@@ -151,6 +151,31 @@ ensure_trailing_newline () {
 	[[ -z "$(tail -c1 "$f")" ]] || printf '\n' >> "$f"
 }
 
+json_escape () {
+	# Minimal JSON string escaping -- adequate for the values this script
+	# actually emits (client names, MACs, dates, short messages); not a
+	# general-purpose JSON encoder.
+	local s="$1"
+	s="${s//\\/\\\\}"
+	s="${s//\"/\\\"}"
+	printf '%s' "$s"
+}
+
+json_string_array () {
+	# Prints a JSON array of strings from newline-separated input on $1.
+	local input="$1" item first=1
+	if [[ -z "$input" ]]; then
+		printf '[]'
+		return 0
+	fi
+	printf '['
+	while IFS= read -r item; do
+		[[ $first -eq 1 ]] && first=0 || printf ','
+		printf '"%s"' "$(json_escape "$item")"
+	done <<< "$input"
+	printf ']'
+}
+
 normalize_mac () {
 	# Accepts a MAC in any common separator style/case on stdin-like arg $1,
 	# prints the normalized lowercase colon-separated form on success, or
@@ -243,20 +268,36 @@ do_revoke_client () {
 }
 
 do_list_clients () {
-	local names name
+	# Usage: do_list_clients [json]
+	local as_json="${1:-}" names name first=1
 	names=$(tail -n +2 "$EASYRSA_DIR/pki/index.txt" 2>/dev/null | grep "^V" | cut -d '=' -f 2)
 	if [[ -z "$names" ]]; then
-		echo "No valid clients found."
+		if [[ "$as_json" == json ]]; then
+			echo "[]"
+		else
+			echo "No valid clients found."
+		fi
 		return 0
 	fi
-	printf "%-20s %s\n" "NAME" "IN_DB"
-	while IFS= read -r name; do
-		if grep -q "^${name}=" "$DB_FILE" 2>/dev/null; then
-			printf "%-20s %s\n" "$name" "yes"
-		else
-			printf "%-20s %s\n" "$name" "no (cannot connect until added)"
-		fi
-	done <<< "$names"
+	if [[ "$as_json" == json ]]; then
+		printf '['
+		while IFS= read -r name; do
+			local in_db=false
+			grep -q "^${name}=" "$DB_FILE" 2>/dev/null && in_db=true
+			[[ $first -eq 1 ]] && first=0 || printf ','
+			printf '{"name":"%s","in_db":%s}' "$(json_escape "$name")" "$in_db"
+		done <<< "$names"
+		printf ']\n'
+	else
+		printf "%-20s %s\n" "NAME" "IN_DB"
+		while IFS= read -r name; do
+			if grep -q "^${name}=" "$DB_FILE" 2>/dev/null; then
+				printf "%-20s %s\n" "$name" "yes"
+			else
+				printf "%-20s %s\n" "$name" "no (cannot connect until added)"
+			fi
+		done <<< "$names"
+	fi
 	return 0
 }
 
@@ -273,80 +314,131 @@ format_asn1_time () {
 }
 
 do_list_revoked () {
+	# Usage: do_list_revoked [json]
 	# Lists revoked clients: name, when revoked, and whether they still
 	# have a (stale) entry in DB_FILE that should probably be cleaned up.
-	local lines line name revoked_at
+	local as_json="${1:-}" lines line name revoked_at first=1
 	lines=$(tail -n +2 "$EASYRSA_DIR/pki/index.txt" 2>/dev/null | awk -F'\t' '$1=="R"{print $3"\t"$6}')
 	if [[ -z "$lines" ]]; then
-		echo "No revoked clients."
+		if [[ "$as_json" == json ]]; then
+			echo "[]"
+		else
+			echo "No revoked clients."
+		fi
 		return 0
 	fi
-	printf "%-20s %-24s %s\n" "NAME" "REVOKED_AT" "STALE_DB_ENTRY"
-	while IFS=$'\t' read -r revoked_at name; do
-		name="${name#/CN=}"
-		if grep -q "^${name}=" "$DB_FILE" 2>/dev/null; then
-			printf "%-20s %-24s %s\n" "$name" "$(format_asn1_time "$revoked_at")" "yes -- consider removing (see --check)"
-		else
-			printf "%-20s %-24s %s\n" "$name" "$(format_asn1_time "$revoked_at")" "no"
-		fi
-	done <<< "$lines"
+	if [[ "$as_json" == json ]]; then
+		printf '['
+		while IFS=$'\t' read -r revoked_at name; do
+			name="${name#/CN=}"
+			local stale=false
+			grep -q "^${name}=" "$DB_FILE" 2>/dev/null && stale=true
+			[[ $first -eq 1 ]] && first=0 || printf ','
+			printf '{"name":"%s","revoked_at":"%s","stale_db_entry":%s}' \
+				"$(json_escape "$name")" "$(json_escape "$(format_asn1_time "$revoked_at")")" "$stale"
+		done <<< "$lines"
+		printf ']\n'
+	else
+		printf "%-20s %-24s %s\n" "NAME" "REVOKED_AT" "STALE_DB_ENTRY"
+		while IFS=$'\t' read -r revoked_at name; do
+			name="${name#/CN=}"
+			if grep -q "^${name}=" "$DB_FILE" 2>/dev/null; then
+				printf "%-20s %-24s %s\n" "$name" "$(format_asn1_time "$revoked_at")" "yes -- consider removing (see --check)"
+			else
+				printf "%-20s %-24s %s\n" "$name" "$(format_asn1_time "$revoked_at")" "no"
+			fi
+		done <<< "$lines"
+	fi
 	return 0
 }
 
 do_check_consistency () {
+	# Usage: do_check_consistency [json]
 	# Cross-checks PKI valid certs against DB_FILE entries in both
 	# directions. Exit status: 0 = clean, 1 = at least one orphan found.
-	local pki_names db_names orphan_pki orphan_db issues=0
+	local as_json="${1:-}" pki_names db_names orphan_pki orphan_db issues=0
 	pki_names=$(tail -n +2 "$EASYRSA_DIR/pki/index.txt" 2>/dev/null | grep "^V" | cut -d '=' -f 2)
 	db_names=$(cut -d '=' -f 1 "$DB_FILE" 2>/dev/null | sort -u)
 
 	orphan_pki=$(comm -23 <(sort <<< "$pki_names") <(sort <<< "$db_names"))
 	orphan_db=$(comm -13 <(sort <<< "$pki_names") <(sort <<< "$db_names"))
 
-	if [[ -n "$orphan_pki" ]]; then
-		echo "Valid cert but no $DB_FILE entry (cannot connect until added):"
-		sed 's/^/  - /' <<< "$orphan_pki"
-		issues=1
-	fi
-	if [[ -n "$orphan_db" ]]; then
-		echo "$DB_FILE entry with no matching valid cert (stale -- consider removing):"
-		sed 's/^/  - /' <<< "$orphan_db"
-		issues=1
-	fi
-	if [[ "$issues" -eq 0 ]]; then
-		echo "OK -- every valid cert has a matching db entry and vice versa."
+	[[ -n "$orphan_pki" ]] && issues=1
+	[[ -n "$orphan_db" ]] && issues=1
+
+	if [[ "$as_json" == json ]]; then
+		printf '{"clean":%s,"orphan_pki":%s,"orphan_db":%s}\n' \
+			"$([[ "$issues" -eq 0 ]] && echo true || echo false)" \
+			"$(json_string_array "$orphan_pki")" \
+			"$(json_string_array "$orphan_db")"
+	else
+		if [[ -n "$orphan_pki" ]]; then
+			echo "Valid cert but no $DB_FILE entry (cannot connect until added):"
+			sed 's/^/  - /' <<< "$orphan_pki"
+		fi
+		if [[ -n "$orphan_db" ]]; then
+			echo "$DB_FILE entry with no matching valid cert (stale -- consider removing):"
+			sed 's/^/  - /' <<< "$orphan_db"
+		fi
+		if [[ "$issues" -eq 0 ]]; then
+			echo "OK -- every valid cert has a matching db entry and vice versa."
+		fi
 	fi
 	return "$issues"
 }
 
 do_lint_db () {
+	# Usage: do_lint_db [json]
 	# Validates every openvpn_db.txt line matches "name=aa:bb:cc:dd:ee:ff"
 	# and the file ends with a single trailing newline. Exit status:
 	# 0 = clean, 1 = at least one problem found.
-	local issues=0 lineno=0 line
+	local as_json="${1:-}" issues=0 lineno=0 line
+	local -a problems=()
+
 	if [[ ! -f "$DB_FILE" ]]; then
-		echo "$DB_FILE does not exist."
+		if [[ "$as_json" == json ]]; then
+			printf '{"error":"%s does not exist"}\n' "$(json_escape "$DB_FILE")"
+		else
+			echo "$DB_FILE does not exist."
+		fi
 		return 1
 	fi
+
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		lineno=$((lineno + 1))
 		if [[ -z "$line" ]]; then
-			echo "Line $lineno: blank line (harmless but unexpected)."
+			problems+=("Line $lineno: blank line (harmless but unexpected).")
 			continue
 		fi
 		if [[ ! "$line" =~ ^[A-Za-z0-9_.-]+=([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$ ]]; then
-			echo "Line $lineno: malformed entry: '$line'"
+			problems+=("Line $lineno: malformed entry: '$line'")
 			issues=1
 		fi
 	done < "$DB_FILE"
 
+	local trailing_ok=true
 	if [[ -s "$DB_FILE" ]] && [[ -n "$(tail -c1 "$DB_FILE")" ]]; then
-		echo "$DB_FILE does not end with a trailing newline -- the next appended entry could get glued onto the last line."
+		trailing_ok=false
+		problems+=("$DB_FILE does not end with a trailing newline -- the next appended entry could get glued onto the last line.")
 		issues=1
 	fi
 
-	if [[ "$issues" -eq 0 ]]; then
-		echo "OK -- $DB_FILE is well-formed ($lineno entries)."
+	if [[ "$as_json" == json ]]; then
+		local first=1
+		printf '{"clean":%s,"entries":%d,"trailing_newline_ok":%s,"issues":[' \
+			"$([[ "$issues" -eq 0 ]] && echo true || echo false)" "$lineno" "$trailing_ok"
+		for p in "${problems[@]}"; do
+			[[ $first -eq 1 ]] && first=0 || printf ','
+			printf '"%s"' "$(json_escape "$p")"
+		done
+		printf ']}\n'
+	else
+		for p in "${problems[@]}"; do
+			echo "$p"
+		done
+		if [[ "$issues" -eq 0 ]]; then
+			echo "OK -- $DB_FILE is well-formed ($lineno entries)."
+		fi
 	fi
 	return "$issues"
 }
@@ -366,10 +458,30 @@ print_usage () {
 	  --check          Cross-check PKI valid certs against $DB_FILE for orphans
 	  --lint-db        Validate $DB_FILE formatting and trailing-newline health
 	  --help           Show this help
+
+	--json can be combined with --list, --list-revoked, --check, or --lint-db
+	to print structured JSON instead of a table (order doesn't matter, e.g.
+	both "--list --json" and "--json --list" work). Not valid with any other
+	command.
 	USAGE
 }
 
 # --- Non-interactive CLI dispatch --------------------------------------------
+
+# --json can appear anywhere in the arguments ("--list --json" or
+# "--json --list" both work) -- pull it out first, leaving the rest of the
+# arguments (the actual command) to dispatch on as before.
+json_flag=""
+_cli_args=()
+for _a in "$@"; do
+	if [[ "$_a" == "--json" ]]; then
+		json_flag=json
+	else
+		_cli_args+=("$_a")
+	fi
+done
+set -- "${_cli_args[@]}"
+unset _a _cli_args
 
 case "${1:-}" in
 	--add|--revoke|--list|--list-revoked|--check|--lint-db)
@@ -379,6 +491,16 @@ case "${1:-}" in
 		fi
 		;;
 esac
+
+if [[ -n "$json_flag" ]]; then
+	case "${1:-}" in
+		--list|--list-revoked|--check|--lint-db) ;;
+		*)
+			echo "--json option is not allowed with this command." >&2
+			exit 1
+			;;
+	esac
+fi
 
 case "${1:-}" in
 	--add)
@@ -390,19 +512,19 @@ case "${1:-}" in
 		exit $?
 		;;
 	--list)
-		do_list_clients
+		do_list_clients "$json_flag"
 		exit $?
 		;;
 	--list-revoked)
-		do_list_revoked
+		do_list_revoked "$json_flag"
 		exit $?
 		;;
 	--check)
-		do_check_consistency
+		do_check_consistency "$json_flag"
 		exit $?
 		;;
 	--lint-db)
-		do_lint_db
+		do_lint_db "$json_flag"
 		exit $?
 		;;
 	--help|-h)

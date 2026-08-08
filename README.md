@@ -53,6 +53,25 @@ sudo bash openvpn-install.sh --help
 
 `--check` and `--lint-db` exit `0` when clean and `1` when they find a problem, so they're monitoring/CI-friendly.
 
+Add `--json` to `--list`, `--list-revoked`, `--check`, or `--lint-db` to get structured JSON instead of a table — handy for building a frontend/dashboard on top of this toolkit. Argument order doesn't matter (`--list --json` and `--json --list` are equivalent). It's rejected with a clear error on every other command:
+
+```bash
+$ sudo bash openvpn-install.sh --list --json
+[{"name":"alice","in_db":true}, ...]
+
+$ sudo bash openvpn-install.sh --list-revoked --json
+[{"name":"bob","revoked_at":"2026-03-26 19:46:27 UTC","stale_db_entry":false}, ...]
+
+$ sudo bash openvpn-install.sh --check --json
+{"clean":true,"orphan_pki":[],"orphan_db":[]}
+
+$ sudo bash openvpn-install.sh --lint-db --json
+{"clean":true,"entries":18,"trailing_newline_ok":true,"issues":[]}
+
+$ sudo bash openvpn-install.sh --add alice aa:bb:cc:dd:ee:ff --json
+--json option is not allowed with this command.
+```
+
 ## Live status
 
 ```bash
