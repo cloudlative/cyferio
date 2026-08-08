@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Clients — OpenVPN Toolkit{% endblock %}
+{% block title %}VPN Clients — OpenVPN Toolkit{% endblock %}
 {% block content %}
-<h1>Clients</h1>
+<h1>VPN Clients</h1>
 <p class="page-subtitle">Everyone with a valid VPN certificate.</p>
 
 {% if is_admin %}
@@ -104,7 +104,7 @@ function renderClients() {
 
 	el.innerHTML = `<table>
 		<thead><tr>
-			<th>Name</th><th>Status</th><th>In MAC db</th><th>Last seen</th>
+			<th>Name</th><th>Status</th><th>In MAC db</th><th>MACs</th><th>Last seen</th>
 			<th></th>${isAdmin ? "<th></th>" : ""}
 		</tr></thead>
 		<tbody>${filtered.map(({ c, s, online }) => {
@@ -112,6 +112,7 @@ function renderClients() {
 				<td>${escapeHtml(c.name)}</td>
 				<td><span class="status-pill status-${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span></td>
 				<td>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</td>
+				<td><span class="count-badge">${c.mac_count ?? 0}</span></td>
 				<td>${escapeHtml(s ? s.last_seen : "—")}</td>
 				<td><button class="btn-secondary btn-sm macs-btn">Manage MACs</button></td>
 				${isAdmin ? `<td class="text-right"><button class="btn-danger btn-sm revoke-btn">Revoke</button></td>` : ""}
@@ -153,8 +154,16 @@ async function refreshMacsDialog(name) {
 			html += '<p class="muted">No MAC addresses registered.</p>';
 		} else {
 			html += `<p class="muted">${data.count} registered:</p><ul class="mac-list">${data.macs.map(m => `
-				<li><span class="mono">${escapeHtml(m)}</span>${isAdmin ? `<button class="btn-secondary btn-sm mac-remove-btn" data-mac="${escapeHtml(m)}">Remove</button>` : ""}</li>
+				<li>
+					${isAdmin ? `<label style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer"><input type="checkbox" class="mac-checkbox" value="${escapeHtml(m)}"><span class="mono">${escapeHtml(m)}</span></label>` : `<span class="mono">${escapeHtml(m)}</span>`}
+					${isAdmin ? `<button class="btn-secondary btn-sm mac-remove-btn" data-mac="${escapeHtml(m)}">Remove</button>` : ""}
+				</li>
 			`).join("")}</ul>`;
+			if (isAdmin) {
+				html += `<div class="form-row" style="margin-top:4px">
+					<button class="btn-danger btn-sm" id="mac-remove-selected" disabled>Remove selected</button>
+				</div>`;
+			}
 		}
 		if (isAdmin) {
 			html += `<form id="mac-add-form" class="mac-add-row">
@@ -163,6 +172,16 @@ async function refreshMacsDialog(name) {
 			</form>`;
 		}
 		content.innerHTML = html;
+
+		const checkboxes = content.querySelectorAll(".mac-checkbox");
+		const removeSelectedBtn = document.getElementById("mac-remove-selected");
+		function updateSelectedState() {
+			if (!removeSelectedBtn) return;
+			const n = content.querySelectorAll(".mac-checkbox:checked").length;
+			removeSelectedBtn.disabled = n === 0;
+			removeSelectedBtn.textContent = n > 0 ? `Remove selected (${n})` : "Remove selected";
+		}
+		checkboxes.forEach(cb => cb.addEventListener("change", updateSelectedState));
 
 		content.querySelectorAll(".mac-remove-btn").forEach(btn => {
 			btn.addEventListener("click", async () => {
@@ -176,6 +195,24 @@ async function refreshMacsDialog(name) {
 				} catch (e) { toast(e.message, "error"); }
 			});
 		});
+		if (removeSelectedBtn) {
+			removeSelectedBtn.addEventListener("click", async () => {
+				const macs = [...content.querySelectorAll(".mac-checkbox:checked")].map(cb => cb.value);
+				if (macs.length === 0) return;
+				const ok = await confirmDialog(`Remove ${macs.length} selected MAC address${macs.length === 1 ? "" : "es"} from <strong>${escapeHtml(name)}</strong>?`, { confirmLabel: "Remove all" });
+				if (!ok) return;
+				removeSelectedBtn.disabled = true;
+				let failed = 0;
+				for (const mac of macs) {
+					try {
+						await apiFetch(`/api/clients/${encodeURIComponent(name)}/macs/${encodeURIComponent(mac)}`, { method: "DELETE" });
+					} catch (e) { failed++; }
+				}
+				toast(failed === 0 ? `${macs.length} MAC address(es) removed.` : `Removed ${macs.length - failed}, ${failed} failed.`, failed === 0 ? "success" : "error");
+				refreshMacsDialog(name);
+				loadClients();
+			});
+		}
 		const addForm = document.getElementById("mac-add-form");
 		if (addForm) {
 			addForm.addEventListener("submit", async (ev) => {

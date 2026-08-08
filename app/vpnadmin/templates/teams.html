@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Teams — OpenVPN Toolkit{% endblock %}
+{% block content %}
+<h1>Teams</h1>
+<p class="page-subtitle">Portal users grouped by team. Click a team to see its members.</p>
+
+<div class="stat-grid" id="team-grid"><p class="muted">Loading…</p></div>
+
+<div class="card" id="team-detail-card" style="display:none">
+	<div class="toolbar">
+		<div class="toolbar-title"><h2 style="margin:0" id="team-detail-title">Team</h2><span class="count-badge" id="team-detail-count">— members</span></div>
+	</div>
+	<div id="team-detail-table"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let lastTeams = [];
+
+async function loadTeams() {
+	const grid = document.getElementById("team-grid");
+	try {
+		lastTeams = await apiFetch("/api/teams");
+		if (lastTeams.length === 0) {
+			grid.innerHTML = '<div class="empty-state">No portal users yet.</div>';
+			return;
+		}
+		grid.innerHTML = lastTeams.map((t, i) => `
+			<a class="stat-card ${i % 4 === 0 ? "accent-online" : i % 4 === 1 ? "accent-total" : i % 4 === 2 ? "accent-rejected" : "accent-revoked"}" href="#" data-team="${escapeHtml(t.team)}">
+				<span class="stat-hint">View →</span>
+				<div class="stat-value">${t.count}</div><div class="stat-label">${escapeHtml(t.team)}</div>
+			</a>`).join("");
+		grid.querySelectorAll("[data-team]").forEach(card => {
+			card.addEventListener("click", (ev) => { ev.preventDefault(); showTeam(card.dataset.team); });
+		});
+		const fromHash = decodeURIComponent(location.hash.replace(/^#/, ""));
+		if (fromHash && lastTeams.some(t => t.team === fromHash)) showTeam(fromHash);
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+function showTeam(name) {
+	const team = lastTeams.find(t => t.team === name);
+	if (!team) return;
+	location.hash = encodeURIComponent(name);
+	document.getElementById("team-detail-card").style.display = "";
+	document.getElementById("team-detail-title").textContent = name;
+	document.getElementById("team-detail-count").textContent = `${team.count} member${team.count === 1 ? "" : "s"}`;
+	const el = document.getElementById("team-detail-table");
+	el.innerHTML = `<table>
+		<thead><tr><th>User</th><th>Role</th><th>Status</th></tr></thead>
+		<tbody>${team.members.map(m => `
+			<tr>
+				<td>${escapeHtml(m.display_name)} <span class="muted" style="font-size:0.82em">(${escapeHtml(m.username)})</span></td>
+				<td><span class="role-badge role-${m.role}">${m.role}</span></td>
+				<td>${m.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
+			</tr>`).join("")}</tbody>
+	</table>`;
+	document.getElementById("team-detail-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+loadTeams();
+</script>
+{% endblock %}

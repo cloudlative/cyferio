@@ -23,6 +23,25 @@
 	</a>
 </div>
 
+<div class="stat-grid" id="stat-grid-secondary">
+	<a class="stat-card accent-total" href="/clients">
+		<span class="stat-hint">View →</span>
+		<div class="stat-value" id="stat-macs">—</div><div class="stat-label">MAC addresses registered</div>
+	</a>
+	<a class="stat-card accent-rejected" href="/clients">
+		<span class="stat-hint">View →</span>
+		<div class="stat-value" id="stat-missing-mac">—</div><div class="stat-label">Clients missing a MAC</div>
+	</a>
+	<a class="stat-card accent-rejected" href="/diagnostics#rejected">
+		<span class="stat-hint">View →</span>
+		<div class="stat-value" id="stat-repeat-offenders">—</div><div class="stat-label">Repeat rejection offenders</div>
+	</a>
+	<a class="stat-card accent-rejected" href="/diagnostics#rejected">
+		<span class="stat-hint">View →</span>
+		<div class="stat-value" id="stat-rejected-today">—</div><div class="stat-label">Rejections today</div>
+	</a>
+</div>
+
 <div class="card">
 	<div class="toolbar">
 		<h2 style="margin:0">Connected now</h2>
@@ -43,6 +62,21 @@ async function loadDashboard() {
 		document.getElementById("stat-total").textContent = all.length;
 		document.getElementById("stat-revoked").textContent = revoked.length;
 		document.getElementById("stat-rejected").textContent = rejected.length;
+
+		const totalMacs = all.reduce((sum, c) => sum + (c.mac_count || 0), 0);
+		const missingMac = all.filter(c => !c.mac_count).length;
+		const repeatOffenders = new Set(
+			rejected.filter(r => r.total_attempts_this_name > 5).map(r => r.claimed_name)
+		).size;
+		const today = new Date().toDateString();
+		const rejectedToday = rejected.filter(r => {
+			const t = new Date(r.timestamp);
+			return !isNaN(t) && t.toDateString() === today;
+		}).length;
+		document.getElementById("stat-macs").textContent = totalMacs;
+		document.getElementById("stat-missing-mac").textContent = missingMac;
+		document.getElementById("stat-repeat-offenders").textContent = repeatOffenders;
+		document.getElementById("stat-rejected-today").textContent = rejectedToday;
 
 		const el = document.getElementById("connected-table");
 		if (connected.length === 0) {

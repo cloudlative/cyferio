@@ -18,19 +18,22 @@ _openvpn_install_completions() {
 	COMPREPLY=()
 	cur="${COMP_WORDS[COMP_CWORD]}"
 	prev="${COMP_WORDS[COMP_CWORD-1]}"
-	opts="--add --revoke --list --list-revoked --check --lint-db --help"
+	opts="--add --revoke --list --list-revoked --macs --add-mac --remove-mac --check --lint-db --json --help"
 
-	# Best-effort dynamic client-name completion for --revoke: only if the
-	# PKI index happens to already be readable by the completing user.
-	# Never invokes sudo or prompts a password just to tab-complete.
-	if [[ "$prev" == "--revoke" ]]; then
-		local index="/etc/openvpn/server/easy-rsa/pki/index.txt" names
-		if [[ -r "$index" ]]; then
-			names=$(tail -n +2 "$index" 2>/dev/null | awk -F'\t' '$1=="V"{print $6}' | sed 's#^/CN=##' | grep -v '^server$')
-			COMPREPLY=( $(compgen -W "$names" -- "$cur") )
-		fi
-		return 0
-	fi
+	# Best-effort dynamic client-name completion for any command that takes
+	# an existing client's NAME as its first argument: only if the PKI index
+	# happens to already be readable by the completing user. Never invokes
+	# sudo or prompts a password just to tab-complete.
+	case "$prev" in
+		--revoke|--macs|--add-mac|--remove-mac)
+			local index="/etc/openvpn/server/easy-rsa/pki/index.txt" names
+			if [[ -r "$index" ]]; then
+				names=$(tail -n +2 "$index" 2>/dev/null | awk -F'\t' '$1=="V"{print $6}' | sed 's#^/CN=##' | grep -v '^server$')
+				COMPREPLY=( $(compgen -W "$names" -- "$cur") )
+			fi
+			return 0
+			;;
+	esac
 
 	COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
 	return 0

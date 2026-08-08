@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Users — OpenVPN Toolkit{% endblock %}
+{% block title %}Portal Users — OpenVPN Toolkit{% endblock %}
 {% block content %}
-<h1>App users</h1>
+<h1>Portal Users</h1>
 <p class="page-subtitle">Accounts that can log into this admin app (separate from VPN clients).</p>
 
 <div class="card">
@@ -26,11 +26,11 @@
 		</div>
 		<div class="form-row" style="margin-top:16px">
 			<div class="field">
-				<label for="u-first">First name <span class="muted">(optional)</span></label>
+				<label for="u-first">First Name <span class="muted">(optional)</span></label>
 				<input type="text" id="u-first">
 			</div>
 			<div class="field">
-				<label for="u-last">Last name <span class="muted">(optional)</span></label>
+				<label for="u-last">Last Name <span class="muted">(optional)</span></label>
 				<input type="text" id="u-last">
 			</div>
 			<div class="field">
@@ -62,8 +62,8 @@
 		<h2>Edit user</h2>
 		<form id="edit-form">
 			<div class="form-row">
-				<div class="field"><label for="e-first">First name</label><input type="text" id="e-first"></div>
-				<div class="field"><label for="e-last">Last name</label><input type="text" id="e-last"></div>
+				<div class="field"><label for="e-first">First Name</label><input type="text" id="e-first"></div>
+				<div class="field"><label for="e-last">Last Name</label><input type="text" id="e-last"></div>
 			</div>
 			<div class="form-row" style="margin-top:14px">
 				<div class="field">
@@ -91,16 +91,16 @@
 				</div>
 			</fieldset>
 			<fieldset>
-				<legend>Reset password <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<legend>Reset Password <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
 				<div class="field" style="margin-bottom:0">
 					<input type="password" id="e-password" minlength="8" placeholder="Leave blank to keep current password">
 				</div>
 			</fieldset>
 			<fieldset>
-				<legend>Created at</legend>
+				<legend>Created At</legend>
 				<div class="field" style="margin-bottom:0">
-					<input type="text" id="e-created" placeholder="YYYY-MM-DDTHH:MM:SS">
-					<p class="muted" style="margin:6px 0 0;font-size:0.8rem">Display field only — doesn't affect the audit log, which stays immutable.</p>
+					<input type="text" id="e-created" disabled>
+					<p class="muted" style="margin:6px 0 0;font-size:0.8rem">Immutable — set once when the account was created.</p>
 				</div>
 			</fieldset>
 			<div class="dialog-actions">
@@ -213,7 +213,7 @@ function openEdit(u) {
 	document.getElementById("e-role").value = u.role;
 	document.getElementById("e-active").value = String(u.is_active);
 	document.getElementById("e-password").value = "";
-	document.getElementById("e-created").value = u.created_at ? u.created_at.slice(0, 19) : "";
+	document.getElementById("e-created").value = fmtDate(u.created_at);
 	document.getElementById("edit-dialog").showModal();
 }
 document.getElementById("edit-cancel").addEventListener("click", () => document.getElementById("edit-dialog").close());
@@ -230,8 +230,6 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 	};
 	const pw = document.getElementById("e-password").value;
 	if (pw) body.password = pw;
-	const createdRaw = document.getElementById("e-created").value.trim();
-	if (createdRaw) body.created_at = createdRaw;
 	try {
 		await apiFetch(`/api/users/${editingUserId}`, { method: "PATCH", body });
 		toast("User updated.");

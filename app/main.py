@@ -14,7 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from vpnadmin.auth import bootstrap_admin
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db
-from vpnadmin.routes import auth, clients, diagnostics, pages, status, users
+from vpnadmin.routes import auth, clients, diagnostics, pages, status, teams, users
 
 
 @asynccontextmanager
@@ -47,6 +47,7 @@ app.include_router(status.router)
 app.include_router(status.dashboard_router)
 app.include_router(diagnostics.router)
 app.include_router(users.router)
+app.include_router(teams.router)
 
 
 @app.get("/healthz")

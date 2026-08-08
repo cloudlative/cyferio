@@ -53,7 +53,6 @@ class UpdateUserRequest(BaseModel):
     last_name: str | None = None
     gender: Gender | None = None
     team: str | None = None
-    created_at: datetime | None = None  # deliberately admin-editable; see note on PATCH below
 
     @field_validator("password")
     @classmethod
@@ -208,14 +207,9 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         if value is not None and value != getattr(target, field):
             setattr(target, field, value)
             changes.append(field)
-    if body.created_at is not None and body.created_at != target.created_at:
-        # Deliberately admin-editable (e.g. backdating an account created to
-        # reflect a real-world join date imported from elsewhere) -- this is
-        # purely a profile display field. It's distinct from AuditLog's own
-        # `timestamp` column, which stays an immutable record of when each
-        # action actually happened and is never editable through this API.
-        changes.append(f"created_at {target.created_at.isoformat()}->{body.created_at.isoformat()}")
-        target.created_at = body.created_at
+    # created_at is intentionally immutable here -- it's a factual record of
+    # account creation, not admin-editable through this endpoint (unlike the
+    # other profile fields above).
 
     db.commit()
     if changes:

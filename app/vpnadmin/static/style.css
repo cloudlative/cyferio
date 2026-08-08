@@ -1,14 +1,14 @@
 :root {
-	--bg: #0a0d14;
-	--bg-elevated: #0d1119;
-	--surface: #131826;
-	--surface-alt: #171d2e;
-	--surface-hover: #1c2338;
-	--border: #232b40;
-	--border-light: #2c3550;
-	--text: #e6e9f2;
-	--text-muted: #8890a8;
-	--text-faint: #4b5265;
+	--bg: #131722;
+	--bg-elevated: #1a1f2e;
+	--surface: #1e2436;
+	--surface-alt: #262d43;
+	--surface-hover: #2c3450;
+	--border: #3a4460;
+	--border-light: #4a5578;
+	--text: #f1f3fa;
+	--text-muted: #aab2cc;
+	--text-faint: #757fa0;
 
 	--accent: #6366f1;
 	--accent-2: #818cf8;
@@ -48,19 +48,29 @@ body {
 a { color: var(--accent-2); text-decoration: none; font-weight: 600; }
 a:hover { text-decoration: underline; }
 
-/* --- Page-load progress bar ------------------------------------------- */
+/* --- Loading indicator: a small clockwise-spinning ring, top-right ----- */
 #page-progress {
 	position: fixed;
-	top: 0; left: 0;
-	height: 3px;
-	width: 0%;
-	background: var(--accent-gradient);
-	box-shadow: 0 0 10px rgba(99, 102, 241, 0.7);
+	top: 18px; right: 24px;
+	width: 26px; height: 26px;
 	z-index: 999;
-	transition: width 0.25s ease, opacity 0.3s ease 0.15s;
 	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.2s ease;
 }
-#page-progress.active { opacity: 1; transition: width 0.25s ease; }
+#page-progress.active { opacity: 1; }
+#page-progress .ring {
+	display: block;
+	width: 100%; height: 100%;
+	border-radius: 50%;
+	border: 3px solid var(--border-light);
+	border-top-color: var(--accent-2);
+	border-right-color: var(--accent-3);
+	animation: page-progress-spin 0.7s linear infinite;
+}
+@keyframes page-progress-spin {
+	to { transform: rotate(360deg); }
+}
 
 /* --- Sidebar ------------------------------------------------------------ */
 body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
@@ -70,7 +80,7 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	flex: 0 0 252px;
 	display: flex;
 	flex-direction: column;
-	background: linear-gradient(190deg, #0b0e17 0%, #0f1320 60%, #131020 140%);
+	background: linear-gradient(190deg, #171c2c 0%, #1b2136 60%, #201c38 140%);
 	border-right: 1px solid var(--border);
 	position: sticky;
 	top: 0;
@@ -128,10 +138,11 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	gap: 10px;
 }
 .sidebar-footer .who { display: flex; align-items: center; gap: 8px; font-size: 0.88rem; color: var(--text-muted); padding: 0 10px; }
-.sidebar-footer .who-name { font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-footer a.who-name { font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
+.sidebar-footer a.who-name:hover { color: var(--accent-2); text-decoration: underline; }
 .sidebar-footer .who-links { padding: 0 10px; display: flex; gap: 12px; }
-.sidebar-footer .link-button, .sidebar-footer a.profile-link { color: var(--text-muted); font-size: 0.85rem; }
-.sidebar-footer .link-button:hover, .sidebar-footer a.profile-link:hover { color: var(--text); }
+.sidebar-footer .link-button { color: var(--text-muted); font-size: 0.85rem; }
+.sidebar-footer .link-button:hover { color: var(--text); }
 
 .role-badge {
 	font-size: 0.66rem;
@@ -264,6 +275,7 @@ input[type=text], input[type=password], input[type=date], select, textarea {
 select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-2); background: var(--surface); box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.14); }
 input::placeholder { color: var(--text-faint); }
+input:disabled, select:disabled, textarea:disabled { opacity: 0.7; cursor: not-allowed; color: var(--text-muted); }
 label { display: block; font-weight: 700; font-size: 0.82rem; margin-bottom: 6px; color: var(--text-muted); }
 .field { margin-bottom: 18px; }
 .form-row { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
@@ -299,7 +311,7 @@ fieldset legend { padding: 0 8px; color: var(--text-muted); font-weight: 700; fo
 	min-height: 100vh;
 	position: relative;
 	overflow: hidden;
-	background: radial-gradient(1400px 900px at 50% 120%, #171338 0%, #0a0d14 60%), #06070c;
+	background: radial-gradient(1400px 900px at 50% 120%, #241f4d 0%, #131722 60%), #0e1119;
 }
 .login-page::before, .login-page::after {
 	content: "";
@@ -322,7 +334,7 @@ fieldset legend { padding: 0 8px; color: var(--text-muted); font-weight: 700; fo
 .login-box {
 	position: relative;
 	z-index: 1;
-	background: rgba(19, 24, 38, 0.75);
+	background: rgba(30, 36, 54, 0.88);
 	backdrop-filter: blur(20px);
 	border: 1px solid rgba(255,255,255,0.08);
 	border-radius: var(--radius-lg);
@@ -361,7 +373,7 @@ fieldset legend { padding: 0 8px; color: var(--text-muted); font-weight: 700; fo
 .text-right { text-align: right; }
 
 dialog { border: none; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: 0; max-width: 460px; width: 90%; background: var(--surface); color: var(--text); border: 1px solid var(--border-light); }
-dialog::backdrop { background: rgba(3, 5, 10, 0.7); backdrop-filter: blur(2px); }
+dialog::backdrop { background: rgba(8, 10, 16, 0.72); backdrop-filter: blur(2px); }
 dialog .dialog-body { padding: 28px; }
 dialog .dialog-body h2 { background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; display: inline-block; }
 dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }

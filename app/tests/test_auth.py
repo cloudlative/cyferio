@@ -258,3 +258,46 @@ class TestSelfServiceProfile:
         app_client.post("/logout")
         r = login(app_client, "viewer", "resetbyadmin123")
         assert r.status_code == 200
+
+    def test_admin_edit_cannot_change_created_at(self, app_client, db_session):
+        # created_at was made deliberately immutable through the API --
+        # UpdateUserRequest no longer even has the field, so sending it
+        # should be silently ignored (extra field), not applied.
+        login(app_client, "admin", "adminpass123")
+        viewer = db_session.query(User).filter(User.username == "viewer").one()
+        original = viewer.created_at
+        r = app_client.patch(f"/api/users/{viewer.id}", json={"created_at": "2000-01-01T00:00:00Z"})
+        assert r.status_code == 200
+        db_session.refresh(viewer)
+        assert viewer.created_at == original
+
+
+class TestTeams:
+    def test_teams_groups_users_including_unassigned(self, app_client, db_session):
+        # admin/viewer both start with no team -- both fall into "Unassigned".
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.get("/api/teams")
+        assert r.status_code == 200
+        data = r.json()
+        assert any(g["team"] == "Unassigned" and g["count"] == 2 for g in data)
+
+    def test_teams_groups_by_team_field(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        viewer = db_session.query(User).filter(User.username == "viewer").one()
+        viewer.team = "Platform"
+        db_session.commit()
+        r = app_client.get("/api/teams")
+        assert r.status_code == 200
+        data = r.json()
+        platform = next(g for g in data if g["team"] == "Platform")
+        assert platform["count"] == 1
+        assert platform["members"][0]["username"] == "viewer"
+
+    def test_deleted_users_excluded_from_teams(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        viewer = db_session.query(User).filter(User.username == "viewer").one()
+        r = app_client.delete(f"/api/users/{viewer.id}")
+        assert r.status_code == 200
+        r = app_client.get("/api/teams")
+        total_members = sum(g["count"] for g in r.json())
+        assert total_members == 1  # only admin left

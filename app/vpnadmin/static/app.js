@@ -5,26 +5,16 @@ let _pendingRequests = 0;
 
 function _progressStart() {
 	_pendingRequests++;
-	const bar = document.getElementById("page-progress");
-	if (!bar || _pendingRequests !== 1) return;
-	bar.style.transition = "none";
-	bar.style.width = "6%";
-	bar.classList.add("active");
-	requestAnimationFrame(() => {
-		bar.style.transition = "";
-		bar.style.width = "72%";
-	});
+	const spinner = document.getElementById("page-progress");
+	if (!spinner || _pendingRequests !== 1) return;
+	spinner.classList.add("active");
 }
 
 function _progressDone() {
 	_pendingRequests = Math.max(0, _pendingRequests - 1);
-	const bar = document.getElementById("page-progress");
-	if (!bar || _pendingRequests !== 0) return;
-	bar.style.width = "100%";
-	setTimeout(() => {
-		bar.classList.remove("active");
-		setTimeout(() => { bar.style.width = "0%"; }, 200);
-	}, 150);
+	const spinner = document.getElementById("page-progress");
+	if (!spinner || _pendingRequests !== 0) return;
+	spinner.classList.remove("active");
 }
 
 function toast(message, kind = "success") {

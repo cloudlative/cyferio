@@ -282,19 +282,24 @@ do_list_clients () {
 	if [[ "$as_json" == json ]]; then
 		printf '['
 		while IFS= read -r name; do
-			local in_db=false
-			grep -q "^${name}=" "$DB_FILE" 2>/dev/null && in_db=true
+			local in_db=false mac_count
+			mac_count=$(grep -c "^${name}=" "$DB_FILE" 2>/dev/null || true)
+			[[ -z "$mac_count" ]] && mac_count=0
+			[[ "$mac_count" -gt 0 ]] && in_db=true
 			[[ $first -eq 1 ]] && first=0 || printf ','
-			printf '{"name":"%s","in_db":%s}' "$(json_escape "$name")" "$in_db"
+			printf '{"name":"%s","in_db":%s,"mac_count":%d}' "$(json_escape "$name")" "$in_db" "$mac_count"
 		done <<< "$names"
 		printf ']\n'
 	else
-		printf "%-20s %s\n" "NAME" "IN_DB"
+		printf "%-20s %-6s %s\n" "NAME" "IN_DB" "MACS"
 		while IFS= read -r name; do
-			if grep -q "^${name}=" "$DB_FILE" 2>/dev/null; then
-				printf "%-20s %s\n" "$name" "yes"
+			local mac_count
+			mac_count=$(grep -c "^${name}=" "$DB_FILE" 2>/dev/null || true)
+			[[ -z "$mac_count" ]] && mac_count=0
+			if [[ "$mac_count" -gt 0 ]]; then
+				printf "%-20s %-6s %d\n" "$name" "yes" "$mac_count"
 			else
-				printf "%-20s %s\n" "$name" "no (cannot connect until added)"
+				printf "%-20s %-6s %d (cannot connect until added)\n" "$name" "no" "$mac_count"
 			fi
 		done <<< "$names"
 	fi
@@ -999,11 +1004,13 @@ else
 	echo "   2) List existing clients"
 	echo "   3) List revoked clients"
 	echo "   4) List MAC addresses for a client"
-	echo "   5) Revoke an existing client"
-	echo "   6) Remove OpenVPN"
-	echo "   7) Exit"
+	echo "   5) Add a MAC address for an existing client"
+	echo "   6) Remove a MAC address from an existing client"
+	echo "   7) Revoke an existing client"
+	echo "   8) Remove OpenVPN"
+	echo "   9) Exit"
 	read -p "Option: " option
-	until [[ "$option" =~ ^[1-7]$ ]]; do
+	until [[ "$option" =~ ^[1-9]$ ]]; do
 		echo "$option: invalid selection."
 		read -p "Option: " option
 	done
@@ -1050,6 +1057,40 @@ else
 			exit
 		;;
 		5)
+			echo
+			echo "Provide the name of the existing client to add a MAC address for:"
+			read -p "Name: " addmac_name
+			echo
+			echo "Enter the additional device's MAC address."
+			echo "Accepted separators: ':', '-', or none. Letters may be upper or lower case."
+			while true; do
+				read -p "MAC address: " raw_mac
+				if mac=$(normalize_mac "$raw_mac"); then
+					break
+				else
+					echo "Invalid MAC address: expected 12 hex characters (e.g. aa:bb:cc:dd:ee:ff)."
+				fi
+			done
+			do_add_mac "$addmac_name" "$mac"
+			exit
+		;;
+		6)
+			echo
+			echo "Provide the name of the existing client to remove a MAC address from:"
+			read -p "Name: " removemac_name
+			echo
+			do_list_macs "$removemac_name"
+			echo
+			echo "Enter the MAC address to remove:"
+			read -p "MAC address: " raw_mac
+			if mac=$(normalize_mac "$raw_mac"); then
+				do_remove_mac "$removemac_name" "$mac"
+			else
+				echo "Invalid MAC address: expected 12 hex characters (e.g. aa:bb:cc:dd:ee:ff)."
+			fi
+			exit
+		;;
+		7)
 			# This option could be documented a bit better and maybe even be simplified
 			# ...but what can I say, I want some sleep too
 			number_of_clients=$(tail -n +2 "$EASYRSA_DIR/pki/index.txt" | grep -c "^V")
@@ -1081,7 +1122,7 @@ else
 			fi
 			exit
 		;;
-		6)
+		8)
 			echo
 			read -p "Confirm OpenVPN removal? [y/N]: " remove
 			until [[ "$remove" =~ ^[yYnN]*$ ]]; do
@@ -1133,7 +1174,7 @@ else
 			fi
 			exit
 		;;
-		7)
+		9)
 			exit
 		;;
 	esac

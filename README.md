@@ -32,9 +32,11 @@ First run walks you through a normal OpenVPN server install (IP, protocol, port,
 2) List existing clients
 3) List revoked clients
 4) List MAC addresses for a client
-5) Revoke an existing client
-6) Remove OpenVPN
-7) Exit
+5) Add a MAC address for an existing client
+6) Remove a MAC address from an existing client
+7) Revoke an existing client
+8) Remove OpenVPN
+9) Exit
 ```
 
 Adding a client prompts for a name and the device's MAC address (any common format — `aa:bb:cc:dd:ee:ff`, `AA-BB-CC-DD-EE-FF`, `aabbccddeeff`, mixed case — all normalized automatically). The client only needs push-peer-info in their `.ovpn` (already baked in by this installer) for the MAC check to work.
