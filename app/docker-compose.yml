@@ -6,6 +6,14 @@ services:
     env_file: .env
     ports:
       - "8000:8000"
+    # openvpn-install.sh unconditionally probes /dev/net/tun at startup
+    # (even for read-only commands like --list/--check) as a sanity check
+    # that OpenVPN could run on this host -- pass the device through rather
+    # than granting --privileged.
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
     volumes:
       # --- REQUIRED: gives the app the same access a human running
       #     openvpn-install.sh/vpn-status.py directly on the host would
