@@ -239,6 +239,30 @@ def get_connected():
 # Formatting helpers
 # --------------------------------------------------------------------------
 
+MACOS_BUILD_RE = re.compile(r"^(\d+(?:\.\d+)*)\.([0-9A-Za-z]+)$")
+
+
+def format_os(block):
+    """Best-effort human-readable OS string from a matched env block.
+    macOS clients report UV_PLAT_REL in Apple's raw `sw_vers`-style
+    "<version>.<build>" form (e.g. "26.5.2.25F84"), which reads as noise
+    next to Windows's "Microsoft_Windows_10_Pro_..." or plain "linux" --
+    detect macOS (via IV_GUI_VER containing "macOS", or IV_PLAT == "mac")
+    and reformat as "macOS <version> (<build>)" instead."""
+    if not block:
+        return "n/a"
+    plat_rel = block.get("UV_PLAT_REL")
+    gui_ver = block.get("IV_GUI_VER", "")
+    iv_plat = block.get("IV_PLAT", "")
+    is_mac = "macos" in gui_ver.lower() or iv_plat == "mac"
+    if is_mac and plat_rel:
+        m = MACOS_BUILD_RE.match(plat_rel)
+        if m:
+            return f"macOS {m.group(1)} ({m.group(2)})"
+        return f"macOS {plat_rel}"
+    return plat_rel or iv_plat or "n/a"
+
+
 def human_bytes(n):
     try:
         n = float(n)
@@ -282,7 +306,7 @@ def cmd_connected(as_json):
         block = latest.get(r["name"])
         if block:
             r["mac"] = block.get("IV_HWADDR", "n/a")
-            r["os"] = block.get("UV_PLAT_REL") or block.get("IV_PLAT", "n/a")
+            r["os"] = format_os(block)
         else:
             r["mac"] = db.get(r["name"], "n/a")
             r["os"] = "n/a"
@@ -320,7 +344,7 @@ def cmd_all(as_json):
         in_pki = name in pki_clients
         block = latest.get(name)
         mac = (block.get("IV_HWADDR") if block else None) or db.get(name, "n/a")
-        osname = (block.get("UV_PLAT_REL") or block.get("IV_PLAT") if block else None) or "n/a"
+        osname = format_os(block)
 
         # PKI is authoritative for validity: a name showing up here only via
         # connection history (not a currently-valid cert) has been revoked
@@ -377,7 +401,7 @@ def cmd_rejected(limit, as_json):
         "timestamp": b["timestamp"].isoformat() if b.get("timestamp") else "unknown",
         "claimed_name": b.get("common_name", "n/a"),
         "mac_presented": b.get("IV_HWADDR", "n/a"),
-        "os": b.get("UV_PLAT_REL") or b.get("IV_PLAT", "n/a"),
+        "os": format_os(b),
         "source_ip": b.get("trusted_ip") or b.get("untrusted_ip", "n/a"),
     } for b in blocks]
 
