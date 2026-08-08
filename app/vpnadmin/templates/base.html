@@ -6,26 +6,29 @@
 	<title>{% block title %}OpenVPN Toolkit{% endblock %}</title>
 	<link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="{{ 'has-sidebar' if user }}">
 	{% if user %}
-	<header class="topbar">
+	<aside class="sidebar">
 		<div class="brand">OpenVPN Toolkit</div>
 		<nav>
-			<a href="/" class="{{ 'active' if request.url.path == '/' }}">Dashboard</a>
-			<a href="/clients" class="{{ 'active' if request.url.path == '/clients' }}">Clients</a>
-			<a href="/clients/revoked" class="{{ 'active' if request.url.path == '/clients/revoked' }}">Revoked</a>
-			<a href="/diagnostics" class="{{ 'active' if request.url.path == '/diagnostics' }}">Diagnostics</a>
+			<a href="/" class="{{ 'active' if request.url.path == '/' }}"><span class="nav-icon">◆</span>Dashboard</a>
+			<a href="/clients" class="{{ 'active' if request.url.path == '/clients' }}"><span class="nav-icon">◇</span>Clients</a>
+			<a href="/clients/revoked" class="{{ 'active' if request.url.path == '/clients/revoked' }}"><span class="nav-icon">⊘</span>Revoked</a>
+			<a href="/diagnostics" class="{{ 'active' if request.url.path == '/diagnostics' }}"><span class="nav-icon">⚙</span>Diagnostics</a>
 			{% if is_admin %}
-			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}">Users</a>
+			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
 			{% endif %}
 		</nav>
-		<div class="who">
-			<span>{{ user.username }} <span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span></span>
-			<form action="/logout" method="post" style="display:inline">
+		<div class="sidebar-footer">
+			<div class="who">
+				<span class="who-name">{{ user.username }}</span>
+				<span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span>
+			</div>
+			<form action="/logout" method="post">
 				<button type="submit" class="link-button">Log out</button>
 			</form>
 		</div>
-	</header>
+	</aside>
 	{% endif %}
 
 	<main class="content">
