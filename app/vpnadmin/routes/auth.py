@@ -26,14 +26,14 @@ def login_submit(
     db: Session = Depends(get_db),
 ):
     user = db.query(User).filter(User.username == username.strip().lower()).first()
-    if user is None or not user.is_active or not verify_password(password, user.password_hash):
+    if user is None or not user.is_active or user.deleted or not verify_password(password, user.password_hash):
         return templates.TemplateResponse(
             request,
             "login.html",
             {"error": "Invalid username or password."},
             status_code=401,
         )
-    login_user(request, user)
+    login_user(request, user, db)
     return RedirectResponse("/", status_code=303)
 
 

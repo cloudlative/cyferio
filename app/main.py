@@ -44,6 +44,7 @@ app.include_router(pages.router)
 app.include_router(auth.router)
 app.include_router(clients.router)
 app.include_router(status.router)
+app.include_router(status.dashboard_router)
 app.include_router(diagnostics.router)
 app.include_router(users.router)
 

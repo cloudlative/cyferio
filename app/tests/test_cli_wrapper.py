@@ -76,6 +76,70 @@ class TestArgumentConstruction:
         assert seen["args"][0] != "sudo"
         settings.USE_SUDO = True  # restore for other tests in this module
 
+    def test_add_mac_args(self, monkeypatch):
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, "Added MAC for alice.")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.add_mac("alice", "aa:bb:cc:dd:ee:ff")
+        assert seen["args"] == [
+            "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--add-mac", "alice", "aa:bb:cc:dd:ee:ff",
+        ]
+
+    def test_remove_mac_args(self, monkeypatch):
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, "Removed MAC for alice.")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.remove_mac("alice", "aa:bb:cc:dd:ee:ff")
+        assert seen["args"] == [
+            "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--remove-mac", "alice", "aa:bb:cc:dd:ee:ff",
+        ]
+
+    def test_add_mac_failure_raises(self, monkeypatch):
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda args, **kw: _completed(args, 1, "", "alice is already registered with MAC aa:bb:cc:dd:ee:ff."),
+        )
+        with pytest.raises(cw.ScriptError, match="already registered"):
+            cw.add_mac("alice", "aa:bb:cc:dd:ee:ff")
+
+
+class TestCaching:
+    def test_repeated_read_call_hits_cache_not_subprocess(self, monkeypatch):
+        calls = {"n": 0}
+
+        def fake_run(args, **kwargs):
+            calls["n"] += 1
+            return _completed(args, 0, "[]")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.list_clients()
+        cw.list_clients()
+        cw.list_clients()
+        assert calls["n"] == 1
+
+    def test_mutating_call_invalidates_related_cache(self, monkeypatch):
+        calls = {"n": 0}
+
+        def fake_run(args, **kwargs):
+            calls["n"] += 1
+            if "--add" in args:
+                return _completed(args, 0, "alice added.")
+            return _completed(args, 0, "[]")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.list_clients()  # cached now
+        cw.add_client("alice", "aa:bb:cc:dd:ee:ff")  # should invalidate list_clients cache
+        cw.list_clients()  # must re-spawn, not reuse the pre-add cached result
+        assert calls["n"] == 3  # list, add, list again
+
 
 class TestInjectionSafety:
     def test_malicious_looking_name_passed_as_single_inert_arg(self, monkeypatch):

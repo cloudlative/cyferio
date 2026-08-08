@@ -1,12 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Revoked clients — OpenVPN Toolkit{% endblock %}
+{% block title %}Deleted / Revoked clients — OpenVPN Toolkit{% endblock %}
 {% block content %}
-<h1>Revoked clients</h1>
+<h1>Deleted / Revoked clients</h1>
 <p class="page-subtitle">Certificates that have been revoked and can no longer connect.</p>
 
 <div class="card">
 	<div class="toolbar">
-		<h2 style="margin:0">Revoked</h2>
+		<div class="toolbar-title">
+			<h2 style="margin:0">Deleted / Revoked</h2>
+			<span class="count-badge" id="revoked-count">— entries</span>
+		</div>
 		<button class="btn-secondary" id="refresh-btn">Refresh</button>
 	</div>
 	<div id="revoked-table"><p class="muted">Loading…</p></div>
@@ -19,18 +22,20 @@ async function loadRevoked() {
 	const el = document.getElementById("revoked-table");
 	try {
 		const revoked = await apiFetch("/api/clients/revoked");
+		document.getElementById("revoked-count").textContent = `${revoked.length} entr${revoked.length === 1 ? "y" : "ies"}`;
 		if (revoked.length === 0) {
-			el.innerHTML = '<div class="empty-state">No revoked clients.</div>';
+			el.innerHTML = '<div class="empty-state">No deleted or revoked clients.</div>';
 			return;
 		}
+		const sorted = [...revoked].sort((a, b) => (b.revoked_at || "").localeCompare(a.revoked_at || ""));
 		el.innerHTML = `<table>
 			<thead><tr><th>Name</th><th>Revoked at</th><th>Stale MAC db entry</th></tr></thead>
-			<tbody>${revoked.map(r => `
-				<tr>
+			<tbody>${sorted.map(r => `
+				<tr class="row-dim">
 					<td>${escapeHtml(r.name)}</td>
-					<td>${escapeHtml(r.revoked_at)}</td>
+					<td class="mono">${escapeHtml(r.revoked_at)}</td>
 					<td>${r.stale_db_entry
-						? '<span style="color:var(--warning)">Yes — consider running --check cleanup</span>'
+						? '<span class="status-pill status-revoked">Stale — needs cleanup</span>'
 						: '<span class="muted">No</span>'}</td>
 				</tr>`).join("")}</tbody>
 		</table>`;

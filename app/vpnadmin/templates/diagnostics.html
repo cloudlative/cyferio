@@ -14,7 +14,7 @@
 	<div id="lint-result"><p class="muted">Loading…</p></div>
 </div>
 
-<div class="card">
+<div class="card" id="rejected">
 	<div class="toolbar"><h2 style="margin:0">Recent rejected connection attempts</h2><button class="btn-secondary" id="rejected-refresh">Refresh</button></div>
 	<div id="rejected-result"><p class="muted">Loading…</p></div>
 </div>
@@ -68,19 +68,27 @@ async function loadRejected() {
 			return;
 		}
 		el.innerHTML = `<table>
-			<thead><tr><th>Timestamp</th><th>Claimed name</th><th>MAC presented</th><th>OS</th><th>Source IP</th></tr></thead>
-			<tbody>${data.map(r => `
-				<tr>
+			<thead><tr>
+				<th>Timestamp</th><th>Claimed name</th><th>MAC presented</th><th>MAC registered</th>
+				<th>OS</th><th>Source IP:Port</th><th>Attempts (this name)</th>
+			</tr></thead>
+			<tbody>${data.map(r => {
+				const mismatch = r.mac_registered !== "not registered" && r.mac_registered !== r.mac_presented;
+				const repeat = r.total_attempts_this_name > 5;
+				return `<tr>
 					<td>${escapeHtml(r.timestamp)}</td>
 					<td>${escapeHtml(r.claimed_name)}</td>
 					<td class="mono">${escapeHtml(r.mac_presented)}</td>
+					<td class="mono">${mismatch ? `<span style="color:var(--warning-text)">${escapeHtml(r.mac_registered)}</span>` : escapeHtml(r.mac_registered)}</td>
 					<td>${escapeHtml(r.os)}</td>
-					<td class="mono">${escapeHtml(r.source_ip)}</td>
-				</tr>`).join("")}</tbody>
+					<td class="mono">${escapeHtml(r.source_ip)}:${escapeHtml(String(r.source_port))}</td>
+					<td>${repeat ? `<span class="status-pill status-revoked">${r.total_attempts_this_name}×</span>` : `${r.total_attempts_this_name}×`}</td>
+				</tr>`;
+			}).join("")}</tbody>
 		</table>
-		<p class="muted" style="margin-top:12px">Repeated entries for the same name/IP are usually a client-side device/network issue, not necessarily an attack.</p>`;
+		<p class="muted" style="margin-top:12px">"MAC registered" is what's on file for that name in <span class="mono">openvpn_db.txt</span> — compare against "MAC presented" to see if it's a wrong/unregistered device, a stale entry, or a name that was never registered at all. "Attempts (this name)" counts the full rejection history, not just what's shown here. Repeated entries for the same name/IP are usually a client-side device/network issue, not necessarily an attack.</p>`;
 	} catch (e) {
-		el.innerHTML = `<p style="color:var(--danger)">${escapeHtml(e.message)}</p>`;
+		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
 	}
 }
 

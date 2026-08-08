@@ -394,15 +394,34 @@ def cmd_all(as_json):
 
 
 def cmd_rejected(limit, as_json):
-    blocks = [b for b in iter_env_blocks() if b.get("matched") is False]
-    blocks.sort(key=lambda b: b["timestamp"] or datetime.min, reverse=True)
-    blocks = blocks[:limit]
+    db = load_db()
+    all_blocks = [b for b in iter_env_blocks() if b.get("matched") is False]
+
+    # Repeat counts are computed across the *full* rejection history, not
+    # just the limited/displayed window -- a name that's been rejected 40
+    # times but only the latest 20 are shown should still read as "40", not
+    # reset to whatever fits on screen.
+    total_by_name = {}
+    total_by_name_mac = {}
+    for b in all_blocks:
+        name = b.get("common_name", "n/a")
+        mac = b.get("IV_HWADDR", "n/a")
+        total_by_name[name] = total_by_name.get(name, 0) + 1
+        total_by_name_mac[(name, mac)] = total_by_name_mac.get((name, mac), 0) + 1
+
+    all_blocks.sort(key=lambda b: b["timestamp"] or datetime.min, reverse=True)
+    blocks = all_blocks[:limit]
     rows = [{
         "timestamp": b["timestamp"].isoformat() if b.get("timestamp") else "unknown",
         "claimed_name": b.get("common_name", "n/a"),
         "mac_presented": b.get("IV_HWADDR", "n/a"),
+        "mac_registered": db.get(b.get("common_name", ""), "not registered"),
         "os": format_os(b),
+        "platform": b.get("IV_PLAT", "n/a"),
         "source_ip": b.get("trusted_ip") or b.get("untrusted_ip", "n/a"),
+        "source_port": b.get("trusted_port") or b.get("untrusted_port", "n/a"),
+        "total_attempts_this_name": total_by_name.get(b.get("common_name", "n/a"), 1),
+        "total_attempts_this_mac": total_by_name_mac.get((b.get("common_name", "n/a"), b.get("IV_HWADDR", "n/a")), 1),
     } for b in blocks]
 
     if as_json:
@@ -413,8 +432,9 @@ def cmd_rejected(limit, as_json):
         print("No rejected connection attempts found in available logs.")
         return
 
-    headers = ("TIMESTAMP", "CLAIMED_NAME", "MAC_PRESENTED", "OS", "SOURCE_IP")
-    table = [[r["timestamp"], r["claimed_name"], r["mac_presented"], r["os"], r["source_ip"]] for r in rows]
+    headers = ("TIMESTAMP", "CLAIMED_NAME", "MAC_PRESENTED", "MAC_REGISTERED", "OS", "SOURCE_IP:PORT", "TOTAL_ATTEMPTS")
+    table = [[r["timestamp"], r["claimed_name"], r["mac_presented"], r["mac_registered"], r["os"],
+              f"{r['source_ip']}:{r['source_port']}", r["total_attempts_this_name"]] for r in rows]
     print_table(headers, table)
     print()
     print("These are connections whose certificate CN + device MAC pair did not match")

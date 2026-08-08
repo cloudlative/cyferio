@@ -13,13 +13,16 @@ of it, only calls it and renders the result.
 
 ## Features
 
-Everything the CLI can do:
+Everything the CLI can do, plus more:
 - Add / revoke clients, with MAC-address input in any common format
-- List all clients (online/offline/revoked status, last-seen)
-- List MAC addresses registered per client
+- List all clients (online/offline/revoked status, last-seen), sorted online-first, with a live total count
+- Add or remove individual MAC addresses for an existing client (multi-device users) without re-issuing a cert
 - Consistency check (`--check`) and MAC-db formatting health (`--lint-db`)
-- Live connection status: who's online now, bandwidth, rejected (MAC-mismatch) connection attempts
+- Live connection status: who's online now, bandwidth, rejected (MAC-mismatch) connection attempts with expected-vs-presented MAC and repeat-attempt counts
+- Clickable dashboard stat cards linking straight to the filtered table behind each number
 - Multi-user accounts with two roles: **admin** (full control) and **viewer** (read-only)
+- Self-service profile page: any user can set their own name/gender/team and change their own password
+- Admin user management: edit any user's role, profile fields, and reset their password; soft-delete/restore accounts (deleted users are recoverable, never silently gone)
 - Every add/revoke/user-management action is written to an audit log (who, when, what, success/failure)
 
 ## Architecture

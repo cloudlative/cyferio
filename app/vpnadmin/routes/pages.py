@@ -48,3 +48,10 @@ def users_page(request: Request, user: User | None = Depends(get_current_user)):
     if user.role != Role.admin:
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "users.html", _ctx(user))
+
+
+@router.get("/profile")
+def profile_page(request: Request, user: User | None = Depends(get_current_user)):
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    return templates.TemplateResponse(request, "profile.html", _ctx(user))

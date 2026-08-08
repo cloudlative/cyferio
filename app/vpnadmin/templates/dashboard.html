@@ -5,10 +5,22 @@
 <p class="page-subtitle">Live overview of who's connected to the VPN right now.</p>
 
 <div class="stat-grid" id="stat-grid">
-	<div class="stat-card"><div class="stat-value" id="stat-online">—</div><div class="stat-label">Online now</div></div>
-	<div class="stat-card"><div class="stat-value" id="stat-total">—</div><div class="stat-label">Total clients</div></div>
-	<div class="stat-card"><div class="stat-value" id="stat-revoked">—</div><div class="stat-label">Revoked</div></div>
-	<div class="stat-card"><div class="stat-value" id="stat-rejected">—</div><div class="stat-label">Recent rejections</div></div>
+	<a class="stat-card accent-online" href="/clients?online=1">
+		<span class="stat-hint">View →</span>
+		<div class="stat-value" id="stat-online">—</div><div class="stat-label">Online now</div>
+	</a>
+	<a class="stat-card accent-total" href="/clients">
+		<span class="stat-hint">View →</span>
+		<div class="stat-value" id="stat-total">—</div><div class="stat-label">Total clients</div>
+	</a>
+	<a class="stat-card accent-revoked" href="/clients/revoked">
+		<span class="stat-hint">View →</span>
+		<div class="stat-value" id="stat-revoked">—</div><div class="stat-label">Deleted / revoked</div>
+	</a>
+	<a class="stat-card accent-rejected" href="/diagnostics#rejected">
+		<span class="stat-hint">View →</span>
+		<div class="stat-value" id="stat-rejected">—</div><div class="stat-label">Recent rejections</div>
+	</a>
 </div>
 
 <div class="card">
@@ -24,12 +36,8 @@
 <script>
 async function loadDashboard() {
 	try {
-		const [connected, all, revoked, rejected] = await Promise.all([
-			apiFetch("/api/status"),
-			apiFetch("/api/status/all"),
-			apiFetch("/api/clients/revoked"),
-			apiFetch("/api/status/rejected?limit=20"),
-		]);
+		const data = await apiFetch("/api/dashboard");
+		const connected = data.connected, all = data.all_clients, revoked = data.revoked, rejected = data.rejected;
 
 		document.getElementById("stat-online").textContent = connected.length;
 		document.getElementById("stat-total").textContent = all.length;
@@ -41,10 +49,11 @@ async function loadDashboard() {
 			el.innerHTML = '<div class="empty-state">No one is currently connected.</div>';
 			return;
 		}
+		const sorted = [...connected].sort((a, b) => a.name.localeCompare(b.name));
 		el.innerHTML = `<table>
 			<thead><tr><th>Name</th><th>Source IP</th><th>OS</th><th>Connected since</th><th>Duration</th><th>RX / TX</th></tr></thead>
-			<tbody>${connected.map(c => `
-				<tr>
+			<tbody>${sorted.map(c => `
+				<tr class="row-online">
 					<td>${escapeHtml(c.name)}</td>
 					<td class="mono">${escapeHtml(c.source_ip)}</td>
 					<td>${escapeHtml(c.os)}</td>

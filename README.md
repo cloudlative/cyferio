@@ -49,6 +49,8 @@ sudo bash openvpn-install.sh --revoke NAME
 sudo bash openvpn-install.sh --list             # valid clients + db registration status
 sudo bash openvpn-install.sh --list-revoked     # revoked clients, when, stale db entries
 sudo bash openvpn-install.sh --macs NAME        # every MAC address registered for one client
+sudo bash openvpn-install.sh --add-mac NAME MAC     # register an extra device MAC for an existing client
+sudo bash openvpn-install.sh --remove-mac NAME MAC  # remove one MAC registration (client keeps its cert)
 sudo bash openvpn-install.sh --check            # cross-check PKI certs vs openvpn_db.txt
 sudo bash openvpn-install.sh --lint-db          # validate openvpn_db.txt formatting/health
 sudo bash openvpn-install.sh --help

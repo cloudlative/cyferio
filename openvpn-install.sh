@@ -332,6 +332,69 @@ do_list_macs () {
 	[[ "$count" -gt 0 ]]
 }
 
+do_add_mac () {
+	# Usage: do_add_mac <name> <mac>
+	# Registers an additional device MAC for an existing client, without
+	# issuing a new certificate -- for the common multi-device case (same
+	# person, a second laptop/phone). Requires a valid (non-revoked) cert to
+	# already exist for the name, so this can't be used to sneak in a
+	# registration for a client that was never actually issued.
+	local name="$1" raw_mac="$2" mac
+	if [[ -z "$name" ]]; then
+		echo "Client name required." >&2
+		return 1
+	fi
+	if [[ ! -e "$EASYRSA_DIR/pki/issued/$name.crt" ]]; then
+		echo "$name: no such client (no valid certificate). Use --add to create a new client." >&2
+		return 1
+	fi
+	if [[ -z "$raw_mac" ]]; then
+		echo "A MAC address is required." >&2
+		return 1
+	fi
+	if ! mac=$(normalize_mac "$raw_mac"); then
+		echo "Invalid MAC address: expected 12 hex characters (e.g. aa:bb:cc:dd:ee:ff), got '$raw_mac'." >&2
+		return 1
+	fi
+	if grep -qi "^${name}=${mac}$" "$DB_FILE" 2>/dev/null; then
+		echo "$name is already registered with MAC $mac." >&2
+		return 1
+	fi
+	touch "$DB_FILE"
+	ensure_trailing_newline "$DB_FILE"
+	echo "$name=$mac" >> "$DB_FILE"
+	echo "Added MAC $mac for $name."
+	return 0
+}
+
+do_remove_mac () {
+	# Usage: do_remove_mac <name> <mac>
+	# Removes one specific MAC registration for a client, leaving any other
+	# MACs they have registered (and their certificate) untouched. Use
+	# --revoke instead to remove a client entirely.
+	local name="$1" raw_mac="$2" mac
+	if [[ -z "$name" ]]; then
+		echo "Client name required." >&2
+		return 1
+	fi
+	if [[ -z "$raw_mac" ]]; then
+		echo "A MAC address is required." >&2
+		return 1
+	fi
+	if ! mac=$(normalize_mac "$raw_mac"); then
+		echo "Invalid MAC address: expected 12 hex characters (e.g. aa:bb:cc:dd:ee:ff), got '$raw_mac'." >&2
+		return 1
+	fi
+	if ! grep -qi "^${name}=${mac}$" "$DB_FILE" 2>/dev/null; then
+		echo "$name has no registration for MAC $mac." >&2
+		return 1
+	fi
+	sed -i "/^${name}=${mac}$/Id" "$DB_FILE"
+	ensure_trailing_newline "$DB_FILE"
+	echo "Removed MAC $mac for $name."
+	return 0
+}
+
 format_asn1_time () {
 	# easy-rsa's pki/index.txt dates are ASN.1-style "YYMMDDHHMMSSZ".
 	# Reformats to "YYYY-MM-DD HH:MM:SS UTC" for readability; falls back to
@@ -487,6 +550,8 @@ print_usage () {
 	  --list           List valid clients and their MAC-db registration status
 	  --list-revoked   List revoked clients, when revoked, and any stale db entries
 	  --macs NAME      List every MAC address registered for one client
+	  --add-mac NAME MAC     Register an additional device MAC for an existing client
+	  --remove-mac NAME MAC  Remove one specific MAC registration (client keeps its cert)
 	  --check          Cross-check PKI valid certs against $DB_FILE for orphans
 	  --lint-db        Validate $DB_FILE formatting and trailing-newline health
 	  --help           Show this help
@@ -516,7 +581,7 @@ set -- "${_cli_args[@]}"
 unset _a _cli_args
 
 case "${1:-}" in
-	--add|--revoke|--list|--list-revoked|--macs|--check|--lint-db)
+	--add|--revoke|--list|--list-revoked|--macs|--add-mac|--remove-mac|--check|--lint-db)
 		if [[ ! -e "$OPENVPN_DIR/server.conf" ]]; then
 			echo "OpenVPN is not installed yet (no $OPENVPN_DIR/server.conf) -- run without arguments first to install." >&2
 			exit 1
@@ -553,6 +618,14 @@ case "${1:-}" in
 		;;
 	--macs)
 		do_list_macs "$2" "$json_flag"
+		exit $?
+		;;
+	--add-mac)
+		do_add_mac "$2" "$3"
+		exit $?
+		;;
+	--remove-mac)
+		do_remove_mac "$2" "$3"
 		exit $?
 		;;
 	--check)

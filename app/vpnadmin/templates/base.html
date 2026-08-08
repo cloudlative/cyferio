@@ -7,13 +7,14 @@
 	<link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="{{ 'has-sidebar' if user }}">
+	<div id="page-progress"></div>
 	{% if user %}
 	<aside class="sidebar">
 		<div class="brand">OpenVPN Toolkit</div>
 		<nav>
 			<a href="/" class="{{ 'active' if request.url.path == '/' }}"><span class="nav-icon">◆</span>Dashboard</a>
 			<a href="/clients" class="{{ 'active' if request.url.path == '/clients' }}"><span class="nav-icon">◇</span>Clients</a>
-			<a href="/clients/revoked" class="{{ 'active' if request.url.path == '/clients/revoked' }}"><span class="nav-icon">⊘</span>Revoked</a>
+			<a href="/clients/revoked" class="{{ 'active' if request.url.path == '/clients/revoked' }}"><span class="nav-icon">⊘</span>Deleted / Revoked</a>
 			<a href="/diagnostics" class="{{ 'active' if request.url.path == '/diagnostics' }}"><span class="nav-icon">⚙</span>Diagnostics</a>
 			{% if is_admin %}
 			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
@@ -24,9 +25,12 @@
 				<span class="who-name">{{ user.username }}</span>
 				<span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span>
 			</div>
-			<form action="/logout" method="post">
-				<button type="submit" class="link-button">Log out</button>
-			</form>
+			<div class="who-links">
+				<a href="/profile" class="profile-link">My profile</a>
+				<form action="/logout" method="post" style="margin:0">
+					<button type="submit" class="link-button">Log out</button>
+				</form>
+			</div>
 		</div>
 	</aside>
 	{% endif %}

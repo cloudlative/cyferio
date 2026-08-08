@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}My profile — OpenVPN Toolkit{% endblock %}
+{% block content %}
+<div class="profile-header">
+	<div class="avatar-circle" id="avatar-initials">{{ user.username[:2].upper() }}</div>
+	<div>
+		<h1 style="display:block">My profile</h1>
+		<p class="page-subtitle" style="margin:0">{{ user.username }} · <span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span></p>
+	</div>
+</div>
+
+<div class="card">
+	<h2>Account details</h2>
+	<div class="form-grid" style="margin-bottom:18px">
+		<div><label>Username</label><div class="mono">{{ user.username }}</div></div>
+		<div><label>Role</label><div><span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span></div></div>
+		<div><label>Created</label><div class="muted" id="p-created">—</div></div>
+		<div><label>Last login</label><div class="muted" id="p-last-login">—</div></div>
+	</div>
+	<p class="muted">Your role and account status are managed by an admin. Everything below, you control yourself.</p>
+</div>
+
+<div class="card">
+	<h2>Profile information</h2>
+	<form id="profile-form">
+		<div class="form-row">
+			<div class="field">
+				<label for="p-first">First name</label>
+				<input type="text" id="p-first" placeholder="e.g. Asif">
+			</div>
+			<div class="field">
+				<label for="p-last">Last name</label>
+				<input type="text" id="p-last" placeholder="e.g. Rafiq">
+			</div>
+		</div>
+		<div class="form-row" style="margin-top:16px">
+			<div class="field">
+				<label for="p-gender">Gender</label>
+				<select id="p-gender">
+					<option value="unspecified">Prefer not to say</option>
+					<option value="male">Male</option>
+					<option value="female">Female</option>
+					<option value="other">Other</option>
+				</select>
+			</div>
+			<div class="field">
+				<label for="p-team">Team</label>
+				<input type="text" id="p-team" placeholder="e.g. Infrastructure">
+			</div>
+		</div>
+		<button type="submit" class="btn-primary" style="margin-top:8px">Save profile</button>
+	</form>
+</div>
+
+<div class="card">
+	<h2>Change password</h2>
+	<form id="password-form">
+		<div class="form-row">
+			<div class="field">
+				<label for="p-current-pw">Current password</label>
+				<input type="password" id="p-current-pw" autocomplete="current-password" required>
+			</div>
+			<div class="field">
+				<label for="p-new-pw">New password</label>
+				<input type="password" id="p-new-pw" autocomplete="new-password" required minlength="8">
+			</div>
+			<button type="submit" class="btn-primary">Update password</button>
+		</div>
+		<p class="muted" style="margin-top:10px">At least 8 characters. You'll stay logged in on this device.</p>
+	</form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadProfile() {
+	try {
+		const me = await apiFetch("/api/users/me");
+		document.getElementById("p-created").textContent = me.created_at ? new Date(me.created_at).toLocaleString() : "—";
+		document.getElementById("p-last-login").textContent = me.last_login_at ? new Date(me.last_login_at).toLocaleString() : "Never (this is your first session on record)";
+		document.getElementById("p-first").value = me.first_name || "";
+		document.getElementById("p-last").value = me.last_name || "";
+		document.getElementById("p-gender").value = me.gender || "unspecified";
+		document.getElementById("p-team").value = me.team || "";
+		if (me.display_name && me.display_name !== me.username) {
+			document.getElementById("avatar-initials").textContent = me.display_name.split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
+		}
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+document.getElementById("profile-form").addEventListener("submit", async (ev) => {
+	ev.preventDefault();
+	try {
+		await apiFetch("/api/users/me", {
+			method: "PATCH",
+			body: {
+				first_name: document.getElementById("p-first").value.trim() || null,
+				last_name: document.getElementById("p-last").value.trim() || null,
+				gender: document.getElementById("p-gender").value,
+				team: document.getElementById("p-team").value.trim() || null,
+			},
+		});
+		toast("Profile updated.");
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+document.getElementById("password-form").addEventListener("submit", async (ev) => {
+	ev.preventDefault();
+	const current = document.getElementById("p-current-pw").value;
+	const next = document.getElementById("p-new-pw").value;
+	try {
+		await apiFetch("/api/users/me", {
+			method: "PATCH",
+			body: { current_password: current, new_password: next },
+		});
+		toast("Password updated.");
+		document.getElementById("password-form").reset();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+loadProfile();
+</script>
+{% endblock %}

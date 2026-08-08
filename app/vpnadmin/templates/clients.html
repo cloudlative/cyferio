@@ -26,8 +26,16 @@
 
 <div class="card">
 	<div class="toolbar">
-		<h2 style="margin:0">All clients</h2>
+		<div class="toolbar-title">
+			<h2 style="margin:0">All clients</h2>
+			<span class="count-badge" id="client-count">— clients</span>
+		</div>
 		<button class="btn-secondary" id="refresh-btn">Refresh</button>
+	</div>
+	<div class="filter-bar">
+		<button class="filter-chip active" data-filter="all">All</button>
+		<button class="filter-chip" data-filter="online">Online only</button>
+		<button class="filter-chip" data-filter="offline">Offline only</button>
 	</div>
 	<div id="clients-table"><p class="muted">Loading…</p></div>
 </div>
@@ -46,6 +54,12 @@
 {% block scripts %}
 <script>
 const isAdmin = {{ "true" if is_admin else "false" }};
+let currentFilter = new URLSearchParams(location.search).get("online") === "1" ? "online" : "all";
+let lastClients = [], lastStatusByName = {};
+
+function applyFilterUI() {
+	document.querySelectorAll(".filter-chip").forEach(c => c.classList.toggle("active", c.dataset.filter === currentFilter));
+}
 
 async function loadClients() {
 	const el = document.getElementById("clients-table");
@@ -54,59 +68,129 @@ async function loadClients() {
 			apiFetch("/api/clients"),
 			apiFetch("/api/status/all"),
 		]);
-		const statusByName = Object.fromEntries(statusAll.map(s => [s.name, s]));
-
-		if (clients.length === 0) {
-			el.innerHTML = '<div class="empty-state">No clients yet.</div>';
-			return;
-		}
-		el.innerHTML = `<table>
-			<thead><tr>
-				<th>Name</th><th>Status</th><th>In MAC db</th><th>Last seen</th>
-				<th></th>${isAdmin ? "<th></th>" : ""}
-			</tr></thead>
-			<tbody>${clients.map(c => {
-				const s = statusByName[c.name];
-				const online = s && s.status === "online";
-				return `<tr data-name="${escapeHtml(c.name)}">
-					<td>${escapeHtml(c.name)}</td>
-					<td><span class="status-pill status-${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span></td>
-					<td>${c.in_db ? "Yes" : '<span style="color:var(--warning)">No — cannot connect</span>'}</td>
-					<td>${escapeHtml(s ? s.last_seen : "—")}</td>
-					<td><button class="btn-secondary macs-btn">View MACs</button></td>
-					${isAdmin ? `<td class="text-right"><button class="btn-danger revoke-btn">Revoke</button></td>` : ""}
-				</tr>`;
-			}).join("")}</tbody>
-		</table>`;
-
-		el.querySelectorAll(".macs-btn").forEach(btn => {
-			btn.addEventListener("click", () => showMacs(btn.closest("tr").dataset.name));
-		});
-		if (isAdmin) {
-			el.querySelectorAll(".revoke-btn").forEach(btn => {
-				btn.addEventListener("click", () => revokeClient(btn.closest("tr").dataset.name));
-			});
-		}
+		lastClients = clients;
+		lastStatusByName = Object.fromEntries(statusAll.map(s => [s.name, s]));
+		document.getElementById("client-count").textContent = `${clients.length} client${clients.length === 1 ? "" : "s"}`;
+		renderClients();
 	} catch (e) {
 		toast(e.message, "error");
 	}
 }
+
+function renderClients() {
+	const el = document.getElementById("clients-table");
+	applyFilterUI();
+
+	// Online-first sort, then alphabetical within each group.
+	const withStatus = lastClients.map(c => {
+		const s = lastStatusByName[c.name];
+		return { c, s, online: !!(s && s.status === "online") };
+	}).sort((a, b) => (b.online - a.online) || a.c.name.localeCompare(b.c.name));
+
+	const filtered = withStatus.filter(row => {
+		if (currentFilter === "online") return row.online;
+		if (currentFilter === "offline") return !row.online;
+		return true;
+	});
+
+	if (lastClients.length === 0) {
+		el.innerHTML = '<div class="empty-state">No clients yet.</div>';
+		return;
+	}
+	if (filtered.length === 0) {
+		el.innerHTML = '<div class="empty-state">No clients match this filter.</div>';
+		return;
+	}
+
+	el.innerHTML = `<table>
+		<thead><tr>
+			<th>Name</th><th>Status</th><th>In MAC db</th><th>Last seen</th>
+			<th></th>${isAdmin ? "<th></th>" : ""}
+		</tr></thead>
+		<tbody>${filtered.map(({ c, s, online }) => {
+			return `<tr data-name="${escapeHtml(c.name)}" class="${online ? "row-online" : ""}">
+				<td>${escapeHtml(c.name)}</td>
+				<td><span class="status-pill status-${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span></td>
+				<td>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</td>
+				<td>${escapeHtml(s ? s.last_seen : "—")}</td>
+				<td><button class="btn-secondary btn-sm macs-btn">Manage MACs</button></td>
+				${isAdmin ? `<td class="text-right"><button class="btn-danger btn-sm revoke-btn">Revoke</button></td>` : ""}
+			</tr>`;
+		}).join("")}</tbody>
+	</table>`;
+
+	el.querySelectorAll(".macs-btn").forEach(btn => {
+		btn.addEventListener("click", () => showMacs(btn.closest("tr").dataset.name));
+	});
+	if (isAdmin) {
+		el.querySelectorAll(".revoke-btn").forEach(btn => {
+			btn.addEventListener("click", () => revokeClient(btn.closest("tr").dataset.name));
+		});
+	}
+}
+
+document.querySelectorAll(".filter-chip").forEach(chip => {
+	chip.addEventListener("click", () => {
+		currentFilter = chip.dataset.filter;
+		renderClients();
+	});
+});
 
 async function showMacs(name) {
 	const dlg = document.getElementById("macs-dialog");
 	document.getElementById("macs-dialog-title").textContent = `MAC addresses — ${name}`;
 	document.getElementById("macs-dialog-content").innerHTML = "Loading…";
 	dlg.showModal();
+	await refreshMacsDialog(name);
+}
+
+async function refreshMacsDialog(name) {
+	const content = document.getElementById("macs-dialog-content");
 	try {
 		const data = await apiFetch(`/api/clients/${encodeURIComponent(name)}/macs`);
-		const content = document.getElementById("macs-dialog-content");
+		let html = "";
 		if (!data.macs || data.macs.length === 0) {
-			content.innerHTML = '<p class="muted">No MAC addresses registered.</p>';
+			html += '<p class="muted">No MAC addresses registered.</p>';
 		} else {
-			content.innerHTML = `<p>${data.count} registered:</p><ul>${data.macs.map(m => `<li class="mono">${escapeHtml(m)}</li>`).join("")}</ul>`;
+			html += `<p class="muted">${data.count} registered:</p><ul class="mac-list">${data.macs.map(m => `
+				<li><span class="mono">${escapeHtml(m)}</span>${isAdmin ? `<button class="btn-secondary btn-sm mac-remove-btn" data-mac="${escapeHtml(m)}">Remove</button>` : ""}</li>
+			`).join("")}</ul>`;
+		}
+		if (isAdmin) {
+			html += `<form id="mac-add-form" class="mac-add-row">
+				<input type="text" id="mac-add-input" placeholder="New MAC, e.g. aa:bb:cc:dd:ee:ff" required>
+				<button type="submit" class="btn-primary btn-sm">Add</button>
+			</form>`;
+		}
+		content.innerHTML = html;
+
+		content.querySelectorAll(".mac-remove-btn").forEach(btn => {
+			btn.addEventListener("click", async () => {
+				const ok = await confirmDialog(`Remove MAC <span class="mono">${escapeHtml(btn.dataset.mac)}</span> from <strong>${escapeHtml(name)}</strong>?`, { confirmLabel: "Remove" });
+				if (!ok) return;
+				try {
+					await apiFetch(`/api/clients/${encodeURIComponent(name)}/macs/${encodeURIComponent(btn.dataset.mac)}`, { method: "DELETE" });
+					toast("MAC removed.");
+					refreshMacsDialog(name);
+					loadClients();
+				} catch (e) { toast(e.message, "error"); }
+			});
+		});
+		const addForm = document.getElementById("mac-add-form");
+		if (addForm) {
+			addForm.addEventListener("submit", async (ev) => {
+				ev.preventDefault();
+				const mac = document.getElementById("mac-add-input").value.trim();
+				try {
+					await apiFetch(`/api/clients/${encodeURIComponent(name)}/macs`, { method: "POST", body: { mac } });
+					toast("MAC added.");
+					refreshMacsDialog(name);
+					loadClients();
+				} catch (e) { toast(e.message, "error"); }
+			});
 		}
 	} catch (e) {
-		document.getElementById("macs-dialog-content").innerHTML = `<p style="color:var(--danger)">${escapeHtml(e.message)}</p>`;
+		content.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
 	}
 }
 document.getElementById("macs-dialog-close").addEventListener("click", () => document.getElementById("macs-dialog").close());

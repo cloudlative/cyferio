@@ -5,6 +5,8 @@ Sessions use Starlette's built-in SessionMiddleware (a signed, httponly
 cookie -- no server-side session store needed). Passwords are hashed with
 bcrypt via passlib. Two roles: admin (full control) and viewer (read-only).
 """
+from datetime import datetime, timezone
+
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -57,7 +59,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | 
     if user_id is None:
         return None
     user = db.get(User, user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.deleted:
         return None
     return user
 
@@ -76,12 +78,15 @@ def require_admin(user: User = Depends(require_user)) -> User:
     return user
 
 
-def login_user(request: Request, user: User) -> None:
+def login_user(request: Request, user: User, db: Session | None = None) -> None:
     # Store the minimum needed to re-derive identity; role/is_active are
     # re-checked from the DB on every request via get_current_user, so a
     # role change or deactivation takes effect immediately, not just on
     # next login.
     request.session["user_id"] = user.id
+    if db is not None:
+        user.last_login_at = datetime.now(timezone.utc)
+        db.commit()
 
 
 def logout_user(request: Request) -> None:

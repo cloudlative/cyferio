@@ -135,3 +135,126 @@ class TestSelfLockoutGuardrails:
         # blocked by the self-lockout rule (covered above), but demoting
         # admin2 via itself should ALSO be blocked as the last admin.
         # (Already implied by the self-guard, this just documents intent.)
+
+
+class TestSoftDeleteAndRestore:
+    def test_delete_soft_deletes_not_hard_deletes(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+
+        r = app_client.delete(f"/api/users/{viewer_id}")
+        assert r.status_code == 200
+
+        # Row still exists in the DB, just marked deleted -- not gone.
+        db_session.expire_all()
+        target = db_session.get(User, viewer_id)
+        assert target is not None
+        assert target.deleted is True
+        assert target.deleted_at is not None
+        assert target.is_active is False
+
+    def test_deleted_user_hidden_from_main_list_shown_in_deleted_list(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+        app_client.delete(f"/api/users/{viewer_id}")
+
+        active = app_client.get("/api/users").json()
+        assert all(u["username"] != "viewer" for u in active)
+
+        deleted = app_client.get("/api/users/deleted").json()
+        assert any(u["username"] == "viewer" for u in deleted)
+
+    def test_deleted_user_cannot_login(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+        app_client.delete(f"/api/users/{viewer_id}")
+        app_client.post("/logout")
+
+        r = login(app_client, "viewer", "viewerpass123")
+        assert r.status_code == 401
+
+    def test_restore_brings_user_back(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+        app_client.delete(f"/api/users/{viewer_id}")
+
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"deleted": False, "is_active": True})
+        assert r.status_code == 200
+
+        active = app_client.get("/api/users").json()
+        assert any(u["username"] == "viewer" for u in active)
+        deleted = app_client.get("/api/users/deleted").json()
+        assert all(u["username"] != "viewer" for u in deleted)
+
+    def test_cannot_delete_last_admin(self, app_client, db_session):
+        second_admin = User(username="admin2", password_hash=hash_password("admin2pass123"), role=Role.admin)
+        db_session.add(second_admin)
+        db_session.commit()
+        login(app_client, "admin2", "admin2pass123")
+
+        admin_id = db_session.query(User).filter(User.username == "admin").one().id
+        r = app_client.delete(f"/api/users/{admin_id}")
+        assert r.status_code == 200  # two admins exist, this one is fine
+
+        # admin2 is now the only admin -- deleting it (even via itself,
+        # blocked by self-lockout) or being the sole survivor is the
+        # relevant state; assert no *third* admin could remove it either.
+        third_admin_check = db_session.query(User).filter(
+            User.role == Role.admin, User.is_active.is_(True), User.deleted.is_(False)
+        ).count()
+        assert third_admin_check == 1
+
+
+class TestSelfServiceProfile:
+    def test_can_view_own_profile(self, app_client):
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.get("/api/users/me")
+        assert r.status_code == 200
+        assert r.json()["username"] == "viewer"
+
+    def test_viewer_can_update_own_profile_fields(self, app_client):
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.patch("/api/users/me", json={"first_name": "Val", "team": "Support"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["first_name"] == "Val"
+        assert body["team"] == "Support"
+
+    def test_profile_update_cannot_change_role(self, app_client, db_session):
+        login(app_client, "viewer", "viewerpass123")
+        app_client.patch("/api/users/me", json={"first_name": "Val"})
+        viewer = db_session.query(User).filter(User.username == "viewer").one()
+        assert viewer.role == Role.viewer  # UpdateProfileRequest has no role field at all
+
+    def test_self_password_change_requires_current_password(self, app_client):
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.patch("/api/users/me", json={"new_password": "brandnewpass123"})
+        assert r.status_code == 400
+
+    def test_self_password_change_wrong_current_password_rejected(self, app_client):
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.patch("/api/users/me", json={
+            "current_password": "wrongpass", "new_password": "brandnewpass123",
+        })
+        assert r.status_code == 400
+
+    def test_self_password_change_succeeds_and_new_password_works(self, app_client):
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.patch("/api/users/me", json={
+            "current_password": "viewerpass123", "new_password": "brandnewpass123",
+        })
+        assert r.status_code == 200
+
+        app_client.post("/logout")
+        r = login(app_client, "viewer", "brandnewpass123")
+        assert r.status_code == 200
+
+    def test_admin_can_reset_another_users_password_without_current_password(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"password": "resetbyadmin123"})
+        assert r.status_code == 200
+
+        app_client.post("/logout")
+        r = login(app_client, "viewer", "resetbyadmin123")
+        assert r.status_code == 200

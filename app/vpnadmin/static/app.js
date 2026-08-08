@@ -1,5 +1,32 @@
 // Shared helpers used by every page's inline <script> block.
 
+// --- Site-wide top loading bar, driven automatically by apiFetch() -------
+let _pendingRequests = 0;
+
+function _progressStart() {
+	_pendingRequests++;
+	const bar = document.getElementById("page-progress");
+	if (!bar || _pendingRequests !== 1) return;
+	bar.style.transition = "none";
+	bar.style.width = "6%";
+	bar.classList.add("active");
+	requestAnimationFrame(() => {
+		bar.style.transition = "";
+		bar.style.width = "72%";
+	});
+}
+
+function _progressDone() {
+	_pendingRequests = Math.max(0, _pendingRequests - 1);
+	const bar = document.getElementById("page-progress");
+	if (!bar || _pendingRequests !== 0) return;
+	bar.style.width = "100%";
+	setTimeout(() => {
+		bar.classList.remove("active");
+		setTimeout(() => { bar.style.width = "0%"; }, 200);
+	}, 150);
+}
+
 function toast(message, kind = "success") {
 	const container = document.getElementById("toast-container");
 	const el = document.createElement("div");
@@ -20,21 +47,26 @@ async function apiFetch(url, options = {}) {
 		opts.headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
 		opts.body = JSON.stringify(opts.body);
 	}
-	const res = await fetch(url, opts);
-	if (res.status === 401) {
-		window.location.href = "/login";
-		throw new Error("Session expired");
+	_progressStart();
+	try {
+		const res = await fetch(url, opts);
+		if (res.status === 401) {
+			window.location.href = "/login";
+			throw new Error("Session expired");
+		}
+		if (!res.ok) {
+			let detail = `Request failed (${res.status})`;
+			try {
+				const data = await res.json();
+				if (data && data.detail) detail = data.detail;
+			} catch (_) { /* body wasn't JSON */ }
+			throw new Error(detail);
+		}
+		if (res.status === 204) return null;
+		return await res.json();
+	} finally {
+		_progressDone();
 	}
-	if (!res.ok) {
-		let detail = `Request failed (${res.status})`;
-		try {
-			const data = await res.json();
-			if (data && data.detail) detail = data.detail;
-		} catch (_) { /* body wasn't JSON */ }
-		throw new Error(detail);
-	}
-	if (res.status === 204) return null;
-	return res.json();
 }
 
 /**

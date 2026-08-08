@@ -3,7 +3,11 @@
 {% block content %}
 <div class="login-page">
 	<div class="login-box">
-		<h1>OpenVPN Toolkit</h1>
+		<div class="login-brand">
+			<div class="login-logo">⚡</div>
+			<h1>OpenVPN Toolkit</h1>
+			<p class="login-tagline">Sign in to manage clients, MACs &amp; live status</p>
+		</div>
 		{% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
 		<form method="post" action="/login">
 			<div class="field">

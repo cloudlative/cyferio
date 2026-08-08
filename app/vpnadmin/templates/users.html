@@ -18,10 +18,24 @@
 			</div>
 			<div class="field">
 				<label for="u-role">Role</label>
-				<select id="u-role" style="padding:9px 12px;border-radius:8px;border:1px solid var(--border);font:inherit;width:100%">
+				<select id="u-role">
 					<option value="viewer">Viewer (read-only)</option>
 					<option value="admin">Admin (full control)</option>
 				</select>
+			</div>
+		</div>
+		<div class="form-row" style="margin-top:16px">
+			<div class="field">
+				<label for="u-first">First name <span class="muted">(optional)</span></label>
+				<input type="text" id="u-first">
+			</div>
+			<div class="field">
+				<label for="u-last">Last name <span class="muted">(optional)</span></label>
+				<input type="text" id="u-last">
+			</div>
+			<div class="field">
+				<label for="u-team">Team <span class="muted">(optional)</span></label>
+				<input type="text" id="u-team">
 			</div>
 			<button type="submit" class="btn-primary">Add user</button>
 		</div>
@@ -29,66 +43,125 @@
 </div>
 
 <div class="card">
-	<div class="toolbar"><h2 style="margin:0">All users</h2><button class="btn-secondary" id="refresh-btn">Refresh</button></div>
+	<div class="toolbar">
+		<div class="toolbar-title"><h2 style="margin:0">Team</h2><span class="count-badge" id="users-count">— users</span></div>
+		<button class="btn-secondary" id="refresh-btn">Refresh</button>
+	</div>
 	<div id="users-table"><p class="muted">Loading…</p></div>
 </div>
+
+<div class="card">
+	<div class="toolbar">
+		<div class="toolbar-title"><h2 style="margin:0">Deleted users</h2><span class="count-badge" id="deleted-count">— deleted</span></div>
+	</div>
+	<div id="deleted-table"><p class="muted">Loading…</p></div>
+</div>
+
+<dialog id="edit-dialog">
+	<div class="dialog-body">
+		<h2>Edit user</h2>
+		<form id="edit-form">
+			<div class="form-row">
+				<div class="field"><label for="e-first">First name</label><input type="text" id="e-first"></div>
+				<div class="field"><label for="e-last">Last name</label><input type="text" id="e-last"></div>
+			</div>
+			<div class="form-row" style="margin-top:14px">
+				<div class="field">
+					<label for="e-gender">Gender</label>
+					<select id="e-gender">
+						<option value="unspecified">Prefer not to say</option>
+						<option value="male">Male</option>
+						<option value="female">Female</option>
+						<option value="other">Other</option>
+					</select>
+				</div>
+				<div class="field"><label for="e-team">Team</label><input type="text" id="e-team"></div>
+			</div>
+			<fieldset style="margin-top:16px">
+				<legend>Access</legend>
+				<div class="form-row">
+					<div class="field">
+						<label for="e-role">Role</label>
+						<select id="e-role"><option value="viewer">Viewer</option><option value="admin">Admin</option></select>
+					</div>
+					<div class="field">
+						<label for="e-active">Status</label>
+						<select id="e-active"><option value="true">Active</option><option value="false">Disabled</option></select>
+					</div>
+				</div>
+			</fieldset>
+			<fieldset>
+				<legend>Reset password <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<div class="field" style="margin-bottom:0">
+					<input type="password" id="e-password" minlength="8" placeholder="Leave blank to keep current password">
+				</div>
+			</fieldset>
+			<fieldset>
+				<legend>Created at</legend>
+				<div class="field" style="margin-bottom:0">
+					<input type="text" id="e-created" placeholder="YYYY-MM-DDTHH:MM:SS">
+					<p class="muted" style="margin:6px 0 0;font-size:0.8rem">Display field only — doesn't affect the audit log, which stays immutable.</p>
+				</div>
+			</fieldset>
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" id="edit-cancel">Cancel</button>
+				<button type="submit" class="btn-primary">Save changes</button>
+			</div>
+		</form>
+	</div>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
 <script>
 const currentUsername = {{ user.username | tojson }};
+let editingUserId = null;
+
+function fmtDate(iso) {
+	return iso ? new Date(iso).toLocaleString() : "—";
+}
 
 async function loadUsers() {
 	const el = document.getElementById("users-table");
 	try {
 		const users = await apiFetch("/api/users");
-		el.innerHTML = `<table>
-			<thead><tr><th>Username</th><th>Role</th><th>Active</th><th>Created</th><th class="text-right">Actions</th></tr></thead>
-			<tbody>${users.map(u => `
-				<tr data-id="${u.id}" data-username="${escapeHtml(u.username)}">
-					<td>${escapeHtml(u.username)} ${u.username === currentUsername ? '<span class="muted">(you)</span>' : ""}</td>
-					<td><span class="role-badge role-${u.role}">${u.role}</span></td>
-					<td>${u.is_active ? "Yes" : '<span style="color:var(--danger)">No</span>'}</td>
-					<td class="muted">${u.created_at ? u.created_at.slice(0, 10) : "—"}</td>
-					<td class="text-right">
-						<button class="btn-secondary role-toggle-btn">${u.role === "admin" ? "Make viewer" : "Make admin"}</button>
-						<button class="btn-secondary active-toggle-btn">${u.is_active ? "Deactivate" : "Activate"}</button>
-						<button class="btn-danger delete-btn">Delete</button>
-					</td>
-				</tr>`).join("")}</tbody>
-		</table>`;
-
-		el.querySelectorAll(".role-toggle-btn").forEach(btn => {
-			btn.addEventListener("click", async () => {
-				const row = btn.closest("tr");
-				const newRole = btn.textContent.includes("admin") ? "admin" : "viewer";
-				try {
-					await apiFetch(`/api/users/${row.dataset.id}`, { method: "PATCH", body: { role: newRole } });
-					toast("Role updated.");
-					loadUsers();
-				} catch (e) { toast(e.message, "error"); }
-			});
-		});
-		el.querySelectorAll(".active-toggle-btn").forEach(btn => {
-			btn.addEventListener("click", async () => {
-				const row = btn.closest("tr");
-				const activate = btn.textContent.includes("Activate");
-				try {
-					await apiFetch(`/api/users/${row.dataset.id}`, { method: "PATCH", body: { is_active: activate } });
-					toast(activate ? "User activated." : "User deactivated.");
-					loadUsers();
-				} catch (e) { toast(e.message, "error"); }
-			});
+		document.getElementById("users-count").textContent = `${users.length} user${users.length === 1 ? "" : "s"}`;
+		if (users.length === 0) {
+			el.innerHTML = '<div class="empty-state">No users.</div>';
+		} else {
+			el.innerHTML = `<table>
+				<thead><tr><th>User</th><th>Team</th><th>Role</th><th>Status</th><th>Created</th><th>Last login</th><th class="text-right">Actions</th></tr></thead>
+				<tbody>${users.map(u => `
+					<tr data-id="${u.id}">
+						<td>
+							<div>${escapeHtml(u.display_name)}</div>
+							<div class="muted" style="font-size:0.82em">${escapeHtml(u.username)}${u.username === currentUsername ? " (you)" : ""}</div>
+						</td>
+						<td class="muted">${escapeHtml(u.team || "—")}</td>
+						<td><span class="role-badge role-${u.role}">${u.role}</span></td>
+						<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
+						<td class="muted">${fmtDate(u.created_at)}</td>
+						<td class="muted">${fmtDate(u.last_login_at)}</td>
+						<td class="text-right">
+							<button class="btn-secondary btn-sm edit-btn" data-user='${JSON.stringify(u).replace(/'/g, "&apos;")}'>Edit</button>
+							<button class="btn-danger btn-sm delete-btn">Delete</button>
+						</td>
+					</tr>`).join("")}</tbody>
+			</table>`;
+		}
+		el.querySelectorAll(".edit-btn").forEach(btn => {
+			btn.addEventListener("click", () => openEdit(JSON.parse(btn.dataset.user.replace(/&apos;/g, "'"))));
 		});
 		el.querySelectorAll(".delete-btn").forEach(btn => {
 			btn.addEventListener("click", async () => {
 				const row = btn.closest("tr");
-				const ok = await confirmDialog(`Delete user <strong>${row.dataset.username}</strong>? This can't be undone.`, { confirmLabel: "Delete" });
+				const id = row.dataset.id;
+				const ok = await confirmDialog("Delete this user? They'll be moved to the Deleted users list and can be restored later.", { confirmLabel: "Delete" });
 				if (!ok) return;
 				try {
-					const result = await apiFetch(`/api/users/${row.dataset.id}`, { method: "DELETE" });
+					const result = await apiFetch(`/api/users/${id}`, { method: "DELETE" });
 					toast(result.message);
-					loadUsers();
+					loadUsers(); loadDeleted();
 				} catch (e) { toast(e.message, "error"); }
 			});
 		});
@@ -97,13 +170,93 @@ async function loadUsers() {
 	}
 }
 
+async function loadDeleted() {
+	const el = document.getElementById("deleted-table");
+	try {
+		const users = await apiFetch("/api/users/deleted");
+		document.getElementById("deleted-count").textContent = `${users.length} deleted`;
+		if (users.length === 0) {
+			el.innerHTML = '<div class="empty-state">No deleted users.</div>';
+			return;
+		}
+		el.innerHTML = `<table>
+			<thead><tr><th>User</th><th>Role</th><th>Deleted at</th><th class="text-right">Actions</th></tr></thead>
+			<tbody>${users.map(u => `
+				<tr class="row-dim" data-id="${u.id}">
+					<td>${escapeHtml(u.display_name)} <span class="muted" style="font-size:0.82em">(${escapeHtml(u.username)})</span></td>
+					<td><span class="role-badge role-${u.role}">${u.role}</span></td>
+					<td class="muted">${fmtDate(u.deleted_at)}</td>
+					<td class="text-right"><button class="btn-secondary btn-sm restore-btn">Restore</button></td>
+				</tr>`).join("")}</tbody>
+		</table>`;
+		el.querySelectorAll(".restore-btn").forEach(btn => {
+			btn.addEventListener("click", async () => {
+				const id = btn.closest("tr").dataset.id;
+				try {
+					await apiFetch(`/api/users/${id}`, { method: "PATCH", body: { deleted: false, is_active: true } });
+					toast("User restored.");
+					loadUsers(); loadDeleted();
+				} catch (e) { toast(e.message, "error"); }
+			});
+		});
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+function openEdit(u) {
+	editingUserId = u.id;
+	document.getElementById("e-first").value = u.first_name || "";
+	document.getElementById("e-last").value = u.last_name || "";
+	document.getElementById("e-gender").value = u.gender || "unspecified";
+	document.getElementById("e-team").value = u.team || "";
+	document.getElementById("e-role").value = u.role;
+	document.getElementById("e-active").value = String(u.is_active);
+	document.getElementById("e-password").value = "";
+	document.getElementById("e-created").value = u.created_at ? u.created_at.slice(0, 19) : "";
+	document.getElementById("edit-dialog").showModal();
+}
+document.getElementById("edit-cancel").addEventListener("click", () => document.getElementById("edit-dialog").close());
+
+document.getElementById("edit-form").addEventListener("submit", async (ev) => {
+	ev.preventDefault();
+	const body = {
+		first_name: document.getElementById("e-first").value.trim() || null,
+		last_name: document.getElementById("e-last").value.trim() || null,
+		gender: document.getElementById("e-gender").value,
+		team: document.getElementById("e-team").value.trim() || null,
+		role: document.getElementById("e-role").value,
+		is_active: document.getElementById("e-active").value === "true",
+	};
+	const pw = document.getElementById("e-password").value;
+	if (pw) body.password = pw;
+	const createdRaw = document.getElementById("e-created").value.trim();
+	if (createdRaw) body.created_at = createdRaw;
+	try {
+		await apiFetch(`/api/users/${editingUserId}`, { method: "PATCH", body });
+		toast("User updated.");
+		document.getElementById("edit-dialog").close();
+		loadUsers();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
 document.getElementById("add-user-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
 	const username = document.getElementById("u-username").value.trim();
 	const password = document.getElementById("u-password").value;
 	const role = document.getElementById("u-role").value;
 	try {
-		await apiFetch("/api/users", { method: "POST", body: { username, password, role } });
+		await apiFetch("/api/users", {
+			method: "POST",
+			body: {
+				username, password, role,
+				first_name: document.getElementById("u-first").value.trim() || null,
+				last_name: document.getElementById("u-last").value.trim() || null,
+				team: document.getElementById("u-team").value.trim() || null,
+			},
+		});
 		toast(`User '${username}' created.`);
 		document.getElementById("add-user-form").reset();
 		loadUsers();
@@ -112,7 +265,8 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 	}
 });
 
-document.getElementById("refresh-btn").addEventListener("click", loadUsers);
+document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); });
 loadUsers();
+loadDeleted();
 </script>
 {% endblock %}

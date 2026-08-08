@@ -13,6 +13,7 @@ invokes it and relays the result.
 import json
 import subprocess
 import threading
+import time
 
 from .config import settings
 
@@ -27,6 +28,28 @@ from .config import settings
 # (calls queue instead of running in parallel) for never spiking multiple
 # heavy interpreters into memory at once.
 _script_lock = threading.Lock()
+
+# Short-lived cache for read-only calls: the dashboard, and a user simply
+# clicking between pages, can easily re-request the same status/list data
+# within a couple of seconds. Each call is a real subprocess spawn (see
+# _script_lock above for why that's expensive on this box), so a small TTL
+# turns "reload the dashboard twice quickly" from 2 full spawn-bursts into 1.
+# Keyed by (function name, args tuple); not used for mutating calls.
+_CACHE_TTL_SECONDS = 3
+_cache: dict[tuple, tuple[float, object]] = {}
+_cache_lock = threading.Lock()
+
+
+def _cached(key: tuple, fn):
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit is not None and now - hit[0] < _CACHE_TTL_SECONDS:
+            return hit[1]
+    result = fn()
+    with _cache_lock:
+        _cache[key] = (now, result)
+    return result
 
 
 class ScriptError(Exception):
@@ -98,24 +121,62 @@ def _parse_json_or_raise(proc: subprocess.CompletedProcess, *, allow_nonzero_jso
 # --- openvpn-install.sh ------------------------------------------------------
 
 def list_clients() -> list[dict]:
-    return _parse_json_or_raise(_run_install_script("--list", "--json"))
+    return _cached(("list_clients",), lambda:
+        _parse_json_or_raise(_run_install_script("--list", "--json")))
 
 
 def list_revoked() -> list[dict]:
-    return _parse_json_or_raise(_run_install_script("--list-revoked", "--json"))
+    return _cached(("list_revoked",), lambda:
+        _parse_json_or_raise(_run_install_script("--list-revoked", "--json")))
 
 
 def list_macs(name: str) -> dict:
-    proc = _run_install_script("--macs", name, "--json")
-    return _parse_json_or_raise(proc, allow_nonzero_json=True)
+    def _do():
+        proc = _run_install_script("--macs", name, "--json")
+        return _parse_json_or_raise(proc, allow_nonzero_json=True)
+    return _cached(("list_macs", name), _do)
+
+
+def add_mac(name: str, mac: str) -> str:
+    proc = _run_install_script("--add-mac", name, mac)
+    if proc.returncode != 0:
+        raise ScriptError(
+            proc.stderr.strip() or "Failed to add MAC address",
+            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+        )
+    _invalidate_client_caches(name)
+    return proc.stdout.strip()
+
+
+def remove_mac(name: str, mac: str) -> str:
+    proc = _run_install_script("--remove-mac", name, mac)
+    if proc.returncode != 0:
+        raise ScriptError(
+            proc.stderr.strip() or "Failed to remove MAC address",
+            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+        )
+    _invalidate_client_caches(name)
+    return proc.stdout.strip()
+
+
+def _invalidate_client_caches(name: str) -> None:
+    """After a mutating client/MAC action, drop any cached read-only results
+    that would now be stale -- otherwise a change could appear not to have
+    taken effect for up to _CACHE_TTL_SECONDS."""
+    with _cache_lock:
+        for key in [k for k in _cache if k[0] in ("list_clients", "list_revoked", "check_consistency", "lint_db")
+                    or (k[0] == "list_macs" and len(k) > 1 and k[1] == name)]:
+            _cache.pop(key, None)
 
 
 def check_consistency() -> dict:
-    return _parse_json_or_raise(_run_install_script("--check", "--json"), allow_nonzero_json=True)
+    return _cached(("check_consistency",), lambda:
+        _parse_json_or_raise(_run_install_script("--check", "--json"), allow_nonzero_json=True))
 
 
 def lint_db() -> dict:
-    return _parse_json_or_raise(_run_install_script("--lint-db", "--json"), allow_nonzero_json=True)
+    return _cached(("lint_db",), lambda:
+        _parse_json_or_raise(_run_install_script("--lint-db", "--json"), allow_nonzero_json=True))
 
 
 def add_client(name: str, mac: str) -> str:
@@ -131,6 +192,7 @@ def add_client(name: str, mac: str) -> str:
             proc.stderr.strip() or "Failed to add client",
             stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
         )
+    _invalidate_client_caches(name)
     return proc.stdout.strip()
 
 
@@ -141,18 +203,37 @@ def revoke_client(name: str) -> str:
             proc.stderr.strip() or "Failed to revoke client",
             stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
         )
+    _invalidate_client_caches(name)
     return proc.stdout.strip()
 
 
 # --- vpn-status.py ------------------------------------------------------------
 
 def status_connected() -> list[dict]:
-    return _parse_json_or_raise(_run_status_script("--json"))
+    return _cached(("status_connected",), lambda:
+        _parse_json_or_raise(_run_status_script("--json")))
 
 
 def status_all() -> list[dict]:
-    return _parse_json_or_raise(_run_status_script("--all", "--json"))
+    return _cached(("status_all",), lambda:
+        _parse_json_or_raise(_run_status_script("--all", "--json")))
 
 
 def status_rejected(limit: int = 20) -> list[dict]:
-    return _parse_json_or_raise(_run_status_script("--rejected", str(limit), "--json"))
+    return _cached(("status_rejected", limit), lambda:
+        _parse_json_or_raise(_run_status_script("--rejected", str(limit), "--json")))
+
+
+# --- Combined dashboard summary ------------------------------------------
+
+def dashboard_summary(rejected_limit: int = 20) -> dict:
+    """One call for everything the dashboard needs, instead of 4 separate
+    HTTP round-trips each independently hitting the script lock/cache. Still
+    4 underlying script calls (each individually cached above), but callers
+    only pay one HTTP request and one JSON parse."""
+    return {
+        "connected": status_connected(),
+        "all_clients": status_all(),
+        "revoked": list_revoked(),
+        "rejected": status_rejected(rejected_limit),
+    }

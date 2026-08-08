@@ -27,6 +27,21 @@ from vpnadmin.db import Base
 from vpnadmin.models import Role, User
 
 
+@pytest.fixture(autouse=True)
+def _clear_cli_wrapper_cache():
+    """cli_wrapper caches read-only script results for a few seconds (see
+    its own docstring) to avoid redundant subprocess spawns in production.
+    That module-level cache would otherwise leak between tests -- e.g. a
+    test asserting list_clients() succeeds, followed immediately by one
+    asserting it raises on a non-zero exit, could see the first test's
+    cached success instead of actually re-invoking the (differently)
+    mocked subprocess.run. Clear it before and after every test."""
+    from vpnadmin import cli_wrapper
+    cli_wrapper._cache.clear()
+    yield
+    cli_wrapper._cache.clear()
+
+
 @pytest.fixture()
 def db_session():
     """A fresh in-memory SQLite DB per test -- fast, isolated, no shared state.
