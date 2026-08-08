@@ -12,8 +12,21 @@ invokes it and relays the result.
 """
 import json
 import subprocess
+import threading
 
 from .config import settings
+
+# The two wrapped scripts spawn a fresh python3/bash interpreter per
+# invocation, and the dashboard fires several of these concurrently
+# (Promise.all over /api/status, /api/status/all, /api/clients, ...). On a
+# small box (e.g. a 1 vCPU/~1GB droplet) that concurrent spawn burst can
+# exceed available memory and trigger the *host's* OOM killer -- observed
+# in production killing app subprocesses (exit code -9) and, worse, nearly
+# killing unrelated processes (openvpn itself, containerd) before the app
+# was even at fault. Serializing script execution trades a little latency
+# (calls queue instead of running in parallel) for never spiking multiple
+# heavy interpreters into memory at once.
+_script_lock = threading.Lock()
 
 
 class ScriptError(Exception):
@@ -35,14 +48,15 @@ def _run(args: list[str]) -> subprocess.CompletedProcess:
         # hanging on a password prompt this app has no way to answer.
         args = ["sudo", "-n"] + args
     try:
-        return subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            timeout=settings.SCRIPT_TIMEOUT_SECONDS,
-            check=False,
-            shell=False,  # explicit: never let this become shell=True
-        )
+        with _script_lock:
+            return subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=settings.SCRIPT_TIMEOUT_SECONDS,
+                check=False,
+                shell=False,  # explicit: never let this become shell=True
+            )
     except subprocess.TimeoutExpired as e:
         raise ScriptError(
             f"Command timed out after {settings.SCRIPT_TIMEOUT_SECONDS}s"
