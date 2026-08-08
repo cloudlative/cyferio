@@ -1,8 +1,8 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text
-from sqlalchemy.orm import validates
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, ForeignKey
+from sqlalchemy.orm import validates, relationship
 
 from .db import Base
 
@@ -23,6 +23,23 @@ class Gender(str, enum.Enum):
     unspecified = "unspecified"  # default -- nobody is forced to disclose this
 
 
+class Team(Base):
+    """A proper team resource (added on top of the earlier free-text `team`
+    field on User -- see git history) so teams can be created/deleted/listed
+    on their own, independent of whether any user currently belongs to one.
+    Membership is User.team_id, a nullable FK -- a user with no team is
+    simply team_id IS NULL ("Unassigned"), not a row here."""
+    __tablename__ = "teams"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    @validates("name")
+    def _normalize_name(self, key, value):
+        return value.strip()
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -38,7 +55,13 @@ class User(Base):
     first_name = Column(String(64), nullable=True)
     last_name = Column(String(64), nullable=True)
     gender = Column(Enum(Gender), nullable=False, default=Gender.unspecified)
-    team = Column(String(64), nullable=True)
+    # FK to Team, nullable = "Unassigned". Replaces the earlier free-text
+    # `team` column (see git history) now that Teams are a real CRUD
+    # resource -- a stray legacy `team` string column may still physically
+    # exist in older databases (this app's migration approach only ever
+    # ADDs columns, see db.py), but it is no longer read or written anywhere.
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    team = relationship("Team")
 
     last_login_at = Column(DateTime(timezone=True), nullable=True)
 

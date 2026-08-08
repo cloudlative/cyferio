@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Deleted / Revoked clients — OpenVPN Toolkit{% endblock %}
+{% block title %}Deleted / Revoked Clients — {{ APP_NAME }}{% endblock %}
 {% block content %}
-<h1>Deleted / Revoked clients</h1>
+<h1>Deleted / Revoked Clients</h1>
 <p class="page-subtitle">Certificates that have been revoked and can no longer connect.</p>
 
 <div class="card">
@@ -12,37 +12,135 @@
 		</div>
 		<button class="btn-secondary" id="refresh-btn">Refresh</button>
 	</div>
+	{% if is_admin %}
+	<p class="muted" style="margin-bottom:16px">Select one or more entries below to permanently delete their leftover certificate/key files, or restore (reissue a new certificate for) a single client.</p>
+	{% endif %}
 	<div id="revoked-table"><p class="muted">Loading…</p></div>
 </div>
+
+{% if is_admin %}
+<dialog id="restore-dialog">
+	<div class="dialog-body">
+		<h2>Restore Client</h2>
+		<p class="muted" style="margin-top:0">
+			A revoked certificate can't be un-revoked once it's on the CRL -- this issues a
+			<strong id="restore-client-name"></strong> a brand-new certificate under the same name instead.
+		</p>
+		<form id="restore-form">
+			<div class="field">
+				<label for="restore-mac">Device MAC Address</label>
+				<input type="text" id="restore-mac" required placeholder="aa:bb:cc:dd:ee:ff">
+			</div>
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" id="restore-dialog-cancel">Cancel</button>
+				<button type="submit" class="btn-primary">Restore</button>
+			</div>
+		</form>
+	</div>
+</dialog>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
+const isAdmin = {{ "true" if is_admin else "false" }};
+let lastRevoked = [];
+
 async function loadRevoked() {
 	const el = document.getElementById("revoked-table");
 	try {
-		const revoked = await apiFetch("/api/clients/revoked");
-		document.getElementById("revoked-count").textContent = `${revoked.length} entr${revoked.length === 1 ? "y" : "ies"}`;
-		if (revoked.length === 0) {
+		lastRevoked = await apiFetch("/api/clients/revoked");
+		document.getElementById("revoked-count").textContent = `${lastRevoked.length} entr${lastRevoked.length === 1 ? "y" : "ies"}`;
+		if (lastRevoked.length === 0) {
 			el.innerHTML = '<div class="empty-state">No deleted or revoked clients.</div>';
 			return;
 		}
-		const sorted = [...revoked].sort((a, b) => (b.revoked_at || "").localeCompare(a.revoked_at || ""));
-		el.innerHTML = `<table>
-			<thead><tr><th>Name</th><th>Revoked at</th><th>Stale MAC db entry</th></tr></thead>
+		const sorted = [...lastRevoked].sort((a, b) => (b.revoked_at || "").localeCompare(a.revoked_at || ""));
+		el.innerHTML = `
+			${isAdmin ? `<div class="form-row" style="margin-bottom:14px">
+				<button class="btn-danger btn-sm" id="purge-selected" disabled>Permanently Delete Selected</button>
+			</div>` : ""}
+			<table>
+			<thead><tr>
+				${isAdmin ? '<th style="width:1%"></th>' : ""}
+				<th>Name</th><th>Revoked At</th><th>Stale MAC DB Entry</th><th>Files Present</th>
+				${isAdmin ? "<th></th>" : ""}
+			</tr></thead>
 			<tbody>${sorted.map(r => `
-				<tr class="row-dim">
+				<tr class="row-dim" data-name="${escapeHtml(r.name)}">
+					${isAdmin ? `<td>${r.files_present ? `<input type="checkbox" class="purge-checkbox" value="${escapeHtml(r.name)}">` : ""}</td>` : ""}
 					<td>${escapeHtml(r.name)}</td>
 					<td class="mono">${escapeHtml(r.revoked_at)}</td>
 					<td>${r.stale_db_entry
 						? '<span class="status-pill status-revoked">Stale — needs cleanup</span>'
 						: '<span class="muted">No</span>'}</td>
+					<td>${r.files_present
+						? '<span class="muted">Yes</span>'
+						: '<span class="status-pill status-online">Purged</span>'}</td>
+					${isAdmin ? `<td class="text-right">
+						${r.files_present ? '<button class="btn-secondary btn-sm restore-btn">Restore</button>' : '<span class="muted">—</span>'}
+					</td>` : ""}
 				</tr>`).join("")}</tbody>
 		</table>`;
+
+		if (isAdmin) {
+			const purgeBtn = document.getElementById("purge-selected");
+			function updatePurgeState() {
+				const n = el.querySelectorAll(".purge-checkbox:checked").length;
+				purgeBtn.disabled = n === 0;
+				purgeBtn.textContent = n > 0 ? `Permanently Delete Selected (${n})` : "Permanently Delete Selected";
+			}
+			el.querySelectorAll(".purge-checkbox").forEach(cb => cb.addEventListener("change", updatePurgeState));
+			purgeBtn.addEventListener("click", async () => {
+				const names = [...el.querySelectorAll(".purge-checkbox:checked")].map(cb => cb.value);
+				if (names.length === 0) return;
+				const ok = await confirmDialog(`Permanently delete leftover files for ${names.length} revoked client${names.length === 1 ? "" : "s"}? This cannot be undone.`, { confirmLabel: "Delete Permanently" });
+				if (!ok) return;
+				purgeBtn.disabled = true;
+				try {
+					const result = await apiFetch("/api/clients/revoked/purge", { method: "POST", body: { names } });
+					const failed = result.results.filter(r => !r.ok).length;
+					toast(failed === 0 ? `${names.length} client(s) purged.` : `Purged ${names.length - failed}, ${failed} failed.`, failed === 0 ? "success" : "error");
+					loadRevoked();
+				} catch (e) {
+					toast(e.message, "error");
+				}
+			});
+
+			el.querySelectorAll(".restore-btn").forEach(btn => {
+				btn.addEventListener("click", () => openRestoreDialog(btn.closest("tr").dataset.name));
+			});
+		}
 	} catch (e) {
 		toast(e.message, "error");
 	}
 }
+
+if (isAdmin) {
+	let restoringClientName = null;
+	function openRestoreDialog(name) {
+		restoringClientName = name;
+		document.getElementById("restore-client-name").textContent = name;
+		document.getElementById("restore-mac").value = "";
+		document.getElementById("restore-dialog").showModal();
+	}
+	document.getElementById("restore-dialog-cancel").addEventListener("click", () => document.getElementById("restore-dialog").close());
+	document.getElementById("restore-form").addEventListener("submit", async (ev) => {
+		ev.preventDefault();
+		const mac = document.getElementById("restore-mac").value.trim();
+		try {
+			const result = await apiFetch(`/api/clients/revoked/${encodeURIComponent(restoringClientName)}/restore`, {
+				method: "POST", body: { mac },
+			});
+			toast(result.message, "success");
+			document.getElementById("restore-dialog").close();
+			loadRevoked();
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+}
+
 document.getElementById("refresh-btn").addEventListener("click", loadRevoked);
 loadRevoked();
 </script>

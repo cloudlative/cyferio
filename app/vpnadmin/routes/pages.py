@@ -3,10 +3,18 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from ..auth import get_current_user
+from ..config import settings
 from ..models import Role, User
 
 router = APIRouter()
 templates = Jinja2Templates(directory="vpnadmin/templates")
+# Branding is env-driven (see config.py) but rendered in many templates
+# (sidebar header, login page, footer) -- exposing it as Jinja globals here
+# means every template gets it for free without every route handler having
+# to thread it through its own context dict.
+templates.env.globals["APP_NAME"] = settings.APP_NAME
+templates.env.globals["APP_TAGLINE"] = settings.APP_TAGLINE
+templates.env.globals["APP_FOOTER_CREDIT"] = settings.APP_FOOTER_CREDIT
 
 
 def _ctx(user: User, **extra) -> dict:

@@ -1,35 +1,35 @@
 {% extends "base.html" %}
-{% block title %}My profile — OpenVPN Toolkit{% endblock %}
+{% block title %}My Profile — {{ APP_NAME }}{% endblock %}
 {% block content %}
 <div class="profile-header">
 	<div class="avatar-circle" id="avatar-initials">{{ user.username[:2].upper() }}</div>
 	<div>
-		<h1 style="display:block">My profile</h1>
+		<h1 style="display:block">My Profile</h1>
 		<p class="page-subtitle" style="margin:0">{{ user.username }} · <span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span></p>
 	</div>
 </div>
 
 <div class="card">
-	<h2>Account details</h2>
+	<div class="toolbar"><h2 style="margin:0">Account Details</h2><button class="btn-secondary" id="refresh-btn">Refresh</button></div>
 	<div class="form-grid" style="margin-bottom:18px">
 		<div><label>Username</label><div class="mono">{{ user.username }}</div></div>
 		<div><label>Role</label><div><span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span></div></div>
 		<div><label>Created</label><div class="muted" id="p-created">—</div></div>
-		<div><label>Last login</label><div class="muted" id="p-last-login">—</div></div>
+		<div><label>Last Login</label><div class="muted" id="p-last-login">—</div></div>
 	</div>
 	<p class="muted">Your role and account status are managed by an admin. Everything below, you control yourself.</p>
 </div>
 
 <div class="card">
-	<h2>Profile information</h2>
+	<h2>Profile Information</h2>
 	<form id="profile-form">
 		<div class="form-row">
 			<div class="field">
-				<label for="p-first">First name</label>
+				<label for="p-first">First Name</label>
 				<input type="text" id="p-first" placeholder="e.g. Asif">
 			</div>
 			<div class="field">
-				<label for="p-last">Last name</label>
+				<label for="p-last">Last Name</label>
 				<input type="text" id="p-last" placeholder="e.g. Rafiq">
 			</div>
 		</div>
@@ -45,26 +45,26 @@
 			</div>
 			<div class="field">
 				<label for="p-team">Team</label>
-				<input type="text" id="p-team" placeholder="e.g. Infrastructure">
+				<select id="p-team"><option value="">Unassigned</option></select>
 			</div>
 		</div>
-		<button type="submit" class="btn-primary" style="margin-top:8px">Save profile</button>
+		<button type="submit" class="btn-primary" style="margin-top:8px">Save Profile</button>
 	</form>
 </div>
 
 <div class="card">
-	<h2>Change password</h2>
+	<h2>Change Password</h2>
 	<form id="password-form">
 		<div class="form-row">
 			<div class="field">
-				<label for="p-current-pw">Current password</label>
+				<label for="p-current-pw">Current Password</label>
 				<input type="password" id="p-current-pw" autocomplete="current-password" required>
 			</div>
 			<div class="field">
-				<label for="p-new-pw">New password</label>
+				<label for="p-new-pw">New Password</label>
 				<input type="password" id="p-new-pw" autocomplete="new-password" required minlength="8">
 			</div>
-			<button type="submit" class="btn-primary">Update password</button>
+			<button type="submit" class="btn-primary">Update Password</button>
 		</div>
 		<p class="muted" style="margin-top:10px">At least 8 characters. You'll stay logged in on this device.</p>
 	</form>
@@ -73,6 +73,20 @@
 
 {% block scripts %}
 <script>
+let myTeamId = null;
+
+async function loadTeamOptions() {
+	const select = document.getElementById("p-team");
+	try {
+		const teams = await apiFetch("/api/teams");
+		select.innerHTML = '<option value="">Unassigned</option>' +
+			teams.filter(t => t.team !== "Unassigned").map(t => `<option value="${t.id}">${escapeHtml(t.team)}</option>`).join("");
+		select.value = myTeamId != null ? String(myTeamId) : "";
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
 async function loadProfile() {
 	try {
 		const me = await apiFetch("/api/users/me");
@@ -81,7 +95,8 @@ async function loadProfile() {
 		document.getElementById("p-first").value = me.first_name || "";
 		document.getElementById("p-last").value = me.last_name || "";
 		document.getElementById("p-gender").value = me.gender || "unspecified";
-		document.getElementById("p-team").value = me.team || "";
+		myTeamId = me.team_id;
+		await loadTeamOptions();
 		if (me.display_name && me.display_name !== me.username) {
 			document.getElementById("avatar-initials").textContent = me.display_name.split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
 		}
@@ -92,6 +107,7 @@ async function loadProfile() {
 
 document.getElementById("profile-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
+	const teamValue = document.getElementById("p-team").value;
 	try {
 		await apiFetch("/api/users/me", {
 			method: "PATCH",
@@ -99,7 +115,7 @@ document.getElementById("profile-form").addEventListener("submit", async (ev) =>
 				first_name: document.getElementById("p-first").value.trim() || null,
 				last_name: document.getElementById("p-last").value.trim() || null,
 				gender: document.getElementById("p-gender").value,
-				team: document.getElementById("p-team").value.trim() || null,
+				team_id: teamValue ? Number(teamValue) : null,
 			},
 		});
 		toast("Profile updated.");
@@ -107,6 +123,8 @@ document.getElementById("profile-form").addEventListener("submit", async (ev) =>
 		toast(e.message, "error");
 	}
 });
+
+document.getElementById("refresh-btn").addEventListener("click", loadProfile);
 
 document.getElementById("password-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();

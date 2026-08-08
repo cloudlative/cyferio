@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Portal Users — OpenVPN Toolkit{% endblock %}
+{% block title %}Users — {{ APP_NAME }}{% endblock %}
 {% block content %}
-<h1>Portal Users</h1>
+<h1>Users</h1>
 <p class="page-subtitle">Accounts that can log into this admin app (separate from VPN clients).</p>
 
 <div class="card">
-	<h2>Add a user</h2>
+	<h2>Add a User</h2>
 	<form id="add-user-form">
 		<div class="form-row">
 			<div class="field">
@@ -35,16 +35,16 @@
 			</div>
 			<div class="field">
 				<label for="u-team">Team <span class="muted">(optional)</span></label>
-				<input type="text" id="u-team">
+				<select id="u-team"><option value="">Unassigned</option></select>
 			</div>
-			<button type="submit" class="btn-primary">Add user</button>
+			<button type="submit" class="btn-primary">Add User</button>
 		</div>
 	</form>
 </div>
 
 <div class="card">
 	<div class="toolbar">
-		<div class="toolbar-title"><h2 style="margin:0">Team</h2><span class="count-badge" id="users-count">— users</span></div>
+		<div class="toolbar-title"><h2 style="margin:0">All Users</h2><span class="count-badge" id="users-count">— users</span></div>
 		<button class="btn-secondary" id="refresh-btn">Refresh</button>
 	</div>
 	<div id="users-table"><p class="muted">Loading…</p></div>
@@ -52,14 +52,14 @@
 
 <div class="card">
 	<div class="toolbar">
-		<div class="toolbar-title"><h2 style="margin:0">Deleted users</h2><span class="count-badge" id="deleted-count">— deleted</span></div>
+		<div class="toolbar-title"><h2 style="margin:0">Deleted Users</h2><span class="count-badge" id="deleted-count">— deleted</span></div>
 	</div>
 	<div id="deleted-table"><p class="muted">Loading…</p></div>
 </div>
 
 <dialog id="edit-dialog">
 	<div class="dialog-body">
-		<h2>Edit user</h2>
+		<h2>Edit User</h2>
 		<form id="edit-form">
 			<div class="form-row">
 				<div class="field"><label for="e-first">First Name</label><input type="text" id="e-first"></div>
@@ -75,7 +75,7 @@
 						<option value="other">Other</option>
 					</select>
 				</div>
-				<div class="field"><label for="e-team">Team</label><input type="text" id="e-team"></div>
+				<div class="field"><label for="e-team">Team</label><select id="e-team"><option value="">Unassigned</option></select></div>
 			</div>
 			<fieldset style="margin-top:16px">
 				<legend>Access</legend>
@@ -83,6 +83,7 @@
 					<div class="field">
 						<label for="e-role">Role</label>
 						<select id="e-role"><option value="viewer">Viewer</option><option value="admin">Admin</option></select>
+						<p class="muted" id="e-role-note" style="margin:6px 0 0;font-size:0.8rem;display:none">Admin accounts can't be demoted.</p>
 					</div>
 					<div class="field">
 						<label for="e-active">Status</label>
@@ -105,7 +106,7 @@
 			</fieldset>
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="edit-cancel">Cancel</button>
-				<button type="submit" class="btn-primary">Save changes</button>
+				<button type="submit" class="btn-primary">Save Changes</button>
 			</div>
 		</form>
 	</div>
@@ -116,9 +117,22 @@
 <script>
 const currentUsername = {{ user.username | tojson }};
 let editingUserId = null;
+let editingUserRole = null;
+let teamOptionsHtml = '<option value="">Unassigned</option>';
 
 function fmtDate(iso) {
 	return iso ? new Date(iso).toLocaleString() : "—";
+}
+
+async function loadTeamOptions() {
+	try {
+		const teams = await apiFetch("/api/teams");
+		teamOptionsHtml = '<option value="">Unassigned</option>' +
+			teams.filter(t => t.team !== "Unassigned").map(t => `<option value="${t.id}">${escapeHtml(t.team)}</option>`).join("");
+		document.getElementById("u-team").innerHTML = teamOptionsHtml;
+	} catch (e) {
+		toast(e.message, "error");
+	}
 }
 
 async function loadUsers() {
@@ -130,7 +144,7 @@ async function loadUsers() {
 			el.innerHTML = '<div class="empty-state">No users.</div>';
 		} else {
 			el.innerHTML = `<table>
-				<thead><tr><th>User</th><th>Team</th><th>Role</th><th>Status</th><th>Created</th><th>Last login</th><th class="text-right">Actions</th></tr></thead>
+				<thead><tr><th>User</th><th>Team</th><th>Role</th><th>Status</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
 				<tbody>${users.map(u => `
 					<tr data-id="${u.id}">
 						<td>
@@ -180,7 +194,7 @@ async function loadDeleted() {
 			return;
 		}
 		el.innerHTML = `<table>
-			<thead><tr><th>User</th><th>Role</th><th>Deleted at</th><th class="text-right">Actions</th></tr></thead>
+			<thead><tr><th>User</th><th>Role</th><th>Deleted At</th><th class="text-right">Actions</th></tr></thead>
 			<tbody>${users.map(u => `
 				<tr class="row-dim" data-id="${u.id}">
 					<td>${escapeHtml(u.display_name)} <span class="muted" style="font-size:0.82em">(${escapeHtml(u.username)})</span></td>
@@ -206,11 +220,18 @@ async function loadDeleted() {
 
 function openEdit(u) {
 	editingUserId = u.id;
+	editingUserRole = u.role;
 	document.getElementById("e-first").value = u.first_name || "";
 	document.getElementById("e-last").value = u.last_name || "";
 	document.getElementById("e-gender").value = u.gender || "unspecified";
-	document.getElementById("e-team").value = u.team || "";
+	document.getElementById("e-team").innerHTML = teamOptionsHtml;
+	document.getElementById("e-team").value = u.team_id != null ? String(u.team_id) : "";
 	document.getElementById("e-role").value = u.role;
+	// Admin accounts can never be demoted (by anyone, even another admin) --
+	// the API enforces this unconditionally; disable the control here too so
+	// the UI doesn't offer an action that will just be rejected.
+	document.getElementById("e-role").disabled = u.role === "admin";
+	document.getElementById("e-role-note").style.display = u.role === "admin" ? "" : "none";
 	document.getElementById("e-active").value = String(u.is_active);
 	document.getElementById("e-password").value = "";
 	document.getElementById("e-created").value = fmtDate(u.created_at);
@@ -220,14 +241,15 @@ document.getElementById("edit-cancel").addEventListener("click", () => document.
 
 document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
+	const teamValue = document.getElementById("e-team").value;
 	const body = {
 		first_name: document.getElementById("e-first").value.trim() || null,
 		last_name: document.getElementById("e-last").value.trim() || null,
 		gender: document.getElementById("e-gender").value,
-		team: document.getElementById("e-team").value.trim() || null,
-		role: document.getElementById("e-role").value,
+		team_id: teamValue ? Number(teamValue) : null,
 		is_active: document.getElementById("e-active").value === "true",
 	};
+	if (editingUserRole !== "admin") body.role = document.getElementById("e-role").value;
 	const pw = document.getElementById("e-password").value;
 	if (pw) body.password = pw;
 	try {
@@ -245,6 +267,7 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 	const username = document.getElementById("u-username").value.trim();
 	const password = document.getElementById("u-password").value;
 	const role = document.getElementById("u-role").value;
+	const teamValue = document.getElementById("u-team").value;
 	try {
 		await apiFetch("/api/users", {
 			method: "POST",
@@ -252,7 +275,7 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				username, password, role,
 				first_name: document.getElementById("u-first").value.trim() || null,
 				last_name: document.getElementById("u-last").value.trim() || null,
-				team: document.getElementById("u-team").value.trim() || null,
+				team_id: teamValue ? Number(teamValue) : null,
 			},
 		});
 		toast(`User '${username}' created.`);
@@ -263,8 +286,9 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 	}
 });
 
-document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); });
+document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); loadTeamOptions(); });
 loadUsers();
 loadDeleted();
+loadTeamOptions();
 </script>
 {% endblock %}

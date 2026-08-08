@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — OpenVPN Toolkit{% endblock %}
+{% block title %}Dashboard — {{ APP_NAME }}{% endblock %}
 {% block content %}
 <h1>Dashboard</h1>
 <p class="page-subtitle">Live overview of who's connected to the VPN right now.</p>
@@ -7,44 +7,45 @@
 <div class="stat-grid" id="stat-grid">
 	<a class="stat-card accent-online" href="/clients?online=1">
 		<span class="stat-hint">View →</span>
-		<div class="stat-value" id="stat-online">—</div><div class="stat-label">Online now</div>
+		<div class="stat-value" id="stat-online">—</div><div class="stat-label">Online Now</div>
 	</a>
 	<a class="stat-card accent-total" href="/clients">
 		<span class="stat-hint">View →</span>
-		<div class="stat-value" id="stat-total">—</div><div class="stat-label">Total clients</div>
+		<div class="stat-value" id="stat-total">—</div><div class="stat-label">Total Clients</div>
 	</a>
 	<a class="stat-card accent-revoked" href="/clients/revoked">
 		<span class="stat-hint">View →</span>
-		<div class="stat-value" id="stat-revoked">—</div><div class="stat-label">Deleted / revoked</div>
+		<div class="stat-value" id="stat-revoked">—</div><div class="stat-label">Deleted / Revoked</div>
 	</a>
 	<a class="stat-card accent-rejected" href="/diagnostics#rejected">
 		<span class="stat-hint">View →</span>
-		<div class="stat-value" id="stat-rejected">—</div><div class="stat-label">Recent rejections</div>
+		<div class="stat-value" id="stat-rejected">—</div><div class="stat-label">Recent Rejections</div>
 	</a>
 </div>
 
 <div class="stat-grid" id="stat-grid-secondary">
 	<a class="stat-card accent-total" href="/clients">
 		<span class="stat-hint">View →</span>
-		<div class="stat-value" id="stat-macs">—</div><div class="stat-label">MAC addresses registered</div>
+		<div class="stat-value" id="stat-macs">—</div><div class="stat-label">MAC Addresses Registered</div>
 	</a>
-	<a class="stat-card accent-rejected" href="/clients">
+	<a class="stat-card accent-rejected" href="/clients?missing_mac=1">
 		<span class="stat-hint">View →</span>
-		<div class="stat-value" id="stat-missing-mac">—</div><div class="stat-label">Clients missing a MAC</div>
-	</a>
-	<a class="stat-card accent-rejected" href="/diagnostics#rejected">
-		<span class="stat-hint">View →</span>
-		<div class="stat-value" id="stat-repeat-offenders">—</div><div class="stat-label">Repeat rejection offenders</div>
+		<div class="stat-value" id="stat-missing-mac">—</div><div class="stat-label">Clients Without a MAC Registered</div>
 	</a>
 	<a class="stat-card accent-rejected" href="/diagnostics#rejected">
 		<span class="stat-hint">View →</span>
-		<div class="stat-value" id="stat-rejected-today">—</div><div class="stat-label">Rejections today</div>
+		<div class="stat-value" id="stat-repeat-offenders">—</div><div class="stat-label">Repeat Rejection Offenders</div>
+	</a>
+	<a class="stat-card accent-rejected" href="/diagnostics#rejected">
+		<span class="stat-hint">View →</span>
+		<div class="stat-value" id="stat-rejected-today">—</div><div class="stat-label">Rejections Today</div>
 	</a>
 </div>
+<p class="muted" style="margin:-16px 0 28px;font-size:0.85rem">"Without a MAC registered" counts clients whose MAC-db entry is currently empty (e.g. every registered MAC was later removed via Manage MACs) -- a new client always gets one at creation, so this is worth a look, but isn't necessarily urgent.</p>
 
 <div class="card">
 	<div class="toolbar">
-		<h2 style="margin:0">Connected now</h2>
+		<h2 style="margin:0">Connected Now</h2>
 		<button class="btn-secondary" id="refresh-btn">Refresh</button>
 	</div>
 	<div id="connected-table"><p class="muted">Loading…</p></div>
@@ -56,15 +57,19 @@
 async function loadDashboard() {
 	try {
 		const data = await apiFetch("/api/dashboard");
-		const connected = data.connected, all = data.all_clients, revoked = data.revoked, rejected = data.rejected;
+		const connected = data.connected, all = data.all_clients, clients = data.clients, revoked = data.revoked, rejected = data.rejected;
 
 		document.getElementById("stat-online").textContent = connected.length;
 		document.getElementById("stat-total").textContent = all.length;
 		document.getElementById("stat-revoked").textContent = revoked.length;
 		document.getElementById("stat-rejected").textContent = rejected.length;
 
-		const totalMacs = all.reduce((sum, c) => sum + (c.mac_count || 0), 0);
-		const missingMac = all.filter(c => !c.mac_count).length;
+		// MAC registration counts come from `clients` (openvpn-install.sh
+		// --list), NOT `all_clients` (vpn-status.py --all) -- the latter has
+		// no mac_count field at all, which previously made every client look
+		// like it was "missing a MAC" regardless of its real MAC-db state.
+		const totalMacs = clients.reduce((sum, c) => sum + (c.mac_count || 0), 0);
+		const missingMac = clients.filter(c => !c.mac_count).length;
 		const repeatOffenders = new Set(
 			rejected.filter(r => r.total_attempts_this_name > 5).map(r => r.claimed_name)
 		).size;
@@ -85,7 +90,7 @@ async function loadDashboard() {
 		}
 		const sorted = [...connected].sort((a, b) => a.name.localeCompare(b.name));
 		el.innerHTML = `<table>
-			<thead><tr><th>Name</th><th>Source IP</th><th>OS</th><th>Connected since</th><th>Duration</th><th>RX / TX</th></tr></thead>
+			<thead><tr><th>Name</th><th>Source IP</th><th>OS</th><th>Connected Since</th><th>Duration</th><th>RX / TX</th></tr></thead>
 			<tbody>${sorted.map(c => `
 				<tr class="row-online">
 					<td>${escapeHtml(c.name)}</td>

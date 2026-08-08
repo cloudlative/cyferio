@@ -1,14 +1,36 @@
 {% extends "base.html" %}
-{% block title %}Teams — OpenVPN Toolkit{% endblock %}
+{% block title %}Teams — {{ APP_NAME }}{% endblock %}
 {% block content %}
 <h1>Teams</h1>
 <p class="page-subtitle">Portal users grouped by team. Click a team to see its members.</p>
 
+{% if is_admin %}
+<div class="card">
+	<h2>Create a Team</h2>
+	<form id="create-team-form">
+		<div class="form-row">
+			<div class="field">
+				<label for="new-team-name">Team Name</label>
+				<input type="text" id="new-team-name" required maxlength="64" placeholder="e.g. Infrastructure">
+			</div>
+			<button type="submit" class="btn-primary">Create Team</button>
+		</div>
+	</form>
+</div>
+{% endif %}
+
+<div class="toolbar" style="margin-bottom:0">
+	<div class="toolbar-title"><h2 style="margin:0">All Teams</h2></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
 <div class="stat-grid" id="team-grid"><p class="muted">Loading…</p></div>
 
 <div class="card" id="team-detail-card" style="display:none">
 	<div class="toolbar">
 		<div class="toolbar-title"><h2 style="margin:0" id="team-detail-title">Team</h2><span class="count-badge" id="team-detail-count">— members</span></div>
+		{% if is_admin %}
+		<button class="btn-danger btn-sm" id="team-delete-btn">Delete Team</button>
+		{% endif %}
 	</div>
 	<div id="team-detail-table"></div>
 </div>
@@ -16,51 +38,117 @@
 
 {% block scripts %}
 <script>
+const isAdmin = {{ "true" if is_admin else "false" }};
 let lastTeams = [];
+let currentTeamId = "unassigned";
 
 async function loadTeams() {
 	const grid = document.getElementById("team-grid");
 	try {
 		lastTeams = await apiFetch("/api/teams");
 		if (lastTeams.length === 0) {
-			grid.innerHTML = '<div class="empty-state">No portal users yet.</div>';
+			grid.innerHTML = '<div class="empty-state">No teams yet.</div>';
 			return;
 		}
 		grid.innerHTML = lastTeams.map((t, i) => `
-			<a class="stat-card ${i % 4 === 0 ? "accent-online" : i % 4 === 1 ? "accent-total" : i % 4 === 2 ? "accent-rejected" : "accent-revoked"}" href="#" data-team="${escapeHtml(t.team)}">
+			<a class="stat-card ${i % 4 === 0 ? "accent-online" : i % 4 === 1 ? "accent-total" : i % 4 === 2 ? "accent-rejected" : "accent-revoked"}" href="#" data-team-id="${t.id == null ? "unassigned" : t.id}">
 				<span class="stat-hint">View →</span>
 				<div class="stat-value">${t.count}</div><div class="stat-label">${escapeHtml(t.team)}</div>
 			</a>`).join("");
-		grid.querySelectorAll("[data-team]").forEach(card => {
-			card.addEventListener("click", (ev) => { ev.preventDefault(); showTeam(card.dataset.team); });
+		grid.querySelectorAll("[data-team-id]").forEach(card => {
+			card.addEventListener("click", (ev) => { ev.preventDefault(); showTeam(card.dataset.teamId); });
 		});
 		const fromHash = decodeURIComponent(location.hash.replace(/^#/, ""));
-		if (fromHash && lastTeams.some(t => t.team === fromHash)) showTeam(fromHash);
+		if (fromHash && lastTeams.some(t => String(t.id == null ? "unassigned" : t.id) === fromHash)) showTeam(fromHash);
 	} catch (e) {
 		toast(e.message, "error");
 	}
 }
 
-function showTeam(name) {
-	const team = lastTeams.find(t => t.team === name);
+function teamOptionsHtml(selectedId) {
+	return lastTeams.filter(t => t.id != null).map(t =>
+		`<option value="${t.id}" ${String(t.id) === String(selectedId) ? "selected" : ""}>${escapeHtml(t.team)}</option>`
+	).join("") + `<option value="" ${selectedId == null ? "selected" : ""}>Unassigned</option>`;
+}
+
+function showTeam(id) {
+	const team = lastTeams.find(t => String(t.id == null ? "unassigned" : t.id) === String(id));
 	if (!team) return;
-	location.hash = encodeURIComponent(name);
+	currentTeamId = id;
+	location.hash = encodeURIComponent(id);
 	document.getElementById("team-detail-card").style.display = "";
-	document.getElementById("team-detail-title").textContent = name;
+	document.getElementById("team-detail-title").textContent = team.team;
 	document.getElementById("team-detail-count").textContent = `${team.count} member${team.count === 1 ? "" : "s"}`;
+	const deleteBtn = document.getElementById("team-delete-btn");
+	if (deleteBtn) deleteBtn.style.display = team.id == null ? "none" : "";
 	const el = document.getElementById("team-detail-table");
+	if (team.members.length === 0) {
+		el.innerHTML = '<div class="empty-state">No members in this team.</div>';
+		return;
+	}
 	el.innerHTML = `<table>
-		<thead><tr><th>User</th><th>Role</th><th>Status</th></tr></thead>
+		<thead><tr><th>User</th><th>Role</th><th>Status</th>${isAdmin ? "<th>Reassign To</th>" : ""}</tr></thead>
 		<tbody>${team.members.map(m => `
-			<tr>
+			<tr data-user-id="${m.id}">
 				<td>${escapeHtml(m.display_name)} <span class="muted" style="font-size:0.82em">(${escapeHtml(m.username)})</span></td>
 				<td><span class="role-badge role-${m.role}">${m.role}</span></td>
 				<td>${m.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
+				${isAdmin ? `<td><select class="reassign-select" style="width:auto;padding:6px 10px">${teamOptionsHtml(team.id)}</select></td>` : ""}
 			</tr>`).join("")}</tbody>
 	</table>`;
 	document.getElementById("team-detail-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+	if (isAdmin) {
+		el.querySelectorAll(".reassign-select").forEach(sel => {
+			sel.addEventListener("change", async () => {
+				const userId = sel.closest("tr").dataset.userId;
+				sel.disabled = true;
+				try {
+					await apiFetch(`/api/users/${userId}`, { method: "PATCH", body: { team_id: sel.value ? Number(sel.value) : null } });
+					toast("User reassigned.");
+					await loadTeams();
+					showTeam(currentTeamId);
+				} catch (e) {
+					toast(e.message, "error");
+					sel.disabled = false;
+				}
+			});
+		});
+	}
 }
 
+if (isAdmin) {
+	document.getElementById("create-team-form").addEventListener("submit", async (ev) => {
+		ev.preventDefault();
+		const name = document.getElementById("new-team-name").value.trim();
+		try {
+			await apiFetch("/api/teams", { method: "POST", body: { name } });
+			toast(`Team '${name}' created.`);
+			document.getElementById("create-team-form").reset();
+			loadTeams();
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+
+	document.getElementById("team-delete-btn").addEventListener("click", async () => {
+		const team = lastTeams.find(t => String(t.id) === String(currentTeamId));
+		if (!team || team.id == null) return;
+		const ok = await confirmDialog(`Delete team <strong>${escapeHtml(team.team)}</strong>? Members will be moved to Unassigned, not deleted.`, { confirmLabel: "Delete Team" });
+		if (!ok) return;
+		try {
+			const result = await apiFetch(`/api/teams/${team.id}`, { method: "DELETE" });
+			toast(result.message);
+			document.getElementById("team-detail-card").style.display = "none";
+			location.hash = "";
+			loadTeams();
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+}
+
+document.getElementById("refresh-btn").addEventListener("click", loadTeams);
 loadTeams();
 </script>
 {% endblock %}

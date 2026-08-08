@@ -15,16 +15,22 @@ of it, only calls it and renders the result.
 
 Everything the CLI can do, plus more:
 - Add / revoke clients, with MAC-address input in any common format
-- List all clients (online/offline/revoked status, last-seen, MAC count), sorted online-first, with a live total count
+- List all clients (online/offline/revoked status, last-seen, MAC count), sorted online-first, with a live total count and a "missing a MAC" filter
 - Add, remove, or bulk-remove individual MAC addresses for an existing client (multi-device users) without re-issuing a cert
+- View or copy a client's .ovpn profile on demand (admin-only), including right after adding a new client
+- Email a client's .ovpn profile directly to a recipient's inbox, with a branded HTML template (requires SMTP config -- see `.env.example`; the UI stays present either way, and the action fails cleanly with a clear message if SMTP isn't set up)
+- Selective, permanent cleanup of a revoked client's leftover certificate/key files (checkboxes + bulk delete, admin-only) -- the revocation record itself always stays, for CRL correctness and audit history
+- Restore a revoked client: since a revoked certificate can never be un-revoked (that's how PKI revocation is supposed to work), this issues a brand-new certificate under the same name instead -- documented plainly in the UI, not oversold as reactivating the old cert
 - Consistency check (`--check`) and MAC-db formatting health (`--lint-db`)
 - Live connection status: who's online now, bandwidth, rejected (MAC-mismatch) connection attempts with expected-vs-presented MAC and repeat-attempt counts
+- A donut chart of rejected-connection attempts broken down by claimed client name, on the Diagnostics page
 - Clickable dashboard stat cards (plus a second row of MAC/rejection stats) linking straight to the filtered table behind each number
-- Multi-user accounts with two roles: **admin** (full control) and **viewer** (read-only)
+- Multi-user accounts with two roles: **admin** (full control) and **viewer** (read-only); admin accounts can never be demoted by anyone, including another admin
 - Self-service profile page (click your username in the sidebar): any user can set their own name/gender/team and change their own password
-- Team view: portal users grouped by team, click a team to see its members
+- Teams are a real resource: admins can create/delete teams, and assign users to a team from either the Users page or the Teams page itself (dropdown-driven, not free text); the Teams page lists members grouped by team, including empty teams
 - Admin user management: edit any user's role, profile fields, and reset their password (account creation date is immutable); soft-delete/restore accounts (deleted users are recoverable, never silently gone)
-- Every add/revoke/user-management action is written to an audit log (who, when, what, success/failure)
+- Configurable branding (app name / tagline / footer credit) via environment variables -- see `.env.example`
+- Every add/revoke/user-management/team/email action is written to an audit log (who, when, what, success/failure)
 
 ## Architecture
 
@@ -82,9 +88,12 @@ hardcoded to any specific server — every path/setting is env-driven.
 - **admin**: everything, including adding/revoking clients and managing app user accounts.
 - **viewer**: read-only — can see status/clients/diagnostics, cannot mutate anything.
 
-Guardrails prevent an admin from locking everyone out: you can't demote,
-deactivate, or delete your own account, and you can't remove the last
-active admin.
+Guardrails prevent an admin from locking everyone out: you can't deactivate
+or delete your own account, and you can't remove the last active admin.
+Role demotion is stricter still -- an admin account can never be demoted to
+viewer by anyone, including another admin; the only way to change who's an
+admin is by creating new admin accounts or deleting existing ones (subject
+to the same last-admin/self-lockout guardrails).
 
 ## Testing
 
@@ -93,10 +102,11 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
-62 tests, none of which require a real OpenVPN install or root — the CLI
+85 tests, none of which require a real OpenVPN install or root — the CLI
 wrapper tests monkeypatch `subprocess.run` and assert on the exact argument
 lists constructed (including an explicit injection-safety test); the auth/
-role/DB tests run against an in-memory SQLite database.
+role/DB tests run against an in-memory SQLite database; the .ovpn/email
+tests monkeypatch `cli_wrapper`/`mailer` directly.
 
 ## What this app deliberately does NOT expose
 

@@ -102,6 +102,58 @@ class TestArgumentConstruction:
             "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--remove-mac", "alice", "aa:bb:cc:dd:ee:ff",
         ]
 
+    def test_show_ovpn_args(self, monkeypatch):
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, "<ovpn file contents>")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        result = cw.show_ovpn("alice")
+        assert seen["args"] == ["sudo", "-n", "bash", "/fake/openvpn-install.sh", "--show-ovpn", "alice"]
+        assert result == "<ovpn file contents>"
+
+    def test_purge_revoked_args(self, monkeypatch):
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, "alice: purged.")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.purge_revoked("alice")
+        assert seen["args"] == ["sudo", "-n", "bash", "/fake/openvpn-install.sh", "--purge-revoked", "alice"]
+
+    def test_restore_client_args(self, monkeypatch):
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, "alice added.")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.restore_client("alice", "aa:bb:cc:dd:ee:ff")
+        assert seen["args"] == [
+            "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--restore", "alice", "aa:bb:cc:dd:ee:ff",
+        ]
+
+    def test_show_ovpn_failure_raises(self, monkeypatch):
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda args, **kw: _completed(args, 1, "", "alice: no .ovpn file found"),
+        )
+        with pytest.raises(cw.ScriptError, match="no .ovpn file found"):
+            cw.show_ovpn("alice")
+
+    def test_purge_revoked_failure_raises(self, monkeypatch):
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda args, **kw: _completed(args, 1, "", "alice: not a revoked client"),
+        )
+        with pytest.raises(cw.ScriptError, match="not a revoked client"):
+            cw.purge_revoked("alice")
+
     def test_add_mac_failure_raises(self, monkeypatch):
         monkeypatch.setattr(
             subprocess, "run",

@@ -48,7 +48,7 @@ def test_sync_adds_missing_columns(monkeypatch):
     sync_missing_columns()
 
     after = {c["name"] for c in inspect(engine).get_columns("users")}
-    for col in ("first_name", "last_name", "gender", "team", "last_login_at", "deleted", "deleted_at"):
+    for col in ("first_name", "last_name", "gender", "team_id", "last_login_at", "deleted", "deleted_at"):
         assert col in after
 
 

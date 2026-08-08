@@ -70,5 +70,25 @@ class Settings:
     BOOTSTRAP_ADMIN_USERNAME: str | None = os.environ.get("BOOTSTRAP_ADMIN_USERNAME")
     BOOTSTRAP_ADMIN_PASSWORD: str | None = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD")
 
+    # --- Branding -----------------------------------------------------------
+    # Purely cosmetic, env-driven so a given deployment can relabel the app
+    # (sidebar header, login page, footer credit) without touching templates
+    # or committing anything person/org-specific to this open-source repo.
+    APP_NAME: str = os.environ.get("APP_NAME", "OpenVPN Toolkit")
+    APP_TAGLINE: str = os.environ.get("APP_TAGLINE", "Sign in to manage clients, MACs & live status")
+    APP_FOOTER_CREDIT: str = os.environ.get("APP_FOOTER_CREDIT", "")
+
+    # --- Outbound email (SMTP) -----------------------------------------------
+    # Used solely for the "email a client's .ovpn profile" action. Left blank
+    # by default -- the feature stays present in the UI but the API returns a
+    # clear 400 ("SMTP is not configured") until these are set, rather than
+    # silently failing or crashing.
+    SMTP_HOST: str = os.environ.get("SMTP_HOST", "")
+    SMTP_PORT: int = int(os.environ.get("SMTP_PORT", 587))
+    SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "")
+    SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
+    SMTP_FROM: str = os.environ.get("SMTP_FROM", "")
+    SMTP_USE_TLS: bool = _env_bool("SMTP_USE_TLS", True)
+
 
 settings = Settings()

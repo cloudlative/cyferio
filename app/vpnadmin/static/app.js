@@ -17,13 +17,43 @@ function _progressDone() {
 	spinner.classList.remove("active");
 }
 
+/**
+ * Shows a toast notification. Auto-dismisses after 4s, or immediately via
+ * its "×" close button. Multiple toasts stack (newest at the bottom,
+ * pushing older ones up) rather than replacing each other.
+ *
+ * If a native <dialog> is currently open, the toast is appended inside that
+ * dialog instead of document.body: a <dialog> creates its own top-layer
+ * stacking context that no z-index on a body-level element can render
+ * above, so a toast fired while e.g. the edit-user dialog is open would
+ * otherwise be stuck invisibly behind it.
+ */
 function toast(message, kind = "success") {
-	const container = document.getElementById("toast-container");
+	const openDialog = document.querySelector("dialog[open]");
+	let container = openDialog
+		? openDialog.querySelector(":scope > #toast-container")
+		: document.getElementById("toast-container");
+	if (openDialog && !container) {
+		container = document.createElement("div");
+		container.id = "toast-container";
+		openDialog.appendChild(container);
+	}
+
 	const el = document.createElement("div");
 	el.className = `toast ${kind}`;
-	el.textContent = message;
+	const text = document.createElement("span");
+	text.textContent = message;
+	el.appendChild(text);
+	const closeBtn = document.createElement("button");
+	closeBtn.type = "button";
+	closeBtn.className = "toast-close";
+	closeBtn.setAttribute("aria-label", "Dismiss");
+	closeBtn.textContent = "×";
+	closeBtn.addEventListener("click", () => el.remove());
+	el.appendChild(closeBtn);
+
 	container.appendChild(el);
-	setTimeout(() => el.remove(), 5000);
+	setTimeout(() => el.remove(), 4000);
 }
 
 /**
@@ -84,6 +114,61 @@ function confirmDialog(message, { confirmLabel = "Confirm", danger = true } = {}
 		dlg.querySelector('[data-action="confirm"]').onclick = () => dlg.close("confirm");
 		dlg.showModal();
 	});
+}
+
+// A small set of colors reused across every chart on the site, drawn from
+// the same accent/status palette already defined in style.css (:root
+// custom properties) so charts never introduce a clashing color scheme.
+const CHART_COLORS = [
+	"#6366f1", "#22d3ee", "#f59e0b", "#fb7185", "#34d399",
+	"#818cf8", "#fbbf24", "#f43f5e", "#2dd4bf", "#a78bfa",
+];
+
+/**
+ * Renders a dependency-free SVG donut chart into `mountEl` from
+ * `entries` = [{ label, value }, ...]. No external charting library --
+ * this app can't rely on reaching a CDN, and the need here is simple
+ * enough not to warrant a new dependency.
+ */
+function renderDonutChart(mountEl, entries, { size = 220, thickness = 34 } = {}) {
+	const total = entries.reduce((sum, e) => sum + e.value, 0);
+	if (total === 0 || entries.length === 0) {
+		mountEl.innerHTML = '<p class="muted">Nothing to chart yet.</p>';
+		return;
+	}
+	const r = (size - thickness) / 2;
+	const cx = size / 2, cy = size / 2;
+	const circumference = 2 * Math.PI * r;
+	let offset = 0;
+	const arcs = entries.map((e, i) => {
+		const fraction = e.value / total;
+		const dash = fraction * circumference;
+		const circle = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none"
+			stroke="${CHART_COLORS[i % CHART_COLORS.length]}" stroke-width="${thickness}"
+			stroke-dasharray="${dash} ${circumference - dash}"
+			stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})">
+			<title>${escapeHtml(e.label)}: ${e.value} (${(fraction * 100).toFixed(1)}%)</title>
+		</circle>`;
+		offset += dash;
+		return circle;
+	}).join("");
+
+	const legend = entries.map((e, i) => `
+		<div style="display:flex;align-items:center;gap:8px;font-size:0.85rem;">
+			<span style="width:10px;height:10px;border-radius:3px;background:${CHART_COLORS[i % CHART_COLORS.length]};flex:none"></span>
+			<span style="flex:1">${escapeHtml(e.label)}</span>
+			<span class="muted mono">${e.value}</span>
+		</div>`).join("");
+
+	mountEl.innerHTML = `
+		<div style="display:flex;gap:28px;align-items:center;flex-wrap:wrap">
+			<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Donut chart">
+				${arcs}
+				<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle"
+					fill="var(--text)" font-size="${size * 0.13}" font-weight="800">${total}</text>
+			</svg>
+			<div style="display:flex;flex-direction:column;gap:8px;min-width:160px;flex:1">${legend}</div>
+		</div>`;
 }
 
 function escapeHtml(s) {

@@ -207,6 +207,47 @@ def revoke_client(name: str) -> str:
     return proc.stdout.strip()
 
 
+def show_ovpn(name: str) -> str:
+    """Returns an existing client's already-generated .ovpn config content.
+    Not cached (unlike the list-style calls above) -- this returns key
+    material, so every call should reflect the file on disk right now."""
+    proc = _run_install_script("--show-ovpn", name)
+    if proc.returncode != 0:
+        raise ScriptError(
+            proc.stderr.strip() or "Failed to read .ovpn file",
+            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+        )
+    return proc.stdout
+
+
+def purge_revoked(name: str) -> str:
+    """Permanently deletes a revoked client's leftover PKI/.ovpn files (see
+    openvpn-install.sh's do_purge_revoked for exactly what is and isn't
+    removed)."""
+    proc = _run_install_script("--purge-revoked", name)
+    if proc.returncode != 0:
+        raise ScriptError(
+            proc.stderr.strip() or "Failed to purge revoked client",
+            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+        )
+    _invalidate_client_caches(name)
+    return proc.stdout.strip()
+
+
+def restore_client(name: str, mac: str) -> str:
+    """Reissues a brand-new certificate under a revoked client's name -- see
+    openvpn-install.sh's do_restore_client docstring for why this is NOT
+    the same as un-revoking the old certificate."""
+    proc = _run_install_script("--restore", name, mac)
+    if proc.returncode != 0:
+        raise ScriptError(
+            proc.stderr.strip() or "Failed to restore client",
+            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+        )
+    _invalidate_client_caches(name)
+    return proc.stdout.strip()
+
+
 # --- vpn-status.py ------------------------------------------------------------
 
 def status_connected() -> list[dict]:
@@ -227,13 +268,23 @@ def status_rejected(limit: int = 20) -> list[dict]:
 # --- Combined dashboard summary ------------------------------------------
 
 def dashboard_summary(rejected_limit: int = 20) -> dict:
-    """One call for everything the dashboard needs, instead of 4 separate
+    """One call for everything the dashboard needs, instead of 5 separate
     HTTP round-trips each independently hitting the script lock/cache. Still
-    4 underlying script calls (each individually cached above), but callers
-    only pay one HTTP request and one JSON parse."""
+    5 underlying script calls (each individually cached above), but callers
+    only pay one HTTP request and one JSON parse.
+
+    Note "all_clients" (vpn-status.py --all) and "clients" (openvpn-install.sh
+    --list) are deliberately both included and are NOT interchangeable:
+    "all_clients" carries live status/last-seen/single-MAC-in-use info,
+    while "clients" carries MAC-*db* registration counts (mac_count,
+    in_db) -- a dashboard stat about "how many MACs are registered" must
+    read from "clients", not "all_clients" (which has no mac_count field
+    at all, and previously produced a misleadingly-large "missing MAC"
+    count as a result)."""
     return {
         "connected": status_connected(),
         "all_clients": status_all(),
+        "clients": list_clients(),
         "revoked": list_revoked(),
         "rejected": status_rejected(rejected_limit),
     }

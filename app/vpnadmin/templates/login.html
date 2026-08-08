@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Log in — OpenVPN Toolkit{% endblock %}
+{% block title %}Log In — {{ APP_NAME }}{% endblock %}
 {% block content %}
 <div class="login-page">
 	<div class="login-box">
 		<div class="login-brand">
 			<div class="login-logo">⚡</div>
-			<h1>OpenVPN Toolkit</h1>
-			<p class="login-tagline">Sign in to manage clients, MACs &amp; live status</p>
+			<h1>{{ APP_NAME }}</h1>
+			<p class="login-tagline">{{ APP_TAGLINE }}</p>
 		</div>
 		{% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
 		<form method="post" action="/login">

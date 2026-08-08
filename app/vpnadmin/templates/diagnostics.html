@@ -1,22 +1,30 @@
 {% extends "base.html" %}
-{% block title %}Diagnostics — OpenVPN Toolkit{% endblock %}
+{% block title %}Diagnostics — {{ APP_NAME }}{% endblock %}
 {% block content %}
-<h1>Diagnostics</h1>
-<p class="page-subtitle">Consistency checks and recent rejected connection attempts.</p>
+<div class="toolbar" style="margin-bottom:22px">
+	<div class="toolbar-title"><h1 style="margin:0">Diagnostics</h1></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-16px">Consistency checks and recent rejected connection attempts.</p>
 
 <div class="card">
-	<div class="toolbar"><h2 style="margin:0">Database consistency</h2><button class="btn-secondary" id="check-refresh">Refresh</button></div>
+	<div class="toolbar"><h2 style="margin:0">Database Consistency</h2><button class="btn-secondary" id="check-refresh">Refresh</button></div>
 	<div id="check-result"><p class="muted">Loading…</p></div>
 </div>
 
 <div class="card">
-	<div class="toolbar"><h2 style="margin:0">MAC-db formatting health</h2><button class="btn-secondary" id="lint-refresh">Refresh</button></div>
+	<div class="toolbar"><h2 style="margin:0">MAC-DB Formatting Health</h2><button class="btn-secondary" id="lint-refresh">Refresh</button></div>
 	<div id="lint-result"><p class="muted">Loading…</p></div>
 </div>
 
 <div class="card" id="rejected">
-	<div class="toolbar"><h2 style="margin:0">Recent rejected connection attempts</h2><button class="btn-secondary" id="rejected-refresh">Refresh</button></div>
+	<div class="toolbar"><h2 style="margin:0">Recent Rejected Connection Attempts</h2><button class="btn-secondary" id="rejected-refresh">Refresh</button></div>
 	<div id="rejected-result"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card" id="rejected-chart-card" style="display:none">
+	<div class="toolbar"><h2 style="margin:0">Rejections by Claimed Name</h2></div>
+	<div id="rejected-chart"></div>
 </div>
 {% endblock %}
 
@@ -59,18 +67,41 @@ async function loadLint() {
 	}
 }
 
+function renderRejectedChart(data) {
+	const chartCard = document.getElementById("rejected-chart-card");
+	const chartEl = document.getElementById("rejected-chart");
+	if (!data || data.length === 0) {
+		chartCard.style.display = "none";
+		return;
+	}
+	chartCard.style.display = "";
+	const counts = {};
+	for (const r of data) {
+		const key = r.claimed_name || "(unknown)";
+		counts[key] = (counts[key] || 0) + 1;
+	}
+	// Top 8 offenders by rejection count in this recent window, keeping the
+	// chart legend readable instead of listing every distinct name.
+	const entries = Object.entries(counts)
+		.map(([label, value]) => ({ label, value }))
+		.sort((a, b) => b.value - a.value)
+		.slice(0, 8);
+	renderDonutChart(chartEl, entries);
+}
+
 async function loadRejected() {
 	const el = document.getElementById("rejected-result");
 	try {
 		const data = await apiFetch("/api/status/rejected?limit=20");
+		renderRejectedChart(data);
 		if (data.length === 0) {
 			el.innerHTML = '<div class="empty-state">No rejected connection attempts found.</div>';
 			return;
 		}
 		el.innerHTML = `<table>
 			<thead><tr>
-				<th>Timestamp</th><th>Claimed name</th><th>MAC presented</th><th>MAC registered</th>
-				<th>OS</th><th>Source IP:Port</th><th>Attempts (this name)</th>
+				<th>Timestamp</th><th>Claimed Name</th><th>MAC Presented</th><th>MAC Registered</th>
+				<th>OS</th><th>Source IP:Port</th><th>Attempts (This Name)</th>
 			</tr></thead>
 			<tbody>${data.map(r => {
 				const mismatch = r.mac_registered !== "not registered" && r.mac_registered !== r.mac_presented;
@@ -95,6 +126,7 @@ async function loadRejected() {
 document.getElementById("check-refresh").addEventListener("click", loadCheck);
 document.getElementById("lint-refresh").addEventListener("click", loadLint);
 document.getElementById("rejected-refresh").addEventListener("click", loadRejected);
+document.getElementById("refresh-btn").addEventListener("click", () => { loadCheck(); loadLint(); loadRejected(); });
 loadCheck();
 loadLint();
 loadRejected();

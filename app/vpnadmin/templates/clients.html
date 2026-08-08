@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}VPN Clients — OpenVPN Toolkit{% endblock %}
+{% block title %}VPN Clients — {{ APP_NAME }}{% endblock %}
 {% block content %}
 <h1>VPN Clients</h1>
 <p class="page-subtitle">Everyone with a valid VPN certificate.</p>
 
 {% if is_admin %}
 <div class="card">
-	<h2>Add a new client</h2>
+	<h2>Add a New Client</h2>
 	<form id="add-form">
 		<div class="form-row">
 			<div class="field">
@@ -14,47 +14,88 @@
 				<input type="text" id="add-name" required pattern="[A-Za-z0-9_-]{1,64}" placeholder="e.g. alice">
 			</div>
 			<div class="field">
-				<label for="add-mac">Device MAC address</label>
+				<label for="add-mac">Device MAC Address</label>
 				<input type="text" id="add-mac" required placeholder="aa:bb:cc:dd:ee:ff">
 			</div>
-			<button type="submit" class="btn-primary" id="add-submit">Add client</button>
+			<button type="submit" class="btn-primary" id="add-submit">Add Client</button>
 		</div>
 		<p class="muted" style="margin-top:10px">MAC can be entered in any common format (colons, dashes, or none — any case) and will be normalized automatically.</p>
 	</form>
+	<div id="add-result" style="display:none;margin-top:18px">
+		<label>New Client's .ovpn Profile</label>
+		<textarea id="add-result-ovpn" readonly rows="6" class="mono" style="resize:vertical"></textarea>
+		<div class="form-row" style="margin-top:10px">
+			<button type="button" class="btn-secondary btn-sm" id="add-result-copy">Copy to Clipboard</button>
+			<button type="button" class="btn-secondary btn-sm" id="add-result-dismiss">Dismiss</button>
+		</div>
+	</div>
 </div>
 {% endif %}
 
 <div class="card">
 	<div class="toolbar">
 		<div class="toolbar-title">
-			<h2 style="margin:0">All clients</h2>
+			<h2 style="margin:0">All Clients</h2>
 			<span class="count-badge" id="client-count">— clients</span>
 		</div>
 		<button class="btn-secondary" id="refresh-btn">Refresh</button>
 	</div>
 	<div class="filter-bar">
 		<button class="filter-chip active" data-filter="all">All</button>
-		<button class="filter-chip" data-filter="online">Online only</button>
-		<button class="filter-chip" data-filter="offline">Offline only</button>
+		<button class="filter-chip" data-filter="online">Online Only</button>
+		<button class="filter-chip" data-filter="offline">Offline Only</button>
+		<button class="filter-chip" data-filter="missing_mac">Missing MAC</button>
 	</div>
 	<div id="clients-table"><p class="muted">Loading…</p></div>
 </div>
 
 <dialog id="macs-dialog">
 	<div class="dialog-body">
-		<h2 id="macs-dialog-title">MAC addresses</h2>
+		<h2 id="macs-dialog-title">MAC Addresses</h2>
 		<div id="macs-dialog-content"></div>
 		<div class="dialog-actions">
 			<button class="btn-secondary" id="macs-dialog-close">Close</button>
 		</div>
 	</div>
 </dialog>
+
+{% if is_admin %}
+<dialog id="ovpn-dialog">
+	<div class="dialog-body">
+		<h2 id="ovpn-dialog-title">.ovpn Profile</h2>
+		<div id="ovpn-dialog-content"><p class="muted">Loading…</p></div>
+		<div class="dialog-actions">
+			<button class="btn-secondary" id="ovpn-dialog-close">Close</button>
+		</div>
+	</div>
+</dialog>
+
+<dialog id="email-dialog">
+	<div class="dialog-body">
+		<h2>Email VPN Profile</h2>
+		<form id="email-form">
+			<p class="muted" style="margin-top:0">Sends <strong id="email-client-name"></strong>'s .ovpn profile as an email attachment.</p>
+			<div class="field">
+				<label for="email-address">Recipient Email Address</label>
+				<input type="email" id="email-address" required placeholder="user@example.com">
+			</div>
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" id="email-dialog-cancel">Cancel</button>
+				<button type="submit" class="btn-primary" id="email-submit">Send</button>
+			</div>
+		</form>
+	</div>
+</dialog>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
 const isAdmin = {{ "true" if is_admin else "false" }};
-let currentFilter = new URLSearchParams(location.search).get("online") === "1" ? "online" : "all";
+const _initialParams = new URLSearchParams(location.search);
+let currentFilter = _initialParams.get("online") === "1" ? "online"
+	: _initialParams.get("missing_mac") === "1" ? "missing_mac"
+	: "all";
 let lastClients = [], lastStatusByName = {};
 
 function applyFilterUI() {
@@ -90,6 +131,7 @@ function renderClients() {
 	const filtered = withStatus.filter(row => {
 		if (currentFilter === "online") return row.online;
 		if (currentFilter === "offline") return !row.online;
+		if (currentFilter === "missing_mac") return !row.c.mac_count;
 		return true;
 	});
 
@@ -104,8 +146,8 @@ function renderClients() {
 
 	el.innerHTML = `<table>
 		<thead><tr>
-			<th>Name</th><th>Status</th><th>In MAC db</th><th>MACs</th><th>Last seen</th>
-			<th></th>${isAdmin ? "<th></th>" : ""}
+			<th>Name</th><th>Status</th><th>In MAC DB</th><th>MACs</th><th>Last Seen</th>
+			<th></th>${isAdmin ? "<th></th><th></th><th></th>" : ""}
 		</tr></thead>
 		<tbody>${filtered.map(({ c, s, online }) => {
 			return `<tr data-name="${escapeHtml(c.name)}" class="${online ? "row-online" : ""}">
@@ -115,6 +157,8 @@ function renderClients() {
 				<td><span class="count-badge">${c.mac_count ?? 0}</span></td>
 				<td>${escapeHtml(s ? s.last_seen : "—")}</td>
 				<td><button class="btn-secondary btn-sm macs-btn">Manage MACs</button></td>
+				${isAdmin ? `<td><button class="btn-secondary btn-sm ovpn-btn">View / Copy .ovpn</button></td>` : ""}
+				${isAdmin ? `<td><button class="btn-secondary btn-sm email-btn">Email Profile</button></td>` : ""}
 				${isAdmin ? `<td class="text-right"><button class="btn-danger btn-sm revoke-btn">Revoke</button></td>` : ""}
 			</tr>`;
 		}).join("")}</tbody>
@@ -126,6 +170,12 @@ function renderClients() {
 	if (isAdmin) {
 		el.querySelectorAll(".revoke-btn").forEach(btn => {
 			btn.addEventListener("click", () => revokeClient(btn.closest("tr").dataset.name));
+		});
+		el.querySelectorAll(".ovpn-btn").forEach(btn => {
+			btn.addEventListener("click", () => showOvpn(btn.closest("tr").dataset.name));
+		});
+		el.querySelectorAll(".email-btn").forEach(btn => {
+			btn.addEventListener("click", () => openEmailDialog(btn.closest("tr").dataset.name));
 		});
 	}
 }
@@ -232,6 +282,62 @@ async function refreshMacsDialog(name) {
 }
 document.getElementById("macs-dialog-close").addEventListener("click", () => document.getElementById("macs-dialog").close());
 
+if (isAdmin) {
+	async function showOvpn(name) {
+		const dlg = document.getElementById("ovpn-dialog");
+		document.getElementById("ovpn-dialog-title").textContent = `.ovpn Profile — ${name}`;
+		document.getElementById("ovpn-dialog-content").innerHTML = '<p class="muted">Loading…</p>';
+		dlg.showModal();
+		try {
+			const data = await apiFetch(`/api/clients/${encodeURIComponent(name)}/ovpn`);
+			document.getElementById("ovpn-dialog-content").innerHTML = `
+				<textarea readonly rows="12" class="mono" style="resize:vertical">${escapeHtml(data.ovpn)}</textarea>
+				<div class="form-row" style="margin-top:12px">
+					<button type="button" class="btn-primary btn-sm" id="ovpn-copy-btn">Copy to Clipboard</button>
+				</div>`;
+			document.getElementById("ovpn-copy-btn").addEventListener("click", async () => {
+				try {
+					await navigator.clipboard.writeText(data.ovpn);
+					toast("Copied to clipboard.");
+				} catch (e) {
+					toast("Couldn't access the clipboard -- select and copy manually.", "error");
+				}
+			});
+		} catch (e) {
+			document.getElementById("ovpn-dialog-content").innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+		}
+	}
+	window.showOvpn = showOvpn;
+	document.getElementById("ovpn-dialog-close").addEventListener("click", () => document.getElementById("ovpn-dialog").close());
+
+	let emailingClientName = null;
+	function openEmailDialog(name) {
+		emailingClientName = name;
+		document.getElementById("email-client-name").textContent = name;
+		document.getElementById("email-address").value = "";
+		document.getElementById("email-dialog").showModal();
+	}
+	window.openEmailDialog = openEmailDialog;
+	document.getElementById("email-dialog-cancel").addEventListener("click", () => document.getElementById("email-dialog").close());
+	document.getElementById("email-form").addEventListener("submit", async (ev) => {
+		ev.preventDefault();
+		const email = document.getElementById("email-address").value.trim();
+		const submitBtn = document.getElementById("email-submit");
+		submitBtn.disabled = true;
+		try {
+			const result = await apiFetch(`/api/clients/${encodeURIComponent(emailingClientName)}/email-ovpn`, {
+				method: "POST", body: { email },
+			});
+			toast(result.message, "success");
+			document.getElementById("email-dialog").close();
+		} catch (e) {
+			toast(e.message, "error");
+		} finally {
+			submitBtn.disabled = false;
+		}
+	});
+}
+
 async function revokeClient(name) {
 	const ok = await confirmDialog(`Revoke <strong>${escapeHtml(name)}</strong>? This immediately blocks them from connecting and cannot be undone.`, { confirmLabel: "Revoke" });
 	if (!ok) return;
@@ -256,11 +362,30 @@ if (isAdmin) {
 			toast(result.message, "success");
 			document.getElementById("add-form").reset();
 			loadClients();
+			// Show the new client's .ovpn profile right away so it can be
+			// copied/delivered without a separate lookup.
+			try {
+				const ovpnData = await apiFetch(`/api/clients/${encodeURIComponent(name)}/ovpn`);
+				document.getElementById("add-result-ovpn").value = ovpnData.ovpn;
+				document.getElementById("add-result").style.display = "";
+			} catch (_) { /* non-fatal -- the client is still added either way */ }
 		} catch (e) {
 			toast(e.message, "error");
 		} finally {
 			submitBtn.disabled = false;
 		}
+	});
+
+	document.getElementById("add-result-copy").addEventListener("click", async () => {
+		try {
+			await navigator.clipboard.writeText(document.getElementById("add-result-ovpn").value);
+			toast("Copied to clipboard.");
+		} catch (e) {
+			toast("Couldn't access the clipboard -- select and copy manually.", "error");
+		}
+	});
+	document.getElementById("add-result-dismiss").addEventListener("click", () => {
+		document.getElementById("add-result").style.display = "none";
 	});
 }
 

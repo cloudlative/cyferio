@@ -267,6 +267,80 @@ do_revoke_client () {
 	return 0
 }
 
+do_show_ovpn () {
+	# Usage: do_show_ovpn <name>
+	# Prints an existing (valid) client's already-generated .ovpn config to
+	# stdout, so a caller (e.g. the web admin app) can offer it for copy/
+	# download/email without re-generating or touching any key material.
+	local name="$1" ovpn_file
+	if [[ -z "$name" ]]; then
+		echo "Client name required." >&2
+		return 1
+	fi
+	if [[ ! -e "$EASYRSA_DIR/pki/issued/$name.crt" ]]; then
+		echo "$name: no such client (no valid certificate)." >&2
+		return 1
+	fi
+	ovpn_file="$OVPN_OUTPUT_DIR/$name.ovpn"
+	if [[ ! -f "$ovpn_file" ]]; then
+		echo "$name: no .ovpn file found at $ovpn_file (it may have been moved or deleted after issuance)." >&2
+		return 1
+	fi
+	cat "$ovpn_file"
+	return 0
+}
+
+do_purge_revoked () {
+	# Usage: do_purge_revoked <name>
+	# Permanently deletes a *revoked* client's leftover PKI files (issued
+	# cert, private key, CSR) and delivered .ovpn -- for cleaning up
+	# certificates that will never be used again. Deliberately does NOT
+	# remove the client's row from pki/index.txt: that row is what keeps it
+	# on the CRL, and easy-rsa has no supported way to remove a single
+	# index.txt entry without regenerating the whole PKI, so the audit
+	# trail (who was revoked, when) stays intact even after a purge.
+	local name="$1" is_revoked
+	if [[ -z "$name" ]]; then
+		echo "Client name required." >&2
+		return 1
+	fi
+	is_revoked=$(tail -n +2 "$EASYRSA_DIR/pki/index.txt" 2>/dev/null | awk -F'\t' -v n="/CN=$name" '$1=="R" && $6==n {print "yes"; exit}')
+	if [[ "$is_revoked" != "yes" ]]; then
+		echo "$name: not a revoked client -- nothing to purge (use --revoke first)." >&2
+		return 1
+	fi
+	rm -f "$EASYRSA_DIR/pki/issued/$name.crt" "$EASYRSA_DIR/pki/private/$name.key" "$EASYRSA_DIR/pki/reqs/$name.req" "$OVPN_OUTPUT_DIR/$name.ovpn"
+	if [[ -f "$DB_FILE" ]]; then
+		sed -i "/^${name}=/d" "$DB_FILE"
+		ensure_trailing_newline "$DB_FILE"
+	fi
+	echo "$name: revoked client's leftover PKI/.ovpn files permanently deleted."
+	return 0
+}
+
+do_restore_client () {
+	# Usage: do_restore_client <name> <mac>
+	# "Restoring" a revoked client is NOT un-revoking their old certificate
+	# -- once a cert is on the CRL, easy-rsa (correctly, by PKI design) has
+	# no way to reverse that; a revoked cert must stay revoked forever. What
+	# this actually does is issue a brand-new certificate under the same
+	# client name, after clearing out the old revoked cert's leftover files
+	# so the name can be reused -- functionally "the person is back", but
+	# cryptographically a fresh identity, not the old one reactivated.
+	local name="$1" mac="$2" is_revoked
+	if [[ -z "$name" ]]; then
+		echo "Client name required." >&2
+		return 1
+	fi
+	is_revoked=$(tail -n +2 "$EASYRSA_DIR/pki/index.txt" 2>/dev/null | awk -F'\t' -v n="/CN=$name" '$1=="R" && $6==n {print "yes"; exit}')
+	if [[ "$is_revoked" != "yes" ]]; then
+		echo "$name: not a revoked client -- nothing to restore." >&2
+		return 1
+	fi
+	rm -f "$EASYRSA_DIR/pki/issued/$name.crt" "$EASYRSA_DIR/pki/private/$name.key" "$EASYRSA_DIR/pki/reqs/$name.req" "$OVPN_OUTPUT_DIR/$name.ovpn"
+	do_add_client "$name" "$mac"
+}
+
 do_list_clients () {
 	# Usage: do_list_clients [json]
 	local as_json="${1:-}" names name first=1
@@ -430,22 +504,30 @@ do_list_revoked () {
 		printf '['
 		while IFS=$'\t' read -r revoked_at name; do
 			name="${name#/CN=}"
-			local stale=false
+			local stale=false files_present=false
 			grep -q "^${name}=" "$DB_FILE" 2>/dev/null && stale=true
+			[[ -e "$EASYRSA_DIR/pki/issued/$name.crt" ]] && files_present=true
 			[[ $first -eq 1 ]] && first=0 || printf ','
-			printf '{"name":"%s","revoked_at":"%s","stale_db_entry":%s}' \
-				"$(json_escape "$name")" "$(json_escape "$(format_asn1_time "$revoked_at")")" "$stale"
+			printf '{"name":"%s","revoked_at":"%s","stale_db_entry":%s,"files_present":%s}' \
+				"$(json_escape "$name")" "$(json_escape "$(format_asn1_time "$revoked_at")")" "$stale" "$files_present"
 		done <<< "$lines"
 		printf ']\n'
 	else
-		printf "%-20s %-24s %s\n" "NAME" "REVOKED_AT" "STALE_DB_ENTRY"
+		printf "%-20s %-24s %-16s %s\n" "NAME" "REVOKED_AT" "STALE_DB_ENTRY" "FILES_PRESENT"
 		while IFS=$'\t' read -r revoked_at name; do
 			name="${name#/CN=}"
+			local stale_col files_col
 			if grep -q "^${name}=" "$DB_FILE" 2>/dev/null; then
-				printf "%-20s %-24s %s\n" "$name" "$(format_asn1_time "$revoked_at")" "yes -- consider removing (see --check)"
+				stale_col="yes -- consider removing (see --check)"
 			else
-				printf "%-20s %-24s %s\n" "$name" "$(format_asn1_time "$revoked_at")" "no"
+				stale_col="no"
 			fi
+			if [[ -e "$EASYRSA_DIR/pki/issued/$name.crt" ]]; then
+				files_col="yes"
+			else
+				files_col="no (already purged)"
+			fi
+			printf "%-20s %-24s %-16s %s\n" "$name" "$(format_asn1_time "$revoked_at")" "$stale_col" "$files_col"
 		done <<< "$lines"
 	fi
 	return 0
@@ -557,6 +639,10 @@ print_usage () {
 	  --macs NAME      List every MAC address registered for one client
 	  --add-mac NAME MAC     Register an additional device MAC for an existing client
 	  --remove-mac NAME MAC  Remove one specific MAC registration (client keeps its cert)
+	  --show-ovpn NAME       Print an existing client's .ovpn config to stdout
+	  --purge-revoked NAME   Permanently delete a revoked client's leftover PKI/.ovpn files
+	  --restore NAME MAC     Reissue a brand-new cert under a revoked client's name
+	                         (NOT un-revoking the old cert -- see --help output below)
 	  --check          Cross-check PKI valid certs against $DB_FILE for orphans
 	  --lint-db        Validate $DB_FILE formatting and trailing-newline health
 	  --help           Show this help
@@ -565,6 +651,13 @@ print_usage () {
 	--lint-db to print structured JSON instead of a table (order doesn't
 	matter, e.g. both "--list --json" and "--json --list" work). Not valid
 	with any other command.
+
+	Note on --restore: a revoked certificate cannot be un-revoked once its
+	CRL entry exists (that's how PKI revocation is supposed to work).
+	--restore instead purges the old revoked client's leftover files and
+	issues a brand-new certificate under the same name -- the person is
+	back, but cryptographically it's a fresh identity, not the old one
+	reactivated.
 	USAGE
 }
 
@@ -586,7 +679,7 @@ set -- "${_cli_args[@]}"
 unset _a _cli_args
 
 case "${1:-}" in
-	--add|--revoke|--list|--list-revoked|--macs|--add-mac|--remove-mac|--check|--lint-db)
+	--add|--revoke|--list|--list-revoked|--macs|--add-mac|--remove-mac|--show-ovpn|--purge-revoked|--restore|--check|--lint-db)
 		if [[ ! -e "$OPENVPN_DIR/server.conf" ]]; then
 			echo "OpenVPN is not installed yet (no $OPENVPN_DIR/server.conf) -- run without arguments first to install." >&2
 			exit 1
@@ -631,6 +724,18 @@ case "${1:-}" in
 		;;
 	--remove-mac)
 		do_remove_mac "$2" "$3"
+		exit $?
+		;;
+	--show-ovpn)
+		do_show_ovpn "$2"
+		exit $?
+		;;
+	--purge-revoked)
+		do_purge_revoked "$2"
+		exit $?
+		;;
+	--restore)
+		do_restore_client "$2" "$3"
 		exit $?
 		;;
 	--check)
@@ -1008,9 +1113,12 @@ else
 	echo "   6) Remove a MAC address from an existing client"
 	echo "   7) Revoke an existing client"
 	echo "   8) Remove OpenVPN"
-	echo "   9) Exit"
+	echo "   9) Show/print a client's .ovpn config"
+	echo "  10) Permanently delete a revoked client's leftover files"
+	echo "  11) Restore (reissue a new cert for) a revoked client"
+	echo "  12) Exit"
 	read -p "Option: " option
-	until [[ "$option" =~ ^[1-9]$ ]]; do
+	until [[ "$option" =~ ^([1-9]|1[0-2])$ ]]; do
 		echo "$option: invalid selection."
 		read -p "Option: " option
 	done
@@ -1175,6 +1283,58 @@ else
 			exit
 		;;
 		9)
+			echo
+			echo "Provide the client name to show/print the .ovpn config for:"
+			read -p "Name: " showovpn_name
+			echo
+			do_show_ovpn "$showovpn_name"
+			exit
+		;;
+		10)
+			echo
+			do_list_revoked
+			echo
+			echo "Provide the name of the revoked client to permanently delete leftover files for:"
+			read -p "Name: " purge_name
+			echo
+			read -p "Confirm permanent deletion of $purge_name's leftover PKI/.ovpn files? [y/N]: " purge_confirm
+			until [[ "$purge_confirm" =~ ^[yYnN]*$ ]]; do
+				echo "$purge_confirm: invalid selection."
+				read -p "Confirm permanent deletion of $purge_name's leftover PKI/.ovpn files? [y/N]: " purge_confirm
+			done
+			if [[ "$purge_confirm" =~ ^[yY]$ ]]; then
+				do_purge_revoked "$purge_name"
+			else
+				echo
+				echo "Purge aborted!"
+			fi
+			exit
+		;;
+		11)
+			echo
+			echo "Restoring a revoked client does NOT un-revoke their old certificate"
+			echo "(not possible once it's on the CRL) -- it purges the old leftover files"
+			echo "and issues a brand-new certificate under the same name instead."
+			echo
+			do_list_revoked
+			echo
+			echo "Provide the name of the revoked client to restore:"
+			read -p "Name: " restore_name
+			echo
+			echo "Enter the MAC address of the client's device (required for MAC-binding auth)."
+			echo "Accepted separators: ':', '-', or none. Letters may be upper or lower case."
+			while true; do
+				read -p "MAC address: " raw_mac
+				if mac=$(normalize_mac "$raw_mac"); then
+					break
+				else
+					echo "Invalid MAC address: expected 12 hex characters (e.g. aa:bb:cc:dd:ee:ff)."
+				fi
+			done
+			do_restore_client "$restore_name" "$mac"
+			exit
+		;;
+		12)
 			exit
 		;;
 	esac

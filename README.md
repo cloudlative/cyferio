@@ -36,7 +36,10 @@ First run walks you through a normal OpenVPN server install (IP, protocol, port,
 6) Remove a MAC address from an existing client
 7) Revoke an existing client
 8) Remove OpenVPN
-9) Exit
+9) Show/print a client's .ovpn config
+10) Permanently delete a revoked client's leftover files
+11) Restore (reissue a new cert for) a revoked client
+12) Exit
 ```
 
 Adding a client prompts for a name and the device's MAC address (any common format — `aa:bb:cc:dd:ee:ff`, `AA-BB-CC-DD-EE-FF`, `aabbccddeeff`, mixed case — all normalized automatically). The client only needs push-peer-info in their `.ovpn` (already baked in by this installer) for the MAC check to work.
@@ -53,12 +56,17 @@ sudo bash openvpn-install.sh --list-revoked     # revoked clients, when, stale d
 sudo bash openvpn-install.sh --macs NAME        # every MAC address registered for one client
 sudo bash openvpn-install.sh --add-mac NAME MAC     # register an extra device MAC for an existing client
 sudo bash openvpn-install.sh --remove-mac NAME MAC  # remove one MAC registration (client keeps its cert)
+sudo bash openvpn-install.sh --show-ovpn NAME       # print an existing client's .ovpn config to stdout
+sudo bash openvpn-install.sh --purge-revoked NAME   # permanently delete a revoked client's leftover PKI/.ovpn files
+sudo bash openvpn-install.sh --restore NAME MAC     # reissue a brand-new cert under a revoked client's name
 sudo bash openvpn-install.sh --check            # cross-check PKI certs vs openvpn_db.txt
 sudo bash openvpn-install.sh --lint-db          # validate openvpn_db.txt formatting/health
 sudo bash openvpn-install.sh --help
 ```
 
 `--check` and `--lint-db` exit `0` when clean and `1` when they find a problem, so they're monitoring/CI-friendly.
+
+`--restore` is **not** un-revoking the old certificate — once a cert is on the CRL it stays revoked forever, by design. `--restore` purges the old revoked client's leftover files and issues a brand-new certificate under the same name instead, so the person can connect again, but it's a fresh cryptographic identity, not the old one reactivated.
 
 Add `--json` to `--list`, `--list-revoked`, `--macs`, `--check`, or `--lint-db` to get structured JSON instead of a table — handy for building a frontend/dashboard on top of this toolkit. Argument order doesn't matter (`--list --json` and `--json --list` are equivalent). It's rejected with a clear error on every other command:
 

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..audit import log_action
 from ..auth import hash_password, require_admin, require_user, verify_password
 from ..db import get_db
-from ..models import Gender, Role, User
+from ..models import Gender, Role, Team, User
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -18,6 +18,18 @@ def _valid_password(v: str) -> str:
     return v
 
 
+def _resolve_team_id(db: Session, team_id: int | None) -> int | None:
+    """Validates a team_id references an existing Team (or is None/
+    "Unassigned"). Used by both the admin-edit and self-service endpoints so
+    a client can only ever land a user in a real team, never arbitrary
+    free text."""
+    if team_id is None:
+        return None
+    if db.get(Team, team_id) is None:
+        raise HTTPException(status_code=400, detail="No such team.")
+    return team_id
+
+
 class CreateUserRequest(BaseModel):
     username: str
     password: str
@@ -25,7 +37,7 @@ class CreateUserRequest(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     gender: Gender = Gender.unspecified
-    team: str | None = None
+    team_id: int | None = None
 
     @field_validator("username")
     @classmethod
@@ -52,7 +64,7 @@ class UpdateUserRequest(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     gender: Gender | None = None
-    team: str | None = None
+    team_id: int | None = None  # explicit null = unassign; see model_fields_set usage below
 
     @field_validator("password")
     @classmethod
@@ -66,7 +78,7 @@ class UpdateProfileRequest(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     gender: Gender | None = None
-    team: str | None = None
+    team_id: int | None = None
     current_password: str | None = None
     new_password: str | None = None
 
@@ -90,7 +102,8 @@ def _serialize(u: User) -> dict:
         "last_name": u.last_name,
         "display_name": u.display_name,
         "gender": u.gender.value if u.gender else Gender.unspecified.value,
-        "team": u.team,
+        "team_id": u.team_id,
+        "team": u.team.name if u.team else None,
     }
 
 
@@ -129,11 +142,17 @@ def whoami(user: User = Depends(require_user)):
 @router.patch("/me")
 def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_user), db: Session = Depends(get_db)):
     changes = []
-    for field in ("first_name", "last_name", "gender", "team"):
+    for field in ("first_name", "last_name", "gender"):
         value = getattr(body, field)
         if value is not None and value != getattr(user, field):
             setattr(user, field, value)
             changes.append(field)
+
+    if "team_id" in body.model_fields_set:
+        new_team_id = _resolve_team_id(db, body.team_id)
+        if new_team_id != user.team_id:
+            user.team_id = new_team_id
+            changes.append("team")
 
     if body.new_password:
         if not body.current_password or not verify_password(body.current_password, user.password_hash):
@@ -151,6 +170,7 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
 def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == body.username).first() is not None:
         raise HTTPException(status_code=409, detail=f"Username '{body.username}' already exists.")
+    team_id = _resolve_team_id(db, body.team_id)
     user = User(
         username=body.username,
         password_hash=hash_password(body.password),
@@ -158,7 +178,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         first_name=body.first_name,
         last_name=body.last_name,
         gender=body.gender,
-        team=body.team,
+        team_id=team_id,
     )
     db.add(user)
     db.commit()
@@ -177,15 +197,19 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     # PATCH. Other mutations on an already-deleted account are harmless too
     # (they just take effect if/when it's restored).
 
+    # An admin account can never be demoted -- by anyone, including another
+    # admin -- full stop. Unlike the self-lockout guardrails below (which
+    # only kick in for the *last* admin, or acting on yourself), this is an
+    # unconditional rule: once an account is admin, it stays admin until
+    # deleted/deactivated by someone else, but its role itself never changes.
+    if target.role == Role.admin and body.role is not None and body.role != Role.admin:
+        raise HTTPException(status_code=400, detail="Admin accounts cannot be demoted.")
+
     # Guardrails against an admin locking everyone (including themselves)
-    # out: demoting, deactivating, or deleting the last active admin (or
-    # yourself) is blocked, regardless of which of those three the request
-    # is doing.
-    would_remove = target.role == Role.admin and (
-        (body.role is not None and body.role != Role.admin)
-        or body.is_active is False
-        or body.deleted is True
-    )
+    # out: deactivating or deleting the last active admin (or yourself) is
+    # blocked, regardless of which of those two the request is doing. (Role
+    # demotion of an admin is already unconditionally blocked above.)
+    would_remove = target.role == Role.admin and (body.is_active is False or body.deleted is True)
     _guard_against_self_lockout(db, target, admin, removing=would_remove)
 
     changes = []
@@ -202,11 +226,16 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     if body.password:
         target.password_hash = hash_password(body.password)
         changes.append("password reset")
-    for field in ("first_name", "last_name", "gender", "team"):
+    for field in ("first_name", "last_name", "gender"):
         value = getattr(body, field)
         if value is not None and value != getattr(target, field):
             setattr(target, field, value)
             changes.append(field)
+    if "team_id" in body.model_fields_set:
+        new_team_id = _resolve_team_id(db, body.team_id)
+        if new_team_id != target.team_id:
+            target.team_id = new_team_id
+            changes.append("team")
     # created_at is intentionally immutable here -- it's a factual record of
     # account creation, not admin-editable through this endpoint (unlike the
     # other profile fields above).

@@ -1,5 +1,5 @@
 from vpnadmin.auth import hash_password, verify_password
-from vpnadmin.models import Role, User
+from vpnadmin.models import Role, Team, User
 
 from .conftest import login
 
@@ -117,24 +117,34 @@ class TestSelfLockoutGuardrails:
         r = app_client.delete(f"/api/users/{admin_id}")
         assert r.status_code == 400
 
-    def test_cannot_demote_last_admin(self, app_client, db_session):
-        # "admin" is the only admin; try to demote it via a *different*
-        # logged-in admin account to isolate this guardrail from the
-        # can't-touch-yourself one above.
+    def test_admin_cannot_be_demoted_even_by_another_admin(self, app_client, db_session):
+        # Admin accounts can never be demoted -- by anyone, including another
+        # admin -- full stop, regardless of how many other admins exist.
         second_admin = User(username="admin2", password_hash=hash_password("admin2pass123"), role=Role.admin)
         db_session.add(second_admin)
         db_session.commit()
 
         login(app_client, "admin2", "admin2pass123")
         admin_id = db_session.query(User).filter(User.username == "admin").one().id
-        # Demote the original admin -- should succeed, two admins exist.
         r = app_client.patch(f"/api/users/{admin_id}", json={"role": "viewer"})
-        assert r.status_code == 200
+        assert r.status_code == 400
+        assert "cannot be demoted" in r.json()["detail"].lower()
 
-        # Now only admin2 is an admin; demoting/deleting self is still
-        # blocked by the self-lockout rule (covered above), but demoting
-        # admin2 via itself should ALSO be blocked as the last admin.
-        # (Already implied by the self-guard, this just documents intent.)
+        db_session.expire_all()
+        assert db_session.query(User).filter(User.username == "admin").one().role == Role.admin
+
+    def test_admin_can_still_be_deactivated_by_another_admin(self, app_client, db_session):
+        # The unconditional "never demoted" rule only covers role changes --
+        # deactivating (not role-changing) a non-self admin, when another
+        # active admin remains, is still allowed.
+        second_admin = User(username="admin2", password_hash=hash_password("admin2pass123"), role=Role.admin)
+        db_session.add(second_admin)
+        db_session.commit()
+
+        login(app_client, "admin2", "admin2pass123")
+        admin_id = db_session.query(User).filter(User.username == "admin").one().id
+        r = app_client.patch(f"/api/users/{admin_id}", json={"is_active": False})
+        assert r.status_code == 200
 
 
 class TestSoftDeleteAndRestore:
@@ -212,9 +222,13 @@ class TestSelfServiceProfile:
         assert r.status_code == 200
         assert r.json()["username"] == "viewer"
 
-    def test_viewer_can_update_own_profile_fields(self, app_client):
+    def test_viewer_can_update_own_profile_fields(self, app_client, db_session):
+        team = Team(name="Support")
+        db_session.add(team)
+        db_session.commit()
+
         login(app_client, "viewer", "viewerpass123")
-        r = app_client.patch("/api/users/me", json={"first_name": "Val", "team": "Support"})
+        r = app_client.patch("/api/users/me", json={"first_name": "Val", "team_id": team.id})
         assert r.status_code == 200
         body = r.json()
         assert body["first_name"] == "Val"
@@ -281,10 +295,13 @@ class TestTeams:
         data = r.json()
         assert any(g["team"] == "Unassigned" and g["count"] == 2 for g in data)
 
-    def test_teams_groups_by_team_field(self, app_client, db_session):
+    def test_teams_groups_by_team_assignment(self, app_client, db_session):
+        team = Team(name="Platform")
+        db_session.add(team)
+        db_session.commit()
         login(app_client, "admin", "adminpass123")
         viewer = db_session.query(User).filter(User.username == "viewer").one()
-        viewer.team = "Platform"
+        viewer.team_id = team.id
         db_session.commit()
         r = app_client.get("/api/teams")
         assert r.status_code == 200
@@ -301,3 +318,56 @@ class TestTeams:
         r = app_client.get("/api/teams")
         total_members = sum(g["count"] for g in r.json())
         assert total_members == 1  # only admin left
+
+    def test_empty_team_shows_up_with_zero_members(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/teams", json={"name": "Ghost Team"})
+        assert r.status_code == 201
+        r = app_client.get("/api/teams")
+        ghost = next(g for g in r.json() if g["team"] == "Ghost Team")
+        assert ghost["count"] == 0
+
+    def test_viewer_cannot_create_team(self, app_client):
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.post("/api/teams", json={"name": "Nope"})
+        assert r.status_code == 403
+
+    def test_duplicate_team_name_rejected(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/teams", json={"name": "Ops"})
+        assert r.status_code == 201
+        r = app_client.post("/api/teams", json={"name": "Ops"})
+        assert r.status_code == 409
+
+    def test_delete_team_unassigns_members_not_cascade_delete(self, app_client, db_session):
+        team = Team(name="Ops")
+        db_session.add(team)
+        db_session.commit()
+        viewer = db_session.query(User).filter(User.username == "viewer").one()
+        viewer.team_id = team.id
+        db_session.commit()
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.delete(f"/api/teams/{team.id}")
+        assert r.status_code == 200
+
+        db_session.expire_all()
+        still_there = db_session.query(User).filter(User.username == "viewer").one()
+        assert still_there.team_id is None  # unassigned, not deleted
+
+    def test_assign_user_to_team_via_admin_edit_endpoint(self, app_client, db_session):
+        team = Team(name="Infra")
+        db_session.add(team)
+        db_session.commit()
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"team_id": team.id})
+        assert r.status_code == 200
+        assert r.json()["team"] == "Infra"
+
+    def test_assign_user_to_nonexistent_team_rejected(self, app_client, db_session):
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"team_id": 99999})
+        assert r.status_code == 400
