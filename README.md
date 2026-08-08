@@ -14,11 +14,12 @@ A small, self-contained OpenVPN road-warrior installer and management toolkit fo
 | `openvpn-install.sh` | Installer + client management (add/revoke/list/check/lint), interactive menu or CLI flags |
 | `vpn-status.py` | Live connection status, all-clients view, bandwidth, rejected-attempt auditing |
 | `vpn-tools.conf.example` | Copy to `/etc/openvpn/vpn-tools.conf` to override any default path/setting |
+| `completions/*.bash` | Optional bash tab-completion for both tools' CLI flags |
 
 ## Quick start
 
 ```bash
-git clone https://github.com/asifrafiq/openvpn-toolkit.git
+git clone https://github.com/cloudlative/openvpn-toolkit.git
 cd openvpn-toolkit
 sudo bash openvpn-install.sh
 ```
@@ -62,6 +63,17 @@ python3 vpn-status.py --json        # any of the above as JSON
 ```
 
 Neither command needs to be run as root — both escalate internally via `sudo` for the handful of files that require it (the live status log, the PKI index), so a regular sudo-capable user account is enough.
+
+## Shell completion
+
+Bash tab-completion for both tools' flags (and, for `--revoke`, live client names when the PKI index happens to be readable by the completing user):
+
+```bash
+source completions/openvpn-install-completion.bash
+source completions/vpn-status-completion.bash
+```
+
+Add those two lines to `~/.bashrc` to make it permanent, or copy the files into `/etc/bash_completion.d/` for a system-wide install. Only the scripts' own names (`openvpn-install.sh`, `vpn-status.py`) are bound — not bare `sudo`/`bash`/`python3`, which would break tab-completion for every *other* command invoked that way. `sudo openvpn-install.sh <TAB>` still completes correctly on any system with the standard `bash-completion` package installed, since its own `sudo` handling looks up whatever completion is already registered for the command that follows. If you run `vpn-status.py` as `python3 vpn-status.py ...` and want completion for that exact invocation, add a matching shell function/alias named `vpn-status.py` (see the comment in that completion file for the one-liner) — or just invoke it directly as `./vpn-status.py`, which already works since it's executable with a `python3` shebang.
 
 ## Configuration
 
