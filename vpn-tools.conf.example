@@ -1,0 +1,42 @@
+# vpn-tools.conf — shared configuration for openvpn-install.sh and vpn-status.py
+#
+# Plain KEY=VALUE lines (no spaces around '='), sourceable directly by bash
+# and parsed by the Python tools with a simple split. Values are not quoted.
+#
+# This file is expected at /etc/openvpn/vpn-tools.conf by default; both
+# tools fall back to sane defaults if the file is missing entirely, so a
+# fresh install works out of the box. Copy this file there and uncomment
+# only what you actually want to override.
+
+# Public IP or hostname clients connect to (informational here; the actual
+# value used by generated .ovpn files still comes from client-common.txt)
+#SERVER_PUBLIC_IP=203.0.113.10
+#SERVER_PORT=1194
+#SERVER_PROTO=udp
+
+# systemd unit managing the OpenVPN server process
+#SERVICE_NAME=openvpn-server@server.service
+
+# Core OpenVPN server paths
+#OPENVPN_DIR=/etc/openvpn/server
+#EASYRSA_DIR=/etc/openvpn/server/easy-rsa
+#DB_FILE=/etc/openvpn/server/openvpn_db.txt
+#CLIENT_COMMON_FILE=/etc/openvpn/server/client-common.txt
+
+# Logs
+#STATUS_LOG=/var/log/openvpn/openvpn-status.log
+#CONN_LOG=/etc/openvpn/server/openvpn.log
+
+# Where newly-generated .ovpn client files are delivered, and to whom they
+# should be chown'd (so they can be retrieved without needing root).
+#
+# Left commented out by default: openvpn-install.sh auto-detects this from
+# whoever actually ran `sudo` to invoke it ($SUDO_USER and their home dir),
+# falling back to the first regular human account on the box, then root --
+# it does NOT assume a specific distro's default account name (e.g.
+# "ubuntu"), since the community running this could be on Debian, a
+# different cloud image, or a custom setup. Only set these explicitly if
+# you want delivery to go to an account OTHER than whoever ran the install.
+#OVPN_OUTPUT_DIR=/home/someuser
+#OVPN_OUTPUT_OWNER=someuser:someuser
+OVPN_OUTPUT_MODE=600

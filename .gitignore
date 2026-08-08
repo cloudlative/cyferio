@@ -1,0 +1,19 @@
+# Never commit real client configs, keys, or the MAC-binding database --
+# these are per-install secrets/PII, not part of the toolkit itself.
+*.ovpn
+openvpn_db.txt
+vpn-tools.conf
+!vpn-tools.conf.example
+
+*.key
+*.crt
+*.pem
+*.csr
+
+# Editor/OS cruft
+.DS_Store
+*.swp
+
+# Python
+__pycache__/
+*.pyc
