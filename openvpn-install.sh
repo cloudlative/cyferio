@@ -301,6 +301,37 @@ do_list_clients () {
 	return 0
 }
 
+do_list_macs () {
+	# Usage: do_list_macs <name> [json]
+	# Shows every MAC address registered for a given client name --
+	# openvpn_db.txt allows multiple "name=mac" lines per person for
+	# multi-device users (e.g. a laptop and a phone), so this is genuinely
+	# a one-to-many lookup, not just a single value.
+	local name="$1" as_json="${2:-}" macs count
+	if [[ -z "$name" ]]; then
+		echo "Client name required." >&2
+		return 1
+	fi
+	macs=$(grep "^${name}=" "$DB_FILE" 2>/dev/null | cut -d '=' -f 2-)
+	if [[ -z "$macs" ]]; then
+		count=0
+	else
+		count=$(wc -l <<< "$macs")
+	fi
+
+	if [[ "$as_json" == json ]]; then
+		printf '{"name":"%s","count":%d,"macs":%s}\n' "$(json_escape "$name")" "$count" "$(json_string_array "$macs")"
+	else
+		if [[ "$count" -eq 0 ]]; then
+			echo "No MAC addresses registered for '$name'."
+		else
+			echo "$count MAC address(es) registered for '$name':"
+			sed 's/^/  - /' <<< "$macs"
+		fi
+	fi
+	[[ "$count" -gt 0 ]]
+}
+
 format_asn1_time () {
 	# easy-rsa's pki/index.txt dates are ASN.1-style "YYMMDDHHMMSSZ".
 	# Reformats to "YYYY-MM-DD HH:MM:SS UTC" for readability; falls back to
@@ -455,14 +486,15 @@ print_usage () {
 	  --revoke NAME    Revoke an existing client
 	  --list           List valid clients and their MAC-db registration status
 	  --list-revoked   List revoked clients, when revoked, and any stale db entries
+	  --macs NAME      List every MAC address registered for one client
 	  --check          Cross-check PKI valid certs against $DB_FILE for orphans
 	  --lint-db        Validate $DB_FILE formatting and trailing-newline health
 	  --help           Show this help
 
-	--json can be combined with --list, --list-revoked, --check, or --lint-db
-	to print structured JSON instead of a table (order doesn't matter, e.g.
-	both "--list --json" and "--json --list" work). Not valid with any other
-	command.
+	--json can be combined with --list, --list-revoked, --macs, --check, or
+	--lint-db to print structured JSON instead of a table (order doesn't
+	matter, e.g. both "--list --json" and "--json --list" work). Not valid
+	with any other command.
 	USAGE
 }
 
@@ -484,7 +516,7 @@ set -- "${_cli_args[@]}"
 unset _a _cli_args
 
 case "${1:-}" in
-	--add|--revoke|--list|--list-revoked|--check|--lint-db)
+	--add|--revoke|--list|--list-revoked|--macs|--check|--lint-db)
 		if [[ ! -e "$OPENVPN_DIR/server.conf" ]]; then
 			echo "OpenVPN is not installed yet (no $OPENVPN_DIR/server.conf) -- run without arguments first to install." >&2
 			exit 1
@@ -494,7 +526,7 @@ esac
 
 if [[ -n "$json_flag" ]]; then
 	case "${1:-}" in
-		--list|--list-revoked|--check|--lint-db) ;;
+		--list|--list-revoked|--macs|--check|--lint-db) ;;
 		*)
 			echo "--json option is not allowed with this command." >&2
 			exit 1
@@ -517,6 +549,10 @@ case "${1:-}" in
 		;;
 	--list-revoked)
 		do_list_revoked "$json_flag"
+		exit $?
+		;;
+	--macs)
+		do_list_macs "$2" "$json_flag"
 		exit $?
 		;;
 	--check)
@@ -889,11 +925,12 @@ else
 	echo "   1) Add a new client"
 	echo "   2) List existing clients"
 	echo "   3) List revoked clients"
-	echo "   4) Revoke an existing client"
-	echo "   5) Remove OpenVPN"
-	echo "   6) Exit"
+	echo "   4) List MAC addresses for a client"
+	echo "   5) Revoke an existing client"
+	echo "   6) Remove OpenVPN"
+	echo "   7) Exit"
 	read -p "Option: " option
-	until [[ "$option" =~ ^[1-6]$ ]]; do
+	until [[ "$option" =~ ^[1-7]$ ]]; do
 		echo "$option: invalid selection."
 		read -p "Option: " option
 	done
@@ -933,6 +970,13 @@ else
 			exit
 		;;
 		4)
+			echo
+			echo "Provide the client name to look up:"
+			read -p "Name: " macs_name
+			do_list_macs "$macs_name"
+			exit
+		;;
+		5)
 			# This option could be documented a bit better and maybe even be simplified
 			# ...but what can I say, I want some sleep too
 			number_of_clients=$(tail -n +2 "$EASYRSA_DIR/pki/index.txt" | grep -c "^V")
@@ -964,7 +1008,7 @@ else
 			fi
 			exit
 		;;
-		5)
+		6)
 			echo
 			read -p "Confirm OpenVPN removal? [y/N]: " remove
 			until [[ "$remove" =~ ^[yYnN]*$ ]]; do
@@ -1016,7 +1060,7 @@ else
 			fi
 			exit
 		;;
-		6)
+		7)
 			exit
 		;;
 	esac
