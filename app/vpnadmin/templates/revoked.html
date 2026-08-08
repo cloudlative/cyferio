@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Revoked clients — OpenVPN Toolkit{% endblock %}
+{% block content %}
+<h1>Revoked clients</h1>
+<p class="page-subtitle">Certificates that have been revoked and can no longer connect.</p>
+
+<div class="card">
+	<div class="toolbar">
+		<h2 style="margin:0">Revoked</h2>
+		<button class="btn-secondary" id="refresh-btn">Refresh</button>
+	</div>
+	<div id="revoked-table"><p class="muted">Loading…</p></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadRevoked() {
+	const el = document.getElementById("revoked-table");
+	try {
+		const revoked = await apiFetch("/api/clients/revoked");
+		if (revoked.length === 0) {
+			el.innerHTML = '<div class="empty-state">No revoked clients.</div>';
+			return;
+		}
+		el.innerHTML = `<table>
+			<thead><tr><th>Name</th><th>Revoked at</th><th>Stale MAC db entry</th></tr></thead>
+			<tbody>${revoked.map(r => `
+				<tr>
+					<td>${escapeHtml(r.name)}</td>
+					<td>${escapeHtml(r.revoked_at)}</td>
+					<td>${r.stale_db_entry
+						? '<span style="color:var(--warning)">Yes — consider running --check cleanup</span>'
+						: '<span class="muted">No</span>'}</td>
+				</tr>`).join("")}</tbody>
+		</table>`;
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+document.getElementById("refresh-btn").addEventListener("click", loadRevoked);
+loadRevoked();
+</script>
+{% endblock %}

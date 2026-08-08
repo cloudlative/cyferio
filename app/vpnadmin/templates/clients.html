@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Clients — OpenVPN Toolkit{% endblock %}
+{% block content %}
+<h1>Clients</h1>
+<p class="page-subtitle">Everyone with a valid VPN certificate.</p>
+
+{% if is_admin %}
+<div class="card">
+	<h2>Add a new client</h2>
+	<form id="add-form">
+		<div class="form-row">
+			<div class="field">
+				<label for="add-name">Name</label>
+				<input type="text" id="add-name" required pattern="[A-Za-z0-9_-]{1,64}" placeholder="e.g. alice">
+			</div>
+			<div class="field">
+				<label for="add-mac">Device MAC address</label>
+				<input type="text" id="add-mac" required placeholder="aa:bb:cc:dd:ee:ff">
+			</div>
+			<button type="submit" class="btn-primary" id="add-submit">Add client</button>
+		</div>
+		<p class="muted" style="margin-top:10px">MAC can be entered in any common format (colons, dashes, or none — any case) and will be normalized automatically.</p>
+	</form>
+</div>
+{% endif %}
+
+<div class="card">
+	<div class="toolbar">
+		<h2 style="margin:0">All clients</h2>
+		<button class="btn-secondary" id="refresh-btn">Refresh</button>
+	</div>
+	<div id="clients-table"><p class="muted">Loading…</p></div>
+</div>
+
+<dialog id="macs-dialog">
+	<div class="dialog-body">
+		<h2 id="macs-dialog-title">MAC addresses</h2>
+		<div id="macs-dialog-content"></div>
+		<div class="dialog-actions">
+			<button class="btn-secondary" id="macs-dialog-close">Close</button>
+		</div>
+	</div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const isAdmin = {{ "true" if is_admin else "false" }};
+
+async function loadClients() {
+	const el = document.getElementById("clients-table");
+	try {
+		const [clients, statusAll] = await Promise.all([
+			apiFetch("/api/clients"),
+			apiFetch("/api/status/all"),
+		]);
+		const statusByName = Object.fromEntries(statusAll.map(s => [s.name, s]));
+
+		if (clients.length === 0) {
+			el.innerHTML = '<div class="empty-state">No clients yet.</div>';
+			return;
+		}
+		el.innerHTML = `<table>
+			<thead><tr>
+				<th>Name</th><th>Status</th><th>In MAC db</th><th>Last seen</th>
+				<th></th>${isAdmin ? "<th></th>" : ""}
+			</tr></thead>
+			<tbody>${clients.map(c => {
+				const s = statusByName[c.name];
+				const online = s && s.status === "online";
+				return `<tr data-name="${escapeHtml(c.name)}">
+					<td>${escapeHtml(c.name)}</td>
+					<td><span class="status-pill status-${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span></td>
+					<td>${c.in_db ? "Yes" : '<span style="color:var(--warning)">No — cannot connect</span>'}</td>
+					<td>${escapeHtml(s ? s.last_seen : "—")}</td>
+					<td><button class="btn-secondary macs-btn">View MACs</button></td>
+					${isAdmin ? `<td class="text-right"><button class="btn-danger revoke-btn">Revoke</button></td>` : ""}
+				</tr>`;
+			}).join("")}</tbody>
+		</table>`;
+
+		el.querySelectorAll(".macs-btn").forEach(btn => {
+			btn.addEventListener("click", () => showMacs(btn.closest("tr").dataset.name));
+		});
+		if (isAdmin) {
+			el.querySelectorAll(".revoke-btn").forEach(btn => {
+				btn.addEventListener("click", () => revokeClient(btn.closest("tr").dataset.name));
+			});
+		}
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+async function showMacs(name) {
+	const dlg = document.getElementById("macs-dialog");
+	document.getElementById("macs-dialog-title").textContent = `MAC addresses — ${name}`;
+	document.getElementById("macs-dialog-content").innerHTML = "Loading…";
+	dlg.showModal();
+	try {
+		const data = await apiFetch(`/api/clients/${encodeURIComponent(name)}/macs`);
+		const content = document.getElementById("macs-dialog-content");
+		if (!data.macs || data.macs.length === 0) {
+			content.innerHTML = '<p class="muted">No MAC addresses registered.</p>';
+		} else {
+			content.innerHTML = `<p>${data.count} registered:</p><ul>${data.macs.map(m => `<li class="mono">${escapeHtml(m)}</li>`).join("")}</ul>`;
+		}
+	} catch (e) {
+		document.getElementById("macs-dialog-content").innerHTML = `<p style="color:var(--danger)">${escapeHtml(e.message)}</p>`;
+	}
+}
+document.getElementById("macs-dialog-close").addEventListener("click", () => document.getElementById("macs-dialog").close());
+
+async function revokeClient(name) {
+	const ok = await confirmDialog(`Revoke <strong>${escapeHtml(name)}</strong>? This immediately blocks them from connecting and cannot be undone.`, { confirmLabel: "Revoke" });
+	if (!ok) return;
+	try {
+		const result = await apiFetch(`/api/clients/${encodeURIComponent(name)}`, { method: "DELETE" });
+		toast(result.message, "success");
+		loadClients();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+if (isAdmin) {
+	document.getElementById("add-form").addEventListener("submit", async (ev) => {
+		ev.preventDefault();
+		const name = document.getElementById("add-name").value.trim();
+		const mac = document.getElementById("add-mac").value.trim();
+		const submitBtn = document.getElementById("add-submit");
+		submitBtn.disabled = true;
+		try {
+			const result = await apiFetch("/api/clients", { method: "POST", body: { name, mac } });
+			toast(result.message, "success");
+			document.getElementById("add-form").reset();
+			loadClients();
+		} catch (e) {
+			toast(e.message, "error");
+		} finally {
+			submitBtn.disabled = false;
+		}
+	});
+}
+
+document.getElementById("refresh-btn").addEventListener("click", loadClients);
+loadClients();
+</script>
+{% endblock %}

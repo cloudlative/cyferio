@@ -1,0 +1,47 @@
+services:
+  app:
+    build: .
+    container_name: openvpn-toolkit-app
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      # --- REQUIRED: gives the app the same access a human running
+      #     openvpn-install.sh/vpn-status.py directly on the host would
+      #     have. rw on /etc/openvpn because --add/--revoke write there
+      #     (new certs, openvpn_db.txt updates); ro on the log dir since
+      #     the status tool only ever reads it.
+      - /etc/openvpn:/etc/openvpn
+      - /var/log/openvpn:/var/log/openvpn:ro
+
+      # --- REQUIRED: the actual scripts this app wraps, bind-mounted from
+      #     this repo's root so the container always runs whatever's
+      #     checked out on the host (no image rebuild to pick up a script
+      #     change). Point OPENVPN_INSTALL_SCRIPT/VPN_STATUS_SCRIPT in .env
+      #     at these same in-container paths.
+      - ../openvpn-install.sh:/opt/openvpn-toolkit/openvpn-install.sh:ro
+      - ../vpn-status.py:/opt/openvpn-toolkit/vpn-status.py:ro
+
+      # --- Only needed in SQLite mode (default) -- persists the app's own
+      #     database (users, audit log) across container recreation. Not
+      #     used if DATABASE_URL in .env points at the postgres service
+      #     below instead.
+      - ./data:/app/data
+    # This app manipulates root-owned files under /etc/openvpn and runs
+    # easyrsa, so it runs as root inside the container (the image's
+    # default user). USE_SUDO=false in .env reflects that no privilege
+    # escalation is needed once already running as root.
+
+  # Optional: uncomment if you set DATABASE_URL in .env to a postgresql://
+  # URL pointing at this service instead of the default SQLite file.
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: openvpn-toolkit-db
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: vpnadmin
+  #     POSTGRES_PASSWORD: changeme
+  #     POSTGRES_DB: vpnadmin
+  #   volumes:
+  #     - ./pgdata:/var/lib/postgresql/data

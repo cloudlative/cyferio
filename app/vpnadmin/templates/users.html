@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Users — OpenVPN Toolkit{% endblock %}
+{% block content %}
+<h1>App users</h1>
+<p class="page-subtitle">Accounts that can log into this admin app (separate from VPN clients).</p>
+
+<div class="card">
+	<h2>Add a user</h2>
+	<form id="add-user-form">
+		<div class="form-row">
+			<div class="field">
+				<label for="u-username">Username</label>
+				<input type="text" id="u-username" required minlength="3">
+			</div>
+			<div class="field">
+				<label for="u-password">Password</label>
+				<input type="password" id="u-password" required minlength="8">
+			</div>
+			<div class="field">
+				<label for="u-role">Role</label>
+				<select id="u-role" style="padding:9px 12px;border-radius:8px;border:1px solid var(--border);font:inherit;width:100%">
+					<option value="viewer">Viewer (read-only)</option>
+					<option value="admin">Admin (full control)</option>
+				</select>
+			</div>
+			<button type="submit" class="btn-primary">Add user</button>
+		</div>
+	</form>
+</div>
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">All users</h2><button class="btn-secondary" id="refresh-btn">Refresh</button></div>
+	<div id="users-table"><p class="muted">Loading…</p></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const currentUsername = {{ user.username | tojson }};
+
+async function loadUsers() {
+	const el = document.getElementById("users-table");
+	try {
+		const users = await apiFetch("/api/users");
+		el.innerHTML = `<table>
+			<thead><tr><th>Username</th><th>Role</th><th>Active</th><th>Created</th><th class="text-right">Actions</th></tr></thead>
+			<tbody>${users.map(u => `
+				<tr data-id="${u.id}" data-username="${escapeHtml(u.username)}">
+					<td>${escapeHtml(u.username)} ${u.username === currentUsername ? '<span class="muted">(you)</span>' : ""}</td>
+					<td><span class="role-badge role-${u.role}">${u.role}</span></td>
+					<td>${u.is_active ? "Yes" : '<span style="color:var(--danger)">No</span>'}</td>
+					<td class="muted">${u.created_at ? u.created_at.slice(0, 10) : "—"}</td>
+					<td class="text-right">
+						<button class="btn-secondary role-toggle-btn">${u.role === "admin" ? "Make viewer" : "Make admin"}</button>
+						<button class="btn-secondary active-toggle-btn">${u.is_active ? "Deactivate" : "Activate"}</button>
+						<button class="btn-danger delete-btn">Delete</button>
+					</td>
+				</tr>`).join("")}</tbody>
+		</table>`;
+
+		el.querySelectorAll(".role-toggle-btn").forEach(btn => {
+			btn.addEventListener("click", async () => {
+				const row = btn.closest("tr");
+				const newRole = btn.textContent.includes("admin") ? "admin" : "viewer";
+				try {
+					await apiFetch(`/api/users/${row.dataset.id}`, { method: "PATCH", body: { role: newRole } });
+					toast("Role updated.");
+					loadUsers();
+				} catch (e) { toast(e.message, "error"); }
+			});
+		});
+		el.querySelectorAll(".active-toggle-btn").forEach(btn => {
+			btn.addEventListener("click", async () => {
+				const row = btn.closest("tr");
+				const activate = btn.textContent.includes("Activate");
+				try {
+					await apiFetch(`/api/users/${row.dataset.id}`, { method: "PATCH", body: { is_active: activate } });
+					toast(activate ? "User activated." : "User deactivated.");
+					loadUsers();
+				} catch (e) { toast(e.message, "error"); }
+			});
+		});
+		el.querySelectorAll(".delete-btn").forEach(btn => {
+			btn.addEventListener("click", async () => {
+				const row = btn.closest("tr");
+				const ok = await confirmDialog(`Delete user <strong>${row.dataset.username}</strong>? This can't be undone.`, { confirmLabel: "Delete" });
+				if (!ok) return;
+				try {
+					const result = await apiFetch(`/api/users/${row.dataset.id}`, { method: "DELETE" });
+					toast(result.message);
+					loadUsers();
+				} catch (e) { toast(e.message, "error"); }
+			});
+		});
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+document.getElementById("add-user-form").addEventListener("submit", async (ev) => {
+	ev.preventDefault();
+	const username = document.getElementById("u-username").value.trim();
+	const password = document.getElementById("u-password").value;
+	const role = document.getElementById("u-role").value;
+	try {
+		await apiFetch("/api/users", { method: "POST", body: { username, password, role } });
+		toast(`User '${username}' created.`);
+		document.getElementById("add-user-form").reset();
+		loadUsers();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+document.getElementById("refresh-btn").addEventListener("click", loadUsers);
+loadUsers();
+</script>
+{% endblock %}

@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Diagnostics — OpenVPN Toolkit{% endblock %}
+{% block content %}
+<h1>Diagnostics</h1>
+<p class="page-subtitle">Consistency checks and recent rejected connection attempts.</p>
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">Database consistency</h2><button class="btn-secondary" id="check-refresh">Refresh</button></div>
+	<div id="check-result"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">MAC-db formatting health</h2><button class="btn-secondary" id="lint-refresh">Refresh</button></div>
+	<div id="lint-result"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">Recent rejected connection attempts</h2><button class="btn-secondary" id="rejected-refresh">Refresh</button></div>
+	<div id="rejected-result"><p class="muted">Loading…</p></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function okBadge(ok) {
+	return ok
+		? '<span class="status-pill status-online">Clean</span>'
+		: '<span class="status-pill status-revoked">Issues found</span>';
+}
+
+async function loadCheck() {
+	const el = document.getElementById("check-result");
+	try {
+		const data = await apiFetch("/api/check");
+		let html = `<p>${okBadge(data.clean)}</p>`;
+		if (data.orphan_pki.length) {
+			html += `<p><strong>Valid cert but no MAC-db entry</strong> (cannot connect until added):</p><ul>${data.orphan_pki.map(n => `<li>${escapeHtml(n)}</li>`).join("")}</ul>`;
+		}
+		if (data.orphan_db.length) {
+			html += `<p><strong>MAC-db entry with no matching valid cert</strong> (stale):</p><ul>${data.orphan_db.map(n => `<li>${escapeHtml(n)}</li>`).join("")}</ul>`;
+		}
+		el.innerHTML = html;
+	} catch (e) {
+		el.innerHTML = `<p style="color:var(--danger)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+async function loadLint() {
+	const el = document.getElementById("lint-result");
+	try {
+		const data = await apiFetch("/api/lint-db");
+		let html = `<p>${okBadge(data.clean)} <span class="muted">${data.entries} entries, trailing newline ${data.trailing_newline_ok ? "OK" : "MISSING"}</span></p>`;
+		if (data.issues && data.issues.length) {
+			html += `<ul>${data.issues.map(i => `<li>${escapeHtml(i)}</li>`).join("")}</ul>`;
+		}
+		el.innerHTML = html;
+	} catch (e) {
+		el.innerHTML = `<p style="color:var(--danger)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+async function loadRejected() {
+	const el = document.getElementById("rejected-result");
+	try {
+		const data = await apiFetch("/api/status/rejected?limit=20");
+		if (data.length === 0) {
+			el.innerHTML = '<div class="empty-state">No rejected connection attempts found.</div>';
+			return;
+		}
+		el.innerHTML = `<table>
+			<thead><tr><th>Timestamp</th><th>Claimed name</th><th>MAC presented</th><th>OS</th><th>Source IP</th></tr></thead>
+			<tbody>${data.map(r => `
+				<tr>
+					<td>${escapeHtml(r.timestamp)}</td>
+					<td>${escapeHtml(r.claimed_name)}</td>
+					<td class="mono">${escapeHtml(r.mac_presented)}</td>
+					<td>${escapeHtml(r.os)}</td>
+					<td class="mono">${escapeHtml(r.source_ip)}</td>
+				</tr>`).join("")}</tbody>
+		</table>
+		<p class="muted" style="margin-top:12px">Repeated entries for the same name/IP are usually a client-side device/network issue, not necessarily an attack.</p>`;
+	} catch (e) {
+		el.innerHTML = `<p style="color:var(--danger)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+document.getElementById("check-refresh").addEventListener("click", loadCheck);
+document.getElementById("lint-refresh").addEventListener("click", loadLint);
+document.getElementById("rejected-refresh").addEventListener("click", loadRejected);
+loadCheck();
+loadLint();
+loadRejected();
+</script>
+{% endblock %}

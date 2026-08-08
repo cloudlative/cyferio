@@ -1,0 +1,74 @@
+"""
+Central configuration for the OpenVPN Toolkit web app.
+
+Everything is read from environment variables (see ../.env.example), with
+sane defaults for a co-located deployment (app running directly on the same
+box as openvpn-install.sh / vpn-status.py). No config value here is
+hardcoded to any specific person's server -- this is the open-source app,
+not a private deployment.
+"""
+import os
+import secrets
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+class Settings:
+    # --- Database -------------------------------------------------------
+    # Either sqlite:///./data/app.db (default) or a postgresql:// URL.
+    # SQLAlchemy handles both transparently through the same models.
+    DATABASE_URL: str = os.environ.get("DATABASE_URL", "sqlite:///./data/app.db")
+
+    # --- Sessions / auth --------------------------------------------------
+    # MUST be overridden in production via env var -- a random one is
+    # generated per-process as a safe fallback for local dev only (sessions
+    # won't survive a restart, which is a deliberate nudge to set a real one).
+    SECRET_KEY: str = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+    SESSION_COOKIE_NAME: str = os.environ.get("SESSION_COOKIE_NAME", "vpnadmin_session")
+    SESSION_MAX_AGE_SECONDS: int = int(os.environ.get("SESSION_MAX_AGE_SECONDS", 60 * 60 * 8))  # 8h
+
+    # --- Underlying toolkit scripts --------------------------------------
+    # Paths to the two CLI tools this app is a frontend for. Defaults match
+    # a fresh `git clone` of this repo placed at /opt/openvpn-toolkit; in a
+    # Docker deployment these are bind-mounted from the host (see
+    # docker-compose.yml) and these env vars should point at the mounted
+    # paths instead.
+    OPENVPN_INSTALL_SCRIPT: str = os.environ.get(
+        "OPENVPN_INSTALL_SCRIPT", "/opt/openvpn-toolkit/openvpn-install.sh"
+    )
+    VPN_STATUS_SCRIPT: str = os.environ.get(
+        "VPN_STATUS_SCRIPT", "/opt/openvpn-toolkit/vpn-status.py"
+    )
+
+    # Whether to prefix script invocations with `sudo`. Default true (the
+    # scripts require root for most operations). Set to false if this
+    # process itself already runs as root -- e.g. inside a container that
+    # was granted root to access the bind-mounted /etc/openvpn directory,
+    # where re-invoking sudo would be a needless extra dependency (and
+    # sudo may not even be installed in a minimal container image).
+    USE_SUDO: bool = _env_bool("USE_SUDO", True)
+
+    # Per-call timeout for shelling out to the scripts, in seconds. Add/revoke
+    # involve easyrsa key generation which can take a few seconds on slower
+    # hardware; status/list calls should be near-instant.
+    SCRIPT_TIMEOUT_SECONDS: int = int(os.environ.get("SCRIPT_TIMEOUT_SECONDS", 30))
+
+    # --- Server -----------------------------------------------------------
+    HOST: str = os.environ.get("HOST", "0.0.0.0")
+    PORT: int = int(os.environ.get("PORT", 8000))
+
+    # --- First-run bootstrap ------------------------------------------------
+    # If no admin user exists yet at startup, one is created from these (only
+    # used once -- change the password immediately after first login). Unset
+    # by default so a fresh deployment is forced to set these explicitly
+    # rather than silently shipping a guessable default credential.
+    BOOTSTRAP_ADMIN_USERNAME: str | None = os.environ.get("BOOTSTRAP_ADMIN_USERNAME")
+    BOOTSTRAP_ADMIN_PASSWORD: str | None = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD")
+
+
+settings = Settings()

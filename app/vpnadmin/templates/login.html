@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Log in — OpenVPN Toolkit{% endblock %}
+{% block content %}
+<div class="login-page">
+	<div class="login-box">
+		<h1>OpenVPN Toolkit</h1>
+		{% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+		<form method="post" action="/login">
+			<div class="field">
+				<label for="username">Username</label>
+				<input type="text" id="username" name="username" autocomplete="username" required autofocus>
+			</div>
+			<div class="field">
+				<label for="password">Password</label>
+				<input type="password" id="password" name="password" autocomplete="current-password" required>
+			</div>
+			<button type="submit" class="btn-primary">Log in</button>
+		</form>
+	</div>
+</div>
+{% endblock %}

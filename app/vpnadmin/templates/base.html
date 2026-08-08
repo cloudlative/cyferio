@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>{% block title %}OpenVPN Toolkit{% endblock %}</title>
+	<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+	{% if user %}
+	<header class="topbar">
+		<div class="brand">OpenVPN Toolkit</div>
+		<nav>
+			<a href="/" class="{{ 'active' if request.url.path == '/' }}">Dashboard</a>
+			<a href="/clients" class="{{ 'active' if request.url.path == '/clients' }}">Clients</a>
+			<a href="/clients/revoked" class="{{ 'active' if request.url.path == '/clients/revoked' }}">Revoked</a>
+			<a href="/diagnostics" class="{{ 'active' if request.url.path == '/diagnostics' }}">Diagnostics</a>
+			{% if is_admin %}
+			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}">Users</a>
+			{% endif %}
+		</nav>
+		<div class="who">
+			<span>{{ user.username }} <span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span></span>
+			<form action="/logout" method="post" style="display:inline">
+				<button type="submit" class="link-button">Log out</button>
+			</form>
+		</div>
+	</header>
+	{% endif %}
+
+	<main class="content">
+		{% block content %}{% endblock %}
+	</main>
+
+	<div id="toast-container"></div>
+	<script src="/static/app.js"></script>
+	{% block scripts %}{% endblock %}
+</body>
+</html>

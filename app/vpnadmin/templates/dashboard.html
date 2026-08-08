@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — OpenVPN Toolkit{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<p class="page-subtitle">Live overview of who's connected to the VPN right now.</p>
+
+<div class="stat-grid" id="stat-grid">
+	<div class="stat-card"><div class="stat-value" id="stat-online">—</div><div class="stat-label">Online now</div></div>
+	<div class="stat-card"><div class="stat-value" id="stat-total">—</div><div class="stat-label">Total clients</div></div>
+	<div class="stat-card"><div class="stat-value" id="stat-revoked">—</div><div class="stat-label">Revoked</div></div>
+	<div class="stat-card"><div class="stat-value" id="stat-rejected">—</div><div class="stat-label">Recent rejections</div></div>
+</div>
+
+<div class="card">
+	<div class="toolbar">
+		<h2 style="margin:0">Connected now</h2>
+		<button class="btn-secondary" id="refresh-btn">Refresh</button>
+	</div>
+	<div id="connected-table"><p class="muted">Loading…</p></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadDashboard() {
+	try {
+		const [connected, all, revoked, rejected] = await Promise.all([
+			apiFetch("/api/status"),
+			apiFetch("/api/status/all"),
+			apiFetch("/api/clients/revoked"),
+			apiFetch("/api/status/rejected?limit=20"),
+		]);
+
+		document.getElementById("stat-online").textContent = connected.length;
+		document.getElementById("stat-total").textContent = all.length;
+		document.getElementById("stat-revoked").textContent = revoked.length;
+		document.getElementById("stat-rejected").textContent = rejected.length;
+
+		const el = document.getElementById("connected-table");
+		if (connected.length === 0) {
+			el.innerHTML = '<div class="empty-state">No one is currently connected.</div>';
+			return;
+		}
+		el.innerHTML = `<table>
+			<thead><tr><th>Name</th><th>Source IP</th><th>OS</th><th>Connected since</th><th>Duration</th><th>RX / TX</th></tr></thead>
+			<tbody>${connected.map(c => `
+				<tr>
+					<td>${escapeHtml(c.name)}</td>
+					<td class="mono">${escapeHtml(c.source_ip)}</td>
+					<td>${escapeHtml(c.os)}</td>
+					<td>${escapeHtml(c.connected_since)}</td>
+					<td>${escapeHtml(c.duration)}</td>
+					<td class="mono">${escapeHtml(c.bytes_received_h)} / ${escapeHtml(c.bytes_sent_h)}</td>
+				</tr>`).join("")}</tbody>
+		</table>`;
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+document.getElementById("refresh-btn").addEventListener("click", loadDashboard);
+loadDashboard();
+</script>
+{% endblock %}

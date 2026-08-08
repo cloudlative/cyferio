@@ -15,6 +15,7 @@ A small, self-contained OpenVPN road-warrior installer and management toolkit fo
 | `vpn-status.py` | Live connection status, all-clients view, bandwidth, rejected-attempt auditing |
 | `vpn-tools.conf.example` | Copy to `/etc/openvpn/vpn-tools.conf` to override any default path/setting |
 | `completions/*.bash` | Optional bash tab-completion for both tools' CLI flags |
+| `app/` | Optional web admin UI (FastAPI) for non-technical users — see [app/README.md](app/README.md) |
 
 ## Quick start
 

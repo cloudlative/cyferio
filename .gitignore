@@ -17,3 +17,9 @@ vpn-tools.conf
 # Python
 __pycache__/
 *.pyc
+.venv/
+
+# app/ -- web app runtime artifacts, never the code itself
+app/.env
+app/data/
+app/pgdata/
