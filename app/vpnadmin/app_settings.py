@@ -24,12 +24,40 @@ multi-worker deployment would need a shared cache instead (documented as a
 known limitation, not silently wrong -- a stale worker still falls back to
 correct-but-outdated values, never garbage).
 """
+import hashlib
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from .config import settings as env_settings
 from .models import AppSettings
+
+_STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _compute_static_version() -> str:
+    """Short content hash of the static/ dir, computed once at import time
+    (not per-request -- the image is immutable once built, so the content
+    can't change without a restart anyway). Used as a `?v=` cache-busting
+    query string on <link>/<script> tags in base.html.
+
+    Needed because this app sits behind Cloudflare, which caches /static/*
+    at the edge for hours regardless of what the origin actually serves
+    (a plain path with no querystring is one cache key forever) -- a CSS/JS
+    fix can be live in the running container and still invisible to every
+    visitor until the edge cache happens to expire. A version query string
+    changes the cache key on every release that touches a static file, so
+    Cloudflare treats it as a new object instead of serving the stale HIT.
+    """
+    h = hashlib.sha1()
+    for path in sorted(_STATIC_DIR.rglob("*")):
+        if path.is_file():
+            h.update(path.read_bytes())
+    return h.hexdigest()[:10]
+
+
+static_version = _compute_static_version()
 
 # The placeholder returned in place of a real SMTP password by GET
 # /api/settings -- never round-trip the actual secret to the browser. The
@@ -102,6 +130,7 @@ def apply_settings_globals(templates) -> None:
     copied string), later changes to its attributes are visible on the
     very next render with no extra wiring."""
     templates.env.globals["app_settings"] = runtime
+    templates.env.globals["static_version"] = static_version
 
 
 def prune_audit_log(db: Session) -> int:
