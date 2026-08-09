@@ -1,0 +1,33 @@
+# Static routing config for Traefik (see docker-compose.yml's `traefik`
+# service, --providers.file). Used instead of Traefik's Docker-socket
+# provider (the usual docker-compose-labels pattern) because Traefik's
+# bundled Docker client is incompatible with this host's Docker Engine
+# version -- it hardcodes an old API version (1.24) that this Engine's
+# MinAPIVersion (1.40) rejects outright, and DOCKER_API_VERSION isn't
+# honored by Traefik's provider even on the latest v3.x. The file provider
+# sidesteps this entirely (no docker.sock mount needed at all, which is
+# also one less container with access to the Docker socket -- a modest
+# security win) since this app doesn't need dynamic service discovery: it's
+# one fixed backend.
+#
+# NOTE: unlike docker-compose.yml, Traefik's file provider does not expand
+# ${VAR} from .env -- the hostname below is hardcoded and must be kept in
+# sync with APP_DOMAIN in .env by hand if that ever changes.
+http:
+  routers:
+    openvpn-toolkit:
+      rule: "Host(`vpn-mgmt.apkamuaalij.com`)"
+      entryPoints:
+        - websecure
+      service: openvpn-toolkit
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    openvpn-toolkit:
+      loadBalancer:
+        servers:
+          # "app" resolves via Docker Compose's built-in DNS to the `app`
+          # service on the shared compose network -- no service discovery
+          # needed.
+          - url: "http://app:8000"

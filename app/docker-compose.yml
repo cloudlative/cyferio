@@ -1,11 +1,16 @@
 services:
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3.5
     container_name: openvpn-toolkit-traefik
     restart: unless-stopped
     command:
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
+      # File provider (see traefik/dynamic.yml), not the usual Docker-socket
+      # provider -- this host's Docker Engine enforces a MinAPIVersion that
+      # Traefik's bundled Docker client can't satisfy (see dynamic.yml's
+      # comment for the full story). One fixed backend, so static routing
+      # config is simpler here anyway, and avoids mounting docker.sock at all.
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
       # HTTP -> HTTPS redirect, applied globally at the entrypoint so it
@@ -30,8 +35,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-acme:/letsencrypt
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic/dynamic.yml:ro
     env_file: .env
 
   app:
@@ -46,13 +51,8 @@ services:
     # IP) alongside Traefik, that would leave an unauthenticated bypass.
     # ports:
     #   - "10.8.0.1:8000:8000"
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.openvpn-toolkit.rule=Host(`${APP_DOMAIN}`)
-      - traefik.http.routers.openvpn-toolkit.entrypoints=websecure
-      - traefik.http.routers.openvpn-toolkit.tls=true
-      - traefik.http.routers.openvpn-toolkit.tls.certresolver=letsencrypt
-      - traefik.http.services.openvpn-toolkit.loadbalancer.server.port=8000
+    # Routing (Host rule, TLS, backend port) is defined in traefik/dynamic.yml
+    # rather than labels here -- see that file's comment for why.
     # openvpn-install.sh unconditionally probes /dev/net/tun at startup
     # (even for read-only commands like --list/--check) as a sanity check
     # that OpenVPN could run on this host -- pass the device through rather
