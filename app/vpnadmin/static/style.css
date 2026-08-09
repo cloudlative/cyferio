@@ -247,6 +247,25 @@ tr.row-online td:first-child { box-shadow: inset 3px 0 0 var(--success-strong); 
 .status-revoked { background: var(--danger-bg); color: var(--danger-text); }
 .status-revoked::before { background: var(--danger-strong); box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.2); }
 
+/* Dashboard Recent Activity table (see dashboard.html) -- a pill for the
+   humanized action label (same visual weight/shape as .role-badge, just
+   neutral-colored since there's no admin/viewer-style semantic to color
+   by here), and de-emphasized timestamp/detail columns so "Who" and
+   "Action" read as the primary columns at a glance. */
+.activity-action {
+	display: inline-block;
+	font-size: 0.74rem;
+	font-weight: 700;
+	padding: 3px 10px;
+	border-radius: 999px;
+	background: var(--surface-alt);
+	color: var(--text);
+	border: 1px solid var(--border-light);
+	white-space: nowrap;
+}
+.activity-when { color: var(--text-muted); font-size: 0.85rem; }
+.activity-detail { color: var(--text-muted); font-size: 0.87rem; }
+
 button, .btn {
 	display: inline-flex;
 	align-items: center;

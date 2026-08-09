@@ -63,6 +63,63 @@
 
 {% block scripts %}
 <script>
+// Maps every action string routes/*.py's log_action() actually logs (the
+// complete set -- grep 'log_action(' vpnadmin/routes/*.py to re-verify if
+// a new one is ever added) to a human-readable label for the Dashboard's
+// Recent Activity table. Keep this in sync with that grep, not a guess.
+const ACTION_LABELS = {
+	add_client: "Added VPN client",
+	revoke_client: "Revoked VPN client",
+	restore_client: "Restored VPN client",
+	purge_revoked: "Purged revoked client files",
+	add_mac: "Added MAC address",
+	remove_mac: "Removed MAC address",
+	email_ovpn: "Emailed .ovpn profile",
+	create_user: "Created user account",
+	update_user: "Updated user account",
+	update_own_profile: "Updated own profile",
+	delete_user: "Deleted user account",
+	permanently_delete_user: "Permanently deleted user account",
+	create_team: "Created team",
+	delete_team: "Deleted team",
+	add_team_member: "Added team member",
+	remove_team_member: "Removed team member",
+	update_settings: "Updated app settings",
+	test_smtp_settings: "Sent SMTP test email",
+};
+
+// Field-name tokens that show up in the semicolon/comma-joined "changes"
+// lists logged by update_user/update_own_profile (see users.py) -- these
+// are the only detail strings built from bare field names rather than
+// already-prose script/mailer output, so this relabeling is deliberately
+// scoped to those two actions (see humanizeDetail below) rather than
+// applied blindly to every action's detail text.
+const FIELD_LABELS = {
+	is_active: "active", first_name: "first name", last_name: "last name",
+	gender: "gender", teams: "teams", password: "password",
+};
+
+function humanizeDetail(action, detail) {
+	if (!detail) return "";
+	if (action !== "update_user" && action !== "update_own_profile") {
+		// Every other action's detail is already prose -- either the CLI
+		// script's own stdout message (e.g. "alice added.") or an
+		// explicitly-written sentence (mailer send result, role=x on
+		// create_user, etc.) -- just clean up any "old->new" arrows.
+		return detail.replace(/->/g, " → ");
+	}
+	const sep = detail.includes(";") ? ";" : ",";
+	return detail.split(sep).map(part => {
+		part = part.trim();
+		const arrowMatch = part.match(/^(\w+)\s+(.+)->(.+)$/);
+		if (arrowMatch) {
+			const [, field, from, to] = arrowMatch;
+			return `${FIELD_LABELS[field] || field}: ${from} → ${to}`;
+		}
+		return FIELD_LABELS[part] || part;
+	}).join(", ");
+}
+
 async function loadDashboard() {
 	try {
 		const data = await apiFetch("/api/dashboard");
@@ -124,15 +181,18 @@ async function loadDashboard() {
 			if (entries.length === 0) {
 				activityEl.innerHTML = '<div class="empty-state">No activity recorded yet.</div>';
 			} else {
-				activityEl.innerHTML = `<table>
-					<thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
+				activityEl.innerHTML = `<table class="activity-table">
+					<thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th><th>Result</th></tr></thead>
 					<tbody>${entries.map(e => `
 						<tr>
-							<td class="mono">${escapeHtml(new Date(e.timestamp).toLocaleString())}</td>
+							<td class="mono activity-when">${escapeHtml(new Date(e.timestamp).toLocaleString())}</td>
 							<td>${escapeHtml(e.username)}</td>
-							<td>${escapeHtml(e.action)}</td>
+							<td><span class="activity-action">${escapeHtml(ACTION_LABELS[e.action] || e.action)}</span></td>
 							<td>${escapeHtml(e.target || '—')}</td>
-							<td>${escapeHtml(e.detail || '')}${e.success ? '' : ' <span class="muted">(failed)</span>'}</td>
+							<td class="activity-detail">${escapeHtml(humanizeDetail(e.action, e.detail))}</td>
+							<td>${e.success
+								? '<span class="status-pill status-online">Success</span>'
+								: '<span class="status-pill status-revoked">Failed</span>'}</td>
 						</tr>`).join("")}</tbody>
 				</table>`;
 			}
