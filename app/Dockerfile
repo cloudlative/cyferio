@@ -19,7 +19,15 @@ COPY requirements.txt .
 # (see .github/workflows/build.yml's Trivy scan) with fixes already
 # released upstream.
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements.txt \
+    # The base image also carries a bundled pip wheel under ensurepip/
+    # (for `python -m ensurepip`/venv bootstrapping) -- an old pip version
+    # with its own vendored, outdated setuptools reference baked into its
+    # METADATA. This app never runs ensurepip or creates venvs at runtime
+    # (dependencies are all installed above, at build time), so the wheel
+    # is dead weight that exists only to trip a vulnerability scanner over
+    # code that's never executed. Remove it.
+    && rm -rf /usr/local/lib/python3.12/ensurepip/_bundled
 
 COPY main.py .
 COPY vpnadmin ./vpnadmin

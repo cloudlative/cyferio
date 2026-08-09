@@ -1,0 +1,24 @@
+# See .github/workflows/build.yml's Trivy scan job (trivyignores input).
+#
+# Every entry here is investigated and justified individually -- this file
+# is for genuinely unreachable findings only, never a blanket suppression.
+# Re-check each entry whenever the base image or requirements.txt changes;
+# don't just keep adding to it.
+
+# GHSA-6v7p-g79w-8964 -- msgpack 1.1.2, HIGH.
+# This is pip's own vendored copy (site-packages/pip/_vendor/msgpack),
+# bundled inside the python:3.12-slim base image's pip installation for
+# pip's *own* internal HTTP-cache serialization. This app's code never
+# imports msgpack, and pip itself is only invoked at build time (`pip
+# install -r requirements.txt` in the Dockerfile) -- it is not present in
+# the running process, never receives network/user input at runtime, and
+# ships in the image purely as a byproduct of how pip is packaged.
+GHSA-6v7p-g79w-8964
+
+# CVE-2025-47273 -- setuptools 70.3.0, HIGH.
+# Trivy is parsing pip/_vendor/vendor.txt, a plain-text manifest pip ships
+# documenting which versions it vendors -- it is not an installed package
+# (confirmed: no setuptools files exist anywhere in the image, `python3 -c
+# "import setuptools"` fails with ModuleNotFoundError). False positive from
+# text-file parsing, not a real installed dependency.
+CVE-2025-47273
