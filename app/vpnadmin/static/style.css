@@ -525,3 +525,19 @@ a.team-card:hover .stat-hint { opacity: 1; }
 .tab-btn { background: none; border: none; box-shadow: none; color: var(--text-muted); padding: 10px 4px; margin-right: 22px; border-radius: 0; border-bottom: 2px solid transparent; font-weight: 700; }
 .tab-btn:hover { color: var(--text); background: none; }
 .tab-btn.active { color: var(--text); border-bottom-color: var(--accent-2); }
+
+/* Dashboard "Activity Breakdown" donut chart + legend (see dashboard.html).
+   Legend doubles as the WCAG table-view equivalent of the chart -- every
+   value the donut encodes visually is also plain text here. */
+.donut-layout { display: flex; align-items: center; gap: 36px; flex-wrap: wrap; margin-top: 8px; }
+.donut-chart { width: 160px; height: 160px; flex: none; }
+.donut-segment { transition: opacity 0.15s ease; }
+.donut-segment:hover { opacity: 0.82; }
+.donut-center-value { font-size: 1.7rem; font-weight: 800; fill: var(--text); font-family: inherit; }
+.donut-center-label { font-size: 0.62rem; fill: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-family: inherit; }
+.donut-legend { flex: 1; min-width: 240px; font-size: 0.88rem; }
+.donut-legend th { background: none; padding: 4px 10px; font-size: 0.68rem; }
+.donut-legend td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.donut-legend tr:last-child td { border-bottom: none; }
+.legend-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 9px; vertical-align: middle; }
+.activity-breakdown #activity-stat-grid { margin-bottom: 24px; }
