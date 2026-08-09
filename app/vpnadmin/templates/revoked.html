@@ -14,11 +14,9 @@
 	</div>
 	<p class="muted" style="margin-bottom:16px">
 		Revoking a client is permanent by design — a revoked certificate can never be reactivated, only replaced.
-		Two separate actions are available here, and they do very different things:
 		<strong>Restore</strong> issues a brand-new certificate under the same name (a fresh identity that
-		happens to share a name, not the old one coming back), while <strong>Permanently Delete</strong> only
-		clears out the old certificate's leftover files on disk — it never removes the revocation record itself,
-		which stays forever for audit history.
+		happens to share a name, not the old one coming back); the revocation record itself always stays,
+		for audit history.
 	</p>
 	<div id="revoked-table"><p class="muted">Loading…</p></div>
 </div>
@@ -62,12 +60,8 @@ async function loadRevoked() {
 		}
 		const sorted = [...lastRevoked].sort((a, b) => (b.revoked_at || "").localeCompare(a.revoked_at || ""));
 		el.innerHTML = `
-			${isAdmin ? `<div class="form-row" style="margin-bottom:14px">
-				<button class="btn-danger btn-sm" id="purge-selected" disabled title="Removes leftover certificate/key files only -- the revocation record always stays.">Permanently Delete Selected</button>
-			</div>` : ""}
 			<table>
 			<thead><tr>
-				${isAdmin ? '<th style="width:1%"></th>' : ""}
 				<th>Name</th>
 				<th>Revoked On</th>
 				<th title="Whether this client still has a leftover entry in the MAC-binding database (openvpn_db.txt) that should be cleaned up.">MAC DB Entry</th>
@@ -76,7 +70,6 @@ async function loadRevoked() {
 			</tr></thead>
 			<tbody>${sorted.map(r => `
 				<tr class="row-dim" data-name="${escapeHtml(r.name)}">
-					${isAdmin ? `<td>${r.files_present ? `<input type="checkbox" class="purge-checkbox" value="${escapeHtml(r.name)}" title="Select for permanent file deletion">` : ""}</td>` : ""}
 					<td>${escapeHtml(r.name)}</td>
 					<td class="mono">${escapeHtml(r.revoked_at)}</td>
 					<td>${r.stale_db_entry
@@ -92,29 +85,6 @@ async function loadRevoked() {
 		</table>`;
 
 		if (isAdmin) {
-			const purgeBtn = document.getElementById("purge-selected");
-			function updatePurgeState() {
-				const n = el.querySelectorAll(".purge-checkbox:checked").length;
-				purgeBtn.disabled = n === 0;
-				purgeBtn.textContent = n > 0 ? `Permanently Delete Selected (${n})` : "Permanently Delete Selected";
-			}
-			el.querySelectorAll(".purge-checkbox").forEach(cb => cb.addEventListener("change", updatePurgeState));
-			purgeBtn.addEventListener("click", async () => {
-				const names = [...el.querySelectorAll(".purge-checkbox:checked")].map(cb => cb.value);
-				if (names.length === 0) return;
-				const ok = await confirmDialog(`Permanently delete leftover certificate/key files for ${names.length} revoked client${names.length === 1 ? "" : "s"}? The revocation record itself is not affected either way. This cannot be undone.`, { confirmLabel: "Delete Permanently" });
-				if (!ok) return;
-				purgeBtn.disabled = true;
-				try {
-					const result = await apiFetch("/api/clients/revoked/purge", { method: "POST", body: { names } });
-					const failed = result.results.filter(r => !r.ok).length;
-					toast(failed === 0 ? `${names.length} client(s) purged.` : `Purged ${names.length - failed}, ${failed} failed.`, failed === 0 ? "success" : "error");
-					loadRevoked();
-				} catch (e) {
-					toast(e.message, "error");
-				}
-			});
-
 			el.querySelectorAll(".restore-btn").forEach(btn => {
 				btn.addEventListener("click", () => openRestoreDialog(btn.closest("tr").dataset.name));
 			});
