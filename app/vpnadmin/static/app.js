@@ -579,6 +579,24 @@ function attachInlineValidation(inputEl, validateFn) {
 	return { check: run };
 }
 
+// Human-formatted session duration for display -- e.g. "2h 14m", "45m",
+// "12s". Mirrors vpn-status.py's fmt_duration() in spirit (both take
+// seconds), but a shorter/denser format tuned for a table column rather
+// than that script's terminal-table "0d 2h 14m" style: omits leading
+// zero units instead of always showing all three, and drops down to
+// seconds-only for sub-minute sessions rather than showing "0m".
+function fmtDuration(totalSeconds) {
+	const seconds = Math.max(0, Math.trunc(Number(totalSeconds) || 0));
+	const d = Math.floor(seconds / 86400);
+	const h = Math.floor((seconds % 86400) / 3600);
+	const m = Math.floor((seconds % 3600) / 60);
+	const s = seconds % 60;
+	if (d > 0) return `${d}d ${h}h`;
+	if (h > 0) return `${h}h ${m}m`;
+	if (m > 0) return `${m}m ${s}s`;
+	return `${s}s`;
+}
+
 function escapeHtml(s) {
 	const div = document.createElement("div");
 	div.textContent = s == null ? "" : String(s);

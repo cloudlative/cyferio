@@ -265,6 +265,19 @@ def status_rejected(limit: int = 20) -> list[dict]:
         _parse_json_or_raise(_run_status_script("--rejected-connections", str(limit), "--json")))
 
 
+def status_session_history(limit: int = 20) -> list[dict]:
+    """Connection History page's data source -- past (ended) sessions, each
+    with connected/disconnected timestamps, duration, source IP, and byte
+    counts. See vpn-status.py's cmd_session_history / host-scripts/
+    policy_lib.py's append_session_history for what's actually in each
+    row. Not part of the shared dashboard snapshot below (that snapshot is
+    scoped to what Dashboard/Clients/Revoked/Diagnostics need on every
+    load; Connection History is its own page with its own fetch, same as
+    e.g. /api/lint-db)."""
+    return _cached(("status_session_history", limit), lambda:
+        _parse_json_or_raise(_run_status_script("--session-history", str(limit), "--json")))
+
+
 # --- Combined dashboard summary ------------------------------------------
 
 def dashboard_summary(rejected_limit: int = 20) -> dict:

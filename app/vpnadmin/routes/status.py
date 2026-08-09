@@ -34,6 +34,21 @@ def get_rejected(limit: int = Query(20, ge=1, le=500), _: User = Depends(require
         raise HTTPException(status_code=502, detail=e.message)
 
 
+@router.get("/session-history")
+def get_session_history(limit: int = Query(20, ge=1, le=500), _: User = Depends(require_user)):
+    """Connection History page. Same access level as /rejected (any
+    logged-in user, admin or viewer) -- this is read-only historical data,
+    not a mutating endpoint, matching Diagnostics' own require_user gate.
+    Filtering by client name is done client-side against this same window,
+    same as Diagnostics' rejected-connections filters (see that page's
+    populateRejectedFilters/renderRejectedTable for the pattern this
+    mirrors)."""
+    try:
+        return cli.status_session_history(limit)
+    except ScriptError as e:
+        raise HTTPException(status_code=502, detail=e.message)
+
+
 # Deliberately outside the /api/status prefix -- this is a cross-cutting
 # summary (status + revoked clients), not purely a "status" resource. Kept
 # in this module since it's a thin composition of the functions above.

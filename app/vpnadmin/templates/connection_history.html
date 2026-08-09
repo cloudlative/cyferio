@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Connection History — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:22px">
+	<div class="toolbar-title"><h1 style="margin:0">Connection History</h1></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-16px">Past connection sessions per VPN client -- when they connected, when they disconnected, and how long the session lasted. For who's online right now, see the Dashboard.</p>
+
+<div class="card" id="session-history">
+	<div class="toolbar"><h2 style="margin:0">Session History</h2><button class="btn-secondary" id="session-history-refresh">Refresh</button></div>
+	<div class="form-row" style="margin-bottom:16px;gap:12px">
+		<div class="field" style="flex:1;min-width:180px">
+			<label for="session-history-filter-name">VPN Profile</label>
+			<select id="session-history-filter-name"><option value="">All</option></select>
+		</div>
+	</div>
+	<div id="session-history-result"><p class="muted">Loading…</p></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let sessionHistoryEntries = [];
+
+function populateSessionHistoryFilters(data) {
+	const nameSel = document.getElementById("session-history-filter-name");
+	const prevName = nameSel.value;
+	const names = [...new Set(data.map(r => r.client))].sort();
+	nameSel.innerHTML = '<option value="">All</option>' + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+	// Preserve the operator's current filter selection across a refresh,
+	// as long as that value still exists in the new data.
+	if (names.includes(prevName)) nameSel.value = prevName;
+}
+
+const SESSION_HISTORY_PAGE_SIZE = 20;
+let sessionHistoryPage = 1;
+
+function renderSessionHistoryTable() {
+	const el = document.getElementById("session-history-result");
+	const nameFilter = document.getElementById("session-history-filter-name").value;
+	const data = sessionHistoryEntries.filter(r => !nameFilter || r.client === nameFilter);
+
+	if (sessionHistoryEntries.length === 0) {
+		el.innerHTML = '<div class="empty-state">No connection history found yet.</div>';
+		return;
+	}
+	if (data.length === 0) {
+		el.innerHTML = '<div class="empty-state">No sessions match the selected filter.</div>';
+		return;
+	}
+
+	const totalPages = Math.max(1, Math.ceil(data.length / SESSION_HISTORY_PAGE_SIZE));
+	if (sessionHistoryPage > totalPages) sessionHistoryPage = totalPages;
+	if (sessionHistoryPage < 1) sessionHistoryPage = 1;
+	const start = (sessionHistoryPage - 1) * SESSION_HISTORY_PAGE_SIZE;
+	const pageRows = data.slice(start, start + SESSION_HISTORY_PAGE_SIZE);
+
+	el.innerHTML = `<table>
+		<thead><tr>
+			<th>Client</th><th>Connected At</th><th>Disconnected At</th><th>Duration</th><th>Source IP</th>
+		</tr></thead>
+		<tbody>${pageRows.map(r => `<tr>
+				<td>${escapeHtml(r.client)}</td>
+				<td class="mono">${escapeHtml(r.connected_at || "n/a")}</td>
+				<td class="mono">${escapeHtml(r.disconnected_at || "n/a")}</td>
+				<td>${escapeHtml(fmtDuration(r.duration_seconds))}</td>
+				<td class="mono">${escapeHtml(r.source_ip || "n/a")}</td>
+			</tr>`).join("")}</tbody>
+	</table>
+	<div class="toolbar" style="margin-top:14px">
+		<span class="muted" style="font-size:0.85rem">Showing ${start + 1}–${Math.min(start + SESSION_HISTORY_PAGE_SIZE, data.length)} of ${data.length}</span>
+		<div class="form-row" style="gap:8px">
+			<button type="button" class="btn-secondary btn-sm" id="session-history-prev-page" ${sessionHistoryPage <= 1 ? "disabled" : ""}>← Prev</button>
+			<span class="muted" style="font-size:0.85rem;align-self:center">Page ${sessionHistoryPage} of ${totalPages}</span>
+			<button type="button" class="btn-secondary btn-sm" id="session-history-next-page" ${sessionHistoryPage >= totalPages ? "disabled" : ""}>Next →</button>
+		</div>
+	</div>`;
+
+	const prevBtn = document.getElementById("session-history-prev-page");
+	const nextBtn = document.getElementById("session-history-next-page");
+	if (prevBtn) prevBtn.addEventListener("click", () => { sessionHistoryPage -= 1; renderSessionHistoryTable(); });
+	if (nextBtn) nextBtn.addEventListener("click", () => { sessionHistoryPage += 1; renderSessionHistoryTable(); });
+}
+
+async function loadSessionHistory() {
+	const el = document.getElementById("session-history-result");
+	try {
+		// A larger window than the table's own page size -- the VPN Profile
+		// filter is only useful if there's enough history behind it to
+		// filter through (500 is the API's own cap, same as /rejected).
+		sessionHistoryEntries = await apiFetch("/api/status/session-history?limit=500");
+		populateSessionHistoryFilters(sessionHistoryEntries);
+		sessionHistoryPage = 1;
+		renderSessionHistoryTable();
+	} catch (e) {
+		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+document.getElementById("session-history-filter-name").addEventListener("change", () => { sessionHistoryPage = 1; renderSessionHistoryTable(); });
+document.getElementById("session-history-refresh").addEventListener("click", loadSessionHistory);
+document.getElementById("refresh-btn").addEventListener("click", loadSessionHistory);
+loadSessionHistory();
+</script>
+{% endblock %}

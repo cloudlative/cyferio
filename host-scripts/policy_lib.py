@@ -18,8 +18,15 @@ Two JSON files this module deals with:
   client_usage.json   -- weekly bandwidth usage. Read here (by the
                           connect script, to check quota) AND written here
                           (by the disconnect script, after each session).
+  session_history.jsonl -- one JSON object per ended session, one per
+                          line, APPEND-ONLY. Written only by the disconnect
+                          script (see append_session_history()); never read
+                          by these host scripts themselves -- the web app's
+                          Connection History page reads it via
+                          vpn-status.py, the same way it already reads
+                          openvpn.log for rejected-connection history.
 
-Both files use an atomic write-to-tmp-then-os.rename pattern guarded by an
+The two JSON (non-JSONL) files use an atomic write-to-tmp-then-os.rename pattern guarded by an
 flock-based lock (see _locked()/atomic_write_json()) so the app (writing
 client_policy.json from a different process/container) and these scripts
 (writing client_usage.json -- possibly two sessions disconnecting at the
@@ -40,6 +47,7 @@ DEFAULTS = {
     # atomic_write_json docstring and README.md's setup section for why.
     "CLIENT_POLICY_FILE": "/etc/openvpn/server/policy/client_policy.json",
     "CLIENT_USAGE_FILE": "/etc/openvpn/server/policy/client_usage.json",
+    "SESSION_HISTORY_FILE": "/etc/openvpn/server/policy/session_history.jsonl",
     "MAXMIND_LICENSE_KEY": "",
     "MAXMIND_DB_PATH": "/etc/openvpn/server/GeoLite2-Country.mmdb",
     "DB_FILE": "/etc/openvpn/server/openvpn_db.txt",
@@ -63,6 +71,7 @@ def load_config():
 CFG = load_config()
 CLIENT_POLICY_FILE = CFG["CLIENT_POLICY_FILE"]
 CLIENT_USAGE_FILE = CFG["CLIENT_USAGE_FILE"]
+SESSION_HISTORY_FILE = CFG["SESSION_HISTORY_FILE"]
 
 
 @contextmanager
@@ -234,6 +243,39 @@ def add_usage(name, bytes_delta):
         all_usage[name] = entry
         atomic_write_json(CLIENT_USAGE_FILE, all_usage)
     return all_usage[name]
+
+
+def append_session_history(record):
+    """Appends one ended-session record to SESSION_HISTORY_FILE as a single
+    JSON line. Append-only (no read-modify-write of the whole file, unlike
+    atomic_write_json above) -- a JSONL file is naturally append-safe under
+    an exclusive lock as long as each write is one line ending in "\\n" and
+    the OS append is used (O_APPEND), which is what this does. Locked with
+    the same _locked() helper (and therefore the same nobody-writable
+    lock-file handling) as client_policy.json/client_usage.json, for
+    consistency with them and so a concurrent disconnect-script invocation
+    (two sessions ending at once) can't interleave partial lines.
+
+    Silently creates the file (and its directory, best-effort) on first
+    use, same nobody:nogroup 0664 default as atomic_write_json's
+    brand-new-file case -- see that function's docstring for why."""
+    with _locked(SESSION_HISTORY_FILE):
+        d = os.path.dirname(SESSION_HISTORY_FILE) or "."
+        _ensure_dir_writable_by_nobody(d)
+        is_new = not os.path.exists(SESSION_HISTORY_FILE)
+        fd = os.open(SESSION_HISTORY_FILE, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o664)
+        try:
+            if is_new:
+                try:
+                    import grp
+                    import pwd
+                    os.fchown(fd, pwd.getpwnam("nobody").pw_uid, grp.getgrnam("nogroup").gr_gid)
+                except (OSError, KeyError):
+                    pass
+            line = (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
+            os.write(fd, line)
+        finally:
+            os.close(fd)
 
 
 # OpenVPN's own IV_PLAT env var -> this project's allowed_os vocabulary.

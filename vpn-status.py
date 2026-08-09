@@ -8,6 +8,7 @@ Usage:
   python3 vpn-status.py                               Currently-connected clients
   python3 vpn-status.py --all-clients                 All known clients (online + offline), with last-seen
   python3 vpn-status.py --rejected-connections [N]    Last N rejected connection attempts (default 20)
+  python3 vpn-status.py --session-history [N]         Last N ended connection sessions (default 20)
   python3 vpn-status.py --json                        Any of the above, as JSON instead of a table
 
 Config: reads /etc/openvpn/vpn-tools.conf if present (KEY=VALUE lines),
@@ -44,6 +45,7 @@ DEFAULTS = {
     "DB_FILE": "/etc/openvpn/server/openvpn_db.txt",
     "STATUS_LOG": "/var/log/openvpn/openvpn-status.log",
     "CONN_LOG": "/etc/openvpn/server/openvpn.log",
+    "SESSION_HISTORY_FILE": "/etc/openvpn/server/policy/session_history.jsonl",
 }
 
 
@@ -64,6 +66,7 @@ CFG = load_config()
 STATUS_LOG = CFG["STATUS_LOG"]
 CONN_LOG = CFG["CONN_LOG"]
 DB_FILE = CFG["DB_FILE"]
+SESSION_HISTORY_FILE = CFG["SESSION_HISTORY_FILE"]
 PKI_INDEX = os.path.join(CFG["EASYRSA_DIR"], "pki", "index.txt")
 
 NOTE_OS_MAC = (
@@ -461,6 +464,56 @@ def cmd_rejected(limit, as_json):
     print("stale registration) rather than an attack, but worth a look if unexpected.")
 
 
+def iter_session_history():
+    """Yields one dict per line of SESSION_HISTORY_FILE (see host-scripts/
+    policy_lib.py's append_session_history() for the writer and exact
+    field set/semantics -- notably connected_at/disconnected_at are
+    derived from duration_seconds + the disconnect script's own wall
+    clock, NOT from OpenVPN's time_unix, which is empirically the
+    session's START time, not "now" -- see that script's own comment).
+    Malformed lines (partial write, corruption) are silently skipped
+    rather than raising -- one bad line must never break the whole page.
+    Uses read_privileged_file for the same reason STATUS_LOG does: this
+    script may run unprivileged directly (e.g. from a terminal) even
+    though the web app always invokes it via sudo."""
+    content = read_privileged_file(SESSION_HISTORY_FILE)
+    if not content:
+        return
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            yield json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+
+def cmd_session_history(limit, as_json, client_filter=None):
+    rows = list(iter_session_history())
+    if client_filter:
+        rows = [r for r in rows if r.get("client") == client_filter]
+    # Newest-disconnected-first, same ordering convention as cmd_rejected.
+    rows.sort(key=lambda r: r.get("disconnected_at") or "", reverse=True)
+    rows = rows[:limit]
+    for r in rows:
+        r["duration_human"] = fmt_duration(r.get("duration_seconds", 0))
+
+    if as_json:
+        print(json.dumps(rows, indent=2, default=str))
+        return
+
+    if not rows:
+        print("No session history found.")
+        return
+
+    headers = ("CLIENT", "CONNECTED_AT", "DISCONNECTED_AT", "DURATION", "SOURCE_IP", "BYTES_RX", "BYTES_TX")
+    table = [[r.get("client", "n/a"), r.get("connected_at", "n/a"), r.get("disconnected_at", "n/a"),
+              r["duration_human"], r.get("source_ip", "n/a"),
+              human_bytes(r.get("bytes_received", 0)), human_bytes(r.get("bytes_sent", 0))] for r in rows]
+    print_table(headers, table)
+
+
 # --------------------------------------------------------------------------
 
 def main():
@@ -468,10 +521,16 @@ def main():
     ap.add_argument("--all-clients", action="store_true", help="Show all known clients (online + offline) with last-seen")
     ap.add_argument("--rejected-connections", nargs="?", const=20, type=int, metavar="N",
                      help="Show the last N rejected (MAC-mismatch) connection attempts (default 20)")
+    ap.add_argument("--session-history", nargs="?", const=20, type=int, metavar="N",
+                     help="Show the last N ended connection sessions (default 20)")
+    ap.add_argument("--client", type=str, default=None, metavar="NAME",
+                     help="With --session-history, only show sessions for this client name")
     ap.add_argument("--json", action="store_true", help="Output as JSON instead of a table")
     args = ap.parse_args()
 
-    if args.rejected_connections is not None:
+    if args.session_history is not None:
+        cmd_session_history(args.session_history, args.json, args.client)
+    elif args.rejected_connections is not None:
         cmd_rejected(args.rejected_connections, args.json)
     elif args.all_clients:
         cmd_all(args.json)
