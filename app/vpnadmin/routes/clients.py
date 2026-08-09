@@ -14,6 +14,24 @@ from ..models import User
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 
+
+def _friendly_ovpn_error(name: str, e: ScriptError) -> str:
+    """Translates the raw stderr from `--show-ovpn` into a message safe/
+    useful to show a non-technical user. The script's own "no .ovpn file
+    found at <path>" case (file genuinely missing/moved -- see
+    openvpn-install.sh's do_show_ovpn) is common enough to deserve a
+    specific, actionable message instead of leaking a server filesystem
+    path into the UI."""
+    if "no .ovpn file found" in e.message.lower():
+        return (
+            f"'{name}'s .ovpn profile file is missing on the server (it may "
+            "have been moved, deleted, or never delivered to the location "
+            "this app can read). Use Restore to issue a brand-new "
+            "certificate and profile for this client."
+        )
+    return e.message
+
+
 # Client names: the script itself sanitizes to this character set (replacing
 # anything else with "_"), and that sanitization already happened silently
 # before. Validating up front here gives a clear 400 error in the UI
@@ -154,7 +172,7 @@ def get_client_ovpn(name: str, _: User = Depends(require_admin), db: Session = D
     try:
         content = cli.show_ovpn(name)
     except ScriptError as e:
-        raise HTTPException(status_code=400, detail=e.message)
+        raise HTTPException(status_code=400, detail=_friendly_ovpn_error(name, e))
     return {"name": name, "ovpn": content}
 
 
@@ -179,8 +197,9 @@ def email_client_ovpn(name: str, body: EmailOvpnRequest, user: User = Depends(re
     try:
         content = cli.show_ovpn(name)
     except ScriptError as e:
+        friendly = _friendly_ovpn_error(name, e)
         log_action(db, user, "email_ovpn", target=name, detail=e.message, success=False)
-        raise HTTPException(status_code=400, detail=e.message)
+        raise HTTPException(status_code=400, detail=friendly)
     try:
         mailer.send_ovpn_profile(to_address=body.email, client_name=name, ovpn_content=content)
     except Exception as e:

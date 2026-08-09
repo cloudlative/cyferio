@@ -98,6 +98,16 @@ and `docker compose up -d --build`.
 | `./openvpn-install.sh`, `./vpn-status.py` (ro) | the actual scripts this app wraps — bind-mounted, not baked into the image, so a `git pull` on the host takes effect without rebuilding |
 | `./app/data` | SQLite file persistence (only relevant if `DATABASE_URL` stays on the SQLite default — see below) |
 
+**`OVPN_OUTPUT_DIR` must be under `/etc/openvpn`** — that's the only path
+above containing generated `.ovpn` client files that's shared between the
+host and this container. If `/etc/openvpn/vpn-tools.conf`'s
+`OVPN_OUTPUT_DIR` is left at its script default (a human account's home
+directory, e.g. `/home/ubuntu` or `/root`), files really do land there on
+the host, but they're invisible to this container — every "View .ovpn" /
+"Email .ovpn" action then fails with a "no .ovpn file found" error even
+though the file exists. Set `OVPN_OUTPUT_DIR=/etc/openvpn/client` (see
+`vpn-tools.conf.example`) before running the app in Docker.
+
 ### Releases
 
 Image builds are tag-triggered, not push-triggered: pushing a version tag

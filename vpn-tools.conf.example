@@ -40,3 +40,17 @@
 #OVPN_OUTPUT_DIR=/home/someuser
 #OVPN_OUTPUT_OWNER=someuser:someuser
 OVPN_OUTPUT_MODE=600
+
+# --- IMPORTANT if you run the web app (app/) in Docker ---
+# The app container only bind-mounts /etc/openvpn (rw) and /var/log/openvpn
+# (ro) from the host -- see app/docker-compose.yml. A default/home-directory
+# OVPN_OUTPUT_DIR (e.g. /home/ubuntu, /root) is NOT visible inside that
+# container: files really do land there on the host when a human runs
+# openvpn-install.sh directly, but the containerized app's own --show-ovpn/
+# --add calls resolve that same path inside the container's filesystem,
+# where it's an unrelated, normally-empty directory -- so the app reports
+# "no .ovpn file found" even though the file genuinely exists on the host.
+# If you're running the app in Docker, set OVPN_OUTPUT_DIR to a path under
+# /etc/openvpn instead, e.g.:
+#OVPN_OUTPUT_DIR=/etc/openvpn/client
+#OVPN_OUTPUT_OWNER=root:root
