@@ -171,6 +171,148 @@ function renderDonutChart(mountEl, entries, { size = 220, thickness = 34 } = {})
 		</div>`;
 }
 
+/**
+ * A dependency-free "closed by default, expands into checkable options"
+ * multiselect dropdown -- used everywhere this app lets someone pick
+ * several teams (add-user, edit-user, profile). A native `<select
+ * multiple>` shows every option as an always-open listbox (no real
+ * "dropdown" affordance, and it eats vertical space); this instead looks
+ * and behaves like a normal closed dropdown until clicked.
+ *
+ * Usage:
+ *   const ms = createMultiselectDropdown(document.getElementById("mount"));
+ *   ms.setOptions([{id: 1, label: "Infra"}, {id: 2, label: "Security"}]);
+ *   ms.setSelected([1]);
+ *   ms.getSelected(); // -> [1]
+ */
+function createMultiselectDropdown(root, { placeholder = "Select…" } = {}) {
+	root.classList.add("ms-dropdown");
+	root.innerHTML = `
+		<button type="button" class="ms-toggle">
+			<span class="ms-toggle-label">${escapeHtml(placeholder)}</span>
+			<span class="ms-toggle-caret">▾</span>
+		</button>
+		<div class="ms-panel"></div>`;
+
+	const toggle = root.querySelector(".ms-toggle");
+	const toggleLabel = root.querySelector(".ms-toggle-label");
+	const panel = root.querySelector(".ms-panel");
+	let options = [];
+	let selected = new Set();
+
+	function refreshLabel() {
+		if (selected.size === 0) {
+			toggleLabel.textContent = placeholder;
+			toggleLabel.classList.add("muted");
+		} else {
+			const names = options.filter(o => selected.has(o.id)).map(o => o.label);
+			toggleLabel.textContent = names.length <= 2 ? names.join(", ") : `${names.length} teams selected`;
+			toggleLabel.classList.remove("muted");
+		}
+	}
+
+	function renderPanel() {
+		panel.innerHTML = options.length === 0
+			? '<div class="ms-empty muted">No teams yet.</div>'
+			: options.map(o => `
+				<label class="ms-option">
+					<input type="checkbox" value="${o.id}" ${selected.has(o.id) ? "checked" : ""}>
+					<span>${escapeHtml(o.label)}</span>
+				</label>`).join("");
+		panel.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+			cb.addEventListener("change", () => {
+				const id = Number(cb.value);
+				if (cb.checked) selected.add(id); else selected.delete(id);
+				refreshLabel();
+			});
+		});
+	}
+
+	toggle.addEventListener("click", () => {
+		const willOpen = !panel.classList.contains("open");
+		document.querySelectorAll(".ms-panel.open").forEach(p => p.classList.remove("open"));
+		if (willOpen) panel.classList.add("open");
+	});
+	document.addEventListener("click", (ev) => {
+		if (!root.contains(ev.target)) panel.classList.remove("open");
+	});
+
+	return {
+		setOptions(opts) {
+			options = opts;
+			renderPanel();
+			refreshLabel();
+		},
+		setSelected(ids) {
+			selected = new Set((ids || []).map(Number));
+			renderPanel();
+			refreshLabel();
+		},
+		getSelected() {
+			return [...selected];
+		},
+		reset() {
+			selected = new Set();
+			renderPanel();
+			refreshLabel();
+		},
+	};
+}
+
+/**
+ * Copies `text` to the clipboard, robust to running over plain HTTP: the
+ * modern `navigator.clipboard` API is only available in a secure context
+ * (HTTPS or localhost) -- this app doesn't have TLS termination yet (see
+ * README's "Planned (phase 2)"), so that API is silently `undefined` in
+ * production today, not just occasionally failing. Falls through to the
+ * legacy `document.execCommand('copy')` approach (deprecated but still
+ * functional over plain HTTP in most browsers), and if even that fails,
+ * selects `sourceEl`'s text (when it's a text field) so manual Ctrl+C is a
+ * single keystroke instead of "go find and select it yourself."
+ *
+ * Returns true if the text actually made it onto the clipboard
+ * automatically, false if it only got as far as being selected for a
+ * manual copy.
+ */
+async function copyTextToClipboard(text, sourceEl) {
+	if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+		try {
+			await navigator.clipboard.writeText(text);
+			return true;
+		} catch (_) { /* fall through to the legacy path below */ }
+	}
+
+	const usingSourceEl = sourceEl && typeof sourceEl.select === "function";
+	const ta = usingSourceEl ? sourceEl : document.createElement("textarea");
+	if (!usingSourceEl) {
+		ta.value = text;
+		ta.setAttribute("readonly", "");
+		ta.style.position = "fixed";
+		ta.style.opacity = "0";
+		ta.style.pointerEvents = "none";
+		document.body.appendChild(ta);
+	}
+	ta.focus();
+	ta.select();
+	if (typeof ta.setSelectionRange === "function") ta.setSelectionRange(0, ta.value.length);
+
+	let copied = false;
+	try {
+		copied = document.execCommand("copy");
+	} catch (_) {
+		copied = false;
+	}
+	if (!usingSourceEl) ta.remove();
+	// On the failure path, if we were given a real on-page textarea, leave
+	// its text selected (re-select in case removing a temporary element
+	// above stole focus) so the fallback advice is actionable.
+	if (!copied && usingSourceEl) {
+		ta.focus();
+		ta.select();
+	}
+	return copied;
+}
+
 function escapeHtml(s) {
 	const div = document.createElement("div");
 	div.textContent = s == null ? "" : String(s);

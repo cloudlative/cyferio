@@ -44,8 +44,8 @@
 				</select>
 			</div>
 			<div class="field">
-				<label for="p-team">Teams <span class="muted">(select several)</span></label>
-				<select id="p-team" multiple></select>
+				<label for="p-team-toggle">Teams <span class="muted">(select several)</span></label>
+				<div id="p-team-ms"></div>
 			</div>
 		</div>
 		<button type="submit" class="btn-primary" style="margin-top:8px">Save Profile</button>
@@ -74,18 +74,13 @@
 {% block scripts %}
 <script>
 let myTeamIds = [];
-
-function setMultiSelectValues(select, ids) {
-	const set = new Set((ids || []).map(String));
-	[...select.options].forEach(opt => { opt.selected = set.has(opt.value); });
-}
+const teamMs = createMultiselectDropdown(document.getElementById("p-team-ms"), { placeholder: "Unassigned" });
 
 async function loadTeamOptions() {
-	const select = document.getElementById("p-team");
 	try {
 		const teams = await apiFetch("/api/teams");
-		select.innerHTML = teams.filter(t => t.team !== "Unassigned").map(t => `<option value="${t.id}">${escapeHtml(t.team)}</option>`).join("");
-		setMultiSelectValues(select, myTeamIds);
+		teamMs.setOptions(teams.filter(t => t.team !== "Unassigned").map(t => ({ id: t.id, label: t.team })));
+		teamMs.setSelected(myTeamIds);
 	} catch (e) {
 		toast(e.message, "error");
 	}
@@ -128,7 +123,7 @@ document.getElementById("profile-form").addEventListener("submit", async (ev) =>
 				first_name: firstName,
 				last_name: document.getElementById("p-last").value.trim() || null,
 				gender: document.getElementById("p-gender").value,
-				team_ids: [...document.getElementById("p-team").selectedOptions].map(o => Number(o.value)),
+				team_ids: teamMs.getSelected(),
 			},
 		});
 		updateDisplayedIdentity(updated);

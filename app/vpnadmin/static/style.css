@@ -269,7 +269,7 @@ button, .btn {
 .btn-sm { padding: 5px 12px; font-size: 0.78rem; }
 button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; }
 
-input[type=text], input[type=password], input[type=date], select, textarea {
+input[type=text], input[type=password], input[type=date], input[type=email], select, textarea {
 	padding: 10px 14px;
 	border-radius: 9px;
 	border: 1.5px solid var(--border);
@@ -280,11 +280,64 @@ input[type=text], input[type=password], input[type=date], select, textarea {
 	transition: border-color 0.15s ease, background 0.15s ease;
 }
 select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
-/* Multi-selects render as a listbox, not a dropdown -- the single-select
-   custom arrow above doesn't apply, and a bit of height/padding helps them
-   read as a proper "pick several" control rather than a cramped list. */
-select[multiple] { appearance: auto; background-image: none; min-height: 110px; padding: 6px; }
-select[multiple] option { padding: 6px 8px; border-radius: 6px; }
+
+/* --- Multiselect dropdown (createMultiselectDropdown in app.js) --------
+   Closed-by-default team picker: looks/behaves like a normal <select>
+   until clicked, then expands into a checkable options panel, instead of
+   a native <select multiple> permanently-open listbox. */
+.ms-dropdown { position: relative; }
+.ms-toggle {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 10px 14px;
+	border-radius: 9px;
+	border: 1.5px solid var(--border);
+	background: var(--bg-elevated);
+	color: var(--text);
+	font: inherit;
+	font-weight: 500;
+	text-align: left;
+	cursor: pointer;
+	box-shadow: none;
+}
+.ms-toggle:hover { border-color: var(--accent-2); }
+.ms-toggle .ms-toggle-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-toggle .ms-toggle-label.muted { color: var(--text-faint); font-weight: 400; }
+.ms-toggle .ms-toggle-caret { flex: none; color: var(--text-muted); font-size: 0.75rem; transition: transform 0.15s ease; }
+.ms-toggle:has(+ .ms-panel.open) .ms-toggle-caret { transform: rotate(180deg); }
+.ms-panel {
+	display: none;
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	right: 0;
+	z-index: 50;
+	max-height: 220px;
+	overflow-y: auto;
+	background: var(--surface);
+	border: 1.5px solid var(--border-light);
+	border-radius: 9px;
+	box-shadow: var(--shadow-lg);
+	padding: 6px;
+}
+.ms-panel.open { display: block; }
+.ms-panel .ms-option {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 10px;
+	border-radius: 7px;
+	font-weight: 500;
+	font-size: 0.92rem;
+	cursor: pointer;
+	margin: 0;
+}
+.ms-panel .ms-option:hover { background: var(--surface-hover); }
+.ms-panel .ms-option input { width: auto; flex: none; }
+.ms-panel .ms-empty { padding: 10px; font-size: 0.88rem; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-2); background: var(--surface); box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.14); }
 input::placeholder { color: var(--text-faint); }
 input:disabled, select:disabled, textarea:disabled { opacity: 0.7; cursor: not-allowed; color: var(--text-muted); }
@@ -413,6 +466,33 @@ dialog .dialog-body h2 { background: var(--accent-gradient); -webkit-background-
 dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 dialog ul { padding-left: 20px; margin: 8px 0; }
 dialog li { margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* --- Team cards (teams.html) -- name is the primary heading, member
+   count is secondary info underneath, unlike the numeric-KPI-first
+   .stat-card layout used for dashboard stats. */
+a.team-card {
+	position: relative;
+	display: block;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	padding: 20px 20px 18px;
+	box-shadow: var(--shadow);
+	overflow: hidden;
+	text-decoration: none;
+	color: inherit;
+	transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+a.team-card:hover { transform: translateY(-2px); border-color: var(--border-light); box-shadow: var(--shadow), 0 0 0 1px rgba(99,102,241,0.25); text-decoration: none; }
+a.team-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent-gradient); }
+a.team-card.accent-online::before { background: linear-gradient(90deg, #10b981, #34d399); }
+a.team-card.accent-total::before { background: linear-gradient(90deg, #6366f1, #818cf8); }
+a.team-card.accent-revoked::before { background: linear-gradient(90deg, #f43f5e, #fb7185); }
+a.team-card.accent-rejected::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+a.team-card .team-card-name { font-size: 1.15rem; font-weight: 800; letter-spacing: -0.01em; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.team-card .team-card-count { color: var(--text-muted); font-size: 0.85rem; font-weight: 600; margin-top: 4px; }
+a.team-card .stat-hint { position: absolute; top: 18px; right: 18px; color: var(--text-faint); font-size: 0.75rem; opacity: 0; transition: opacity 0.15s ease; }
+a.team-card:hover .stat-hint { opacity: 1; }
 
 .mac-list { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 8px; }
 .mac-list li { background: var(--surface-alt); border: 1px solid var(--border-light); border-radius: 8px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; }

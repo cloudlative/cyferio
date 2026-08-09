@@ -34,10 +34,13 @@
 				<input type="text" id="u-last">
 			</div>
 			<div class="field">
-				<label for="u-team">Teams <span class="muted">(optional, select several)</span></label>
-				<select id="u-team" multiple></select>
+				<label for="u-team-toggle">Teams <span class="muted">(optional, select several)</span></label>
+				<div id="u-team-ms"></div>
 			</div>
+		</div>
+		<div class="form-row" style="margin-top:16px">
 			<button type="submit" class="btn-primary">Add User</button>
+			<button type="button" class="btn-secondary" id="add-user-clear">Clear</button>
 		</div>
 	</form>
 </div>
@@ -78,7 +81,7 @@
 						<option value="other">Other</option>
 					</select>
 				</div>
-				<div class="field"><label for="e-team">Teams <span class="muted">(select several)</span></label><select id="e-team" multiple></select></div>
+				<div class="field"><label for="e-team-toggle">Teams <span class="muted">(select several)</span></label><div id="e-team-ms"></div></div>
 			</div>
 			<fieldset style="margin-top:16px">
 				<legend>Access</legend>
@@ -129,23 +132,15 @@ function fmtDate(iso) {
 	return iso ? new Date(iso).toLocaleString() : "—";
 }
 
-function teamOptionsHtml() {
-	return allTeams.map(t => `<option value="${t.id}">${escapeHtml(t.team)}</option>`).join("");
-}
-
-function setMultiSelectValues(select, ids) {
-	const set = new Set((ids || []).map(String));
-	[...select.options].forEach(opt => { opt.selected = set.has(opt.value); });
-}
-
-function getMultiSelectValues(select) {
-	return [...select.selectedOptions].map(opt => Number(opt.value));
-}
+const addTeamMs = createMultiselectDropdown(document.getElementById("u-team-ms"), { placeholder: "Unassigned" });
+const editTeamMs = createMultiselectDropdown(document.getElementById("e-team-ms"), { placeholder: "Unassigned" });
 
 async function loadTeamOptions() {
 	try {
 		allTeams = (await apiFetch("/api/teams")).filter(t => t.team !== "Unassigned");
-		document.getElementById("u-team").innerHTML = teamOptionsHtml();
+		const opts = allTeams.map(t => ({ id: t.id, label: t.team }));
+		addTeamMs.setOptions(opts);
+		editTeamMs.setOptions(opts);
 	} catch (e) {
 		toast(e.message, "error");
 	}
@@ -278,8 +273,7 @@ function openEdit(u) {
 	document.getElementById("e-first").value = u.first_name || "";
 	document.getElementById("e-last").value = u.last_name || "";
 	document.getElementById("e-gender").value = u.gender || "unspecified";
-	document.getElementById("e-team").innerHTML = teamOptionsHtml();
-	setMultiSelectValues(document.getElementById("e-team"), u.team_ids);
+	editTeamMs.setSelected(u.team_ids);
 	document.getElementById("e-role").value = u.role;
 	document.getElementById("e-active").value = String(u.is_active);
 	// The bootstrap admin account can never be demoted/deactivated/deleted
@@ -303,7 +297,7 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		first_name: firstName,
 		last_name: document.getElementById("e-last").value.trim() || null,
 		gender: document.getElementById("e-gender").value,
-		team_ids: getMultiSelectValues(document.getElementById("e-team")),
+		team_ids: editTeamMs.getSelected(),
 	};
 	if (!editingUserIsBootstrapAdmin) {
 		body.role = document.getElementById("e-role").value;
@@ -335,15 +329,21 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				username, password, role,
 				first_name: firstName,
 				last_name: document.getElementById("u-last").value.trim() || null,
-				team_ids: getMultiSelectValues(document.getElementById("u-team")),
+				team_ids: addTeamMs.getSelected(),
 			},
 		});
 		toast(`User '${username}' created.`);
 		document.getElementById("add-user-form").reset();
+		addTeamMs.reset();
 		loadUsers();
 	} catch (e) {
 		toast(e.message, "error");
 	}
+});
+
+document.getElementById("add-user-clear").addEventListener("click", () => {
+	document.getElementById("add-user-form").reset();
+	addTeamMs.reset();
 });
 
 document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); loadTeamOptions(); });

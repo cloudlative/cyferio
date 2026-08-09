@@ -291,17 +291,14 @@ if (isAdmin) {
 		try {
 			const data = await apiFetch(`/api/clients/${encodeURIComponent(name)}/ovpn`);
 			document.getElementById("ovpn-dialog-content").innerHTML = `
-				<textarea readonly rows="12" class="mono" style="resize:vertical">${escapeHtml(data.ovpn)}</textarea>
+				<textarea readonly rows="12" class="mono" style="resize:vertical" id="ovpn-copy-textarea">${escapeHtml(data.ovpn)}</textarea>
 				<div class="form-row" style="margin-top:12px">
 					<button type="button" class="btn-primary btn-sm" id="ovpn-copy-btn">Copy to Clipboard</button>
 				</div>`;
 			document.getElementById("ovpn-copy-btn").addEventListener("click", async () => {
-				try {
-					await navigator.clipboard.writeText(data.ovpn);
-					toast("Copied to clipboard.");
-				} catch (e) {
-					toast("Couldn't access the clipboard -- select and copy manually.", "error");
-				}
+				const ta = document.getElementById("ovpn-copy-textarea");
+				const copied = await copyTextToClipboard(data.ovpn, ta);
+				toast(copied ? "Copied to clipboard." : "Couldn't copy automatically -- the text is selected, press Ctrl+C (Cmd+C on Mac) to copy.", copied ? "success" : "error");
 			});
 		} catch (e) {
 			document.getElementById("ovpn-dialog-content").innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
@@ -377,12 +374,9 @@ if (isAdmin) {
 	});
 
 	document.getElementById("add-result-copy").addEventListener("click", async () => {
-		try {
-			await navigator.clipboard.writeText(document.getElementById("add-result-ovpn").value);
-			toast("Copied to clipboard.");
-		} catch (e) {
-			toast("Couldn't access the clipboard -- select and copy manually.", "error");
-		}
+		const ta = document.getElementById("add-result-ovpn");
+		const copied = await copyTextToClipboard(ta.value, ta);
+		toast(copied ? "Copied to clipboard." : "Couldn't copy automatically -- the text is selected, press Ctrl+C (Cmd+C on Mac) to copy.", copied ? "success" : "error");
 	});
 	document.getElementById("add-result-dismiss").addEventListener("click", () => {
 		document.getElementById("add-result").style.display = "none";

@@ -82,9 +82,10 @@ async function loadTeams() {
 			return;
 		}
 		grid.innerHTML = `<div class="stat-grid" style="margin-bottom:0">${lastTeams.map((t, i) => `
-			<a class="stat-card ${i % 4 === 0 ? "accent-online" : i % 4 === 1 ? "accent-total" : i % 4 === 2 ? "accent-rejected" : "accent-revoked"}" href="#" data-team-id="${t.id == null ? "unassigned" : t.id}">
+			<a class="team-card ${i % 4 === 0 ? "accent-online" : i % 4 === 1 ? "accent-total" : i % 4 === 2 ? "accent-rejected" : "accent-revoked"}" href="#" data-team-id="${t.id == null ? "unassigned" : t.id}">
 				<span class="stat-hint">View →</span>
-				<div class="stat-value">${t.count}</div><div class="stat-label">${escapeHtml(t.team)}</div>
+				<div class="team-card-name">${escapeHtml(t.team)}</div>
+				<div class="team-card-count">${t.count} member${t.count === 1 ? "" : "s"}</div>
 			</a>`).join("")}</div>`;
 		grid.querySelectorAll("[data-team-id]").forEach(card => {
 			card.addEventListener("click", (ev) => { ev.preventDefault(); showTeam(card.dataset.teamId); });
