@@ -31,6 +31,12 @@ class Settings:
     SECRET_KEY: str = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
     SESSION_COOKIE_NAME: str = os.environ.get("SESSION_COOKIE_NAME", "vpnadmin_session")
     SESSION_MAX_AGE_SECONDS: int = int(os.environ.get("SESSION_MAX_AGE_SECONDS", 60 * 60 * 8))  # 8h
+    # Marks the session cookie Secure (browser withholds it over plain HTTP)
+    # -- only safe once something in front of this app actually terminates
+    # TLS (e.g. the Traefik service in docker-compose.yml). Off by default
+    # so local/dev runs over plain http:// keep working without a special
+    # override; set true in production's .env.
+    SESSION_HTTPS_ONLY: bool = os.environ.get("SESSION_HTTPS_ONLY", "false").strip().lower() == "true"
 
     # --- Underlying toolkit scripts --------------------------------------
     # Paths to the two CLI tools this app is a frontend for. Defaults match

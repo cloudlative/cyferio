@@ -1,11 +1,58 @@
 services:
+  traefik:
+    image: traefik:v3.1
+    container_name: openvpn-toolkit-traefik
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # HTTP -> HTTPS redirect, applied globally at the entrypoint so it
+      # covers every router without needing a redirect middleware label on
+      # each one.
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      # ACME / Let's Encrypt via HTTP-01 (needs entrypoint 80 reachable from
+      # the public internet -- see task notes on the DO firewall).
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      # Toggle to Let's Encrypt's staging directory first (see .env.example)
+      # to avoid burning production rate-limit attempts while the config is
+      # still being verified; leave unset/empty for the real production CA.
+      - --certificatesresolvers.letsencrypt.acme.caserver=${ACME_CASERVER:-https://acme-v02.api.letsencrypt.org/directory}
+      # Keep the dashboard/API off -- not needed and not worth exposing.
+      - --api=false
+      - --log.level=INFO
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-acme:/letsencrypt
+    env_file: .env
+
   app:
     build: .
     container_name: openvpn-toolkit-app
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "8000:8000"
+    # No public host port: Traefik (above) is the only public entrypoint now.
+    # Uncomment the line below to bind the app port to the VPN-internal
+    # interface for direct debugging without going through Traefik/DNS --
+    # never bind it to a public interface (0.0.0.0 or the droplet's public
+    # IP) alongside Traefik, that would leave an unauthenticated bypass.
+    # ports:
+    #   - "10.8.0.1:8000:8000"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.openvpn-toolkit.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.openvpn-toolkit.entrypoints=websecure
+      - traefik.http.routers.openvpn-toolkit.tls=true
+      - traefik.http.routers.openvpn-toolkit.tls.certresolver=letsencrypt
+      - traefik.http.services.openvpn-toolkit.loadbalancer.server.port=8000
     # openvpn-install.sh unconditionally probes /dev/net/tun at startup
     # (even for read-only commands like --list/--check) as a sanity check
     # that OpenVPN could run on this host -- pass the device through rather
@@ -40,16 +87,30 @@ services:
     # easyrsa, so it runs as root inside the container (the image's
     # default user). USE_SUDO=false in .env reflects that no privilege
     # escalation is needed once already running as root.
+    depends_on:
+      - traefik
 
-  # Optional: uncomment if you set DATABASE_URL in .env to a postgresql://
-  # URL pointing at this service instead of the default SQLite file.
-  # postgres:
-  #   image: postgres:16-alpine
-  #   container_name: openvpn-toolkit-db
-  #   restart: unless-stopped
-  #   environment:
-  #     POSTGRES_USER: vpnadmin
-  #     POSTGRES_PASSWORD: changeme
-  #     POSTGRES_DB: vpnadmin
-  #   volumes:
-  #     - ./pgdata:/var/lib/postgresql/data
+  # Set DATABASE_URL in .env to a postgresql:// URL pointing at this service
+  # to use it instead of the default SQLite file (see .env.example).
+  postgres:
+    image: postgres:16-alpine
+    container_name: openvpn-toolkit-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vpnadmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-vpnadmin}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Not published to the host at all -- only the app service (on the same
+    # compose network) needs to reach it, over its DATABASE_URL using the
+    # service name "postgres" as the host.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vpnadmin} -d ${POSTGRES_DB:-vpnadmin}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  traefik-acme:
+  pgdata:

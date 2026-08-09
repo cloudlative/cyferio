@@ -7,9 +7,8 @@ without touching a terminal. It's a thin FastAPI frontend over
 single source of truth for all VPN logic; this app doesn't reimplement any
 of it, only calls it and renders the result.
 
-> **Status**: not yet deployed to any production server. Built and tested
-> locally (including inside a real Docker container against fake stand-in
-> scripts) — review before deploying against a real OpenVPN install.
+> **Status**: deployed to production at https://vpn-mgmt.apkamuaalij.com,
+> fronted by Traefik (automatic Let's Encrypt TLS) and backed by PostgreSQL.
 
 ## Features
 
@@ -39,7 +38,7 @@ Everything the CLI can do, plus more:
 ## Architecture
 
 - **Backend**: FastAPI, server-rendered HTML (Jinja2) + a bit of vanilla JS calling a JSON API — no separate frontend build step.
-- **Database**: SQLAlchemy, works with either SQLite (default, zero setup) or PostgreSQL — set via `DATABASE_URL`. Only stores this app's own accounts and audit log, never VPN client data (that always comes live from the scripts).
+- **Database**: SQLAlchemy, works with either SQLite (zero-setup default, still the right choice for local/dev) or PostgreSQL (production, via the `postgres` compose service) — set via `DATABASE_URL`. Only stores this app's own accounts and audit log, never VPN client data (that always comes live from the scripts).
 - **Runs co-located** with the OpenVPN server: calls `openvpn-install.sh`/`vpn-status.py` via `subprocess` on the same box, not over SSH.
 - **No shell injection surface**: every subprocess call uses an explicit argument list (never `shell=True` or string-built commands) — see `vpnadmin/cli_wrapper.py` and `tests/test_cli_wrapper.py`, which specifically asserts a malicious-looking client name arrives as one inert argument, not something a shell could interpret.
 
@@ -73,14 +72,43 @@ docker compose up -d --build
 | `/etc/openvpn:/etc/openvpn` (rw) | `--add`/`--revoke` write new certs and update `openvpn_db.txt` here |
 | `/var/log/openvpn:/var/log/openvpn` (ro) | `vpn-status.py` reads connection/rejection history from here |
 | `../openvpn-install.sh`, `../vpn-status.py` (ro) | the actual scripts this app wraps — bind-mounted, not baked into the image, so a `git pull` on the host takes effect without rebuilding |
-| `./data` | SQLite file persistence (skip if using Postgres instead) |
+| `./data` | SQLite file persistence (only relevant if `DATABASE_URL` stays on the SQLite default — see below) |
 
 The container runs as root (needed to touch root-owned `/etc/openvpn` and
 run `easyrsa`) with `USE_SUDO=false` — no `sudo` binary needed since the
 process already has the privilege it would otherwise escalate to.
 
-To use PostgreSQL instead of SQLite: set `DATABASE_URL=postgresql://...` in
-`.env` and uncomment the `postgres` service in `docker-compose.yml`.
+### Database: SQLite (dev) vs PostgreSQL (production)
+
+`docker-compose.yml` ships a `postgres` service alongside `app`. SQLite
+(the `DATABASE_URL` default) remains the zero-setup choice for local/dev —
+nothing to stand up, just run `docker compose up`. **Production now runs
+PostgreSQL**: set `DATABASE_URL=postgresql://vpnadmin:<password>@postgres:5432/vpnadmin`
+in `.env` (host `postgres` is the compose service name, only reachable from
+other containers on the same compose network — Postgres itself is never
+published to the host), and a `POSTGRES_PASSWORD` (generate one with
+`python3 -c "import secrets; print(secrets.token_urlsafe(32))"` — see
+`.env.example`). Data persists in the named `pgdata` volume across
+container recreation.
+
+Moving an existing SQLite deployment's data into Postgres: use
+`scripts/migrate_sqlite_to_postgres.py`, which reuses the app's own
+SQLAlchemy models against both databases (never hand-translated SQL) to
+copy every row table-by-table, preserving ids/foreign keys/timestamps, and
+prints a per-table row-count comparison at the end so you can confirm the
+copy is complete before cutting `DATABASE_URL` over:
+
+```bash
+python3 scripts/migrate_sqlite_to_postgres.py \
+  --sqlite-url sqlite:////opt/openvpn-toolkit/app/data/app.db \
+  --postgres-url postgresql://vpnadmin:<password>@localhost:5432/vpnadmin
+```
+
+(Run against `localhost:5432` from the host, or temporarily publish the
+`postgres` service's port if running the script from outside a container
+on the compose network — it doesn't need to run inside a container.) Keep
+the original SQLite file around as a safety net even after cutting over —
+nothing in this app deletes it automatically.
 
 ## Configuration
 
@@ -123,9 +151,36 @@ the CLI) is not in the UI — that's a destructive, whole-server action best
 left to a human running the script directly, not a web button. This app
 manages **clients**, not the VPN server's own install state.
 
-## Planned (phase 2)
+## TLS / reverse proxy (Traefik)
 
-A Traefik reverse proxy in front of this app for TLS termination and
-domain routing — not yet implemented. For now, run it behind whatever
-TLS/proxy setup you already have, or access it directly over HTTP on your
-internal network.
+`docker-compose.yml` includes a `traefik` service fronting `app`: it
+terminates TLS, issues/renews a Let's Encrypt certificate automatically via
+the HTTP-01 challenge (Traefik's standard ACME provider, configured via
+labels on the `app` service — no separate static config file), and
+redirects plain HTTP to HTTPS. Configure it via `.env` (see
+`.env.example`):
+
+- `APP_DOMAIN` — the public hostname to request a cert for; must already
+  resolve to this host's public IP, and ports 80/443 must be reachable from
+  the internet (Traefik's HTTP-01 challenge needs port 80; the app itself
+  is never exposed on a host port once Traefik is in front of it).
+- `ACME_EMAIL` — a real, monitored mailbox; Let's Encrypt sends
+  expiry/problem notices here.
+- `ACME_CASERVER` — leave unset for Let's Encrypt production. Point at
+  `https://acme-staging-v02.api.letsencrypt.org/directory` first when
+  standing this up or changing domains, to avoid burning production
+  rate-limit attempts on a config that isn't verified yet — staging certs
+  aren't browser-trusted, so flip back to production only once a staging
+  cert issues cleanly.
+- `SESSION_HTTPS_ONLY=true` — once Traefik is actually terminating TLS,
+  set this so the session cookie is marked `Secure`.
+
+The ACME account/cert state persists in the named `traefik-acme` volume.
+Traefik manages that file's permissions (600) itself; don't hand-edit it.
+
+Direct host-port access to the app (bypassing Traefik) is intentionally
+not exposed by default now that Traefik handles all public traffic — see
+the commented-out `ports:` block on the `app` service in
+`docker-compose.yml` if you need a debug path bound to an internal-only
+interface (e.g. the OpenVPN tunnel address). Never bind it to a public
+interface alongside Traefik.

@@ -43,7 +43,7 @@ app.add_middleware(
     secret_key=settings.SECRET_KEY,
     max_age=settings.SESSION_MAX_AGE_SECONDS,
     session_cookie=settings.SESSION_COOKIE_NAME,
-    https_only=False,  # set True once served behind TLS (e.g. the planned Traefik front-end)
+    https_only=settings.SESSION_HTTPS_ONLY,  # set SESSION_HTTPS_ONLY=true in .env once served behind TLS (see docker-compose.yml's traefik service)
 )
 
 app.mount("/static", StaticFiles(directory="vpnadmin/static"), name="static")
