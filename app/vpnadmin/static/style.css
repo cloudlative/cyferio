@@ -186,13 +186,13 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 }
 .link-button:hover { text-decoration: underline; }
 
-/* 1200px -> 1440px: tables like VPN Clients now carry 5 action buttons
-   plus restriction badges per row (Manage MACs/Restrictions, View/Copy
-   .ovpn, Email Profile, Revoke) and were cramped/wrapping awkwardly at the
-   old width. Tables are width:100% within their .card (see `table` below),
-   so the extra room actually gets used rather than just adding empty
-   margin either side. */
-.content { flex: 1; min-width: 0; max-width: 1440px; margin: 0 auto; padding: 40px 32px 64px; }
+/* 1200px -> 1680px (via 1440px): VPN Clients now carries 5 action buttons,
+   a dedicated Restrictions column, and per-chip badges per row -- 11
+   columns total for an admin -- and was cramped/wrapping at the old width.
+   Tables are width:100% within their .card (see `table` below), so the
+   extra room is actually used rather than just adding empty margin either
+   side. */
+.content { flex: 1; min-width: 0; max-width: 1680px; margin: 0 auto; padding: 40px 32px 64px; }
 
 h1 {
 	font-size: 1.85rem;

@@ -232,17 +232,18 @@ function renderClients() {
 
 	el.innerHTML = `<table>
 		<thead><tr>
-			<th>Name</th><th>Status</th><th>In MAC DB</th><th>MACs</th><th>Last Seen</th>
+			<th>Name</th><th>Status</th><th>In MAC DB</th><th>MACs</th><th>Last Seen</th><th>Restrictions</th>
 			<th></th>${isAdmin ? "<th></th><th></th><th></th><th></th>" : ""}
 		</tr></thead>
 		<tbody>${filtered.map(({ c, s, online }) => {
 			const policy = lastPoliciesByName[c.name];
 			return `<tr data-name="${escapeHtml(c.name)}" class="${online ? "row-online" : ""}">
-				<td>${escapeHtml(c.name)}${restrictionChipsHtml(policy)}</td>
+				<td>${escapeHtml(c.name)}</td>
 				<td><span class="status-pill status-${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span></td>
 				<td>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</td>
 				<td><span class="count-badge">${c.mac_count ?? 0}</span></td>
 				<td>${escapeHtml(s ? s.last_seen : "—")}</td>
+				<td>${restrictionChipsHtml(policy) || '<span class="muted">—</span>'}</td>
 				<td><button class="btn-secondary btn-sm macs-btn">${isAdmin ? "Manage MACs" : "View MACs"}</button></td>
 				${isAdmin ? `<td><button class="btn-secondary btn-sm policy-btn">Manage Restrictions</button></td>` : ""}
 				${isAdmin ? `<td><button class="btn-secondary btn-sm ovpn-btn">View / Copy .ovpn</button></td>` : ""}
