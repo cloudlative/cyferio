@@ -24,7 +24,7 @@
 		</nav>
 		<div class="sidebar-footer">
 			<div class="who">
-				<a href="/profile" class="who-name">{{ user.display_name }}</a>
+				<a href="/profile" class="who-name">{{ user.first_name or user.username }}</a>
 				<span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span>
 			</div>
 			<div class="who-links">
