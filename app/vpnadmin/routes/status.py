@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
 
 from .. import cli_wrapper as cli
-from ..auth import require_user
+from ..auth import require_admin, require_user
 from ..cli_wrapper import ScriptError
-from ..models import User
+from ..db import get_db
+from ..models import AuditLog, User
 
 router = APIRouter(prefix="/api/status", tags=["status"])
 
@@ -48,3 +50,29 @@ def get_dashboard(_: User = Depends(require_user)):
         return cli.dashboard_summary()
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
+
+
+@dashboard_router.get("/audit")
+def get_audit_log(limit: int = Query(20, ge=1, le=200), admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Most recent audit-log entries, newest first -- admin-only, since this
+    is the same accountability trail as the (also admin-only) audit-log
+    retention setting on the Settings page. Powers the Dashboard's Recent
+    Activity section; not cached like the CLI-backed endpoints above since
+    it's a cheap indexed DB query, not a subprocess call."""
+    entries = (
+        db.query(AuditLog)
+        .order_by(AuditLog.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+            "username": e.username,
+            "action": e.action,
+            "target": e.target,
+            "detail": e.detail,
+            "success": e.success,
+        }
+        for e in entries
+    ]

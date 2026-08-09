@@ -50,6 +50,15 @@
 	</div>
 	<div id="connected-table"><p class="muted">Loading…</p></div>
 </div>
+
+{% if is_admin %}
+<div class="card">
+	<div class="toolbar">
+		<h2 style="margin:0">Recent Activity</h2>
+	</div>
+	<div id="activity-table"><p class="muted">Loading…</p></div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -103,6 +112,33 @@ async function loadDashboard() {
 		</table>`;
 	} catch (e) {
 		toast(e.message, "error");
+	}
+
+	// Admin-only section (the container only exists in the DOM for admins --
+	// see the `is_admin` guard in the template -- and the endpoint itself is
+	// admin-only too, so a viewer never even attempts this fetch).
+	const activityEl = document.getElementById("activity-table");
+	if (activityEl) {
+		try {
+			const entries = await apiFetch("/api/audit?limit=20");
+			if (entries.length === 0) {
+				activityEl.innerHTML = '<div class="empty-state">No activity recorded yet.</div>';
+			} else {
+				activityEl.innerHTML = `<table>
+					<thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
+					<tbody>${entries.map(e => `
+						<tr>
+							<td class="mono">${escapeHtml(new Date(e.timestamp).toLocaleString())}</td>
+							<td>${escapeHtml(e.username)}</td>
+							<td>${escapeHtml(e.action)}</td>
+							<td>${escapeHtml(e.target || '—')}</td>
+							<td>${escapeHtml(e.detail || '')}${e.success ? '' : ' <span class="muted">(failed)</span>'}</td>
+						</tr>`).join("")}</tbody>
+				</table>`;
+			}
+		} catch (e) {
+			activityEl.innerHTML = `<p class="muted">Could not load activity: ${escapeHtml(e.message)}</p>`;
+		}
 	}
 }
 
