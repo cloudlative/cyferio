@@ -64,6 +64,55 @@ static_version = _compute_static_version()
 # PATCH endpoint treats this exact string as "unchanged, don't touch it".
 SMTP_PASSWORD_PLACEHOLDER = "••••••••"
 
+# The 6 named login/app themes, in rotation order -- must match the ids
+# used in static/style.css's `[data-theme="..."]` rules and
+# templates/partials/theme_bg_*.html. "auto" (rotation) is a settings value,
+# not itself a theme id, so it's intentionally excluded from this tuple.
+ACTIVE_THEME_IDS = ("constellation", "contour", "ingress", "cipher", "perimeter", "horizon")
+
+# What the Settings page dropdown offers, in display order -- id, label, and
+# a short one-line rationale (reused verbatim from the approved preview) so
+# an admin isn't picking blind between six similar-sounding names.
+THEME_CHOICES = [
+    {"id": "auto", "label": "Auto-rotate (every 2 hours, 6 themes)",
+     "description": "Cycles through all 6 themes below on a fixed schedule -- each active for two 2-hour slots per day."},
+    {"id": "constellation", "label": "Constellation",
+     "description": "A mesh of nodes, quietly drifting, occasionally trading a packet along an edge. Indigo/violet/cyan."},
+    {"id": "contour", "label": "Signal Contour",
+     "description": "Faint oscilloscope-like waveform lines drifting sideways. Sky-blue into teal."},
+    {"id": "ingress", "label": "Ingress Field",
+     "description": "A deep starfield with rare bright streaks crossing the frame. Deep blue into cyan."},
+    {"id": "cipher", "label": "Cipher Rain",
+     "description": "Thin columns of hex digits drifting downward, low opacity. Emerald/teal on near-black."},
+    {"id": "perimeter", "label": "Perimeter Grid",
+     "description": "A faint grid with a slow radar-style sweep. Amber into gold."},
+    {"id": "horizon", "label": "Data Horizon",
+     "description": "Straight horizontal lines drifting past a soft horizon glow. Violet into rose."},
+]
+
+
+def resolve_active_theme(login_theme_setting: str | None, now: datetime | None = None) -> str:
+    """Resolves the *effective* theme id for right now.
+
+    An admin's pinned choice (anything other than "auto"/None) always wins,
+    no rotation logic involved. "auto" (or an unset/unrecognized value)
+    rotates through the 6 themes in ACTIVE_THEME_IDS on a fixed schedule:
+    2 hours each, so each theme is active for exactly 2 of the 12 two-hour
+    slots in a day (twice per 24h) -- `hour // 2 % 6` picks the slot. Uses
+    local server time (matches the schedule as shown/confirmed in the
+    approved preview, which likewise used the browser's local hour).
+
+    Deliberately NOT cached on the module-level `runtime` object -- that
+    cache is only refreshed at startup and after settings saves, but this
+    needs to change over the course of a day with no settings change at
+    all. Call this fresh on every render instead (it's cheap: no I/O)."""
+    if login_theme_setting and login_theme_setting != "auto":
+        return login_theme_setting
+    if now is None:
+        now = datetime.now()
+    slot = (now.hour // 2) % len(ACTIVE_THEME_IDS)
+    return ACTIVE_THEME_IDS[slot]
+
 
 class _RuntimeSettings:
     """Plain attribute bag holding the currently-effective settings. A
@@ -83,6 +132,7 @@ class _RuntimeSettings:
         self.min_password_length = 8
         self.session_timeout_minutes = max(1, env_settings.SESSION_MAX_AGE_SECONDS // 60)
         self.audit_retention_days = None  # None/0 = keep forever
+        self.login_theme = env_settings.LOGIN_THEME
 
 
 runtime = _RuntimeSettings()
@@ -118,6 +168,7 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.min_password_length = row.min_password_length or 8
     runtime.session_timeout_minutes = row.session_timeout_minutes or max(1, env_settings.SESSION_MAX_AGE_SECONDS // 60)
     runtime.audit_retention_days = row.audit_retention_days
+    runtime.login_theme = row.login_theme or env_settings.LOGIN_THEME
 
 
 def apply_settings_globals(templates) -> None:
@@ -131,6 +182,11 @@ def apply_settings_globals(templates) -> None:
     very next render with no extra wiring."""
     templates.env.globals["app_settings"] = runtime
     templates.env.globals["static_version"] = static_version
+    # Registered as a callable, not a precomputed value -- `runtime.login_theme`
+    # only changes on settings-save, but the *resolved* active theme must
+    # change over the course of a day purely from the clock when the setting
+    # is "auto". Templates call it fresh on every render: {{ active_theme() }}.
+    templates.env.globals["active_theme"] = lambda: resolve_active_theme(runtime.login_theme)
 
 
 def prune_audit_log(db: Session) -> int:

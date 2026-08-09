@@ -16,6 +16,16 @@
 	--accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #22d3ee 130%);
 	--accent-glow: 0 0 0 1px rgba(99, 102, 241, 0.4), 0 4px 20px rgba(99, 102, 241, 0.25);
 
+	/* Sidebar gradient stops -- broken out as variables (previously
+	   hardcoded directly in `.sidebar`'s background, see below) purely so
+	   the theme system's [data-theme="..."] rules further down can swap
+	   them per theme. These 3 defaults are identical to what `.sidebar`
+	   used to hardcode, so leaving the data-theme attribute absent (or
+	   setting it to "constellation") stays pixel-identical. */
+	--side-1: #171c2c;
+	--side-2: #1b2136;
+	--side-3: #201c38;
+
 	--danger: #fb7185;
 	--danger-strong: #f43f5e;
 	--danger-bg: rgba(244, 63, 94, 0.14);
@@ -32,6 +42,84 @@
 	--radius-lg: 16px;
 	--shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.28);
 	--shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.55);
+}
+
+/* ---------------------------------------------------------------------
+   Theme palettes -- driven by a `data-theme="<id>"` attribute set on
+   <html> in base.html/login.html (see app_settings.py's active_theme()
+   Jinja global). Only the accent/brand palette and sidebar gradient
+   change per theme -- functional/status colors (--danger/--success/
+   --warning, status pills, chart colors) are deliberately untouched by
+   every one of these blocks.
+
+   "constellation" is spelled out explicitly (rather than just relying on
+   the attribute being absent) so an admin who's explicitly pinned it in
+   Settings gets byte-identical values to the :root defaults above -- a
+   true no-op either way, per the approved design.
+
+   Values are the exact 6 palettes approved in the theme preview; each
+   theme's accent-glow rgba is that theme's own `accent` hex translated to
+   rgb(), same construction as the default glow above (#6366f1 -> 99,102,241).
+--------------------------------------------------------------------- */
+:root, [data-theme="constellation"] {
+	--accent: #6366f1;
+	--accent-2: #818cf8;
+	--accent-3: #22d3ee;
+	--accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #22d3ee 130%);
+	--accent-glow: 0 0 0 1px rgba(99, 102, 241, 0.4), 0 4px 20px rgba(99, 102, 241, 0.25);
+	--side-1: #171c2c;
+	--side-2: #1b2136;
+	--side-3: #201c38;
+}
+[data-theme="contour"] {
+	--accent: #0ea5e9;
+	--accent-2: #14b8a6;
+	--accent-3: #5eead4;
+	--accent-gradient: linear-gradient(135deg, #0ea5e9 0%, #14b8a6 55%, #5eead4 130%);
+	--accent-glow: 0 0 0 1px rgba(14, 165, 233, 0.4), 0 4px 20px rgba(14, 165, 233, 0.25);
+	--side-1: #131b22;
+	--side-2: #152229;
+	--side-3: #132420;
+}
+[data-theme="ingress"] {
+	--accent: #1d4ed8;
+	--accent-2: #0ea5e9;
+	--accent-3: #67e8f9;
+	--accent-gradient: linear-gradient(135deg, #1d4ed8 0%, #0ea5e9 55%, #67e8f9 130%);
+	--accent-glow: 0 0 0 1px rgba(29, 78, 216, 0.4), 0 4px 20px rgba(29, 78, 216, 0.25);
+	--side-1: #0a0e18;
+	--side-2: #0c1220;
+	--side-3: #0a1524;
+}
+[data-theme="cipher"] {
+	--accent: #059669;
+	--accent-2: #10b981;
+	--accent-3: #34d399;
+	--accent-gradient: linear-gradient(135deg, #059669 0%, #10b981 55%, #34d399 130%);
+	--accent-glow: 0 0 0 1px rgba(5, 150, 105, 0.4), 0 4px 20px rgba(5, 150, 105, 0.25);
+	--side-1: #0c1613;
+	--side-2: #0e1c18;
+	--side-3: #0a1a15;
+}
+[data-theme="perimeter"] {
+	--accent: #d97706;
+	--accent-2: #f59e0b;
+	--accent-3: #fbbf24;
+	--accent-gradient: linear-gradient(135deg, #d97706 0%, #f59e0b 55%, #fbbf24 130%);
+	--accent-glow: 0 0 0 1px rgba(217, 119, 6, 0.4), 0 4px 20px rgba(217, 119, 6, 0.25);
+	--side-1: #191309;
+	--side-2: #1f1608;
+	--side-3: #1a1006;
+}
+[data-theme="horizon"] {
+	--accent: #7c3aed;
+	--accent-2: #db2777;
+	--accent-3: #f472b6;
+	--accent-gradient: linear-gradient(135deg, #7c3aed 0%, #db2777 55%, #f472b6 130%);
+	--accent-glow: 0 0 0 1px rgba(124, 58, 237, 0.4), 0 4px 20px rgba(124, 58, 237, 0.25);
+	--side-1: #160f1e;
+	--side-2: #1c1226;
+	--side-3: #170f22;
 }
 
 * { box-sizing: border-box; }
@@ -84,7 +172,7 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	flex: 0 0 252px;
 	display: flex;
 	flex-direction: column;
-	background: linear-gradient(190deg, #171c2c 0%, #1b2136 60%, #201c38 140%);
+	background: linear-gradient(190deg, var(--side-1) 0%, var(--side-2) 60%, var(--side-3) 140%);
 	border-right: 1px solid var(--border);
 	position: sticky;
 	top: 0;
@@ -135,21 +223,83 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	background: linear-gradient(90deg, rgba(99,102,241,0.22), rgba(99,102,241,0.04));
 	box-shadow: inset 2px 0 0 var(--accent-2);
 }
-.sidebar-footer {
-	border-top: 1px solid var(--border);
-	padding-top: 16px;
-	margin-top: 12px;
+/* --- Content header ---------------------------------------------------
+   Sits above every logged-in page's own content (see base.html) -- holds
+   the admin-only quick theme switcher plus the "who"/logout controls that
+   used to live in .sidebar-footer. Themed automatically: every color used
+   below is one of the --accent*/--side-* custom properties the
+   [data-theme="..."] rules above already override. -------------------- */
+.content-header {
 	display: flex;
-	flex-direction: column;
-	gap: 10px;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding-bottom: 18px;
+	margin-bottom: 22px;
+	border-bottom: 1px solid var(--border);
 }
-.sidebar-footer .who { display: flex; align-items: center; gap: 8px; font-size: 0.88rem; color: var(--text-muted); padding: 0 10px; }
-.sidebar-footer a.who-name { font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
-.sidebar-footer a.who-name:hover { color: var(--accent-2); text-decoration: underline; }
-.sidebar-footer .who-links { padding: 0 10px; display: flex; gap: 12px; }
-.sidebar-footer .link-button { color: var(--text-muted); font-size: 0.85rem; }
-.sidebar-footer .link-button:hover { color: var(--text); }
-.sidebar-footer .sidebar-credit { padding: 0 10px; font-size: 0.72rem; color: var(--text-faint); }
+.content-header-right { display: flex; align-items: center; gap: 18px; }
+.content-header .who { display: flex; align-items: center; gap: 8px; font-size: 0.88rem; color: var(--text-muted); }
+.content-header a.who-name { font-weight: 700; color: var(--text); text-decoration: none; }
+.content-header a.who-name:hover { color: var(--accent-2); text-decoration: underline; }
+.content-header .link-button { color: var(--text-muted); font-size: 0.85rem; }
+.content-header .link-button:hover { color: var(--text); }
+
+.theme-quick-switch { position: relative; }
+.theme-quick-switch .nav-icon { font-size: 0.9rem; }
+.theme-quick-panel {
+	display: none;
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 0;
+	z-index: 50;
+	min-width: 190px;
+	background: var(--surface);
+	border: 1.5px solid var(--border-light);
+	border-radius: 9px;
+	box-shadow: var(--shadow-lg);
+	padding: 6px;
+}
+.theme-quick-option {
+	display: block;
+	width: 100%;
+	text-align: left;
+	background: none;
+	border: none;
+	box-shadow: none;
+	color: var(--text);
+	font-weight: 600;
+	font-size: 0.85rem;
+	padding: 8px 10px;
+	border-radius: 7px;
+	margin: 0;
+}
+.theme-quick-option:hover { background: var(--surface-hover); transform: none; }
+
+/* --- Content footer ----------------------------------------------------
+   Full-width within the content column, 3 zones (left/center/right) --
+   center is deliberately left as a real, styled, empty slot (trademark
+   text / profile links land there later), not just implied by spacing. */
+.content-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	margin-top: 40px;
+	padding-top: 18px;
+	border-top: 1px solid var(--border);
+	font-size: 0.78rem;
+	color: var(--text-faint);
+}
+.content-footer-left, .content-footer-right { flex: 1; min-width: 0; }
+.content-footer-right { text-align: right; }
+.content-footer-center { flex: 2; text-align: center; }
+
+/* .sidebar-credit is now rendered in .content-footer-right (see base.html)
+   -- kept as its own class rather than folded into .content-footer-right
+   directly so a future second use (e.g. re-adding it to the sidebar) can
+   reuse the same rule. */
+.sidebar-credit { font-size: 0.72rem; color: var(--text-faint); }
 
 .role-badge {
 	font-size: 0.66rem;
@@ -469,7 +619,12 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 }
 .filter-chip.active { background: var(--accent-gradient); color: #fff; border-color: transparent; }
 
-/* --- Login ---------------------------------------------------------- */
+/* --- Login ------------------------------------------------------------
+   Background is theme-driven (see app_settings.py's active_theme()):
+   login.html renders exactly one of the 6 `.login-bg` variants below,
+   server-selected, plus a `data-theme-bg="<id>"` attribute on
+   `.login-page` that these rules key off. Each variant's colors/shapes
+   are ported verbatim from the approved theme preview. --------------- */
 .login-page {
 	display: flex;
 	align-items: center;
@@ -477,26 +632,61 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 	min-height: 100vh;
 	position: relative;
 	overflow: hidden;
-	background: radial-gradient(1400px 900px at 50% 120%, #241f4d 0%, #131722 60%), #0e1119;
+	background: #0a0c16; /* constellation's base -- overridden below per theme */
 }
-.login-page::before, .login-page::after {
-	content: "";
+.login-page[data-theme-bg="contour"] { background: #0c0f1a; }
+.login-page[data-theme-bg="ingress"] { background: #05060c; }
+.login-page[data-theme-bg="cipher"] { background: #0a0910; }
+.login-page[data-theme-bg="perimeter"] {
+	background:
+		radial-gradient(900px 700px at 50% 42%, rgba(99, 102, 241, 0.10), transparent 65%),
+		#0b0d18;
+}
+.login-page[data-theme-bg="horizon"] { background: #0a0c17; }
+
+.login-bg { position: absolute; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
+.login-bg canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* Signal Contour: faint oscilloscope-style waveform lines, drifting */
+.login-bg svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.login-bg svg path { fill: none; stroke-width: 1.2; }
+.login-bg .wave-1 { animation: theme-drift-x 60s linear infinite; }
+.login-bg .wave-2 { animation: theme-drift-x 84s linear infinite reverse; }
+.login-bg .wave-3 { animation: theme-drift-x 110s linear infinite; }
+@keyframes theme-drift-x { from { transform: translateX(0); } to { transform: translateX(-400px); } }
+
+/* Perimeter Grid: faint grid + slow radar-style sweep */
+.login-bg .grid {
+	position: absolute; inset: -1px;
+	background-image:
+		linear-gradient(rgba(129, 140, 248, 0.10) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(129, 140, 248, 0.10) 1px, transparent 1px);
+	background-size: 46px 46px;
+	mask-image: radial-gradient(900px 650px at 50% 42%, #000 55%, transparent 92%);
+}
+.login-bg .sweep {
 	position: absolute;
+	left: 50%; top: 42%;
+	width: 1400px; height: 1400px;
+	margin: -700px 0 0 -700px;
+	background: conic-gradient(from 0deg, rgba(34, 211, 238, 0.20), transparent 12%, transparent 100%);
+	animation: theme-sweep-rotate 14s linear infinite;
 	border-radius: 50%;
-	filter: blur(90px);
-	opacity: 0.55;
-	z-index: 0;
 }
-.login-page::before {
-	width: 480px; height: 480px;
-	background: radial-gradient(circle, #6366f1, transparent 70%);
-	top: -140px; left: -120px;
+@keyframes theme-sweep-rotate { to { transform: rotate(360deg); } }
+
+/* Data Horizon: soft glow band behind the drifting bars canvas */
+.login-bg .glow {
+	position: absolute; left: 0; right: 0; top: 46%;
+	height: 220px;
+	background: linear-gradient(180deg, transparent, rgba(139, 92, 246, 0.16), rgba(34, 211, 238, 0.10), transparent);
+	filter: blur(20px);
 }
-.login-page::after {
-	width: 420px; height: 420px;
-	background: radial-gradient(circle, #22d3ee, transparent 70%);
-	bottom: -140px; right: -100px;
+
+@media (prefers-reduced-motion: reduce) {
+	.login-bg svg path, .login-bg .sweep { animation: none !important; }
 }
+
 .login-box {
 	position: relative;
 	z-index: 1;

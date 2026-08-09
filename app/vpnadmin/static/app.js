@@ -602,3 +602,45 @@ function escapeHtml(s) {
 	div.textContent = s == null ? "" : String(s);
 	return div.innerHTML;
 }
+
+/**
+ * Header quick theme switcher (admin-only, see base.html's
+ * .theme-quick-switch) -- lets an admin change the app's active theme
+ * (login-page background + logged-in accent palette, see
+ * app_settings.py's resolve_active_theme) without visiting the full
+ * Settings page. Deliberately reuses the exact same PATCH /api/settings
+ * `login_theme` field the Settings page dropdown writes to -- no second
+ * mechanism. A no-op on any page that doesn't render the switch (non-admin
+ * users), since it's gated on the element existing.
+ */
+(function initThemeQuickSwitch() {
+	const root = document.getElementById("theme-quick-switch");
+	if (!root) return;
+	const toggle = document.getElementById("theme-quick-toggle");
+	const panel = document.getElementById("theme-quick-panel");
+
+	toggle.addEventListener("click", () => {
+		const willOpen = panel.style.display !== "block";
+		panel.style.display = willOpen ? "block" : "none";
+		toggle.setAttribute("aria-expanded", String(willOpen));
+	});
+	document.addEventListener("click", (ev) => {
+		if (!root.contains(ev.target)) {
+			panel.style.display = "none";
+			toggle.setAttribute("aria-expanded", "false");
+		}
+	});
+
+	panel.querySelectorAll(".theme-quick-option").forEach((btn) => {
+		btn.addEventListener("click", async () => {
+			panel.style.display = "none";
+			try {
+				await apiFetch("/api/settings", { method: "PATCH", body: { login_theme: btn.dataset.themeValue } });
+				toast("Theme updated.");
+				window.location.reload();
+			} catch (e) {
+				toast(e.message, "error");
+			}
+		});
+	});
+})();

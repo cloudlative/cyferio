@@ -1,7 +1,31 @@
 {% extends "base.html" %}
+{% set theme = active_theme() %}
 {% block title %}Log In — {{ app_settings.app_name }}{% endblock %}
 {% block content %}
-<div class="login-page">
+<div class="login-page" data-theme-bg="{{ theme }}">
+	<div class="login-bg" id="login-bg">
+		{% if theme == "constellation" %}
+			<canvas id="theme-canvas"></canvas>
+		{% elif theme == "contour" %}
+			<svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+				<path class="wave-1" stroke="#6366f1" opacity="0.28" d="M-100,120 C 60,60 140,180 300,120 S 540,60 700,120 S 940,180 1100,120" />
+				<path class="wave-1" stroke="#6366f1" opacity="0.16" d="M-100,160 C 60,100 140,220 300,160 S 540,100 700,160 S 940,220 1100,160" />
+				<path class="wave-2" stroke="#22d3ee" opacity="0.22" d="M-100,320 C 80,260 160,380 320,320 S 560,260 720,320 S 960,380 1120,320" />
+				<path class="wave-2" stroke="#22d3ee" opacity="0.12" d="M-100,360 C 80,300 160,420 320,360 S 560,300 720,360 S 960,420 1120,360" />
+				<path class="wave-3" stroke="#8b5cf6" opacity="0.18" d="M-100,220 C 40,180 220,260 360,220 S 600,180 760,220 S 980,260 1140,220" />
+			</svg>
+		{% elif theme == "ingress" %}
+			<canvas id="theme-canvas"></canvas>
+		{% elif theme == "cipher" %}
+			<canvas id="theme-canvas"></canvas>
+		{% elif theme == "perimeter" %}
+			<div class="grid"></div>
+			<div class="sweep"></div>
+		{% elif theme == "horizon" %}
+			<div class="glow"></div>
+			<canvas id="theme-canvas"></canvas>
+		{% endif %}
+	</div>
 	<div class="login-box">
 		<div class="login-brand">
 			<div class="login-logo">⚡</div>
@@ -22,4 +46,247 @@
 		</form>
 	</div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{# Only the server-selected theme's animation code is ever sent/run --
+   the other 5 themes' canvas/JS are not shipped on this page load at all,
+   per the ship-only-what's-needed constraint. Each block below is a
+   faithful port of that theme's logic from the approved preview, with
+   `prefers-reduced-motion` handling preserved exactly (freezes/skips the
+   animation loop instead of running it). #}
+
+{% if theme == "constellation" %}
+<script>
+(function () {
+	const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	const canvas = document.getElementById("theme-canvas");
+	const ctx = canvas.getContext("2d");
+	let w, h, nodes, dpr;
+	function size() {
+		dpr = Math.min(window.devicePixelRatio || 1, 2);
+		w = canvas.clientWidth; h = canvas.clientHeight;
+		canvas.width = w * dpr; canvas.height = h * dpr;
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	}
+	function init() {
+		size();
+		const count = Math.max(18, Math.round((w * h) / 42000));
+		nodes = Array.from({ length: count }, () => ({
+			x: Math.random() * w, y: Math.random() * h,
+			vx: (Math.random() - 0.5) * 0.12, vy: (Math.random() - 0.5) * 0.12,
+			r: 1.2 + Math.random() * 1.6,
+		}));
+	}
+	const linkDist = 170;
+	let packetT = 0, packetEdge = null;
+	function frame() {
+		ctx.clearRect(0, 0, w, h);
+		for (const n of nodes) {
+			n.x += n.vx; n.y += n.vy;
+			if (n.x < 0 || n.x > w) n.vx *= -1;
+			if (n.y < 0 || n.y > h) n.vy *= -1;
+		}
+		ctx.lineWidth = 1;
+		const edges = [];
+		for (let i = 0; i < nodes.length; i++) {
+			for (let j = i + 1; j < nodes.length; j++) {
+				const a = nodes[i], b = nodes[j];
+				const d = Math.hypot(a.x - b.x, a.y - b.y);
+				if (d < linkDist) {
+					const alpha = (1 - d / linkDist) * 0.22;
+					ctx.strokeStyle = `rgba(129,140,248,${alpha})`;
+					ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+					edges.push([a, b]);
+				}
+			}
+		}
+		if (!reduceMotion) {
+			if (!packetEdge && edges.length) packetEdge = edges[Math.floor(Math.random() * edges.length)];
+			if (packetEdge) {
+				packetT += 0.012;
+				const [a, b] = packetEdge;
+				const px = a.x + (b.x - a.x) * packetT, py = a.y + (b.y - a.y) * packetT;
+				ctx.fillStyle = "rgba(34,211,238,0.9)";
+				ctx.beginPath(); ctx.arc(px, py, 2.4, 0, Math.PI * 2); ctx.fill();
+				if (packetT >= 1) { packetT = 0; packetEdge = null; }
+			}
+		}
+		for (const n of nodes) {
+			ctx.fillStyle = "rgba(199,210,254,0.55)";
+			ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2); ctx.fill();
+		}
+		if (!reduceMotion) requestAnimationFrame(frame);
+	}
+	window.addEventListener("resize", init);
+	init(); frame();
+	if (reduceMotion) frame();
+})();
+</script>
+{% elif theme == "ingress" %}
+<script>
+(function () {
+	const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	const canvas = document.getElementById("theme-canvas");
+	const ctx = canvas.getContext("2d");
+	let w, h, dpr, stars, streaks = [];
+	let px = 0, py = 0, tx = 0, ty = 0;
+	function size() {
+		dpr = Math.min(window.devicePixelRatio || 1, 2);
+		w = canvas.clientWidth; h = canvas.clientHeight;
+		canvas.width = w * dpr; canvas.height = h * dpr;
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	}
+	function init() {
+		size();
+		const count = Math.max(80, Math.round((w * h) / 3800));
+		stars = Array.from({ length: count }, () => ({
+			x: Math.random() * w, y: Math.random() * h,
+			r: Math.random() * 1.3 + 0.2, tw: Math.random() * Math.PI * 2,
+			depth: 0.3 + Math.random() * 0.7,
+		}));
+	}
+	document.getElementById("login-bg").addEventListener("mousemove", (e) => {
+		const rect = canvas.getBoundingClientRect();
+		tx = ((e.clientX - rect.left) / rect.width - 0.5) * 14;
+		ty = ((e.clientY - rect.top) / rect.height - 0.5) * 14;
+	});
+	let t = 0;
+	function maybeSpawnStreak() {
+		if (reduceMotion) return;
+		if (Math.random() < 0.006 && streaks.length < 2) {
+			const y = Math.random() * h * 0.7;
+			streaks.push({ x: -50, y, len: 90 + Math.random() * 60, speed: 5 + Math.random() * 4, life: 1 });
+		}
+	}
+	function frame() {
+		t += 0.006;
+		px += (tx - px) * 0.04; py += (ty - py) * 0.04;
+		ctx.clearRect(0, 0, w, h);
+		for (const s of stars) {
+			const tw = reduceMotion ? 0.7 : 0.55 + 0.45 * Math.sin(t * 2 + s.tw);
+			ctx.fillStyle = `rgba(226,232,255,${0.5 * tw})`;
+			ctx.beginPath();
+			ctx.arc(s.x + px * s.depth, s.y + py * s.depth, s.r, 0, Math.PI * 2);
+			ctx.fill();
+		}
+		maybeSpawnStreak();
+		streaks.forEach(st => {
+			st.x += st.speed; st.life -= 0.012;
+			const grad = ctx.createLinearGradient(st.x - st.len, st.y - st.len * 0.2, st.x, st.y);
+			grad.addColorStop(0, "rgba(125,211,252,0)");
+			grad.addColorStop(1, `rgba(186,230,253,${0.8 * Math.max(st.life, 0)})`);
+			ctx.strokeStyle = grad; ctx.lineWidth = 1.4;
+			ctx.beginPath();
+			ctx.moveTo(st.x - st.len, st.y - st.len * 0.2);
+			ctx.lineTo(st.x, st.y);
+			ctx.stroke();
+		});
+		streaks = streaks.filter(st => st.life > 0 && st.x < w + 100);
+		if (!reduceMotion) requestAnimationFrame(frame);
+	}
+	window.addEventListener("resize", init);
+	init(); frame();
+	if (reduceMotion) frame();
+})();
+</script>
+{% elif theme == "cipher" %}
+<script>
+(function () {
+	const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	const canvas = document.getElementById("theme-canvas");
+	const ctx = canvas.getContext("2d");
+	const chars = "0123456789abcdef";
+	let w, h, dpr, cols, fontSize = 13;
+	function size() {
+		dpr = Math.min(window.devicePixelRatio || 1, 2);
+		w = canvas.clientWidth; h = canvas.clientHeight;
+		canvas.width = w * dpr; canvas.height = h * dpr;
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	}
+	function init() {
+		size();
+		const colWidth = 26;
+		const count = Math.ceil(w / colWidth);
+		cols = Array.from({ length: count }, (_, i) => ({
+			x: i * colWidth + colWidth / 2,
+			y: Math.random() * -h,
+			speed: 0.25 + Math.random() * 0.35,
+			len: 4 + Math.floor(Math.random() * 8),
+			glyphs: null,
+		}));
+		cols.forEach(c => {
+			c.glyphs = Array.from({ length: c.len }, () => chars[Math.floor(Math.random() * chars.length)]);
+		});
+	}
+	function frame() {
+		ctx.clearRect(0, 0, w, h);
+		ctx.font = `${fontSize}px ui-monospace, "SF Mono", Consolas, monospace`;
+		ctx.textAlign = "center";
+		for (const c of cols) {
+			if (!reduceMotion) c.y += c.speed;
+			if (c.y - c.len * fontSize > h) { c.y = -Math.random() * 200; }
+			for (let i = 0; i < c.glyphs.length; i++) {
+				const gy = c.y - i * fontSize;
+				if (gy < -fontSize || gy > h + fontSize) continue;
+				const fade = 1 - i / c.glyphs.length;
+				const isHead = i === 0;
+				ctx.fillStyle = isHead ? `rgba(125,211,252,${0.55 * fade})` : `rgba(99,102,241,${0.28 * fade})`;
+				ctx.fillText(c.glyphs[i], c.x, gy);
+			}
+			if (!reduceMotion && Math.random() < 0.01) {
+				c.glyphs[Math.floor(Math.random() * c.glyphs.length)] = chars[Math.floor(Math.random() * chars.length)];
+			}
+		}
+		if (!reduceMotion) requestAnimationFrame(frame);
+	}
+	window.addEventListener("resize", init);
+	init(); frame();
+	if (reduceMotion) frame();
+})();
+</script>
+{% elif theme == "horizon" %}
+<script>
+(function () {
+	const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	const canvas = document.getElementById("theme-canvas");
+	const ctx = canvas.getContext("2d");
+	let w, h, dpr, bars;
+	function size() {
+		dpr = Math.min(window.devicePixelRatio || 1, 2);
+		w = canvas.clientWidth; h = canvas.clientHeight;
+		canvas.width = w * dpr; canvas.height = h * dpr;
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	}
+	function init() {
+		size();
+		bars = Array.from({ length: 22 }, (_, i) => ({
+			y: h * 0.12 + i * (h * 0.76 / 22) + (Math.random() - 0.5) * 6,
+			x: Math.random() * w,
+			speed: 0.06 + Math.random() * 0.22,
+			width: 120 + Math.random() * 260,
+			opacity: 0.06 + Math.random() * 0.16,
+		}));
+	}
+	function frame() {
+		ctx.clearRect(0, 0, w, h);
+		for (const b of bars) {
+			if (!reduceMotion) { b.x += b.speed; if (b.x > w + b.width) b.x = -b.width; }
+			const grad = ctx.createLinearGradient(b.x, 0, b.x + b.width, 0);
+			grad.addColorStop(0, "rgba(203,213,255,0)");
+			grad.addColorStop(0.5, `rgba(203,213,255,${b.opacity})`);
+			grad.addColorStop(1, "rgba(203,213,255,0)");
+			ctx.strokeStyle = grad;
+			ctx.lineWidth = 1;
+			ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x + b.width, b.y); ctx.stroke();
+		}
+		if (!reduceMotion) requestAnimationFrame(frame);
+	}
+	window.addEventListener("resize", init);
+	init(); frame();
+	if (reduceMotion) frame();
+})();
+</script>
+{% endif %}
+{# contour and perimeter are pure CSS/SVG -- no JS needed at all #}
 {% endblock %}

@@ -65,6 +65,18 @@
 	</div>
 
 	<div class="card">
+		<h2>Theme</h2>
+		<p class="muted" style="margin-top:0">Controls the login-page animated background and the sidebar/accent color palette across every logged-in page. Applies immediately, no restart needed.</p>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-login-theme">Active Theme</label>
+				<select id="s-login-theme"></select>
+			</div>
+		</div>
+		<p class="muted" id="theme-description" style="margin-bottom:0"></p>
+	</div>
+
+	<div class="card">
 		<h2>Security</h2>
 		<div class="form-grid">
 			<div class="field">
@@ -122,6 +134,19 @@ function intOrNull(s) {
 	return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
+// Theme choices come from GET /api/settings (server-authoritative, see
+// app_settings.py's THEME_CHOICES) rather than being duplicated here --
+// one source of truth for id/label/description across Settings page,
+// header quick-switch (which hardcodes ids/labels since it needs no
+// description) and the server-side resolver.
+let _themeChoices = [];
+
+function renderThemeDescription() {
+	const id = document.getElementById("s-login-theme").value;
+	const choice = _themeChoices.find(c => c.id === id);
+	document.getElementById("theme-description").textContent = choice ? choice.description : "";
+}
+
 async function loadSettings() {
 	try {
 		const s = await apiFetch("/api/settings");
@@ -138,10 +163,18 @@ async function loadSettings() {
 		setVal("s-session-timeout", s.session_timeout_minutes);
 		setVal("s-audit-retention", s.audit_retention_days);
 		document.getElementById("smtp-status").textContent = s.smtp_configured ? "Currently configured." : "Not configured -- email features are disabled.";
+
+		_themeChoices = s.theme_choices || [];
+		const themeSelect = document.getElementById("s-login-theme");
+		themeSelect.innerHTML = _themeChoices.map(c => `<option value="${c.id}">${escapeHtml(c.label)}</option>`).join("");
+		themeSelect.value = s.login_theme || "auto";
+		renderThemeDescription();
 	} catch (e) {
 		toast(e.message, "error");
 	}
 }
+
+document.getElementById("s-login-theme").addEventListener("change", renderThemeDescription);
 
 document.getElementById("settings-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
@@ -158,6 +191,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		min_password_length: intOrNull(val("s-min-pw-len")),
 		session_timeout_minutes: intOrNull(val("s-session-timeout")),
 		audit_retention_days: intOrNull(val("s-audit-retention")),
+		login_theme: document.getElementById("s-login-theme").value,
 	};
 	try {
 		await apiFetch("/api/settings", { method: "PATCH", body });

@@ -96,6 +96,14 @@ class Settings:
     SMTP_FROM: str = os.environ.get("SMTP_FROM", "")
     SMTP_USE_TLS: bool = _env_bool("SMTP_USE_TLS", True)
 
+    # --- Theming --------------------------------------------------------
+    # Which named theme (login-page animated background + logged-in app
+    # accent palette) is active. "auto" rotates through all 6 on a fixed
+    # 2-hour schedule (see app_settings.resolve_active_theme); any other
+    # value pins that one theme permanently. See app_settings.py's
+    # ACTIVE_THEME_IDS for the full set of valid values.
+    LOGIN_THEME: str = os.environ.get("LOGIN_THEME", "auto")
+
     # --- Per-client restrictions (country / OS / bandwidth quota) -----------
     # See README.md's "Per-client restrictions" section for the full design.
     # These two JSON files live under /etc/openvpn (bind-mounted rw into

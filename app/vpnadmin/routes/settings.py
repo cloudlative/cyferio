@@ -5,7 +5,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from .. import mailer
-from ..app_settings import SMTP_PASSWORD_PLACEHOLDER, get_settings_row, refresh_runtime_cache, runtime
+from ..app_settings import ACTIVE_THEME_IDS, SMTP_PASSWORD_PLACEHOLDER, THEME_CHOICES, get_settings_row, refresh_runtime_cache, runtime
 from ..audit import log_action
 from ..auth import require_admin
 from ..db import get_db
@@ -40,6 +40,8 @@ class UpdateSettingsRequest(BaseModel):
     session_timeout_minutes: int | None = None
     audit_retention_days: int | None = None
 
+    login_theme: str | None = None
+
     @field_validator("smtp_port")
     @classmethod
     def _port_range(cls, v):
@@ -73,6 +75,13 @@ class UpdateSettingsRequest(BaseModel):
             raise ValueError("Audit log retention can't be negative.")
         return v
 
+    @field_validator("login_theme")
+    @classmethod
+    def _valid_theme(cls, v: str | None) -> str | None:
+        if v is not None and v != "auto" and v not in ACTIVE_THEME_IDS:
+            raise ValueError(f"Unknown theme '{v}'.")
+        return v
+
 
 def _serialize() -> dict:
     s = runtime
@@ -91,12 +100,15 @@ def _serialize() -> dict:
         "min_password_length": s.min_password_length,
         "session_timeout_minutes": s.session_timeout_minutes,
         "audit_retention_days": s.audit_retention_days,
+        "login_theme": s.login_theme or "auto",
     }
 
 
 @router.get("")
 def get_settings(_: User = Depends(require_admin)):
-    return _serialize()
+    body = _serialize()
+    body["theme_choices"] = THEME_CHOICES
+    return body
 
 
 @router.patch("")
@@ -107,7 +119,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
 
     for field in ("app_name", "app_tagline", "app_footer_credit", "smtp_host", "smtp_port",
                    "smtp_username", "smtp_from", "smtp_use_tls", "min_password_length",
-                   "session_timeout_minutes", "audit_retention_days"):
+                   "session_timeout_minutes", "audit_retention_days", "login_theme"):
         if field in fields_set:
             value = getattr(body, field)
             if value != getattr(row, field):

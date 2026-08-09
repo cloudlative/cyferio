@@ -158,6 +158,11 @@ class AppSettings(Base):
     # Audit log retention -- NULL/0 means "keep forever" (no pruning).
     audit_retention_days = Column(Integer, nullable=True)
 
+    # Theming (see config.py's LOGIN_THEME) -- NULL/"auto" rotates through
+    # all 6 named themes on a fixed 2-hour schedule (see app_settings.py's
+    # resolve_active_theme); any other value pins that one theme.
+    login_theme = Column(String(32), nullable=True)
+
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
 

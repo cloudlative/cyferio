@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="{{ active_theme() }}">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
@@ -23,25 +23,54 @@
 			<a href="/settings" class="{{ 'active' if request.url.path == '/settings' }}"><span class="nav-icon">⛭</span>Settings</a>
 			{% endif %}
 		</nav>
-		<div class="sidebar-footer">
-			<div class="who">
-				<a href="/profile" class="who-name">{{ user.first_name or user.username }}</a>
-				<span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span>
-			</div>
-			<div class="who-links">
-				<form action="/logout" method="post" style="margin:0">
-					<button type="submit" class="link-button">Log out</button>
-				</form>
-			</div>
-			{% if app_settings.app_footer_credit %}
-			<div class="sidebar-credit">{{ app_settings.app_footer_credit }}</div>
-			{% endif %}
-		</div>
 	</aside>
 	{% endif %}
 
 	<main class="content">
+		{% if user %}
+		<header class="content-header">
+			<div class="content-header-left"></div>
+			<div class="content-header-right">
+				{% if is_admin %}
+				<div class="theme-quick-switch" id="theme-quick-switch">
+					<button type="button" class="btn-secondary btn-sm" id="theme-quick-toggle" aria-haspopup="true" aria-expanded="false">
+						<span class="nav-icon">◐</span>Theme
+					</button>
+					<div class="theme-quick-panel" id="theme-quick-panel">
+						<button type="button" class="theme-quick-option" data-theme-value="auto">Auto-rotate</button>
+						<button type="button" class="theme-quick-option" data-theme-value="constellation">Constellation</button>
+						<button type="button" class="theme-quick-option" data-theme-value="contour">Signal Contour</button>
+						<button type="button" class="theme-quick-option" data-theme-value="ingress">Ingress Field</button>
+						<button type="button" class="theme-quick-option" data-theme-value="cipher">Cipher Rain</button>
+						<button type="button" class="theme-quick-option" data-theme-value="perimeter">Perimeter Grid</button>
+						<button type="button" class="theme-quick-option" data-theme-value="horizon">Data Horizon</button>
+					</div>
+				</div>
+				{% endif %}
+				<div class="who">
+					<a href="/profile" class="who-name">{{ user.first_name or user.username }}</a>
+					<span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span>
+				</div>
+				<form action="/logout" method="post" style="margin:0">
+					<button type="submit" class="link-button">Log out</button>
+				</form>
+			</div>
+		</header>
+		{% endif %}
+
 		{% block content %}{% endblock %}
+
+		{% if user %}
+		<footer class="content-footer">
+			<div class="content-footer-left"></div>
+			<div class="content-footer-center"></div>
+			<div class="content-footer-right">
+				{% if app_settings.app_footer_credit %}
+				<span class="sidebar-credit">{{ app_settings.app_footer_credit }}</span>
+				{% endif %}
+			</div>
+		</footer>
+		{% endif %}
 	</main>
 
 	<div id="toast-container"></div>
