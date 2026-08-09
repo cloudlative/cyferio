@@ -1240,6 +1240,16 @@ persist-key
 persist-tun
 verb 3
 crl-verify crl.pem" >> "$OPENVPN_DIR/server.conf"
+	# Explicit fast write interval -- OpenVPN's own default when the
+	# interval argument is omitted is 60 SECONDS, not the few seconds one
+	# might assume. vpn-status.py and the web app both read this file to
+	# show who's currently connected; without an explicit interval here,
+	# "online now" can lag up to a full minute behind reality after a
+	# client connects or disconnects, no matter how often the app itself
+	# polls or how many times an admin clicks Refresh -- the underlying
+	# file just hasn't been rewritten yet. 5s keeps that lag small without
+	# adding meaningful I/O load.
+	echo "status $STATUS_LOG 5" >> "$OPENVPN_DIR/server.conf"
 	if [[ "$protocol" = "udp" ]]; then
 		echo "explicit-exit-notify" >> "$OPENVPN_DIR/server.conf"
 	fi
