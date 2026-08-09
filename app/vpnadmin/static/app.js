@@ -170,11 +170,15 @@ function renderDonutChart(mountEl, entries, { size = 220, thickness = 34 } = {})
 		return circle;
 	}).join("");
 
+	// Fixed-width label/count columns (not flex:1) so a legend with only
+	// one or two rows doesn't stretch across the full mount width and
+	// leave a huge gap between the label and its count -- this mount can
+	// be half a wide card (e.g. the Diagnostics rejections breakdown).
 	const legend = entries.map((e, i) => `
 		<div class="donut-legend-row" style="display:flex;align-items:center;gap:8px;font-size:0.85rem;padding:3px 6px;border-radius:6px;">
 			<span style="width:10px;height:10px;border-radius:3px;background:${CHART_COLORS[i % CHART_COLORS.length]};flex:none"></span>
-			<span style="flex:1">${escapeHtml(e.label)}</span>
-			<span class="muted mono">${e.value}</span>
+			<span style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(e.label)}</span>
+			<span class="muted mono">${e.value} (${Math.round((e.value / total) * 100)}%)</span>
 		</div>`).join("");
 
 	mountEl.innerHTML = `
@@ -184,7 +188,7 @@ function renderDonutChart(mountEl, entries, { size = 220, thickness = 34 } = {})
 				<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle"
 					fill="var(--text)" font-size="${size * 0.13}" font-weight="800">${total}</text>
 			</svg>
-			<div style="display:flex;flex-direction:column;gap:8px;min-width:160px;flex:1">${legend}</div>
+			<div style="display:flex;flex-direction:column;gap:8px">${legend}</div>
 		</div>`;
 }
 
