@@ -105,8 +105,16 @@ class Settings:
     # itself happens entirely on the OpenVPN host's client-connect/
     # client-disconnect scripts (host-scripts/ in this repo), which this
     # app does not invoke -- it only edits the policy file they read.
-    CLIENT_POLICY_FILE: str = os.environ.get("CLIENT_POLICY_FILE", "/etc/openvpn/server/client_policy.json")
-    CLIENT_USAGE_FILE: str = os.environ.get("CLIENT_USAGE_FILE", "/etc/openvpn/server/client_usage.json")
+    # Default path is under a nobody-owned "policy/" subdirectory, NOT
+    # directly in /etc/openvpn/server/ -- that top-level directory is
+    # root-owned, and the client-connect/disconnect scripts (which run as
+    # `nobody`, OpenVPN's unprivileged runtime user) need to atomically
+    # write-then-rename client_usage.json, which requires write permission
+    # on the containing directory itself, not just the file. See
+    # README.md's "Per-client restrictions" setup section for the
+    # `mkdir`/`chown`/`chmod` this depends on.
+    CLIENT_POLICY_FILE: str = os.environ.get("CLIENT_POLICY_FILE", "/etc/openvpn/server/policy/client_policy.json")
+    CLIENT_USAGE_FILE: str = os.environ.get("CLIENT_USAGE_FILE", "/etc/openvpn/server/policy/client_usage.json")
 
 
 settings = Settings()

@@ -144,11 +144,25 @@ Enforcement happens **on the OpenVPN host itself**, in two scripts under `host-s
 
 Both scripts need `chown nobody:nogroup` + `chmod +x`, same as the original `openvpn-mac-addr-check.py`. After adding the `client-disconnect` line to `server.conf`, restart the OpenVPN server service (**this drops all currently-connected clients** — pick a maintenance window).
 
+**Before that restart**, create the `policy/` subdirectory the two JSON files below live in, owned by `nobody`:
+
+```bash
+mkdir -p /etc/openvpn/server/policy
+chown nobody:nogroup /etc/openvpn/server/policy
+chmod 0770 /etc/openvpn/server/policy
+echo '{}' > /etc/openvpn/server/policy/client_policy.json
+echo '{}' > /etc/openvpn/server/policy/client_usage.json
+chown nobody:nogroup /etc/openvpn/server/policy/client_policy.json /etc/openvpn/server/policy/client_usage.json
+chmod 664 /etc/openvpn/server/policy/client_policy.json /etc/openvpn/server/policy/client_usage.json
+```
+
+This lives in its own subdirectory rather than directly in `/etc/openvpn/server/` (which is root-owned) because the connect/disconnect scripts run as `nobody` and need to atomically write-then-rename `client_usage.json` — which requires *write permission on the containing directory itself*, not just the file; owning the file alone isn't enough. `policy_lib.py` also makes a best-effort attempt to create/chown this directory itself if it's missing and the caller happens to be running as root (the app, or `openvpn-install.sh`/`client_policy_cli.py` via sudo) — but do the above explicitly rather than relying on that fallback, same reasoning as the original installer's own setup steps `touch`-ing + `chown`-ing `openvpn_db.txt`/`openvpn.log` up front. Skipping this doesn't break the MAC-binding check or take down the VPN — a policy-file read failure fails *open* (treated as unrestricted, loudly logged) rather than rejecting connections — but restrictions and usage tracking silently won't work until it's done.
+
 The connect script checks, in order, once identity is established by the MAC check: OS → country → bandwidth quota. Each rejection is logged to `openvpn.log` with a machine-readable `reason` (`mac_mismatch`, `os_not_allowed`, `country_not_allowed`, `country_lookup_failed`, `bandwidth_exceeded`), visible via `vpn-status.py --rejected-connections` and the web app's Diagnostics page.
 
 ### Storage
 
-Two new JSON files under `/etc/openvpn/server/` (paths configurable via `vpn-tools.conf`'s `CLIENT_POLICY_FILE`/`CLIENT_USAGE_FILE`):
+Two new JSON files under `/etc/openvpn/server/policy/` (paths configurable via `vpn-tools.conf`'s `CLIENT_POLICY_FILE`/`CLIENT_USAGE_FILE`):
 
 - **`client_policy.json`** — admin-configured restrictions, keyed by client name:
   ```json

@@ -16,7 +16,7 @@
 #
 #  5) set permissions
 #       chown nobody:nogroup openvpn-mac-addr-check.py policy_lib.py openvpn_db.txt openvpn.log
-#  6) chmod +x openvpn-mac-addr-check.py
+#  6) chmod +x openvpn-mac-addr-check.py openvpn-client-disconnect.py
 #  7) Add the user data to the openvpn_db.txt file with the following format.
 #       {openvpn-user}={system-mac-address}
 #     e.g
@@ -28,6 +28,22 @@
 #     --set-country/--set-os/--set-bandwidth CLI subcommands. A client with
 #     no policy entry at all is fully unrestricted (only the MAC check
 #     above applies to them).
+#
+#     IMPORTANT: /etc/openvpn/server/ is root-owned, and this script (and
+#     openvpn-client-disconnect.py) run as `nobody` -- `nobody` can create
+#     NEW files there. Pre-create client_policy.json/client_usage.json (and
+#     the .lock files policy_lib.py uses for locking) as root, THEN chown
+#     them to nobody:nogroup, exactly like step 4/5 above already does for
+#     openvpn_db.txt/openvpn.log -- otherwise the first-ever policy lookup
+#     will hit a PermissionError trying to create the lock file. This
+#     failure mode is caught and fails OPEN (treated as unrestricted, see
+#     below) rather than blocking every connection, but usage tracking in
+#     particular will silently never persist until this is done:
+#       cd /etc/openvpn/server
+#       echo '{}' > client_policy.json && echo '{}' > client_usage.json
+#       touch client_policy.json.lock client_usage.json.lock
+#       chown nobody:nogroup client_policy.json client_usage.json client_policy.json.lock client_usage.json.lock
+#       chmod 664 client_policy.json client_usage.json client_policy.json.lock client_usage.json.lock
 #
 # Gate order (each stage only runs once identity is established by the
 # stage before it -- see README.md's "Per-client restrictions" section for
@@ -118,7 +134,24 @@ with open(log_file, 'a') as LogFile:
     # Identity established (cert CN + device MAC both matched) -- look up
     # this client's restrictions, if any. An empty/absent policy means
     # fully unrestricted; every check below is a no-op in that case.
-    policy = policy_lib.get_policy(env_user)
+    #
+    # Fails OPEN (treated as unrestricted, connection proceeds) if the
+    # policy file/lock itself can't be read for any reason -- e.g. a fresh
+    # install where client_policy.json hasn't been created yet, or a
+    # permissions problem. This is a deliberately different call than the
+    # GeoIP fail-CLOSED behavior below: here, the failure means "we don't
+    # even know whether a restriction exists", not "we know one exists and
+    # can't verify it" -- and an operational hiccup in this add-on feature
+    # must never be able to lock every client (including ones with no
+    # restriction at all) out of the VPN. The MAC-binding check above --
+    # the actual security boundary -- is completely unaffected either way.
+    # Always logged loudly so it's not silently invisible to an admin.
+    try:
+        policy = policy_lib.get_policy(env_user)
+    except Exception as e:
+        policy = {}
+        print("policy lookup failed for {0}: {1} -- treating as unrestricted".format(env_user, e))
+        LogFile.write("policy lookup failed for {0}: {1} -- treating as unrestricted\n".format(env_user, e))
 
     # 2) OS restriction -----------------------------------------------------
     allowed_os = policy.get("allowed_os") or []
@@ -152,7 +185,16 @@ with open(log_file, 'a') as LogFile:
     # 4) Weekly bandwidth quota (soft cutoff, connect-time only) ------------
     quota_gb = policy.get("bandwidth_weekly_gb")
     if quota_gb:
-        used_bytes = policy_lib.get_usage(env_user)
+        # Same fail-open rationale as the policy lookup above: a quota IS
+        # configured here (we know that much), but if the usage file can't
+        # be read, treat usage as unknown-but-not-yet-over-quota rather
+        # than blocking the connection outright.
+        try:
+            used_bytes = policy_lib.get_usage(env_user)
+        except Exception as e:
+            used_bytes = 0
+            print("usage lookup failed for {0}: {1} -- treating this week's usage as 0".format(env_user, e))
+            LogFile.write("usage lookup failed for {0}: {1} -- treating this week's usage as 0\n".format(env_user, e))
         quota_bytes = float(quota_gb) * (1024 ** 3)
         if used_bytes >= quota_bytes:
             reject(LogFile, "bandwidth_exceeded",

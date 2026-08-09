@@ -35,8 +35,11 @@ from datetime import date, timedelta
 CONFIG_FILE = "/etc/openvpn/vpn-tools.conf"
 
 DEFAULTS = {
-    "CLIENT_POLICY_FILE": "/etc/openvpn/server/client_policy.json",
-    "CLIENT_USAGE_FILE": "/etc/openvpn/server/client_usage.json",
+    # Under a nobody-owned "policy/" subdirectory, not directly in
+    # /etc/openvpn/server/ (root-owned) -- see this module's own
+    # atomic_write_json docstring and README.md's setup section for why.
+    "CLIENT_POLICY_FILE": "/etc/openvpn/server/policy/client_policy.json",
+    "CLIENT_USAGE_FILE": "/etc/openvpn/server/policy/client_usage.json",
     "MAXMIND_LICENSE_KEY": "",
     "MAXMIND_DB_PATH": "/etc/openvpn/server/GeoLite2-Country.mmdb",
     "DB_FILE": "/etc/openvpn/server/openvpn_db.txt",
@@ -70,13 +73,53 @@ def _locked(path):
     e.g. the web app's own read path -- is never blocked by, or interferes
     with, this lock."""
     lock_path = path + ".lock"
+    _ensure_dir_writable_by_nobody(os.path.dirname(lock_path) or ".")
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o666)
+    # os.open's mode argument is masked by the creating process's umask
+    # (typically 022), so a lock file created by a root-run caller (the
+    # app, or client_policy_cli.py via sudo) can otherwise end up
+    # root:root 0644 -- unwritable by `nobody`, breaking every subsequent
+    # connect/disconnect script's attempt to take this same lock. Force
+    # 0666 explicitly (ignoring umask) and best-effort chown to
+    # nobody:nogroup every time this file is opened, regardless of who
+    # created it or when.
+    try:
+        os.fchmod(fd, 0o666)
+        import grp
+        import pwd
+        os.fchown(fd, pwd.getpwnam("nobody").pw_uid, grp.getgrnam("nogroup").gr_gid)
+    except (OSError, KeyError):
+        pass
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
+
+
+def _ensure_dir_writable_by_nobody(d):
+    """Best-effort: if `d` doesn't exist yet, create it AND chown/chmod it
+    so `nobody` can create files inside it (a plain os.makedirs would
+    leave a fresh directory root:root, which doesn't help -- `nobody`
+    still couldn't write into it, the exact problem this whole helper
+    exists to avoid). Only meaningfully succeeds when running as root
+    (the app's container, or openvpn-install.sh via sudo/client_policy_cli.py)
+    -- when running as `nobody` itself (the normal case for the connect/
+    disconnect scripts) against a directory that doesn't exist, this is a
+    silent no-op and the caller's own fail-open handling takes over. See
+    README.md's setup section for the one-time manual equivalent of this,
+    recommended to run ahead of time rather than relying on this fallback."""
+    if os.path.isdir(d):
+        return
+    try:
+        os.makedirs(d, exist_ok=True)
+        import grp
+        import pwd
+        os.chown(d, pwd.getpwnam("nobody").pw_uid, grp.getgrnam("nogroup").gr_gid)
+        os.chmod(d, 0o770)
+    except (OSError, KeyError):
+        pass
 
 
 def read_json(path, default):
@@ -117,6 +160,14 @@ def atomic_write_json(path, data):
             pass
 
     d = os.path.dirname(path) or "."
+    # Best-effort: if this happens to be running as root (e.g. the app's
+    # container, or openvpn-install.sh via sudo) and the directory is
+    # simply missing, create it. When running as `nobody` (the normal case
+    # for the connect/disconnect scripts) against a directory it doesn't
+    # own, this silently does nothing useful and the mkstemp below raises
+    # -- caught by the caller's fail-open handling, see
+    # openvpn-mac-addr-check.py/openvpn-client-disconnect.py.
+    _ensure_dir_writable_by_nobody(d)
     fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", dir=d)
     try:
         with os.fdopen(fd, "w") as f:

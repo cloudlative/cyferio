@@ -40,8 +40,8 @@ from datetime import date, timedelta
 
 CONFIG_FILE = "/etc/openvpn/vpn-tools.conf"
 DEFAULTS = {
-    "CLIENT_POLICY_FILE": "/etc/openvpn/server/client_policy.json",
-    "CLIENT_USAGE_FILE": "/etc/openvpn/server/client_usage.json",
+    "CLIENT_POLICY_FILE": "/etc/openvpn/server/policy/client_policy.json",
+    "CLIENT_USAGE_FILE": "/etc/openvpn/server/policy/client_usage.json",
 }
 VALID_OS = {"windows", "linux", "mac"}
 
@@ -75,13 +75,44 @@ def _read_only(path):
         return {}
 
 
+def _ensure_dir_writable_by_nobody(d):
+    """Same helper as host-scripts/policy_lib.py's own copy -- see that
+    module's docstring for the full rationale. This script normally runs
+    as root (via openvpn-install.sh/sudo), so this reliably succeeds here,
+    unlike the connect/disconnect scripts' own copy (which runs as
+    `nobody` and can only rely on this directory already existing)."""
+    if os.path.isdir(d):
+        return
+    try:
+        os.makedirs(d, exist_ok=True)
+        import grp
+        import pwd
+        os.chown(d, pwd.getpwnam("nobody").pw_uid, grp.getgrnam("nogroup").gr_gid)
+        os.chmod(d, 0o770)
+    except (OSError, KeyError):
+        pass
+
+
 def _locked_read_modify_write(path, mutate_fn):
     """Same atomic write-to-tmp-then-os.rename + owner/mode preservation
     pattern as policy_lib.py -- see that module's atomic_write_json()
     docstring for the full rationale (kept in sync manually, not shared
     code, per this file's own module docstring)."""
     lock_path = path + ".lock"
+    _ensure_dir_writable_by_nobody(os.path.dirname(lock_path) or ".")
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o666)
+    # Force 0666 + nobody:nogroup, ignoring umask -- this script normally
+    # runs as root (via openvpn-install.sh/sudo), so a lock file it
+    # creates/re-opens must not end up unwritable by the OpenVPN host's
+    # nobody-run connect/disconnect scripts. See policy_lib.py's identical
+    # comment on its own copy of this pattern.
+    try:
+        os.fchmod(fd, 0o666)
+        import grp
+        import pwd
+        os.fchown(fd, pwd.getpwnam("nobody").pw_uid, grp.getgrnam("nogroup").gr_gid)
+    except (OSError, KeyError):
+        pass
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         data = _read_only(path)
@@ -103,6 +134,7 @@ def _locked_read_modify_write(path, mutate_fn):
                 pass
 
         d = os.path.dirname(path) or "."
+        _ensure_dir_writable_by_nobody(d)
         tmp_fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", dir=d)
         try:
             with os.fdopen(tmp_fd, "w") as f:

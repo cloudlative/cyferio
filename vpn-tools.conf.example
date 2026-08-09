@@ -35,8 +35,8 @@
 # client_policy_cli.py (this script's --set-country/--set-os/
 # --set-bandwidth/--get-policy subcommands) and by the web app directly
 # (it bind-mounts /etc/openvpn rw, see docker-compose.yml).
-#CLIENT_POLICY_FILE=/etc/openvpn/server/client_policy.json
-#CLIENT_USAGE_FILE=/etc/openvpn/server/client_usage.json
+#CLIENT_POLICY_FILE=/etc/openvpn/server/policy/client_policy.json
+#CLIENT_USAGE_FILE=/etc/openvpn/server/policy/client_usage.json
 
 # MaxMind GeoLite2-Country database, used only by the country-restriction
 # check -- unused, and never even opened, for a client with no country

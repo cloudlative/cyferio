@@ -44,6 +44,15 @@ def _int_env(name):
 if env_user:
     session_bytes = _int_env('bytes_received') + _int_env('bytes_sent')
     if session_bytes > 0:
-        policy_lib.add_usage(env_user, session_bytes)
+        try:
+            policy_lib.add_usage(env_user, session_bytes)
+        except Exception as e:
+            # Never let a usage-write problem (e.g. permissions, disk full)
+            # turn into a non-zero exit here -- OpenVPN doesn't gate
+            # anything on client-disconnect's exit code the way it does
+            # client-connect's, but there's no reason to risk it, and this
+            # keeps the failure mode purely "usage tracking degraded",
+            # never "disconnect processing broke".
+            sys.stderr.write("usage write failed for {0}: {1}\n".format(env_user, e))
 
 sys.exit(0)

@@ -34,10 +34,42 @@ from .config import settings
 VALID_OS = {"windows", "linux", "mac"}
 
 
+def _ensure_dir_writable_by_nobody(d: str) -> None:
+    """If `d` doesn't exist yet, create it AND chown/chmod it so the
+    OpenVPN host's client-connect/disconnect scripts (running as
+    `nobody`, see host-scripts/policy_lib.py) can also create files
+    inside it -- a plain os.makedirs would leave a fresh directory
+    root:root, which wouldn't help. This app runs as root in its
+    container, so this reliably succeeds here."""
+    if os.path.isdir(d):
+        return
+    os.makedirs(d, exist_ok=True)
+    try:
+        import grp
+        import pwd
+        os.chown(d, pwd.getpwnam("nobody").pw_uid, grp.getgrnam("nogroup").gr_gid)
+        os.chmod(d, 0o770)
+    except (OSError, KeyError):
+        pass
+
+
 @contextmanager
 def _locked(path: str):
     lock_path = path + ".lock"
+    _ensure_dir_writable_by_nobody(os.path.dirname(lock_path) or ".")
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o666)
+    # os.open's mode is masked by this process's umask -- since this app
+    # runs as root, a lock file it creates (or re-opens) could otherwise
+    # end up unwritable by the OpenVPN host's `nobody`-run connect/
+    # disconnect scripts. Force 0666 + nobody:nogroup ownership every time,
+    # self-healing any bad state left by a previous process.
+    try:
+        os.fchmod(fd, 0o666)
+        import grp
+        import pwd
+        os.fchown(fd, pwd.getpwnam("nobody").pw_uid, grp.getgrnam("nogroup").gr_gid)
+    except (OSError, KeyError):
+        pass
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield
@@ -82,7 +114,7 @@ def _atomic_write_json(path: str, data: dict) -> None:
             pass
 
     d = os.path.dirname(path) or "."
-    os.makedirs(d, exist_ok=True)
+    _ensure_dir_writable_by_nobody(d)
     fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", dir=d)
     try:
         with os.fdopen(fd, "w") as f:
