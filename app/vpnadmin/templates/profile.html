@@ -133,8 +133,8 @@ function updateDisplayedIdentity(me) {
 async function loadProfile() {
 	try {
 		const me = await apiFetch("/api/users/me");
-		document.getElementById("p-created").textContent = me.created_at ? new Date(me.created_at).toLocaleString() : "—";
-		document.getElementById("p-last-login").textContent = me.last_login_at ? new Date(me.last_login_at).toLocaleString() : "Never (this is your first session on record)";
+		document.getElementById("p-created").textContent = me.created_at ? fmtTimestamp(me.created_at) : "—";
+		document.getElementById("p-last-login").textContent = me.last_login_at ? fmtTimestamp(me.last_login_at) : "Never (this is your first session on record)";
 		document.getElementById("p-first").value = me.first_name || "";
 		document.getElementById("p-last").value = me.last_name || "";
 		document.getElementById("p-gender").value = me.gender || "unspecified";

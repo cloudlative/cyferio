@@ -162,10 +162,16 @@ def get_host_health() -> dict:
     # Fine here: FastAPI runs sync route handlers in a threadpool, so this
     # never blocks the event loop, and it's a low-traffic admin-only page
     # (same tradeoff this app already makes for its subprocess calls).
+    # 0.5s, not something shorter: /proc/stat advances in whole USER_HZ
+    # ticks (10ms each on the standard 100Hz clock), so on this project's
+    # actual 1-vCPU production droplet a too-short window samples only
+    # ~15 ticks -- observed in practice swinging wildly between 0% and
+    # 100% purely from sampling noise, not real load. ~50 ticks at 0.5s
+    # is enough to average that out into a meaningful reading.
     stat1 = _read_file(os.path.join(proc, "stat"))
     times1 = _cpu_times(stat1) if stat1 else None
     if times1:
-        time.sleep(0.15)
+        time.sleep(0.5)
         stat2 = _read_file(os.path.join(proc, "stat"))
         times2 = _cpu_times(stat2) if stat2 else None
         if times2:

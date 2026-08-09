@@ -144,7 +144,7 @@ let lastUsers = [];
 let userSearchTerm = "";
 
 function fmtDate(iso) {
-	return iso ? new Date(iso).toLocaleString() : "—";
+	return iso ? fmtTimestamp(iso) : "—";
 }
 
 const addTeamMs = createMultiselectDropdown(document.getElementById("u-team-ms"), { placeholder: "Unassigned" });

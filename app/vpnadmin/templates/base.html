@@ -21,6 +21,7 @@
 			{% if is_admin %}
 			<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
 			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
+			<a href="/users/activity" class="{{ 'active' if request.url.path == '/users/activity' }}"><span class="nav-icon">☰</span>Users Activity</a>
 			<a href="/settings" class="{{ 'active' if request.url.path == '/settings' }}"><span class="nav-icon">⛭</span>Settings</a>
 			{% endif %}
 		</nav>
@@ -75,6 +76,13 @@
 	</main>
 
 	<div id="toast-container"></div>
+	<script>
+		// Read by static/app.js's fmtTimestamp() -- see config.py's
+		// APP_TIMEZONE/APP_TIME_FORMAT docstrings. Purely a display
+		// setting: every timestamp this app stores/emits stays UTC.
+		window.APP_TIMEZONE = {{ app_settings.timezone | tojson }};
+		window.APP_TIME_FORMAT = {{ app_settings.time_format | tojson }};
+	</script>
 	<script src="/static/app.js?v={{ static_version }}"></script>
 	{% block scripts %}{% endblock %}
 </body>

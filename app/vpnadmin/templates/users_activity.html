@@ -1,0 +1,530 @@
+{% extends "base.html" %}
+{% block title %}Users Activity — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">Users Activity</h1></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Who did what, when -- the full accountability trail across clients, users, teams, and settings.</p>
+
+<div class="card activity-breakdown">
+	<div class="toolbar">
+		<div class="toolbar-title">
+			<h2 style="margin:0">Users Activity Breakdown</h2>
+			<span class="count-badge" id="activity-window-badge">— entries</span>
+		</div>
+	</div>
+	<div id="activity-breakdown-body"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">Most Active Users</h2></div>
+	<p class="muted" style="margin-top:-6px">Ranked by action count within the same window as the breakdown above.</p>
+	<div id="most-active-body"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card">
+	<div class="toolbar">
+		<h2 style="margin:0">Recent User Activity</h2>
+		<button class="btn-secondary btn-sm" id="activity-export-btn">Export CSV</button>
+	</div>
+	<div class="form-row" style="margin-bottom:16px;gap:12px">
+		<div class="field" style="flex:1;min-width:150px">
+			<label for="activity-filter-who">Who</label>
+			<select id="activity-filter-who"><option value="">All</option></select>
+		</div>
+		<div class="field" style="flex:1;min-width:150px">
+			<label for="activity-filter-action">Action</label>
+			<select id="activity-filter-action"><option value="">All</option></select>
+		</div>
+		<div class="field" style="flex:1;min-width:150px">
+			<label for="activity-filter-target">Target</label>
+			<select id="activity-filter-target"><option value="">All</option></select>
+		</div>
+		<div class="field" style="flex:1;min-width:150px">
+			<label for="activity-filter-result">Result</label>
+			<select id="activity-filter-result">
+				<option value="">All</option>
+				<option value="success">Success</option>
+				<option value="failed">Failed</option>
+			</select>
+		</div>
+	</div>
+	<div id="activity-table"><p class="muted">Loading…</p></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Maps every action string routes/*.py's log_action() actually logs (the
+// complete set -- grep 'log_action(' vpnadmin/routes/*.py to re-verify if
+// a new one is ever added) to a human-readable label for the Recent User
+// Activity table. Keep this in sync with that grep, not a guess.
+const ACTION_LABELS = {
+	add_client: "Added VPN client",
+	revoke_client: "Revoked VPN client",
+	restore_client: "Restored VPN client",
+	purge_revoked: "Purged revoked client files",
+	add_mac: "Added MAC address",
+	remove_mac: "Removed MAC address",
+	email_ovpn: "Emailed .ovpn profile",
+	update_client_policy: "Updated client restrictions",
+	create_user: "Created user account",
+	update_user: "Updated user account",
+	update_own_profile: "Updated own profile",
+	delete_user: "Deleted user account",
+	permanently_delete_user: "Permanently deleted user account",
+	create_team: "Created team",
+	delete_team: "Deleted team",
+	add_team_member: "Added team member",
+	remove_team_member: "Removed team member",
+	update_settings: "Updated app settings",
+	test_smtp_settings: "Sent SMTP test email",
+};
+
+// Field-name tokens that show up in the semicolon/comma-joined "changes"
+// lists logged by update_user/update_own_profile (see users.py) -- these
+// are the only detail strings built from bare field names rather than
+// already-prose script/mailer output, so this relabeling is deliberately
+// scoped to those two actions (see humanizeDetail below) rather than
+// applied blindly to every action's detail text.
+const FIELD_LABELS = {
+	is_active: "active", first_name: "first name", last_name: "last name",
+	gender: "gender", teams: "teams", password: "password",
+	email: "email", phone: "phone",
+};
+
+function humanizeDetail(action, detail) {
+	if (!detail) return "";
+	if (action === "add_client" || action === "restore_client") {
+		// do_add_client's real stdout is NOT just its own short final
+		// message -- it's whatever verbose noise easyrsa/openssl print
+		// while actually building the cert (No 'vars' file exists!,
+		// OpenSSL version banner, Private-Key/Certificate-Request/Inline
+		// file notices, ...) followed by the script's own two lines. The
+		// wrapper returns that whole blob as-is (it's genuinely useful
+		// output for someone running the CLI directly), so pull just the
+		// two meaningful facts -- added + MAC registered -- back out of
+		// it for the table instead of dumping the entire easy-rsa log.
+		const macMatch = detail.match(/registered in \S+ with MAC ([0-9a-fA-F:]+)/);
+		if (/added\. Configuration available/.test(detail)) {
+			return macMatch ? `Added, MAC ${macMatch[1]} registered.` : "Added.";
+		}
+		return detail.replace(/->/g, " → ");
+	}
+	if (action === "revoke_client") {
+		// do_revoke_client's stdout is dominated by easy-rsa's own noisy
+		// "revoke" + "gen-crl" output (WARNING banners, PKI file paths,
+		// OpenSSL version lines, ...) before its own two closing lines
+		// ("<name> revoked!" / "Removed <name>'s entries from <db>").
+		// Only those two closing facts matter here.
+		const removedMatch = detail.match(/Removed .+?'s entries from (\S+)/);
+		if (/revoked!/.test(detail)) {
+			return removedMatch
+				? `Revoked; MAC-DB entry removed from ${removedMatch[1]}.`
+				: "Revoked.";
+		}
+		return detail.replace(/->/g, " → ");
+	}
+	if (action !== "update_user" && action !== "update_own_profile") {
+		// Every other action's detail is already short, single-line prose
+		// -- either the CLI script's own stdout message or an
+		// explicitly-written sentence (mailer send result, role=x on
+		// create_user, etc.) -- just clean up any "old->new" arrows.
+		return detail.replace(/->/g, " → ");
+	}
+	const sep = detail.includes(";") ? ";" : ",";
+	return detail.split(sep).map(part => {
+		part = part.trim();
+		const arrowMatch = part.match(/^(\w+)\s+(.+)->(.+)$/);
+		if (arrowMatch) {
+			const [, field, from, to] = arrowMatch;
+			return `${FIELD_LABELS[field] || field}: ${from} → ${to}`;
+		}
+		return FIELD_LABELS[part] || part;
+	}).join(", ");
+}
+
+// Groups the 17 raw action strings into 4 categories for the Users
+// Activity Breakdown donut -- a slice per raw action would be unreadable
+// (and several actions are single-digit rare events), so this is
+// deliberately coarser than ACTION_LABELS above. Every action from that
+// same grep must appear here too (see the loop in renderActivityBreakdown,
+// which throws in dev if one doesn't -- better than silently dropping it
+// into "Other" forever).
+const ACTION_CATEGORIES = {
+	add_client: "client", revoke_client: "client", restore_client: "client",
+	purge_revoked: "client", add_mac: "client", remove_mac: "client", email_ovpn: "client",
+	update_client_policy: "client",
+	create_user: "user", update_user: "user", update_own_profile: "user",
+	delete_user: "user", permanently_delete_user: "user",
+	create_team: "team", delete_team: "team", add_team_member: "team", remove_team_member: "team",
+	update_settings: "settings", test_smtp_settings: "settings",
+};
+// Fixed slot order/hues -- never reassigned by frequency or filtering, so
+// "Client management" is always blue whether it's the biggest slice or
+// absent entirely. Validated colorblind-safe as a 4-slot adjacent-pair set
+// (see dataviz skill's validate_palette.js) against this app's dark card
+// surface.
+const CATEGORY_META = {
+	client: { label: "Client management", color: "#3987e5" },
+	user: { label: "User management", color: "#d95926" },
+	team: { label: "Team management", color: "#199e70" },
+	settings: { label: "Settings & email", color: "#c98500" },
+};
+
+// Shared state for the Users Activity Breakdown stat tiles <-> Recent User
+// Activity table below them: clicking a tile filters the table to match,
+// without re-fetching (both draw from the same already-fetched window).
+let activityEntries = [];
+const ACTIVITY_PAGE_SIZE = 15;
+let activityPage = 1;
+let activityFilter = "all"; // "all" | "success" | "failed"
+
+// Dropdown filters (Who/Action/Target/Result), independent of and
+// additive with the stat-tile success/failed filter above. Empty string
+// means "All" for each.
+let activityWhoFilter = "";
+let activityActionFilter = "";
+let activityTargetFilter = "";
+let activityResultFilter = "";
+
+function setActivityFilter(filter) {
+	activityFilter = activityFilter === filter ? "all" : filter; // click again to clear
+	activityPage = 1;
+	document.querySelectorAll("#activity-stat-grid .stat-card[data-filter]").forEach(card => {
+		card.classList.toggle("stat-card-active", card.dataset.filter === activityFilter);
+	});
+	const resultSelect = document.getElementById("activity-filter-result");
+	if (resultSelect) resultSelect.value = activityFilter === "all" ? "" : activityFilter;
+	renderActivityTable();
+}
+
+// Populates the Who/Action/Target dropdowns from whatever's actually in
+// the fetched window (rather than a hardcoded list) so they never show an
+// option with zero matching rows. Called once per fetch, not per render,
+// so re-rendering (e.g. on pagination) doesn't reset the user's selection.
+function populateActivityFilters(entries) {
+	const who = [...new Set(entries.map(e => e.username))].filter(Boolean).sort();
+	const actions = [...new Set(entries.map(e => e.action))].filter(Boolean).sort();
+	const targets = [...new Set(entries.map(e => e.target))].filter(Boolean).sort();
+
+	const fill = (id, values, current, labelFn) => {
+		const el = document.getElementById(id);
+		if (!el) return;
+		el.innerHTML = '<option value="">All</option>' + values.map(v =>
+			`<option value="${escapeHtml(v)}">${escapeHtml(labelFn ? labelFn(v) : v)}</option>`
+		).join("");
+		el.value = current;
+	};
+	fill("activity-filter-who", who, activityWhoFilter);
+	fill("activity-filter-action", actions, activityActionFilter, a => ACTION_LABELS[a] || a);
+	fill("activity-filter-target", targets, activityTargetFilter);
+}
+
+function renderActivityBreakdown(entries) {
+	const el = document.getElementById("activity-breakdown-body");
+	document.getElementById("activity-window-badge").textContent =
+		`last ${entries.length} entr${entries.length === 1 ? "y" : "ies"}`;
+	if (entries.length === 0) {
+		el.innerHTML = '<div class="empty-state">No activity recorded yet.</div>';
+		return;
+	}
+
+	const succeeded = entries.filter(e => e.success).length;
+	const failed = entries.length - succeeded;
+	const activeUsers = new Set(entries.map(e => e.username)).size;
+
+	const counts = { client: 0, user: 0, team: 0, settings: 0 };
+	for (const e of entries) {
+		const cat = ACTION_CATEGORIES[e.action];
+		if (cat) counts[cat] += 1;
+		// An action missing from ACTION_CATEGORIES is a real bug (see the
+		// comment above it), but silently dropping a whole category of
+		// activity from the chart would be worse than an ugly fallback --
+		// count it as "settings" (the smallest, least fixed-relevant
+		// bucket) rather than losing it from the total entirely.
+		else counts.settings += 1;
+	}
+
+	// Donut geometry: one <circle> per category, stroke-dasharray sized to
+	// its share of the circumference, offset to its cumulative starting
+	// point, rotated so the first segment starts at 12 o'clock. A small
+	// gap (surface-color separation, per the mark spec) is carved out of
+	// the end of every non-zero segment rather than drawn as a border.
+	const r = 60, circumference = 2 * Math.PI * r, gap = 3;
+	let cumulative = 0;
+	const segments = Object.keys(CATEGORY_META).map(key => {
+		const count = counts[key];
+		const pct = count / entries.length;
+		const length = pct * circumference;
+		const dash = Math.max(length - gap, 0);
+		const seg = { key, count, pct, dashoffset: -cumulative, dash };
+		cumulative += length;
+		return seg;
+	});
+
+	// Rotation to start segments at 12 o'clock comes from CSS
+	// (.donut-segment { transform: rotate(-90deg) }), not an SVG "transform"
+	// attribute here -- see style.css for why (a Chromium paint bug where
+	// mixing a presentation-attribute transform with `transition: transform`
+	// can make the segment silently fail to render).
+	const donut = segments.filter(s => s.count > 0).map(s => `
+		<circle class="donut-segment" cx="70" cy="70" r="${r}" stroke="${CATEGORY_META[s.key].color}"
+			stroke-width="16" fill="none"
+			stroke-dasharray="${s.dash} ${circumference - s.dash}"
+			stroke-dashoffset="${s.dashoffset}">
+			<title>${escapeHtml(CATEGORY_META[s.key].label)}: ${s.count} (${Math.round(s.pct * 100)}%)</title>
+		</circle>`).join("");
+
+	const legendRows = Object.keys(CATEGORY_META).map(key => {
+		const count = counts[key];
+		const pct = entries.length ? Math.round((count / entries.length) * 100) : 0;
+		return `<tr>
+			<td><span class="legend-swatch" style="background:${CATEGORY_META[key].color}"></span>${escapeHtml(CATEGORY_META[key].label)}</td>
+			<td class="mono text-right">${count}</td>
+			<td class="mono text-right">${pct}%</td>
+		</tr>`;
+	}).join("");
+
+	el.innerHTML = `
+		<div class="stat-grid" id="activity-stat-grid">
+			<button type="button" class="stat-card accent-total" data-filter="all" title="Show all activity">
+				<span class="stat-hint">Filter →</span>
+				<div class="stat-value">${entries.length}</div><div class="stat-label">Total Actions</div>
+			</button>
+			<button type="button" class="stat-card accent-online" data-filter="success" title="Show only successful actions">
+				<span class="stat-hint">Filter →</span>
+				<div class="stat-value">${succeeded}</div><div class="stat-label">Succeeded</div>
+			</button>
+			<button type="button" class="stat-card accent-revoked" data-filter="failed" title="Show only failed actions">
+				<span class="stat-hint">Filter →</span>
+				<div class="stat-value">${failed}</div><div class="stat-label">Failed</div>
+			</button>
+			<div class="stat-card accent-rejected"><div class="stat-value">${activeUsers}</div><div class="stat-label">Active Users</div></div>
+		</div>
+		<div class="donut-layout">
+			<svg viewBox="0 0 140 140" class="donut-chart" role="img" aria-label="Activity by category">
+				${donut}
+				<text x="70" y="66" text-anchor="middle" class="donut-center-value">${entries.length}</text>
+				<text x="70" y="84" text-anchor="middle" class="donut-center-label">actions</text>
+			</svg>
+			<table class="donut-legend">
+				<thead><tr><th>Category</th><th class="text-right">Count</th><th class="text-right">Share</th></tr></thead>
+				<tbody>${legendRows}</tbody>
+			</table>
+		</div>`;
+
+	document.querySelectorAll("#activity-stat-grid .stat-card[data-filter]").forEach(card => {
+		card.classList.toggle("stat-card-active", card.dataset.filter === activityFilter);
+		card.addEventListener("click", () => setActivityFilter(card.dataset.filter));
+	});
+}
+
+// New: a simple top-5-by-action-count leaderboard over the same fetched
+// window -- distinct from the breakdown's "Active Users" tile (a plain
+// count of distinct users), this shows *who* and *how much*, clickable to
+// drop straight into that user's filtered activity below.
+function renderMostActive(entries) {
+	const el = document.getElementById("most-active-body");
+	if (entries.length === 0) {
+		el.innerHTML = '<div class="empty-state">No activity recorded yet.</div>';
+		return;
+	}
+	const counts = {};
+	for (const e of entries) {
+		if (!e.username) continue;
+		if (!counts[e.username]) counts[e.username] = { total: 0, failed: 0 };
+		counts[e.username].total += 1;
+		if (!e.success) counts[e.username].failed += 1;
+	}
+	const ranked = Object.entries(counts).sort((a, b) => b[1].total - a[1].total).slice(0, 5);
+	const maxCount = ranked.length ? ranked[0][1].total : 1;
+	el.innerHTML = `<table>
+		<thead><tr><th>User</th><th>Actions</th><th>Failed</th></tr></thead>
+		<tbody>${ranked.map(([username, c]) => {
+			const pct = Math.max(6, Math.round((c.total / maxCount) * 100));
+			return `<tr class="team-row" data-username="${escapeHtml(username)}" tabindex="0">
+				<td style="font-weight:700">${escapeHtml(username)}</td>
+				<td><div class="team-row-count"><span class="mono">${c.total}</span><span class="team-row-bar"><span class="team-row-bar-fill" style="width:${pct}%"></span></span></div></td>
+				<td>${c.failed > 0 ? `<span class="status-pill status-revoked">${c.failed}</span>` : '<span class="muted">0</span>'}</td>
+			</tr>`;
+		}).join("")}</tbody>
+	</table>`;
+	el.querySelectorAll("[data-username]").forEach(row => {
+		const jump = () => {
+			activityWhoFilter = row.dataset.username;
+			const sel = document.getElementById("activity-filter-who");
+			if (sel) sel.value = activityWhoFilter;
+			activityPage = 1;
+			renderActivityTable();
+			document.getElementById("activity-table").scrollIntoView({ behavior: "smooth", block: "nearest" });
+		};
+		row.addEventListener("click", jump);
+		row.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); jump(); } });
+	});
+}
+
+function clearAllActivityFilters() {
+	activityFilter = "all";
+	activityWhoFilter = "";
+	activityActionFilter = "";
+	activityTargetFilter = "";
+	activityResultFilter = "";
+	activityPage = 1;
+	document.querySelectorAll("#activity-stat-grid .stat-card[data-filter]").forEach(card => {
+		card.classList.toggle("stat-card-active", card.dataset.filter === "all");
+	});
+	["activity-filter-who", "activity-filter-action", "activity-filter-target", "activity-filter-result"]
+		.forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+	renderActivityTable();
+}
+
+function currentFilteredActivity() {
+	return activityEntries.filter(e =>
+		(activityFilter === "all" || (activityFilter === "success" ? e.success : !e.success)) &&
+		(!activityWhoFilter || e.username === activityWhoFilter) &&
+		(!activityActionFilter || e.action === activityActionFilter) &&
+		(!activityTargetFilter || e.target === activityTargetFilter) &&
+		(!activityResultFilter || (activityResultFilter === "success" ? e.success : !e.success))
+	);
+}
+
+function renderActivityTable() {
+	const activityEl = document.getElementById("activity-table");
+	if (!activityEl) return;
+	const filtered = currentFilteredActivity();
+	const anyFilterActive = activityFilter !== "all" || activityWhoFilter || activityActionFilter
+		|| activityTargetFilter || activityResultFilter;
+	const filterNote = !anyFilterActive ? "" : `
+		<p class="muted" style="margin:-4px 0 14px;font-size:0.85rem">
+			Showing ${filtered.length} of ${activityEntries.length} matching the selected filters --
+			<button type="button" class="link-button" id="clear-activity-filter">clear filters</button>
+		</p>`;
+	if (filtered.length === 0) {
+		activityEl.innerHTML = filterNote + '<div class="empty-state">No matching activity.</div>';
+		const clearBtn0 = document.getElementById("clear-activity-filter");
+		if (clearBtn0) clearBtn0.addEventListener("click", clearAllActivityFilters);
+		return;
+	}
+
+	const totalPages = Math.max(1, Math.ceil(filtered.length / ACTIVITY_PAGE_SIZE));
+	if (activityPage > totalPages) activityPage = totalPages;
+	if (activityPage < 1) activityPage = 1;
+	const start = (activityPage - 1) * ACTIVITY_PAGE_SIZE;
+	const pageRows = filtered.slice(start, start + ACTIVITY_PAGE_SIZE);
+
+	activityEl.innerHTML = filterNote + `<table class="activity-table">
+		<thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th><th>Result</th></tr></thead>
+		<tbody>${pageRows.map(e => `
+			<tr>
+				<td class="mono activity-when">${escapeHtml(fmtTimestamp(e.timestamp))}</td>
+				<td>${escapeHtml(e.username)}</td>
+				<td><span class="activity-action">${escapeHtml(ACTION_LABELS[e.action] || e.action)}</span></td>
+				<td>${escapeHtml(e.target || '—')}</td>
+				<td class="activity-detail">${escapeHtml(humanizeDetail(e.action, e.detail))}</td>
+				<td>${e.success
+					? '<span class="status-pill status-online">Success</span>'
+					: '<span class="status-pill status-revoked">Failed</span>'}</td>
+			</tr>`).join("")}</tbody>
+	</table>
+	<div class="toolbar" style="margin-top:14px">
+		<span class="muted" style="font-size:0.85rem">Showing ${start + 1}–${Math.min(start + ACTIVITY_PAGE_SIZE, filtered.length)} of ${filtered.length}</span>
+		<div class="form-row" style="gap:8px">
+			<button type="button" class="btn-secondary btn-sm" id="activity-prev-page" ${activityPage <= 1 ? "disabled" : ""}>← Prev</button>
+			<span class="muted" style="font-size:0.85rem;align-self:center">Page ${activityPage} of ${totalPages}</span>
+			<button type="button" class="btn-secondary btn-sm" id="activity-next-page" ${activityPage >= totalPages ? "disabled" : ""}>Next →</button>
+		</div>
+	</div>`;
+
+	const clearBtn = document.getElementById("clear-activity-filter");
+	if (clearBtn) clearBtn.addEventListener("click", clearAllActivityFilters);
+	const prevBtn = document.getElementById("activity-prev-page");
+	const nextBtn = document.getElementById("activity-next-page");
+	if (prevBtn) prevBtn.addEventListener("click", () => { activityPage -= 1; renderActivityTable(); });
+	if (nextBtn) nextBtn.addEventListener("click", () => { activityPage += 1; renderActivityTable(); });
+}
+
+// New: exports whatever's currently filtered (not just the visible page)
+// as a CSV a spreadsheet tool can open directly -- for taking a slice of
+// the audit trail off-platform (compliance review, incident write-up)
+// without re-typing rows by hand.
+function exportActivityCsv() {
+	const rows = currentFilteredActivity();
+	if (rows.length === 0) {
+		toast("Nothing to export -- no rows match the current filters.", "error");
+		return;
+	}
+	const headers = ["When", "Who", "Action", "Target", "Detail", "Result"];
+	const csvEscape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+	const lines = [headers.map(csvEscape).join(",")];
+	for (const e of rows) {
+		lines.push([
+			new Date(e.timestamp).toISOString(),
+			e.username,
+			ACTION_LABELS[e.action] || e.action,
+			e.target || "",
+			humanizeDetail(e.action, e.detail),
+			e.success ? "Success" : "Failed",
+		].map(csvEscape).join(","));
+	}
+	const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement("a");
+	a.href = url;
+	a.download = `users-activity-${new Date().toISOString().slice(0, 10)}.csv`;
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	URL.revokeObjectURL(url);
+}
+
+async function loadActivity() {
+	const activityEl = document.getElementById("activity-table");
+	const breakdownEl = document.getElementById("activity-breakdown-body");
+	const mostActiveEl = document.getElementById("most-active-body");
+	try {
+		// Fetch the max window once (200, the API's own cap) and reuse it
+		// for the breakdown chart, the Most Active Users leaderboard, and
+		// the table below (only ever shows the most recent 20 of the
+		// active filter) -- one round-trip instead of three.
+		activityEntries = await apiFetch("/api/audit?limit=200");
+		renderActivityBreakdown(activityEntries);
+		renderMostActive(activityEntries);
+		populateActivityFilters(activityEntries);
+		activityPage = 1;
+		renderActivityTable();
+	} catch (e) {
+		const msg = `<p class="muted">Could not load activity: ${escapeHtml(e.message)}</p>`;
+		activityEl.innerHTML = msg;
+		breakdownEl.innerHTML = msg;
+		mostActiveEl.innerHTML = msg;
+	}
+}
+
+document.getElementById("activity-filter-who").addEventListener("change", (e) => {
+	activityWhoFilter = e.target.value;
+	activityPage = 1;
+	renderActivityTable();
+});
+document.getElementById("activity-filter-action").addEventListener("change", (e) => {
+	activityActionFilter = e.target.value;
+	activityPage = 1;
+	renderActivityTable();
+});
+document.getElementById("activity-filter-target").addEventListener("change", (e) => {
+	activityTargetFilter = e.target.value;
+	activityPage = 1;
+	renderActivityTable();
+});
+document.getElementById("activity-filter-result").addEventListener("change", (e) => {
+	activityResultFilter = e.target.value;
+	activityPage = 1;
+	renderActivityTable();
+});
+
+document.getElementById("activity-export-btn").addEventListener("click", exportActivityCsv);
+document.getElementById("refresh-btn").addEventListener("click", loadActivity);
+loadActivity();
+</script>
+{% endblock %}

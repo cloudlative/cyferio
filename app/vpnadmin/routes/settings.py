@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -42,6 +43,9 @@ class UpdateSettingsRequest(BaseModel):
 
     login_theme: str | None = None
 
+    timezone: str | None = None
+    time_format: str | None = None
+
     @field_validator("smtp_port")
     @classmethod
     def _port_range(cls, v):
@@ -82,6 +86,34 @@ class UpdateSettingsRequest(BaseModel):
             raise ValueError(f"Unknown theme '{v}'.")
         return v
 
+    @field_validator("timezone")
+    @classmethod
+    def _valid_timezone(cls, v: str | None) -> str | None:
+        # Format-only validation (not a whitelist against the IANA
+        # database) -- the actual display conversion happens client-side
+        # via Intl.DateTimeFormat's `timeZone` option (see static/app.js's
+        # fmtTimestamp), against the BROWSER's own tz database, which is
+        # both more complete and more current than anything this server
+        # could ship (no OS tzdata package installed here -- see
+        # config.py's APP_TIMEZONE docstring). "UTC" or "Region/City"
+        # (optionally with a second "/Subcity", e.g. "America/Argentina/
+        # Buenos_Aires") covers every real IANA zone name.
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("Timezone cannot be blank.")
+        if v != "UTC" and not re.match(r"^[A-Za-z_]+(/[A-Za-z_+-]+){1,2}$", v):
+            raise ValueError(f"'{v}' doesn't look like a valid IANA timezone name (e.g. 'UTC' or 'Asia/Karachi').")
+        return v
+
+    @field_validator("time_format")
+    @classmethod
+    def _valid_time_format(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("24h", "12h"):
+            raise ValueError("Time format must be '24h' or '12h'.")
+        return v
+
 
 def _serialize() -> dict:
     s = runtime
@@ -101,6 +133,8 @@ def _serialize() -> dict:
         "session_timeout_minutes": s.session_timeout_minutes,
         "audit_retention_days": s.audit_retention_days,
         "login_theme": s.login_theme or "auto",
+        "timezone": s.timezone,
+        "time_format": s.time_format,
     }
 
 
@@ -119,7 +153,8 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
 
     for field in ("app_name", "app_tagline", "app_footer_credit", "smtp_host", "smtp_port",
                    "smtp_username", "smtp_from", "smtp_use_tls", "min_password_length",
-                   "session_timeout_minutes", "audit_retention_days", "login_theme"):
+                   "session_timeout_minutes", "audit_retention_days", "login_theme",
+                   "timezone", "time_format"):
         if field in fields_set:
             value = getattr(body, field)
             if value != getattr(row, field):

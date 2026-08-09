@@ -133,6 +133,8 @@ class _RuntimeSettings:
         self.session_timeout_minutes = max(1, env_settings.SESSION_MAX_AGE_SECONDS // 60)
         self.audit_retention_days = None  # None/0 = keep forever
         self.login_theme = env_settings.LOGIN_THEME
+        self.timezone = env_settings.APP_TIMEZONE
+        self.time_format = env_settings.APP_TIME_FORMAT
 
 
 runtime = _RuntimeSettings()
@@ -169,6 +171,8 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.session_timeout_minutes = row.session_timeout_minutes or max(1, env_settings.SESSION_MAX_AGE_SECONDS // 60)
     runtime.audit_retention_days = row.audit_retention_days
     runtime.login_theme = row.login_theme or env_settings.LOGIN_THEME
+    runtime.timezone = row.timezone or env_settings.APP_TIMEZONE
+    runtime.time_format = row.time_format or env_settings.APP_TIME_FORMAT
 
 
 def apply_settings_globals(templates) -> None:

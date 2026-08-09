@@ -163,6 +163,13 @@ class AppSettings(Base):
     # resolve_active_theme); any other value pins that one theme.
     login_theme = Column(String(32), nullable=True)
 
+    # Display timezone (see config.py's APP_TIMEZONE) -- an IANA name, e.g.
+    # "Asia/Karachi". Purely a display setting: every stored timestamp
+    # stays UTC, this only affects how app.js's fmtTimestamp() renders it.
+    timezone = Column(String(64), nullable=True)
+    # "24h" or "12h" -- paired with timezone above, same fmtTimestamp().
+    time_format = Column(String(8), nullable=True)
+
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
 

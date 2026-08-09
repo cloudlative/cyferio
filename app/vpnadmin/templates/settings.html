@@ -77,6 +77,24 @@
 	</div>
 
 	<div class="card">
+		<h2>Localization</h2>
+		<p class="muted" style="margin-top:0">Every timestamp in this app is stored in UTC -- these only control how it's <em>displayed</em>, app-wide.</p>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-timezone">Timezone</label>
+				<select id="s-timezone"></select>
+			</div>
+			<div class="field">
+				<label for="s-time-format">Clock Format</label>
+				<select id="s-time-format">
+					<option value="24h">24-hour (e.g. 14:05)</option>
+					<option value="12h">12-hour (e.g. 2:05 PM)</option>
+				</select>
+			</div>
+		</div>
+	</div>
+
+	<div class="card">
 		<h2>Security</h2>
 		<div class="form-grid">
 			<div class="field">
@@ -147,6 +165,36 @@ function renderThemeDescription() {
 	document.getElementById("theme-description").textContent = choice ? choice.description : "";
 }
 
+// A curated fallback list, only used if the browser doesn't support
+// Intl.supportedValuesOf (Chrome/Edge 99+, Firefox 102+, Safari 15.4+ all
+// do -- this is just a safety net for something older). Where it IS
+// supported, this pulls the browser's own real IANA database instead of
+// a list hardcoded here, which would inevitably drift out of date.
+const FALLBACK_TIMEZONES = [
+	"UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+	"America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Moscow",
+	"Africa/Cairo", "Africa/Johannesburg", "Asia/Dubai", "Asia/Karachi", "Asia/Kolkata",
+	"Asia/Dhaka", "Asia/Bangkok", "Asia/Shanghai", "Asia/Tokyo", "Asia/Singapore",
+	"Australia/Sydney", "Pacific/Auckland",
+];
+
+function populateTimezoneSelect(current) {
+	let zones;
+	try {
+		zones = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : FALLBACK_TIMEZONES;
+	} catch (e) {
+		zones = FALLBACK_TIMEZONES;
+	}
+	if (!zones.includes("UTC")) zones = ["UTC", ...zones];
+	// current might be a saved value the browser's list doesn't happen to
+	// include (e.g. saved from a different browser) -- keep it selectable
+	// rather than silently falling back to something else.
+	if (current && !zones.includes(current)) zones = [current, ...zones];
+	const select = document.getElementById("s-timezone");
+	select.innerHTML = zones.map(z => `<option value="${escapeHtml(z)}">${escapeHtml(z.replace(/_/g, " "))}</option>`).join("");
+	select.value = current || "UTC";
+}
+
 async function loadSettings() {
 	try {
 		const s = await apiFetch("/api/settings");
@@ -169,6 +217,9 @@ async function loadSettings() {
 		themeSelect.innerHTML = _themeChoices.map(c => `<option value="${c.id}">${escapeHtml(c.label)}</option>`).join("");
 		themeSelect.value = s.login_theme || "auto";
 		renderThemeDescription();
+
+		populateTimezoneSelect(s.timezone || "UTC");
+		document.getElementById("s-time-format").value = s.time_format || "24h";
 	} catch (e) {
 		toast(e.message, "error");
 	}
@@ -192,6 +243,8 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		session_timeout_minutes: intOrNull(val("s-session-timeout")),
 		audit_retention_days: intOrNull(val("s-audit-retention")),
 		login_theme: document.getElementById("s-login-theme").value,
+		timezone: document.getElementById("s-timezone").value,
+		time_format: document.getElementById("s-time-format").value,
 	};
 	try {
 		await apiFetch("/api/settings", { method: "PATCH", body });

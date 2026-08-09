@@ -62,8 +62,8 @@ function renderSessionHistoryTable() {
 		</tr></thead>
 		<tbody>${pageRows.map(r => `<tr>
 				<td>${escapeHtml(r.client)}</td>
-				<td class="mono">${escapeHtml(r.connected_at || "n/a")}</td>
-				<td class="mono">${escapeHtml(r.disconnected_at || "n/a")}</td>
+				<td class="mono">${r.connected_at ? escapeHtml(fmtTimestamp(r.connected_at)) : "n/a"}</td>
+				<td class="mono">${r.disconnected_at ? escapeHtml(fmtTimestamp(r.disconnected_at)) : "n/a"}</td>
 				<td>${escapeHtml(fmtDuration(r.duration_seconds))}</td>
 				<td class="mono">${escapeHtml(r.source_ip || "n/a")}</td>
 			</tr>`).join("")}</tbody>

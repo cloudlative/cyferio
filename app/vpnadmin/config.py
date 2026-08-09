@@ -84,6 +84,19 @@ class Settings:
     APP_TAGLINE: str = os.environ.get("APP_TAGLINE", "Sign in to manage clients, MACs & live status")
     APP_FOOTER_CREDIT: str = os.environ.get("APP_FOOTER_CREDIT", "")
 
+    # IANA timezone name (e.g. "UTC", "Asia/Karachi") used to DISPLAY
+    # timestamps in the browser -- every timestamp this app stores/emits is
+    # already UTC (see e.g. host-scripts/openvpn-client-disconnect.py's
+    # datetime.now(timezone.utc)), so this never touches storage, only how
+    # app.js's fmtTimestamp() renders it via Intl.DateTimeFormat's
+    # `timeZone` option (which relies on the browser's own IANA database,
+    # not anything installed on this server -- no tzdata package needed
+    # here). "UTC" is a safe, unambiguous default for a fresh install.
+    APP_TIMEZONE: str = os.environ.get("APP_TIMEZONE", "UTC")
+    # "24h" or "12h" -- how fmtTimestamp() (static/app.js) formats the clock
+    # portion of a timestamp. Paired with APP_TIMEZONE above.
+    APP_TIME_FORMAT: str = os.environ.get("APP_TIME_FORMAT", "24h")
+
     # --- Outbound email (SMTP) -----------------------------------------------
     # Used solely for the "email a client's .ovpn profile" action. Left blank
     # by default -- the feature stays present in the UI but the API returns a

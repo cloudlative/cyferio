@@ -86,7 +86,7 @@ async function loadAppHealth() {
 		el.innerHTML = [
 			metricRow("Version", `<span class="mono">${escapeHtml(d.app_version)}</span>`),
 			metricRow("Uptime", fmtDuration(Math.round(d.uptime_seconds))),
-			metricRow("Started", `<span class="mono" style="font-size:0.82em">${escapeHtml(d.started_at)}</span>`),
+			metricRow("Started", `<span class="mono" style="font-size:0.82em">${escapeHtml(fmtTimestamp(d.started_at))}</span>`),
 			metricRow("Python", `<span class="mono">${escapeHtml(d.python_version)}</span>`),
 			metricRow("FastAPI / Uvicorn", `<span class="mono">${escapeHtml(d.fastapi_version)} / ${escapeHtml(d.uvicorn_version)}</span>`),
 			metricRow("DB engine", escapeHtml(d.db_engine)),

@@ -60,6 +60,7 @@ const isAdmin = {{ "true" if is_admin else "false" }};
 let lastTeams = [];
 let allUsers = [];
 let currentTeamId = "unassigned";
+let teamDetailOpen = false; // tracks whether the detail card is actually showing, so clicking the already-open team's row again toggles it closed
 
 function renderSummary() {
 	const namedTeams = lastTeams.filter(t => t.id != null);
@@ -117,9 +118,16 @@ async function loadTeams() {
 			}).join("")}</tbody>
 		</table>`;
 		grid.querySelectorAll("[data-team-id]").forEach(row => {
-			row.addEventListener("click", () => showTeam(row.dataset.teamId));
+			const toggle = () => {
+				if (teamDetailOpen && String(currentTeamId) === row.dataset.teamId) {
+					closeTeamDetail();
+				} else {
+					showTeam(row.dataset.teamId);
+				}
+			};
+			row.addEventListener("click", toggle);
 			row.addEventListener("keydown", (ev) => {
-				if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); showTeam(row.dataset.teamId); }
+				if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggle(); }
 			});
 		});
 		const fromHash = decodeURIComponent(location.hash.replace(/^#/, ""));
@@ -129,10 +137,17 @@ async function loadTeams() {
 	}
 }
 
+function closeTeamDetail() {
+	teamDetailOpen = false;
+	document.getElementById("team-detail-card").style.display = "none";
+	if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+}
+
 function showTeam(id) {
 	const team = lastTeams.find(t => String(t.id == null ? "unassigned" : t.id) === String(id));
 	if (!team) return;
 	currentTeamId = id;
+	teamDetailOpen = true;
 	location.hash = encodeURIComponent(id);
 	document.getElementById("team-detail-card").style.display = "";
 	document.getElementById("team-detail-title").textContent = team.team;
@@ -235,8 +250,7 @@ if (isAdmin) {
 		try {
 			const result = await apiFetch(`/api/teams/${team.id}`, { method: "DELETE" });
 			toast(result.message);
-			document.getElementById("team-detail-card").style.display = "none";
-			location.hash = "";
+			closeTeamDetail();
 			loadTeams();
 		} catch (e) {
 			toast(e.message, "error");

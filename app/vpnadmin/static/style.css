@@ -770,7 +770,10 @@ dialog li { margin-bottom: 6px; display: flex; align-items: center; justify-cont
    numbers (dashboard stats) but produced uneven row widths and
    truncated/colliding text once the content was a variable-length team
    name -- a table keeps every row's columns aligned regardless of name
-   length. */
+   length. Also reused as-is (clickable row + relative-size bar) by Users
+   Activity's Most Active Users leaderboard (users_activity.html) -- the
+   pattern is generic (a clickable named row with a proportional count
+   bar), not actually team-specific, despite the class name. */
 tr.team-row { cursor: pointer; }
 tr.team-row:hover td { background: var(--surface-alt); }
 tr.team-row:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; }

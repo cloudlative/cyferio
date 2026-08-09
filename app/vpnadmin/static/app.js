@@ -597,6 +597,31 @@ function fmtDuration(totalSeconds) {
 	return `${s}s`;
 }
 
+// Formats an ISO timestamp using the app-wide Timezone/Clock Format
+// settings (Settings page -> Localization; window.APP_TIMEZONE/
+// APP_TIME_FORMAT are set in base.html from app_settings.timezone/
+// time_format -- see config.py's APP_TIMEZONE docstring). Every timestamp
+// this app stores/emits is already UTC; this only ever affects display,
+// never storage. Falls back to the browser's own locale/timezone if the
+// configured zone is somehow invalid (e.g. a typo saved outside the UI's
+// own validation) rather than showing nothing.
+function fmtTimestamp(iso) {
+	if (!iso) return "—";
+	const d = new Date(iso);
+	if (isNaN(d)) return String(iso);
+	const opts = {
+		year: "numeric", month: "short", day: "2-digit",
+		hour: "2-digit", minute: "2-digit", second: "2-digit",
+		hour12: window.APP_TIME_FORMAT === "12h",
+	};
+	if (window.APP_TIMEZONE) opts.timeZone = window.APP_TIMEZONE;
+	try {
+		return new Intl.DateTimeFormat(undefined, opts).format(d);
+	} catch (e) {
+		return d.toLocaleString();
+	}
+}
+
 function escapeHtml(s) {
 	const div = document.createElement("div");
 	div.textContent = s == null ? "" : String(s);
