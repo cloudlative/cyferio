@@ -78,9 +78,12 @@ needed) rather than building locally. It's published by
 version tag (`vX.Y.Z`) is pushed — see [Releases](#releases) below.
 Ordinary commits to `master` only run the test suite, they don't publish a
 new image. To deploy an exact version instead of always tracking `latest`,
-set `IMAGE_TAG=vX.Y.Z` in `.env` (see the
+set `IMAGE_TAG=X.Y.Z` in `.env` -- note: **no leading `v`**, even though the
+git tag itself is `vX.Y.Z` (`docker/metadata-action`'s `type=semver` tagging
+strips it, so pushing `v1.0.1` publishes the image as `...:1.0.1`, not
+`...:v1.0.1`). See the
 [Packages page](https://github.com/cloudlative/openvpn-toolkit/pkgs/container/openvpn-toolkit-app)
-for what's been published) before `docker compose pull`.
+for what's been published, before `docker compose pull`.
 
 Rolling back a bad deploy: either set `IMAGE_TAG` in `.env` to a known-good
 previous version tag and re-run `docker compose pull && docker compose up -d`,
