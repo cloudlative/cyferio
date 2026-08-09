@@ -3,7 +3,11 @@ FROM python:3.12-slim
 # openssl + easy-rsa's own shell deps -- needed because the container will
 # execute easyrsa (via openvpn-install.sh) against the bind-mounted host
 # /etc/openvpn directory. bash is already present in this base image.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `apt-get upgrade` pulls in whatever CVE fixes Debian has already
+# published for packages already in the base image (Trivy flags some base-
+# image CVEs with no upstream fix at all yet -- those can't be resolved
+# here, only by a later base-image rebuild once Debian ships one).
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         openssl \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -11,7 +15,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Upgrade pip itself first -- the base image's pinned pip has known CVEs
+# (see .github/workflows/build.yml's Trivy scan) with fixes already
+# released upstream.
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
 COPY vpnadmin ./vpnadmin
