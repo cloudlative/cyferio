@@ -56,6 +56,13 @@ def diagnostics_page(request: Request, user: User | None = Depends(get_current_u
     return templates.TemplateResponse(request, "diagnostics.html", _ctx(user))
 
 
+@router.get("/health")
+def health_page(request: Request, user: User | None = Depends(get_current_user)):
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    return templates.TemplateResponse(request, "health.html", _ctx(user))
+
+
 @router.get("/connection-history")
 def connection_history_page(request: Request, user: User | None = Depends(get_current_user)):
     if user is None:

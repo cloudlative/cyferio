@@ -781,6 +781,23 @@ tr.team-row:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 
 .team-row-view { color: var(--text-faint); font-size: 0.82rem; font-weight: 600; opacity: 0; transition: opacity 0.15s ease; }
 tr.team-row:hover .team-row-view, tr.team-row:focus-visible .team-row-view { opacity: 1; }
 
+/* --- Health page -- one card per health source (App/Database/Host
+   Machine/Traefik), each a compact label/value list rather than a table
+   (unlike the PKI-consistency/lint cards below them, which list a
+   variable number of named issues and stay full-width table cards). */
+.health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; margin-bottom: 22px; }
+.health-grid .card { margin-bottom: 0; }
+.metric-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+.metric-row:last-child { border-bottom: none; }
+.metric-label { color: var(--text-muted); font-weight: 600; }
+.metric-value { display: flex; align-items: center; gap: 8px; text-align: right; }
+.metric-pct { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 2.6em; text-align: right; }
+.usage-bar { position: relative; display: inline-block; width: 90px; height: 6px; border-radius: 999px; background: var(--surface-alt); overflow: hidden; flex: none; }
+.usage-bar-fill { position: absolute; inset: 0; width: 0; border-radius: inherit; }
+.usage-bar-fill.usage-bar-ok { background: linear-gradient(90deg, #10b981, #34d399); }
+.usage-bar-fill.usage-bar-warning { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.usage-bar-fill.usage-bar-critical { background: linear-gradient(90deg, #f43f5e, #fb7185); }
+
 .mac-list { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 8px; }
 .mac-list li { background: var(--surface-alt); border: 1px solid var(--border-light); border-radius: 8px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; }
 .mac-add-row { display: flex; gap: 8px; margin-top: 14px; }

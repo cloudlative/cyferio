@@ -1,5 +1,13 @@
 FROM python:3.12-alpine
 
+# Baked in at build time from the git tag driving this build (see
+# .github/workflows/build.yml's build-args) -- read at runtime via
+# os.environ["APP_VERSION"] by health.py, so the Health page can show
+# exactly which version is actually deployed. Defaults to "unknown" for
+# any image built without that build-arg (e.g. a local `docker build`).
+ARG APP_VERSION=unknown
+ENV APP_VERSION=${APP_VERSION}
+
 # Alpine over python:3.12-slim (Debian) -- verified before switching: every
 # native-extension dependency this app pulls in (uvloop, httptools,
 # psycopg2-binary, bcrypt) publishes musllinux wheels, so nothing needs a

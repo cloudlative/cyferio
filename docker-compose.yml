@@ -39,8 +39,19 @@ services:
       # to avoid burning production rate-limit attempts while the config is
       # still being verified; leave unset/empty for the real production CA.
       - --certificatesresolvers.letsencrypt.acme.caserver=${ACME_CASERVER:-https://acme-v02.api.letsencrypt.org/directory}
-      # Keep the dashboard/API off -- not needed and not worth exposing.
-      - --api=false
+      # Internal API for the Health page (see app/vpnadmin/health.py's
+      # get_traefik_health) to read router/service status from. Bound to
+      # its own "traefik" entrypoint on port 8080, which is deliberately
+      # NOT published below in `ports:` -- reachable only from other
+      # containers on this compose network (i.e. just the app service),
+      # never from the public internet. The dashboard UI stays off
+      # (api.dashboard defaults to false); only the JSON endpoints are
+      # used. The router that actually exposes api@internal on this
+      # entrypoint is defined in app/traefik/dynamic.yml (this file's
+      # File provider needs it explicit -- see that file's own comment).
+      - --entrypoints.traefik.address=:8080
+      - --api=true
+      - --ping=true
       - --log.level=INFO
     ports:
       - "80:80"
@@ -102,6 +113,19 @@ services:
       #     used if DATABASE_URL in .env points at the postgres service
       #     below instead.
       - ./app/data:/app/data
+
+      # --- Health page (see app/vpnadmin/health.py's get_host_health):
+      #     the HOST's /proc, /sys, and root filesystem, all read-only, so
+      #     the app can report the droplet's real CPU/RAM/disk/uptime
+      #     rather than this one container's own cgroup-limited view.
+      #     Read-only means nothing running in the container can write
+      #     through these paths, only read them -- the same mount pattern
+      #     node_exporter and similar host-monitoring tools use. Mount
+      #     targets match config.py's HOST_PROC_PATH/HOST_SYS_PATH/
+      #     HOST_ROOT_PATH defaults.
+      - /proc:/hostproc:ro
+      - /sys:/hostsys:ro
+      - /:/hostfs:ro
     # This app manipulates root-owned files under /etc/openvpn and runs
     # easyrsa, so it runs as root inside the container (the image's
     # default user). USE_SUDO=false in .env reflects that no privilege

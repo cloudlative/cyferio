@@ -124,6 +124,26 @@ class Settings:
     CLIENT_POLICY_FILE: str = os.environ.get("CLIENT_POLICY_FILE", "/etc/openvpn/server/policy/client_policy.json")
     CLIENT_USAGE_FILE: str = os.environ.get("CLIENT_USAGE_FILE", "/etc/openvpn/server/policy/client_usage.json")
 
+    # --- Health page -------------------------------------------------------
+    # Read-only bind mounts of the Docker HOST's /proc, /sys, and root
+    # filesystem (see docker-compose.yml) -- deliberately NOT the
+    # container's own /proc, /sys, "/" (which would only describe this one
+    # container's cgroup-limited view), so the Health page can show the
+    # actual droplet's CPU/RAM/disk/uptime. Unset/missing in local dev (no
+    # such mounts exist there) -- health.py's host-stats functions handle
+    # that by reporting the section as unavailable rather than raising.
+    HOST_PROC_PATH: str = os.environ.get("HOST_PROC_PATH", "/hostproc")
+    HOST_SYS_PATH: str = os.environ.get("HOST_SYS_PATH", "/hostsys")
+    HOST_ROOT_PATH: str = os.environ.get("HOST_ROOT_PATH", "/hostfs")
+
+    # Traefik's internal API (see docker-compose.yml's traefik service --
+    # --api=true bound only to the "traefik" entrypoint, which is never
+    # published to the host, so this is only reachable from other
+    # containers on the same compose network, never publicly). Unreachable
+    # in local dev (no traefik container at all there) -- health.py
+    # reports that section as unavailable rather than raising.
+    TRAEFIK_API_URL: str = os.environ.get("TRAEFIK_API_URL", "http://traefik:8080")
+
 
 settings = Settings()
 

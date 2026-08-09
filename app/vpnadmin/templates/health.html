@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}Health — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:22px">
+	<div class="toolbar-title"><h1 style="margin:0">Health</h1></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-16px">App, database, host machine, and reverse-proxy health, plus PKI/MAC-db consistency checks.</p>
+
+<div class="health-grid">
+	<div class="card">
+		<div class="toolbar"><h2 style="margin:0">App</h2><span class="status-pill" id="app-health-badge">—</span></div>
+		<div id="app-health-result"><p class="muted">Loading…</p></div>
+	</div>
+
+	<div class="card">
+		<div class="toolbar"><h2 style="margin:0">Database</h2><span class="status-pill" id="db-health-badge">—</span></div>
+		<div id="db-health-result"><p class="muted">Loading…</p></div>
+	</div>
+
+	<div class="card">
+		<div class="toolbar"><h2 style="margin:0">Host Machine</h2><span class="status-pill" id="host-health-badge">—</span></div>
+		<div id="host-health-result"><p class="muted">Loading…</p></div>
+	</div>
+
+	<div class="card">
+		<div class="toolbar"><h2 style="margin:0">Traefik</h2><span class="status-pill" id="traefik-health-badge">—</span></div>
+		<div id="traefik-health-result"><p class="muted">Loading…</p></div>
+	</div>
+</div>
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">Database Consistency</h2><button class="btn-secondary" id="check-refresh">Refresh</button></div>
+	<p class="muted" style="margin-top:-6px">Cross-checks issued certificates against the MAC-binding database (openvpn_db.txt) for entries missing on either side.</p>
+	<div id="check-result"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">MAC-DB Formatting Health</h2><button class="btn-secondary" id="lint-refresh">Refresh</button></div>
+	<p class="muted" style="margin-top:-6px">Validates openvpn_db.txt's own formatting -- malformed lines, duplicate MAC assignments, missing trailing newline.</p>
+	<div id="lint-result"><p class="muted">Loading…</p></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function okBadge(el, ok, okLabel, badLabel) {
+	el.className = "status-pill " + (ok ? "status-online" : "status-revoked");
+	el.textContent = ok ? (okLabel || "OK") : (badLabel || "Issues found");
+}
+
+function unavailableBadge(el) {
+	el.className = "status-pill status-offline";
+	el.textContent = "Unavailable";
+}
+
+function humanBytes(n) {
+	if (n == null) return "—";
+	const units = ["B", "KB", "MB", "GB", "TB"];
+	let i = 0, v = n;
+	while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+	return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function usageBar(pct, opts = {}) {
+	if (pct == null) return "";
+	const level = pct >= 90 ? "usage-bar-critical" : pct >= 75 ? "usage-bar-warning" : "usage-bar-ok";
+	return `<span class="usage-bar"><span class="usage-bar-fill ${level}" style="width:${Math.min(100, pct)}%"></span></span>`;
+}
+
+function metricRow(label, valueHtml) {
+	return `<div class="metric-row"><span class="metric-label">${escapeHtml(label)}</span><span class="metric-value">${valueHtml}</span></div>`;
+}
+
+// --- App ---------------------------------------------------------------
+async function loadAppHealth() {
+	const el = document.getElementById("app-health-result");
+	const badge = document.getElementById("app-health-badge");
+	try {
+		const d = await apiFetch("/api/health/app");
+		okBadge(badge, true, "Running");
+		const snapAge = d.background_snapshot_age_seconds;
+		const snapHtml = snapAge == null
+			? '<span class="muted">no snapshot yet</span>'
+			: `${fmtDuration(Math.round(snapAge))} ago ${snapAge > 60 ? '<span class="status-pill status-revoked" style="margin-left:6px">stale</span>' : ""}`;
+		el.innerHTML = [
+			metricRow("Version", `<span class="mono">${escapeHtml(d.app_version)}</span>`),
+			metricRow("Uptime", fmtDuration(Math.round(d.uptime_seconds))),
+			metricRow("Started", `<span class="mono" style="font-size:0.82em">${escapeHtml(d.started_at)}</span>`),
+			metricRow("Python", `<span class="mono">${escapeHtml(d.python_version)}</span>`),
+			metricRow("FastAPI / Uvicorn", `<span class="mono">${escapeHtml(d.fastapi_version)} / ${escapeHtml(d.uvicorn_version)}</span>`),
+			metricRow("DB engine", escapeHtml(d.db_engine)),
+			metricRow("Background snapshot", snapHtml),
+		].join("");
+	} catch (e) {
+		okBadge(badge, false, "", "Error");
+		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+// --- Database ------------------------------------------------------------
+async function loadDbHealth() {
+	const el = document.getElementById("db-health-result");
+	const badge = document.getElementById("db-health-badge");
+	try {
+		const d = await apiFetch("/api/health/database");
+		okBadge(badge, d.ok, "Connected", "Unreachable");
+		const rows = [
+			metricRow("Engine", escapeHtml(d.engine)),
+			metricRow("Latency", d.latency_ms == null ? "—" : `${d.latency_ms} ms`),
+		];
+		if (d.size_bytes != null) rows.push(metricRow("Database size", humanBytes(d.size_bytes)));
+		if (d.active_connections != null) rows.push(metricRow("Active connections", d.active_connections));
+		if (d.error) rows.push(`<p style="color:var(--danger-text);margin-top:10px">${escapeHtml(d.error)}</p>`);
+		el.innerHTML = rows.join("");
+	} catch (e) {
+		okBadge(badge, false, "", "Error");
+		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+// --- Host machine --------------------------------------------------------
+async function loadHostHealth() {
+	const el = document.getElementById("host-health-result");
+	const badge = document.getElementById("host-health-badge");
+	try {
+		const d = await apiFetch("/api/health/host");
+		if (!d.available) {
+			unavailableBadge(badge);
+			el.innerHTML = `<p class="muted">${escapeHtml(d.reason)}</p>`;
+			return;
+		}
+		okBadge(badge, true, "Reporting");
+		const rows = [
+			metricRow("Hostname", `<span class="mono">${escapeHtml(d.hostname || "—")}</span>`),
+			metricRow("Uptime", d.uptime_seconds != null ? fmtDuration(Math.round(d.uptime_seconds)) : "—"),
+			metricRow("Load average", d.load_avg ? d.load_avg.map(v => v.toFixed(2)).join(" / ") : "—"),
+		];
+		if (d.cpu_percent != null) {
+			rows.push(metricRow(`CPU (${d.cpu_count} core${d.cpu_count === 1 ? "" : "s"})`,
+				`${usageBar(d.cpu_percent)}<span class="metric-pct">${d.cpu_percent}%</span>`));
+		}
+		if (d.memory) {
+			rows.push(metricRow("Memory", `${usageBar(d.memory.percent)}<span class="metric-pct">${d.memory.percent}%</span> <span class="muted" style="font-size:0.82em">${humanBytes(d.memory.used_bytes)} / ${humanBytes(d.memory.total_bytes)}</span>`));
+		}
+		if (d.disk) {
+			rows.push(metricRow("Disk (/)", `${usageBar(d.disk.percent)}<span class="metric-pct">${d.disk.percent}%</span> <span class="muted" style="font-size:0.82em">${humanBytes(d.disk.used_bytes)} / ${humanBytes(d.disk.total_bytes)}</span>`));
+		}
+		if (d.error) rows.push(`<p style="color:var(--danger-text);margin-top:10px">${escapeHtml(d.error)}</p>`);
+		el.innerHTML = rows.join("");
+	} catch (e) {
+		okBadge(badge, false, "", "Error");
+		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+// --- Traefik ---------------------------------------------------------------
+async function loadTraefikHealth() {
+	const el = document.getElementById("traefik-health-result");
+	const badge = document.getElementById("traefik-health-badge");
+	try {
+		const d = await apiFetch("/api/health/traefik");
+		if (!d.available) {
+			unavailableBadge(badge);
+			el.innerHTML = `<p class="muted">${escapeHtml(d.reason)}</p>`;
+			return;
+		}
+		const routerIssues = d.routers.filter(r => r.status !== "enabled" || (r.errors && r.errors.length));
+		okBadge(badge, d.ping_ok && routerIssues.length === 0, "Healthy", "Issues found");
+		let html = "";
+		if (d.routers.length) {
+			html += `<table style="margin-top:4px"><thead><tr><th>Router</th><th>Rule</th><th>Status</th></tr></thead><tbody>${d.routers.map(r => `
+				<tr>
+					<td>${escapeHtml(r.name || "—")}</td>
+					<td class="mono" style="font-size:0.82em">${escapeHtml(r.rule || "—")}</td>
+					<td>${r.status === "enabled" && !(r.errors && r.errors.length)
+						? '<span class="status-pill status-online">enabled</span>'
+						: `<span class="status-pill status-revoked">${escapeHtml(r.status || "unknown")}</span>`}</td>
+				</tr>`).join("")}</tbody></table>`;
+		} else {
+			html += '<p class="muted">No routers reported.</p>';
+		}
+		if (d.error) html += `<p style="color:var(--danger-text);margin-top:10px">${escapeHtml(d.error)}</p>`;
+		el.innerHTML = html;
+	} catch (e) {
+		okBadge(badge, false, "", "Error");
+		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+// --- Moved from Diagnostics: PKI/MAC-db consistency + formatting ---------
+async function loadCheck() {
+	const el = document.getElementById("check-result");
+	try {
+		const data = await apiFetch("/api/check");
+		let html = `<p>${data.clean
+			? '<span class="status-pill status-online">Clean</span>'
+			: '<span class="status-pill status-revoked">Issues found</span>'} <span class="muted mono" style="font-size:0.85rem">App database: ${escapeHtml(data.db_engine || "unknown")}</span></p>`;
+		if (data.orphan_pki.length) {
+			html += `<p><strong>Valid cert but no MAC-db entry</strong> (cannot connect until added):</p><ul>${data.orphan_pki.map(n => `<li>${escapeHtml(n)}</li>`).join("")}</ul>`;
+		}
+		if (data.orphan_db.length) {
+			html += `<p><strong>MAC-db entry with no matching valid cert</strong> (stale):</p><ul>${data.orphan_db.map(n => `<li>${escapeHtml(n)}</li>`).join("")}</ul><p class="muted" style="font-size:0.85rem">See <a href="/clients/revoked">Deleted / Revoked Clients</a> to clean up a stale entry.</p>`;
+		}
+		el.innerHTML = html;
+	} catch (e) {
+		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+async function loadLint() {
+	const el = document.getElementById("lint-result");
+	try {
+		const data = await apiFetch("/api/lint-db");
+		let html = `<p>${data.clean
+			? '<span class="status-pill status-online">Clean</span>'
+			: '<span class="status-pill status-revoked">Issues found</span>'} <span class="muted">${data.entries} entries, trailing newline ${data.trailing_newline_ok ? "OK" : "MISSING"}</span></p>`;
+		if (data.issues && data.issues.length) {
+			html += `<ul>${data.issues.map(i => `<li>${escapeHtml(i)}</li>`).join("")}</ul>`;
+		}
+		el.innerHTML = html;
+	} catch (e) {
+		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+function loadAll() {
+	loadAppHealth();
+	loadDbHealth();
+	loadHostHealth();
+	loadTraefikHealth();
+	loadCheck();
+	loadLint();
+}
+
+document.getElementById("check-refresh").addEventListener("click", loadCheck);
+document.getElementById("lint-refresh").addEventListener("click", loadLint);
+document.getElementById("refresh-btn").addEventListener("click", loadAll);
+loadAll();
+</script>
+{% endblock %}

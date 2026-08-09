@@ -84,6 +84,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Surfaced on the Health page (see app/vpnadmin/health.py) --
+          # steps.meta.outputs.version is metadata-action's single resolved
+          # version for this build (e.g. "1.0.25" from the pushed tag).
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

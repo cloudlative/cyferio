@@ -357,6 +357,7 @@ def dashboard_summary(rejected_limit: int = 20) -> dict:
 # from the exact same underlying CLI calls -- one shared snapshot instead
 # of four separate background loops each doing their own spawn burst.
 _dashboard_snapshot: dict | None = None
+_dashboard_snapshot_at: float | None = None
 _dashboard_snapshot_lock = threading.Lock()
 
 
@@ -368,16 +369,28 @@ def get_dashboard_snapshot() -> dict | None:
         return _dashboard_snapshot
 
 
+def get_dashboard_snapshot_age_seconds() -> float | None:
+    """How long ago the background refresh loop last successfully updated
+    the snapshot -- None if it hasn't completed its first tick yet. Surfaced
+    on the Health page: a stalled background loop (see main.py's
+    _dashboard_refresh_loop) wouldn't crash the app or fail any request on
+    its own (every reader falls back to the last-good snapshot), so this is
+    the only signal that it's stopped ticking."""
+    with _dashboard_snapshot_lock:
+        return time.monotonic() - _dashboard_snapshot_at if _dashboard_snapshot_at is not None else None
+
+
 def refresh_dashboard_snapshot(rejected_limit: int = 20) -> dict:
     """Computes a fresh dashboard_summary() and stores it as the snapshot
     get_dashboard_snapshot() serves. Still goes through the same
     _script_lock-serialized, individually-cached calls as always -- this
     doesn't change how the underlying scripts are invoked, only who's
     calling them and when (a timer, not a request)."""
-    global _dashboard_snapshot
+    global _dashboard_snapshot, _dashboard_snapshot_at
     result = dashboard_summary(rejected_limit)
     with _dashboard_snapshot_lock:
         _dashboard_snapshot = result
+        _dashboard_snapshot_at = time.monotonic()
     return result
 
 

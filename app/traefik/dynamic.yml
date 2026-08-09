@@ -23,6 +23,27 @@ http:
       tls:
         certResolver: letsencrypt
 
+    # Traefik's own internal API + ping (see docker-compose.yml's
+    # --api=true, --ping=true, and --entrypoints.traefik.address=:8080) --
+    # both bound only to the "traefik" entrypoint, which is never
+    # published to the host, so these routers are only reachable from
+    # other containers on the compose network (i.e. the app service
+    # calling them for the Health page), never publicly. With the File
+    # provider, api@internal/ping@internal each need an explicit router
+    # like any other service -- neither is auto-exposed just by
+    # --api=true/--ping=true.
+    traefik-internal-api:
+      rule: "PathPrefix(`/api`)"
+      entryPoints:
+        - traefik
+      service: api@internal
+
+    traefik-internal-ping:
+      rule: "PathPrefix(`/ping`)"
+      entryPoints:
+        - traefik
+      service: ping@internal
+
   services:
     openvpn-toolkit:
       loadBalancer:

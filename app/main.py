@@ -18,7 +18,7 @@ from vpnadmin.app_settings import prune_audit_log, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db
-from vpnadmin.routes import auth, clients, diagnostics, pages, settings as settings_routes, status, teams, users
+from vpnadmin.routes import auth, clients, diagnostics, health, pages, settings as settings_routes, status, teams, users
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,7 @@ app.include_router(clients.router)
 app.include_router(status.router)
 app.include_router(status.dashboard_router)
 app.include_router(diagnostics.router)
+app.include_router(health.router)
 app.include_router(users.router)
 app.include_router(teams.router)
 app.include_router(settings_routes.router)
