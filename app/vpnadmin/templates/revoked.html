@@ -12,9 +12,14 @@
 		</div>
 		<button class="btn-secondary" id="refresh-btn">Refresh</button>
 	</div>
-	{% if is_admin %}
-	<p class="muted" style="margin-bottom:16px">Select one or more entries below to permanently delete their leftover certificate/key files, or restore (reissue a new certificate for) a single client.</p>
-	{% endif %}
+	<p class="muted" style="margin-bottom:16px">
+		Revoking a client is permanent by design — a revoked certificate can never be reactivated, only replaced.
+		Two separate actions are available here, and they do very different things:
+		<strong>Restore</strong> issues a brand-new certificate under the same name (a fresh identity that
+		happens to share a name, not the old one coming back), while <strong>Permanently Delete</strong> only
+		clears out the old certificate's leftover files on disk — it never removes the revocation record itself,
+		which stays forever for audit history.
+	</p>
 	<div id="revoked-table"><p class="muted">Loading…</p></div>
 </div>
 
@@ -23,7 +28,7 @@
 	<div class="dialog-body">
 		<h2>Restore Client</h2>
 		<p class="muted" style="margin-top:0">
-			A revoked certificate can't be un-revoked once it's on the CRL -- this issues a
+			A revoked certificate can't be un-revoked once it's on the CRL -- this issues
 			<strong id="restore-client-name"></strong> a brand-new certificate under the same name instead.
 		</p>
 		<form id="restore-form">
@@ -58,27 +63,30 @@ async function loadRevoked() {
 		const sorted = [...lastRevoked].sort((a, b) => (b.revoked_at || "").localeCompare(a.revoked_at || ""));
 		el.innerHTML = `
 			${isAdmin ? `<div class="form-row" style="margin-bottom:14px">
-				<button class="btn-danger btn-sm" id="purge-selected" disabled>Permanently Delete Selected</button>
+				<button class="btn-danger btn-sm" id="purge-selected" disabled title="Removes leftover certificate/key files only -- the revocation record always stays.">Permanently Delete Selected</button>
 			</div>` : ""}
 			<table>
 			<thead><tr>
 				${isAdmin ? '<th style="width:1%"></th>' : ""}
-				<th>Name</th><th>Revoked At</th><th>Stale MAC DB Entry</th><th>Files Present</th>
-				${isAdmin ? "<th></th>" : ""}
+				<th>Name</th>
+				<th>Revoked On</th>
+				<th title="Whether this client still has a leftover entry in the MAC-binding database (openvpn_db.txt) that should be cleaned up.">MAC DB Entry</th>
+				<th title="Whether the old certificate/key files are still on disk. &quot;Purged&quot; clients have nothing left to delete, but the revocation record itself is never removed either way.">Certificate Files</th>
+				${isAdmin ? '<th>Action</th>' : ""}
 			</tr></thead>
 			<tbody>${sorted.map(r => `
 				<tr class="row-dim" data-name="${escapeHtml(r.name)}">
-					${isAdmin ? `<td>${r.files_present ? `<input type="checkbox" class="purge-checkbox" value="${escapeHtml(r.name)}">` : ""}</td>` : ""}
+					${isAdmin ? `<td>${r.files_present ? `<input type="checkbox" class="purge-checkbox" value="${escapeHtml(r.name)}" title="Select for permanent file deletion">` : ""}</td>` : ""}
 					<td>${escapeHtml(r.name)}</td>
 					<td class="mono">${escapeHtml(r.revoked_at)}</td>
 					<td>${r.stale_db_entry
-						? '<span class="status-pill status-revoked">Stale — needs cleanup</span>'
-						: '<span class="muted">No</span>'}</td>
+						? '<span class="status-pill status-revoked" title="This name still has a MAC-binding entry in openvpn_db.txt even though the certificate is revoked.">Stale — needs cleanup</span>'
+						: '<span class="status-pill status-online">Clean</span>'}</td>
 					<td>${r.files_present
-						? '<span class="muted">Yes</span>'
+						? '<span class="status-pill status-offline">Present</span>'
 						: '<span class="status-pill status-online">Purged</span>'}</td>
 					${isAdmin ? `<td class="text-right">
-						${r.files_present ? '<button class="btn-secondary btn-sm restore-btn">Restore</button>' : '<span class="muted">—</span>'}
+						${r.files_present ? '<button class="btn-secondary btn-sm restore-btn" title="Issue a brand-new certificate under this same name -- not a reactivation of the old one.">Restore</button>' : '<span class="muted">—</span>'}
 					</td>` : ""}
 				</tr>`).join("")}</tbody>
 		</table>`;
@@ -94,7 +102,7 @@ async function loadRevoked() {
 			purgeBtn.addEventListener("click", async () => {
 				const names = [...el.querySelectorAll(".purge-checkbox:checked")].map(cb => cb.value);
 				if (names.length === 0) return;
-				const ok = await confirmDialog(`Permanently delete leftover files for ${names.length} revoked client${names.length === 1 ? "" : "s"}? This cannot be undone.`, { confirmLabel: "Delete Permanently" });
+				const ok = await confirmDialog(`Permanently delete leftover certificate/key files for ${names.length} revoked client${names.length === 1 ? "" : "s"}? The revocation record itself is not affected either way. This cannot be undone.`, { confirmLabel: "Delete Permanently" });
 				if (!ok) return;
 				purgeBtn.disabled = true;
 				try {
