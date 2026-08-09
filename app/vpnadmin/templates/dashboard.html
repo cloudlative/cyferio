@@ -553,5 +553,15 @@ function loadDashboard() {
 
 document.getElementById("refresh-btn").addEventListener("click", loadDashboard);
 loadDashboard();
+
+// Auto-refresh Connected Now / online-count without a manual click -- see
+// the matching comment in clients.html for the full "why" (no live push
+// mechanism previously existed at all). Only re-polls the connection
+// stats, not Recent Activity/Activity Breakdown (those have their own
+// filters/pagination state that a background tick shouldn't disturb).
+setInterval(() => {
+	if (document.hidden) return;
+	loadConnectedStats();
+}, 12000);
 </script>
 {% endblock %}

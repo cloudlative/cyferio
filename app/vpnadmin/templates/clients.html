@@ -685,5 +685,20 @@ if (isAdmin) {
 
 document.getElementById("refresh-btn").addEventListener("click", loadClients);
 loadClients();
+
+// Auto-refresh online/offline status without a manual click: this page has
+// no live push mechanism, so a client connecting or disconnecting was
+// previously invisible until a reload or an explicit Refresh click (on top
+// of the backend's own snapshot lag -- see DASHBOARD_REFRESH_INTERVAL_SECONDS
+// in main.py, and the separate OpenVPN status-log write-interval fix in
+// openvpn-install.sh/server.conf). Skips a tick while any <dialog> is open
+// (Manage MACs/Restrictions/Email/View .ovpn) so a full table re-render
+// never yanks focus or closes something the admin is mid-edit on, and
+// pauses entirely while the tab isn't visible to avoid pointless polling.
+setInterval(() => {
+	if (document.hidden) return;
+	if (document.querySelector("dialog[open]")) return;
+	loadClients();
+}, 12000);
 </script>
 {% endblock %}
