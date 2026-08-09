@@ -16,8 +16,8 @@
 			<a href="/clients" class="{{ 'active' if request.url.path == '/clients' }}"><span class="nav-icon">◇</span>VPN Clients</a>
 			<a href="/clients/revoked" class="{{ 'active' if request.url.path == '/clients/revoked' }}"><span class="nav-icon">⊘</span>Deleted / Revoked</a>
 			<a href="/diagnostics" class="{{ 'active' if request.url.path == '/diagnostics' }}"><span class="nav-icon">⚙</span>Diagnostics</a>
-			<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
 			{% if is_admin %}
+			<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
 			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
 			<a href="/settings" class="{{ 'active' if request.url.path == '/settings' }}"><span class="nav-icon">⛭</span>Settings</a>
 			{% endif %}

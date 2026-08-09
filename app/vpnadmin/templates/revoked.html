@@ -21,7 +21,7 @@
 	<div id="revoked-table"><p class="muted">Loading…</p></div>
 </div>
 
-{% if is_admin %}
+{% if can_manage_clients %}
 <dialog id="restore-dialog">
 	<div class="dialog-body">
 		<h2>Restore Client</h2>
@@ -46,7 +46,7 @@
 
 {% block scripts %}
 <script>
-const isAdmin = {{ "true" if is_admin else "false" }};
+const isAdmin = {{ "true" if can_manage_clients else "false" }};
 let lastRevoked = [];
 
 async function loadRevoked() {
@@ -110,8 +110,11 @@ if (isAdmin) {
 			const result = await apiFetch(`/api/clients/revoked/${encodeURIComponent(restoringClientName)}/restore`, {
 				method: "POST", body: { mac },
 			});
-			toast(result.message, "success");
+			// Close before toasting -- see clients.html's email-dialog
+			// handler for why (toast() nests inside an open <dialog>;
+			// closing the dialog first, not after, keeps it visible).
 			document.getElementById("restore-dialog").close();
+			toast(result.message, "success");
 			loadRevoked();
 		} catch (e) {
 			toast(e.message, "error");

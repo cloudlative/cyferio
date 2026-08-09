@@ -85,6 +85,20 @@ strips it, so pushing `v1.0.1` publishes the image as `...:1.0.1`, not
 [Packages page](https://github.com/cloudlative/openvpn-toolkit/pkgs/container/openvpn-toolkit-app)
 for what's been published, before `docker compose pull`.
 
+Find the latest published version tag from the command line (no `gh`/GitHub
+login needed -- GHCR's anonymous token endpoint is enough since the package
+is public):
+
+```bash
+TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:cloudlative/openvpn-toolkit-app:pull" | grep -oE '"token":"[^"]+"' | cut -d'"' -f4)
+curl -s -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/cloudlative/openvpn-toolkit-app/tags/list" \
+  | grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' | tr -d '"' | sort -V | tail -1
+```
+
+Prints just the version number (e.g. `1.0.5`) -- set that as `IMAGE_TAG` in
+`.env` before `docker compose pull` for a reproducible, deliberately-chosen
+deploy instead of always tracking `latest`.
+
 Rolling back a bad deploy: either set `IMAGE_TAG` in `.env` to a known-good
 previous version tag and re-run `docker compose pull && docker compose up -d`,
 or check out the commit before the GHCR-image switch (`build: .` instead of

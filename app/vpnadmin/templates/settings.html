@@ -194,8 +194,11 @@ document.getElementById("test-email-form").addEventListener("submit", async (ev)
 				smtp_use_tls: document.getElementById("s-smtp-tls").value === "true",
 			},
 		});
-		toast(result.message, "success");
+		// Close before toasting -- see clients.html's email-dialog handler
+		// for why (toast() nests inside an open <dialog>; closing the
+		// dialog first, not after, keeps it visible).
 		document.getElementById("test-email-dialog").close();
+		toast(result.message, "success");
 	} catch (e) {
 		toast(e.message, "error");
 	} finally {

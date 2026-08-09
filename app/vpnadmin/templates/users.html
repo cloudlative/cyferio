@@ -20,6 +20,7 @@
 				<label for="u-role">Role</label>
 				<select id="u-role">
 					<option value="viewer">Viewer (read-only)</option>
+					<option value="editor">Editor (manage VPN clients &amp; MACs)</option>
 					<option value="admin">Admin (full control)</option>
 				</select>
 			</div>
@@ -88,7 +89,7 @@
 				<div class="form-row">
 					<div class="field">
 						<label for="e-role">Role</label>
-						<select id="e-role"><option value="viewer">Viewer</option><option value="admin">Admin</option></select>
+						<select id="e-role"><option value="viewer">Viewer</option><option value="editor">Editor</option><option value="admin">Admin</option></select>
 						<p class="muted" id="e-role-note" style="margin:6px 0 0;font-size:0.8rem;display:none">The bootstrap admin account can't be demoted, deactivated, or deleted.</p>
 					</div>
 					<div class="field">
@@ -307,8 +308,12 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 	if (pw) body.password = pw;
 	try {
 		await apiFetch(`/api/users/${editingUserId}`, { method: "PATCH", body });
-		toast("User updated.");
+		// Close before toasting -- see clients.html's email-dialog handler
+		// for why (toast() nests inside an open <dialog>; closing the
+		// dialog first, not after, keeps it visible instead of hidden
+		// inside the now-closed dialog for its whole 4s lifetime).
 		document.getElementById("edit-dialog").close();
+		toast("User updated.");
 		loadUsers();
 	} catch (e) {
 		toast(e.message, "error");

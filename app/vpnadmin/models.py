@@ -13,6 +13,9 @@ def _utcnow():
 
 class Role(str, enum.Enum):
     admin = "admin"
+    editor = "editor"  # can add/revoke/edit VPN clients and manage their MAC
+    # addresses (everything in routes/clients.py) -- but not user
+    # management, teams, or settings, which stay admin-only
     viewer = "viewer"  # read-only: status/list/check/lint-db, no add/revoke/user-management
 
 

@@ -4,7 +4,7 @@
 <h1>VPN Clients</h1>
 <p class="page-subtitle">Everyone with a valid VPN certificate.</p>
 
-{% if is_admin %}
+{% if can_manage_clients %}
 <div class="card">
 	<h2>Add a New Client</h2>
 	<form id="add-form">
@@ -60,7 +60,7 @@
 	</div>
 </dialog>
 
-{% if is_admin %}
+{% if can_manage_clients %}
 <dialog id="ovpn-dialog">
 	<div class="dialog-body">
 		<h2 id="ovpn-dialog-title">.ovpn Profile</h2>
@@ -92,7 +92,7 @@
 
 {% block scripts %}
 <script>
-const isAdmin = {{ "true" if is_admin else "false" }};
+const isAdmin = {{ "true" if can_manage_clients else "false" }};
 const _initialParams = new URLSearchParams(location.search);
 let currentFilter = _initialParams.get("online") === "1" ? "online"
 	: _initialParams.get("missing_mac") === "1" ? "missing_mac"
@@ -113,8 +113,9 @@ async function loadClients() {
 		lastClients = clients;
 		lastStatusByName = Object.fromEntries(statusAll.map(s => [s.name, s]));
 		const onlineCount = clients.filter(c => lastStatusByName[c.name]?.status === "online").length;
-		document.getElementById("client-count").textContent =
-			`${clients.length} client${clients.length === 1 ? "" : "s"} — ${onlineCount} online`;
+		document.getElementById("client-count").innerHTML =
+			`${clients.length} client${clients.length === 1 ? "" : "s"} — ` +
+			`<span class="status-pill status-online" style="margin-left:2px">${onlineCount} online</span>`;
 		renderClients();
 	} catch (e) {
 		toast(e.message, "error");
@@ -176,7 +177,7 @@ function renderClients() {
 				<td>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</td>
 				<td><span class="count-badge">${c.mac_count ?? 0}</span></td>
 				<td>${escapeHtml(s ? s.last_seen : "—")}</td>
-				<td><button class="btn-secondary btn-sm macs-btn">Manage MACs</button></td>
+				<td><button class="btn-secondary btn-sm macs-btn">${isAdmin ? "Manage MACs" : "View MACs"}</button></td>
 				${isAdmin ? `<td><button class="btn-secondary btn-sm ovpn-btn">View / Copy .ovpn</button></td>` : ""}
 				${isAdmin ? `<td><button class="btn-secondary btn-sm email-btn">Email Profile</button></td>` : ""}
 				${isAdmin ? `<td class="text-right"><button class="btn-danger btn-sm revoke-btn">Revoke</button></td>` : ""}
@@ -345,8 +346,15 @@ if (isAdmin) {
 			const result = await apiFetch(`/api/clients/${encodeURIComponent(emailingClientName)}/email-ovpn`, {
 				method: "POST", body: { email },
 			});
-			toast(result.message, "success");
+			// Close the dialog BEFORE toasting -- toast() deliberately nests
+			// itself inside an open <dialog> (so it renders above the
+			// dialog's own top-layer stacking instead of hidden behind it),
+			// but that means calling it right before .close() would bury
+			// the toast inside a now-hidden dialog, invisible for its whole
+			// lifetime. Closing first makes toast() fall back to the
+			// page-level container, which stays visible.
 			document.getElementById("email-dialog").close();
+			toast(result.message, "success");
 		} catch (e) {
 			toast(e.message, "error");
 		} finally {

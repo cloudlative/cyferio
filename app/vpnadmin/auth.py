@@ -127,6 +127,17 @@ def require_admin(user: User = Depends(require_user)) -> User:
     return user
 
 
+def require_client_manager(user: User = Depends(require_user)) -> User:
+    """For routes/clients.py's mutating endpoints (add/revoke/restore/purge
+    a client, add/remove a MAC, email a .ovpn profile): admin OR editor.
+    Editor is scoped to exactly this -- VPN client + MAC management -- and
+    nothing else; user management, teams, and settings all stay
+    require_admin-only."""
+    if user.role not in (Role.admin, Role.editor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or Editor role required")
+    return user
+
+
 def login_user(request: Request, user: User, db: Session | None = None) -> None:
     # Store the minimum needed to re-derive identity; role/is_active are
     # re-checked from the DB on every request via get_current_user, so a

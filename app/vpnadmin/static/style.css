@@ -160,6 +160,7 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	letter-spacing: 0.04em;
 }
 .role-admin { background: var(--accent-gradient); color: #fff; }
+.role-editor { background: linear-gradient(90deg, #22d3ee, #6366f1); color: #fff; }
 .role-viewer { background: var(--surface-alt); color: var(--text-muted); border: 1px solid var(--border-light); }
 
 .link-button {
@@ -533,15 +534,22 @@ a.team-card:hover .stat-hint { opacity: 1; }
 /* Dashboard "Activity Breakdown" donut chart + legend (see dashboard.html).
    Legend doubles as the WCAG table-view equivalent of the chart -- every
    value the donut encodes visually is also plain text here. */
-.donut-layout { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; margin-top: 4px; }
-.donut-chart { width: 108px; height: 108px; flex: none; }
-.donut-segment { transition: opacity 0.15s ease; }
-.donut-segment:hover { opacity: 0.82; }
-.donut-center-value { font-size: 1.35rem; font-weight: 800; fill: var(--text); font-family: inherit; }
-.donut-center-label { font-size: 0.5rem; fill: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-family: inherit; }
-.donut-legend { flex: 1; min-width: 200px; max-width: 340px; font-size: 0.85rem; }
-.donut-legend th { background: none; padding: 3px 8px; font-size: 0.66rem; }
-.donut-legend td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.donut-layout { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 4px; }
+.donut-chart { width: 84px; height: 84px; flex: none; }
+.donut-segment { transition: opacity 0.15s ease, transform 0.15s ease; transform-box: fill-box; transform-origin: center; cursor: pointer; }
+.donut-segment:hover { opacity: 0.82; transform: scale(1.035); }
+.donut-center-value { font-size: 1.1rem; font-weight: 800; fill: var(--text); font-family: inherit; }
+.donut-center-label { font-size: 0.42rem; fill: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-family: inherit; }
+.donut-legend { flex: 1; min-width: 170px; max-width: 320px; font-size: 0.83rem; }
+.donut-legend th { background: none; padding: 3px 8px; font-size: 0.64rem; }
+.donut-legend td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
 .donut-legend tr:last-child td { border-bottom: none; }
+.donut-legend tr:hover td { background: var(--surface-hover); }
+
+/* Shared renderDonutChart() (app.js) -- used by Diagnostics' rejection
+   charts. Same hover treatment as the Dashboard's Activity Breakdown
+   donut above, kept as a separate block since this one isn't built from
+   the .donut-legend <table> markup. */
+.donut-legend-row:hover { background: var(--surface-hover); }
 .legend-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 9px; vertical-align: middle; }
 .activity-breakdown #activity-stat-grid { margin-bottom: 24px; }

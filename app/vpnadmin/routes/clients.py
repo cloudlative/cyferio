@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from .. import cli_wrapper as cli
 from .. import mailer
 from ..audit import log_action
-from ..auth import require_admin, require_user
+from ..auth import require_admin, require_client_manager, require_user
 from ..cli_wrapper import ScriptError
 from ..db import get_db
 from ..models import User
@@ -103,7 +103,7 @@ class MacRequest(BaseModel):
 
 
 @router.post("/{name}/macs", status_code=201)
-def add_client_mac(name: str, body: MacRequest, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+def add_client_mac(name: str, body: MacRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
     try:
@@ -116,7 +116,7 @@ def add_client_mac(name: str, body: MacRequest, user: User = Depends(require_adm
 
 
 @router.delete("/{name}/macs/{mac}")
-def remove_client_mac(name: str, mac: str, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+def remove_client_mac(name: str, mac: str, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
     try:
@@ -129,7 +129,7 @@ def remove_client_mac(name: str, mac: str, user: User = Depends(require_admin), 
 
 
 @router.post("", status_code=201)
-def add_client(body: AddClientRequest, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+def add_client(body: AddClientRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
     try:
         result = cli.add_client(body.name, body.mac)
     except ScriptError as e:
@@ -144,7 +144,7 @@ def add_client(body: AddClientRequest, user: User = Depends(require_admin), db: 
 
 
 @router.delete("/{name}")
-def revoke_client(name: str, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+def revoke_client(name: str, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
     try:
@@ -162,7 +162,7 @@ def revoke_client(name: str, user: User = Depends(require_admin), db: Session = 
 
 
 @router.get("/{name}/ovpn")
-def get_client_ovpn(name: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def get_client_ovpn(name: str, _: User = Depends(require_client_manager), db: Session = Depends(get_db)):
     """Returns an existing client's .ovpn config content on demand.
     Admin-only (unlike most GETs in this router) since this is genuinely
     sensitive key material -- deliberately never bulk-returned as part of
@@ -189,7 +189,7 @@ class EmailOvpnRequest(BaseModel):
 
 
 @router.post("/{name}/email-ovpn")
-def email_client_ovpn(name: str, body: EmailOvpnRequest, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+def email_client_ovpn(name: str, body: EmailOvpnRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
     if not mailer.is_configured():
@@ -214,7 +214,7 @@ class PurgeRevokedRequest(BaseModel):
 
 
 @router.post("/revoked/purge")
-def purge_revoked_clients(body: PurgeRevokedRequest, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+def purge_revoked_clients(body: PurgeRevokedRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
     """Bulk permanent-delete of one or more revoked clients' leftover PKI/
     .ovpn files -- mirrors the MAC bulk-remove UI pattern (select several,
     one confirm, per-item results)."""
@@ -246,7 +246,7 @@ class RestoreClientRequest(BaseModel):
 
 
 @router.post("/revoked/{name}/restore")
-def restore_revoked_client(name: str, body: RestoreClientRequest, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+def restore_revoked_client(name: str, body: RestoreClientRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
     """Reissues a brand-new certificate under a revoked client's name -- see
     cli_wrapper.restore_client / openvpn-install.sh's do_restore_client for
     why this is NOT the same as un-revoking the old certificate."""

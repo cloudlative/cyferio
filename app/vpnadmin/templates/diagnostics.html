@@ -21,20 +21,25 @@
 	<div class="toolbar"><h2 style="margin:0">Recent Rejected Connection Attempts</h2><button class="btn-secondary" id="rejected-refresh">Refresh</button></div>
 	<div class="form-row" style="margin-bottom:16px;gap:12px">
 		<div class="field" style="flex:1;min-width:180px">
-			<label for="rejected-filter-name">Claimed Name</label>
-			<select id="rejected-filter-name"><option value="">All names</option></select>
+			<label for="rejected-filter-name">VPN Profile</label>
+			<select id="rejected-filter-name"><option value="">All</option></select>
 		</div>
 		<div class="field" style="flex:1;min-width:180px">
 			<label for="rejected-filter-os">OS</label>
-			<select id="rejected-filter-os"><option value="">All OSes</option></select>
+			<select id="rejected-filter-os"><option value="">All</option></select>
 		</div>
 	</div>
 	<div id="rejected-result"><p class="muted">Loading…</p></div>
 </div>
 
 <div class="card" id="rejected-chart-card" style="display:none">
-	<div class="toolbar"><h2 style="margin:0">Rejections by Claimed Name</h2></div>
+	<div class="toolbar"><h2 style="margin:0">Rejections by VPN Profile</h2></div>
 	<div id="rejected-chart"></div>
+</div>
+
+<div class="card" id="rejected-os-chart-card" style="display:none">
+	<div class="toolbar"><h2 style="margin:0">Rejections by OS</h2></div>
+	<div id="rejected-os-chart"></div>
 </div>
 {% endblock %}
 
@@ -77,26 +82,35 @@ async function loadLint() {
 	}
 }
 
-function renderRejectedChart(data) {
-	const chartCard = document.getElementById("rejected-chart-card");
-	const chartEl = document.getElementById("rejected-chart");
-	if (!data || data.length === 0) {
-		chartCard.style.display = "none";
-		return;
-	}
-	chartCard.style.display = "";
+// Shared by both rejection donuts below -- groups `data` by whatever key
+// `keyFn` returns, keeping only the top 8 by count so the chart/legend
+// stays readable instead of listing every distinct value.
+function topRejectionEntries(data, keyFn, fallbackLabel) {
 	const counts = {};
 	for (const r of data) {
-		const key = r.claimed_name || "(unknown)";
+		const key = keyFn(r) || fallbackLabel;
 		counts[key] = (counts[key] || 0) + 1;
 	}
-	// Top 8 offenders by rejection count in this recent window, keeping the
-	// chart legend readable instead of listing every distinct name.
-	const entries = Object.entries(counts)
+	return Object.entries(counts)
 		.map(([label, value]) => ({ label, value }))
 		.sort((a, b) => b.value - a.value)
 		.slice(0, 8);
-	renderDonutChart(chartEl, entries);
+}
+
+function renderRejectedChart(data) {
+	const chartCard = document.getElementById("rejected-chart-card");
+	const chartEl = document.getElementById("rejected-chart");
+	const osChartCard = document.getElementById("rejected-os-chart-card");
+	const osChartEl = document.getElementById("rejected-os-chart");
+	if (!data || data.length === 0) {
+		chartCard.style.display = "none";
+		osChartCard.style.display = "none";
+		return;
+	}
+	chartCard.style.display = "";
+	osChartCard.style.display = "";
+	renderDonutChart(chartEl, topRejectionEntries(data, r => r.claimed_name, "(unknown)"));
+	renderDonutChart(osChartEl, topRejectionEntries(data, r => r.os, "(unknown)"));
 }
 
 let rejectedEntries = [];
@@ -107,13 +121,16 @@ function populateRejectedFilters(data) {
 	const prevName = nameSel.value, prevOs = osSel.value;
 	const names = [...new Set(data.map(r => r.claimed_name))].sort();
 	const oses = [...new Set(data.map(r => r.os))].sort();
-	nameSel.innerHTML = '<option value="">All names</option>' + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
-	osSel.innerHTML = '<option value="">All OSes</option>' + oses.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("");
+	nameSel.innerHTML = '<option value="">All</option>' + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+	osSel.innerHTML = '<option value="">All</option>' + oses.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("");
 	// Preserve the operator's current filter selection across a refresh,
 	// as long as that value still exists in the new data.
 	if (names.includes(prevName)) nameSel.value = prevName;
 	if (oses.includes(prevOs)) osSel.value = prevOs;
 }
+
+const REJECTED_PAGE_SIZE = 20;
+let rejectedPage = 1;
 
 function renderRejectedTable() {
 	const el = document.getElementById("rejected-result");
@@ -122,6 +139,8 @@ function renderRejectedTable() {
 	const data = rejectedEntries.filter(r =>
 		(!nameFilter || r.claimed_name === nameFilter) && (!osFilter || r.os === osFilter));
 
+	// The chart always reflects the full filtered set, not just the
+	// current page -- pagination is a display concern for the table only.
 	renderRejectedChart(data);
 	if (rejectedEntries.length === 0) {
 		el.innerHTML = '<div class="empty-state">No rejected connection attempts found.</div>';
@@ -131,12 +150,19 @@ function renderRejectedTable() {
 		el.innerHTML = '<div class="empty-state">No rejected attempts match the selected filters.</div>';
 		return;
 	}
+
+	const totalPages = Math.max(1, Math.ceil(data.length / REJECTED_PAGE_SIZE));
+	if (rejectedPage > totalPages) rejectedPage = totalPages;
+	if (rejectedPage < 1) rejectedPage = 1;
+	const start = (rejectedPage - 1) * REJECTED_PAGE_SIZE;
+	const pageRows = data.slice(start, start + REJECTED_PAGE_SIZE);
+
 	el.innerHTML = `<table>
 		<thead><tr>
-			<th>Timestamp</th><th>Claimed Name</th><th>MAC Presented</th><th>MAC Registered</th>
-			<th>OS</th><th>Source IP:Port</th><th>Attempts (This Name)</th>
+			<th>Timestamp</th><th>VPN Profile</th><th>MAC Presented</th><th>MAC Registered</th>
+			<th>OS</th><th>Source IP:Port</th><th>Attempts (This Profile)</th>
 		</tr></thead>
-		<tbody>${data.map(r => {
+		<tbody>${pageRows.map(r => {
 			const mismatch = r.mac_registered !== "not registered" && r.mac_registered !== r.mac_presented;
 			const repeat = r.total_attempts_this_name > 5;
 			return `<tr>
@@ -150,7 +176,20 @@ function renderRejectedTable() {
 			</tr>`;
 		}).join("")}</tbody>
 	</table>
+	<div class="toolbar" style="margin-top:14px">
+		<span class="muted" style="font-size:0.85rem">Showing ${start + 1}–${Math.min(start + REJECTED_PAGE_SIZE, data.length)} of ${data.length}</span>
+		<div class="form-row" style="gap:8px">
+			<button type="button" class="btn-secondary btn-sm" id="rejected-prev-page" ${rejectedPage <= 1 ? "disabled" : ""}>← Prev</button>
+			<span class="muted" style="font-size:0.85rem;align-self:center">Page ${rejectedPage} of ${totalPages}</span>
+			<button type="button" class="btn-secondary btn-sm" id="rejected-next-page" ${rejectedPage >= totalPages ? "disabled" : ""}>Next →</button>
+		</div>
+	</div>
 	<p class="muted" style="margin-top:12px">"MAC registered" is what's on file for that name in <span class="mono">openvpn_db.txt</span> — compare against "MAC presented" to see if it's a wrong/unregistered device, a stale entry, or a name that was never registered at all. "Attempts (this name)" counts the full rejection history, not just what's shown here. Repeated entries for the same name/IP are usually a client-side device/network issue, not necessarily an attack.</p>`;
+
+	const prevBtn = document.getElementById("rejected-prev-page");
+	const nextBtn = document.getElementById("rejected-next-page");
+	if (prevBtn) prevBtn.addEventListener("click", () => { rejectedPage -= 1; renderRejectedTable(); });
+	if (nextBtn) nextBtn.addEventListener("click", () => { rejectedPage += 1; renderRejectedTable(); });
 }
 
 async function loadRejected() {
@@ -161,14 +200,15 @@ async function loadRejected() {
 		// them to filter through (500 is the API's own cap).
 		rejectedEntries = await apiFetch("/api/status/rejected?limit=500");
 		populateRejectedFilters(rejectedEntries);
+		rejectedPage = 1;
 		renderRejectedTable();
 	} catch (e) {
 		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
 	}
 }
 
-document.getElementById("rejected-filter-name").addEventListener("change", renderRejectedTable);
-document.getElementById("rejected-filter-os").addEventListener("change", renderRejectedTable);
+document.getElementById("rejected-filter-name").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
+document.getElementById("rejected-filter-os").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
 document.getElementById("check-refresh").addEventListener("click", loadCheck);
 document.getElementById("lint-refresh").addEventListener("click", loadLint);
 document.getElementById("rejected-refresh").addEventListener("click", loadRejected);

@@ -17,7 +17,15 @@ apply_settings_globals(templates)
 
 
 def _ctx(user: User, **extra) -> dict:
-    return {"user": user, "is_admin": user.role == Role.admin, **extra}
+    return {
+        "user": user,
+        "is_admin": user.role == Role.admin,
+        # Client/MAC management (add/revoke/restore/purge a client, MAC
+        # add/remove, email .ovpn) -- admin or editor. Everything else
+        # admin-gated in templates keeps using is_admin.
+        "can_manage_clients": user.role in (Role.admin, Role.editor),
+        **extra,
+    }
 
 
 @router.get("/")
@@ -68,6 +76,8 @@ def profile_page(request: Request, user: User | None = Depends(get_current_user)
 def teams_page(request: Request, user: User | None = Depends(get_current_user)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    if user.role != Role.admin:
+        return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "teams.html", _ctx(user))
 
 

@@ -119,9 +119,18 @@ function confirmDialog(message, { confirmLabel = "Confirm", danger = true } = {}
 // A small set of colors reused across every chart on the site, drawn from
 // the same accent/status palette already defined in style.css (:root
 // custom properties) so charts never introduce a clashing color scheme.
+// Fixed categorical order -- never reassigned by data/sort order, so the
+// same claimed name/OS always gets the same color across a refresh. This
+// is the dataviz skill's validated 8-hue set for a dark card surface
+// (blue/orange/aqua/yellow/magenta/green/violet/red): the previous
+// 10-color palette failed both the lightness-band and CVD-separation
+// checks (several adjacent stops were only ΔE 4.6 apart -- effectively
+// indistinguishable to a colorblind viewer, and washed-out/low-contrast
+// for everyone else). 8 slots exactly matches renderRejectedChart's own
+// "top 8" cap, so nothing here ever needs to cycle past slot 8.
 const CHART_COLORS = [
-	"#6366f1", "#22d3ee", "#f59e0b", "#fb7185", "#34d399",
-	"#818cf8", "#fbbf24", "#f43f5e", "#2dd4bf", "#a78bfa",
+	"#3987e5", "#d95926", "#199e70", "#c98500",
+	"#d55181", "#008300", "#9085e9", "#e66767",
 ];
 
 /**
@@ -143,7 +152,7 @@ function renderDonutChart(mountEl, entries, { size = 220, thickness = 34 } = {})
 	const arcs = entries.map((e, i) => {
 		const fraction = e.value / total;
 		const dash = fraction * circumference;
-		const circle = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none"
+		const circle = `<circle class="donut-segment" cx="${cx}" cy="${cy}" r="${r}" fill="none"
 			stroke="${CHART_COLORS[i % CHART_COLORS.length]}" stroke-width="${thickness}"
 			stroke-dasharray="${dash} ${circumference - dash}"
 			stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})">
@@ -154,7 +163,7 @@ function renderDonutChart(mountEl, entries, { size = 220, thickness = 34 } = {})
 	}).join("");
 
 	const legend = entries.map((e, i) => `
-		<div style="display:flex;align-items:center;gap:8px;font-size:0.85rem;">
+		<div class="donut-legend-row" style="display:flex;align-items:center;gap:8px;font-size:0.85rem;padding:3px 6px;border-radius:6px;">
 			<span style="width:10px;height:10px;border-radius:3px;background:${CHART_COLORS[i % CHART_COLORS.length]};flex:none"></span>
 			<span style="flex:1">${escapeHtml(e.label)}</span>
 			<span class="muted mono">${e.value}</span>
