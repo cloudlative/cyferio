@@ -234,6 +234,22 @@ def purge_revoked(name: str) -> str:
     return proc.stdout.strip()
 
 
+def clean_stale_db_entry(name: str) -> str:
+    """Removes a revoked client's leftover openvpn_db.txt (MAC-binding)
+    entry -- the "stale_db_entry" flag surfaced by get_revoked_snapshot
+    below. The script itself refuses (non-zero exit -> ScriptError) if the
+    name still has a currently-valid certificate, so this can't accidentally
+    break a live client's MAC check."""
+    proc = _run_install_script("--clean-stale-db", name)
+    if proc.returncode != 0:
+        raise ScriptError(
+            proc.stderr.strip() or "Failed to clean stale db entry",
+            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+        )
+    _invalidate_client_caches(name)
+    return proc.stdout.strip()
+
+
 def restore_client(name: str, mac: str) -> str:
     """Reissues a brand-new certificate under a revoked client's name -- see
     openvpn-install.sh's do_restore_client docstring for why this is NOT

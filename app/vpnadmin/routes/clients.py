@@ -239,6 +239,34 @@ def purge_revoked_clients(body: PurgeRevokedRequest, user: User = Depends(requir
     return {"results": results}
 
 
+class CleanStaleDbRequest(BaseModel):
+    names: list[str]
+
+
+@router.post("/revoked/clean-stale-db")
+def clean_stale_db_entries(body: CleanStaleDbRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+    """Bulk removal of revoked clients' leftover openvpn_db.txt entries --
+    mirrors /revoked/purge's per-item bulk-result pattern. Distinct from
+    purge: this only touches the MAC-binding db entry, not PKI/.ovpn files
+    (a client can be stale_db_entry:true while files_present is already
+    false, i.e. already purged -- that's exactly the case purge's UI button
+    can't reach, since it's only shown when files_present is true)."""
+    results = []
+    for name in body.names:
+        if not NAME_RE.match(name):
+            results.append({"name": name, "ok": False, "message": "Invalid client name."})
+            continue
+        try:
+            result = cli.clean_stale_db_entry(name)
+        except ScriptError as e:
+            log_action(db, user, "clean_stale_db_entry", target=name, detail=e.message, success=False)
+            results.append({"name": name, "ok": False, "message": e.message})
+            continue
+        log_action(db, user, "clean_stale_db_entry", target=name, detail=result, success=True)
+        results.append({"name": name, "ok": True, "message": f"'{name}'s stale MAC-db entry removed."})
+    return {"results": results}
+
+
 class RestoreClientRequest(BaseModel):
     mac: str
 

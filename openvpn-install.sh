@@ -383,6 +383,39 @@ do_purge_revoked () {
 	return 0
 }
 
+do_clean_stale_db_entry () {
+	# Usage: do_clean_stale_db_entry <name>
+	# Removes NAME's leftover line(s) from $DB_FILE when they don't
+	# correspond to a currently-valid (non-revoked) certificate -- i.e.
+	# exactly the "stale_db_entry" case --list-revoked-users/--check-certs
+	# already detect and warn about, but never had a matching write-side
+	# fix. Deliberately refuses to touch the file for any name that DOES
+	# still have a valid cert, even if this were called by mistake or with
+	# a typo'd name, since that would silently break that client's MAC
+	# check on their next connection attempt.
+	local name="$1"
+	if [[ -z "$name" ]]; then
+		echo "Client name required." >&2
+		return 1
+	fi
+	if [[ ! -f "$DB_FILE" ]]; then
+		echo "$DB_FILE does not exist -- nothing to clean." >&2
+		return 1
+	fi
+	if [[ -e "$EASYRSA_DIR/pki/issued/$name.crt" ]]; then
+		echo "$name has a currently-valid certificate -- refusing to remove its $DB_FILE entry (use --remove-mac for a specific MAC instead)." >&2
+		return 1
+	fi
+	if ! grep -q "^${name}=" "$DB_FILE" 2>/dev/null; then
+		echo "$name has no $DB_FILE entry -- nothing to clean." >&2
+		return 1
+	fi
+	sed -i "/^${name}=/d" "$DB_FILE"
+	ensure_trailing_newline "$DB_FILE"
+	echo "Removed $name's stale entry/entries from $DB_FILE."
+	return 0
+}
+
 do_restore_client () {
 	# Usage: do_restore_client <name> <mac>
 	# "Restoring" a revoked client is NOT un-revoking their old certificate
@@ -867,6 +900,7 @@ print_usage () {
 	  --remove-mac NAME MAC  Remove one specific MAC registration (client keeps its cert)
 	  --show-ovpn NAME       Print an existing client's .ovpn config to stdout
 	  --purge-revoked NAME   Permanently delete a revoked client's leftover PKI/.ovpn files
+	  --clean-stale-db NAME  Remove a revoked client's leftover $DB_FILE entry (refuses if NAME still has a valid cert)
 	  --restore NAME MAC     Reissue a brand-new cert under a revoked client's name
 	                         (NOT un-revoking the old cert -- see --help output below)
 	  --check-certs          Cross-check PKI valid certs against $DB_FILE for orphans
@@ -909,7 +943,7 @@ set -- "${_cli_args[@]}"
 unset _a _cli_args
 
 case "${1:-}" in
-	--add-user|--revoke-user|--list-users|--list-revoked-users|--macs|--add-mac|--remove-mac|--show-ovpn|--purge-revoked|--restore|--check-certs|--lint-mac-db|--set-country|--set-os|--set-bandwidth|--get-policy)
+	--add-user|--revoke-user|--list-users|--list-revoked-users|--macs|--add-mac|--remove-mac|--show-ovpn|--purge-revoked|--clean-stale-db|--restore|--check-certs|--lint-mac-db|--set-country|--set-os|--set-bandwidth|--get-policy)
 		if [[ ! -e "$OPENVPN_DIR/server.conf" ]]; then
 			echo "OpenVPN is not installed yet (no $OPENVPN_DIR/server.conf) -- run without arguments first to install." >&2
 			exit 1
@@ -962,6 +996,10 @@ case "${1:-}" in
 		;;
 	--purge-revoked)
 		do_purge_revoked "$2"
+		exit $?
+		;;
+	--clean-stale-db)
+		do_clean_stale_db_entry "$2"
 		exit $?
 		;;
 	--restore)

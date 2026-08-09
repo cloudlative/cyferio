@@ -80,7 +80,9 @@ async function loadRevoked() {
 						: '<span class="status-pill status-online">Purged</span>'}</td>
 					${isAdmin ? `<td class="text-right">
 						${r.files_present ? '<button class="btn-secondary btn-sm restore-btn" title="Issue a brand-new certificate under this same name -- not a reactivation of the old one.">Restore</button>' : ''}
-						${r.files_present ? '<button class="btn-danger btn-sm purge-btn" style="margin-left:8px" title="Permanently delete this revoked client\'s leftover certificate/key files. The revocation record itself is never removed.">Purge</button>' : '<span class="muted">—</span>'}
+						${r.files_present ? '<button class="btn-danger btn-sm purge-btn" style="margin-left:8px" title="Permanently delete this revoked client\'s leftover certificate/key files. The revocation record itself is never removed.">Purge</button>' : ''}
+						${r.stale_db_entry ? '<button class="btn-secondary btn-sm clean-db-btn" style="margin-left:8px" title="Remove this name\'s leftover MAC-binding entry from openvpn_db.txt. Safe even after the certificate files are already purged.">Clean up</button>' : ''}
+						${(!r.files_present && !r.stale_db_entry) ? '<span class="muted">—</span>' : ''}
 					</td>` : ""}
 				</tr>`).join("")}</tbody>
 		</table>`;
@@ -91,6 +93,9 @@ async function loadRevoked() {
 			});
 			el.querySelectorAll(".purge-btn").forEach(btn => {
 				btn.addEventListener("click", () => purgeClient(btn.closest("tr").dataset.name));
+			});
+			el.querySelectorAll(".clean-db-btn").forEach(btn => {
+				btn.addEventListener("click", () => cleanStaleDbEntry(btn.closest("tr").dataset.name));
 			});
 		}
 	} catch (e) {
@@ -136,6 +141,29 @@ if (isAdmin) {
 		if (!ok) return;
 		try {
 			const { results } = await apiFetch("/api/clients/revoked/purge", {
+				method: "POST", body: { names: [name] },
+			});
+			const r = results[0];
+			toast(r.message, r.ok ? "success" : "error");
+			loadRevoked();
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	}
+
+	async function cleanStaleDbEntry(name) {
+		// Same bulk-endpoint-with-a-single-name pattern as purgeClient above.
+		// Deliberately not "danger" styled -- unlike Purge, this doesn't
+		// touch any certificate/key material, only a leftover MAC-binding
+		// db line, and the script itself refuses if the name still has a
+		// valid cert.
+		const ok = await confirmDialog(
+			`Remove <strong>${escapeHtml(name)}</strong>'s leftover MAC-binding entry from openvpn_db.txt?`,
+			{ confirmLabel: "Clean up" },
+		);
+		if (!ok) return;
+		try {
+			const { results } = await apiFetch("/api/clients/revoked/clean-stale-db", {
 				method: "POST", body: { names: [name] },
 			});
 			const r = results[0];
