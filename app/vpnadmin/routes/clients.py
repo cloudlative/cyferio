@@ -304,6 +304,8 @@ def update_client_policy(name: str, body: PolicyRequest, user: User = Depends(re
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
 
+    fields_set = body.model_fields_set
+
     try:
         result = policy_store.set_policy(
             name,
