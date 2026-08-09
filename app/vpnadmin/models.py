@@ -89,6 +89,13 @@ class User(Base):
     first_name = Column(String(64), nullable=True)
     last_name = Column(String(64), nullable=True)
     gender = Column(Enum(Gender), nullable=False, default=Gender.unspecified)
+    # Contact info -- purely informational (not used for login, password
+    # reset, or notifications anywhere yet; SMTP delivery for .ovpn files
+    # already takes an explicit address per-send, see routes/clients.py
+    # email_client_ovpn). Both optional, same self-service/admin-editable
+    # rules as first_name/last_name/gender above.
+    email = Column(String(254), nullable=True)
+    phone = Column(String(32), nullable=True)
     # Deprecated: replaced by the many-to-many `teams` relationship below
     # (a user can now belong to several teams at once, see git history) --
     # this nullable FK column may still physically exist in older databases

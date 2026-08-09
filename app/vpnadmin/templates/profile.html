@@ -46,6 +46,19 @@
 			<div class="field">
 				<label for="p-team-toggle">Teams <span class="muted">(select several)</span></label>
 				<div id="p-team-ms"></div>
+				{% if user.role.value == "viewer" %}
+				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Viewers can't change their own team -- ask an admin.</p>
+				{% endif %}
+			</div>
+		</div>
+		<div class="form-row" style="margin-top:16px">
+			<div class="field">
+				<label for="p-email">Email</label>
+				<input type="email" id="p-email" placeholder="e.g. asif@example.com">
+			</div>
+			<div class="field">
+				<label for="p-phone">Phone</label>
+				<input type="tel" id="p-phone" placeholder="e.g. +92 300 1234567">
 			</div>
 		</div>
 		<button type="submit" class="btn-primary" style="margin-top:8px">Save Profile</button>
@@ -74,7 +87,8 @@
 {% block scripts %}
 <script>
 let myTeamIds = [];
-const teamMs = createMultiselectDropdown(document.getElementById("p-team-ms"), { placeholder: "Unassigned" });
+const isViewer = {{ "true" if user.role.value == "viewer" else "false" }};
+const teamMs = createMultiselectDropdown(document.getElementById("p-team-ms"), { placeholder: "Unassigned", disabled: isViewer });
 
 async function loadTeamOptions() {
 	try {
@@ -104,6 +118,8 @@ async function loadProfile() {
 		document.getElementById("p-first").value = me.first_name || "";
 		document.getElementById("p-last").value = me.last_name || "";
 		document.getElementById("p-gender").value = me.gender || "unspecified";
+		document.getElementById("p-email").value = me.email || "";
+		document.getElementById("p-phone").value = me.phone || "";
 		myTeamIds = me.team_ids || [];
 		await loadTeamOptions();
 		updateDisplayedIdentity(me);
@@ -123,6 +139,8 @@ document.getElementById("profile-form").addEventListener("submit", async (ev) =>
 				first_name: firstName,
 				last_name: document.getElementById("p-last").value.trim() || null,
 				gender: document.getElementById("p-gender").value,
+				email: document.getElementById("p-email").value.trim(),
+				phone: document.getElementById("p-phone").value.trim(),
 				team_ids: teamMs.getSelected(),
 			},
 		});

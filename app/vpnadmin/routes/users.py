@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -39,6 +40,34 @@ def _valid_first_name(v: str | None) -> str | None:
     return v
 
 
+# Loose but real validation -- catches typos ("bob@@x", "bob@x") without
+# chasing full RFC 5322 (this field is informational, not used for login or
+# delivery today, see models.py's User.email comment).
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _valid_email(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        return None  # explicit "" from the form means "clear it", not an error
+    if not _EMAIL_RE.match(v):
+        raise ValueError("That doesn't look like a valid email address.")
+    return v
+
+
+def _valid_phone(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        return None
+    if len(v) > 32:
+        raise ValueError("Phone number is too long.")
+    return v
+
+
 def _resolve_teams(db: Session, team_ids: list[int]) -> list[Team]:
     """Validates every id in team_ids references an existing Team, and
     returns the Team rows themselves (for assigning to User.teams). Used by
@@ -62,6 +91,8 @@ class CreateUserRequest(BaseModel):
     first_name: str
     last_name: str | None = None
     gender: Gender = Gender.unspecified
+    email: str | None = None
+    phone: str | None = None
     team_ids: list[int] = []
 
     @field_validator("username")
@@ -85,6 +116,16 @@ class CreateUserRequest(BaseModel):
             raise ValueError("First Name is required.")
         return result
 
+    @field_validator("email")
+    @classmethod
+    def _email(cls, v: str | None) -> str | None:
+        return _valid_email(v)
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: str | None) -> str | None:
+        return _valid_phone(v)
+
 
 class UpdateUserRequest(BaseModel):
     """Admin-only edits to another (or their own, for non-guardrailed
@@ -97,6 +138,8 @@ class UpdateUserRequest(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     gender: Gender | None = None
+    email: str | None = None
+    phone: str | None = None
     team_ids: list[int] | None = None  # explicit [] = clear all teams; see model_fields_set usage below
 
     @field_validator("password")
@@ -109,6 +152,16 @@ class UpdateUserRequest(BaseModel):
     def _first_name(cls, v: str | None) -> str | None:
         return _valid_first_name(v)
 
+    @field_validator("email")
+    @classmethod
+    def _email(cls, v: str | None) -> str | None:
+        return _valid_email(v)
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: str | None) -> str | None:
+        return _valid_phone(v)
+
 
 class UpdateProfileRequest(BaseModel):
     """Self-service: any logged-in user editing their own profile. No role/
@@ -116,6 +169,8 @@ class UpdateProfileRequest(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     gender: Gender | None = None
+    email: str | None = None
+    phone: str | None = None
     team_ids: list[int] | None = None
     current_password: str | None = None
     new_password: str | None = None
@@ -129,6 +184,16 @@ class UpdateProfileRequest(BaseModel):
     @classmethod
     def _first_name(cls, v: str | None) -> str | None:
         return _valid_first_name(v)
+
+    @field_validator("email")
+    @classmethod
+    def _email(cls, v: str | None) -> str | None:
+        return _valid_email(v)
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: str | None) -> str | None:
+        return _valid_phone(v)
 
 
 def _serialize(u: User) -> dict:
@@ -146,6 +211,8 @@ def _serialize(u: User) -> dict:
         "last_name": u.last_name,
         "display_name": u.display_name,
         "gender": u.gender.value if u.gender else Gender.unspecified.value,
+        "email": u.email,
+        "phone": u.phone,
         "team_ids": [t.id for t in u.teams],
         "teams": [t.name for t in u.teams],
     }
@@ -191,10 +258,33 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
         if value is not None and value != getattr(user, field):
             setattr(user, field, value)
             changes.append(field)
+    # email/phone use model_fields_set (not "is not None") so an explicit ""
+    # submitted from the form clears the field instead of being ignored --
+    # unlike first_name/last_name/gender above, which have no "unset" UI
+    # affordance and where None simply means "this request didn't touch it".
+    for field in ("email", "phone"):
+        if field in body.model_fields_set:
+            value = getattr(body, field)
+            if value != getattr(user, field):
+                setattr(user, field, value)
+                changes.append(field)
 
     if "team_ids" in body.model_fields_set:
         new_teams = _resolve_teams(db, body.team_ids or [])
         if {t.id for t in new_teams} != {t.id for t in user.teams}:
+            # Team membership determines which clients/routing policy a
+            # user is scoped to -- letting a viewer self-assign into a
+            # different team would be a privilege-adjacent change they
+            # shouldn't be able to make unsupervised, even though everything
+            # else on this form (name, gender, password) is fine for any
+            # role to self-serve. Admins/editors still manage their own
+            # teams here same as before; only an admin can change a
+            # viewer's teams (via PATCH /api/users/{id}).
+            if user.role == Role.viewer:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Viewers can't change their own team assignment -- ask an admin.",
+                )
             user.teams = new_teams
             changes.append("teams")
 
@@ -222,6 +312,8 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         first_name=body.first_name,
         last_name=body.last_name,
         gender=body.gender,
+        email=body.email,
+        phone=body.phone,
         teams=teams,
     )
     db.add(user)
@@ -289,6 +381,12 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         if value is not None and value != getattr(target, field):
             setattr(target, field, value)
             changes.append(field)
+    for field in ("email", "phone"):
+        if field in body.model_fields_set:
+            value = getattr(body, field)
+            if value != getattr(target, field):
+                setattr(target, field, value)
+                changes.append(field)
     if "team_ids" in body.model_fields_set:
         new_teams = _resolve_teams(db, body.team_ids or [])
         if {t.id for t in new_teams} != {t.id for t in target.teams}:

@@ -160,8 +160,20 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	letter-spacing: 0.04em;
 }
 .role-admin { background: var(--accent-gradient); color: #fff; }
-.role-editor { background: linear-gradient(90deg, #22d3ee, #6366f1); color: #fff; }
-.role-viewer { background: var(--surface-alt); color: var(--text-muted); border: 1px solid var(--border-light); }
+/* Previously #22d3ee -> #6366f1 -- the exact same two hues as
+   --accent-gradient (admin's badge), just reversed, so admin and editor
+   badges read as near-identical at a glance despite being different
+   permission tiers. Sky/teal instead: distinct from admin's indigo-purple-
+   cyan, viewer's slate, and the status colors (green=online/success,
+   red=danger/revoked, amber=warning/rejected). */
+.role-editor { background: linear-gradient(90deg, #0ea5e9, #14b8a6); color: #fff; }
+/* Previously background: var(--surface-alt) -- the same color used for
+   table headers, .status-offline, and most card/panel backgrounds, so the
+   badge had almost no contrast against the page around it and read as
+   "missing" rather than "viewer". A distinct (still subdued, since viewer
+   is intentionally the lowest-emphasis tier next to admin/editor's vivid
+   gradients) slate gradient instead. */
+.role-viewer { background: linear-gradient(90deg, #4b5573, #6b7494); color: #fff; }
 
 .link-button {
 	background: none;
@@ -328,6 +340,8 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 	box-shadow: none;
 }
 .ms-toggle:hover { border-color: var(--accent-2); }
+.ms-disabled .ms-toggle { opacity: 0.6; cursor: not-allowed; }
+.ms-disabled .ms-toggle:hover { border-color: var(--border-light); }
 .ms-toggle .ms-toggle-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ms-toggle .ms-toggle-label.muted { color: var(--text-faint); font-weight: 400; }
 .ms-toggle .ms-toggle-caret { flex: none; color: var(--text-muted); font-size: 0.75rem; transition: transform 0.15s ease; }

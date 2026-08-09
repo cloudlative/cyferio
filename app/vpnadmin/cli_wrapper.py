@@ -268,10 +268,11 @@ def status_rejected(limit: int = 20) -> list[dict]:
 # --- Combined dashboard summary ------------------------------------------
 
 def dashboard_summary(rejected_limit: int = 20) -> dict:
-    """One call for everything the dashboard needs, instead of 5 separate
-    HTTP round-trips each independently hitting the script lock/cache. Still
-    5 underlying script calls (each individually cached above), but callers
-    only pay one HTTP request and one JSON parse.
+    """One call for everything the dashboard (and, via the shared background
+    snapshot below, the Clients/Revoked/Diagnostics pages) needs, instead of
+    each page independently hitting the script lock/cache on its own timer.
+    Still N underlying script calls (each individually cached above), but
+    callers only pay one HTTP request and one JSON parse.
 
     Note "all_clients" (vpn-status.py --all-clients) and "clients" (openvpn-install.sh
     --list-users) are deliberately both included and are NOT interchangeable:
@@ -280,30 +281,52 @@ def dashboard_summary(rejected_limit: int = 20) -> dict:
     in_db) -- a dashboard stat about "how many MACs are registered" must
     read from "clients", not "all_clients" (which has no mac_count field
     at all, and previously produced a misleadingly-large "missing MAC"
-    count as a result)."""
+    count as a result).
+
+    "rejected" stays capped at rejected_limit (20 by default) -- that's
+    what the dashboard's "Recent Rejections" stat literally means, and
+    changing what feeds it would silently change that number's meaning.
+    "rejected_full" is a separate, much larger pull (500, matching what
+    the Diagnostics page's own rejected-connections table/filters need)
+    riding along on the same timer -- see get_rejected_snapshot() below for
+    why this doesn't affect the dashboard at all.
+
+    "check_consistency" and "lint_db" are the Diagnostics page's two other
+    cards. Adding them here means Diagnostics rides the same background
+    refresh loop as the Dashboard instead of needing its own separate timer
+    and subprocess-spawn burst -- see main.py's lifespan, which only ever
+    starts one such loop."""
     return {
         "connected": status_connected(),
         "all_clients": status_all(),
         "clients": list_clients(),
         "revoked": list_revoked(),
         "rejected": status_rejected(rejected_limit),
+        "rejected_full": status_rejected(500),
+        "check_consistency": check_consistency(),
+        "lint_db": lint_db(),
     }
 
 
-# --- Background-refreshed dashboard snapshot --------------------------------
+# --- Background-refreshed app-wide snapshot ----------------------------
 # GET /api/dashboard used to call dashboard_summary() directly per request:
-# 5 sequential script spawns (each individually cached above, but that only
-# helps a *second* request within the 3s TTL), so a cold dashboard load was
-# genuinely slow -- and _script_lock intentionally serializes them (see its
-# own comment), so making the route async/threaded wouldn't have helped at
-# all; every one of those 5 calls would just queue on the same lock anyway.
+# several sequential script spawns (each individually cached above, but
+# that only helps a *second* request within the 3s TTL), so a cold page
+# load was genuinely slow -- and _script_lock intentionally serializes
+# them (see its own comment), so making the route async/threaded wouldn't
+# have helped at all; every one of those calls would just queue on the
+# same lock anyway.
 #
 # Instead, a periodic background task (started in main.py's lifespan) calls
-# refresh_dashboard_snapshot() on a timer, independent of any request. The
-# route below just returns whatever's currently cached here -- near-instant,
-# at the cost of the data being up to one refresh interval stale, which is
-# a reasonable trade for a live-status dashboard that already has a manual
-# Refresh button for "I want it *right now*".
+# refresh_dashboard_snapshot() on a timer, independent of any request. Every
+# read-only route below just returns whatever's currently cached here --
+# near-instant, at the cost of the data being up to one refresh interval
+# stale, which is a reasonable trade for pages that already have a manual
+# Refresh button for "I want it *right now*". The name is a holdover from
+# when this only backed the Dashboard; it now backs Clients, Revoked, and
+# Diagnostics too (see dashboard_summary()'s docstring) since they read
+# from the exact same underlying CLI calls -- one shared snapshot instead
+# of four separate background loops each doing their own spawn burst.
 _dashboard_snapshot: dict | None = None
 _dashboard_snapshot_lock = threading.Lock()
 
@@ -327,3 +350,57 @@ def refresh_dashboard_snapshot(rejected_limit: int = 20) -> dict:
     with _dashboard_snapshot_lock:
         _dashboard_snapshot = result
     return result
+
+
+# --- Snapshot-first accessors for the Clients/Revoked/Diagnostics pages -----
+# Each mirrors the shape of its "live" counterpart above (list_clients(),
+# status_all(), ...): serve the shared snapshot when it's warm, otherwise
+# fall back to a direct (blocking, _script_lock-serialized) call -- same
+# fallback rule as get_dashboard()'s route, so a request is never served
+# nothing just because it landed before the first background tick.
+
+
+def get_clients_snapshot() -> list[dict]:
+    snap = get_dashboard_snapshot()
+    return snap["clients"] if snap is not None else list_clients()
+
+
+def get_revoked_snapshot() -> list[dict]:
+    snap = get_dashboard_snapshot()
+    return snap["revoked"] if snap is not None else list_revoked()
+
+
+def get_status_all_snapshot() -> list[dict]:
+    snap = get_dashboard_snapshot()
+    return snap["all_clients"] if snap is not None else status_all()
+
+
+def get_status_connected_snapshot() -> list[dict]:
+    snap = get_dashboard_snapshot()
+    return snap["connected"] if snap is not None else status_connected()
+
+
+def get_status_rejected_snapshot(limit: int = 20) -> list[dict]:
+    """The snapshot carries two pre-fetched rejected-connections windows --
+    "rejected" (20, what the dashboard's stat needs) and "rejected_full"
+    (500, what Diagnostics' table/filters need). "rejected_full" was
+    fetched with limit=500, so it already holds every available record up
+    to that cap regardless of how many actually exist -- any requested
+    limit up to 500 (the API's own cap, see routes/status.py) is served by
+    slicing it. Only a limit above 500 -- not reachable via the API today,
+    but this stays correct if that cap ever changes -- falls back to a
+    fresh call."""
+    snap = get_dashboard_snapshot()
+    if snap is not None and limit <= 500:
+        return snap["rejected_full"][:limit]
+    return status_rejected(limit)
+
+
+def get_check_consistency_snapshot() -> dict:
+    snap = get_dashboard_snapshot()
+    return snap["check_consistency"] if snap is not None else check_consistency()
+
+
+def get_lint_db_snapshot() -> dict:
+    snap = get_dashboard_snapshot()
+    return snap["lint_db"] if snap is not None else lint_db()

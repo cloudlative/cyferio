@@ -65,8 +65,11 @@ class AddClientRequest(BaseModel):
 
 @router.get("")
 def get_clients(_: User = Depends(require_user)):
+    # Served from the same background-refreshed snapshot that powers
+    # /api/dashboard (see cli_wrapper.get_clients_snapshot) -- near-instant
+    # on a warm snapshot, falls back to a direct call otherwise.
     try:
-        return cli.list_clients()
+        return cli.get_clients_snapshot()
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
 
@@ -74,7 +77,7 @@ def get_clients(_: User = Depends(require_user)):
 @router.get("/revoked")
 def get_revoked_clients(_: User = Depends(require_user)):
     try:
-        return cli.list_revoked()
+        return cli.get_revoked_snapshot()
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
 

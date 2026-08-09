@@ -194,14 +194,15 @@ function renderDonutChart(mountEl, entries, { size = 220, thickness = 34 } = {})
  *   ms.setSelected([1]);
  *   ms.getSelected(); // -> [1]
  */
-function createMultiselectDropdown(root, { placeholder = "Select…" } = {}) {
+function createMultiselectDropdown(root, { placeholder = "Select…", disabled = false } = {}) {
 	root.classList.add("ms-dropdown");
 	root.innerHTML = `
-		<button type="button" class="ms-toggle">
+		<button type="button" class="ms-toggle"${disabled ? " disabled" : ""}>
 			<span class="ms-toggle-label">${escapeHtml(placeholder)}</span>
 			<span class="ms-toggle-caret">▾</span>
 		</button>
 		<div class="ms-panel"></div>`;
+	if (disabled) root.classList.add("ms-disabled");
 
 	const toggle = root.querySelector(".ms-toggle");
 	const toggleLabel = root.querySelector(".ms-toggle-label");
@@ -238,6 +239,7 @@ function createMultiselectDropdown(root, { placeholder = "Select…" } = {}) {
 	}
 
 	toggle.addEventListener("click", () => {
+		if (disabled) return;
 		const willOpen = !panel.classList.contains("open");
 		document.querySelectorAll(".ms-panel.open").forEach(p => p.classList.remove("open"));
 		if (willOpen) panel.classList.add("open");

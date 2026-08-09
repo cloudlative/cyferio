@@ -34,15 +34,20 @@ DASHBOARD_REFRESH_INTERVAL_SECONDS = 10
 
 
 async def _dashboard_refresh_loop():
+    # Despite the name, this one snapshot now backs the Dashboard, Clients,
+    # Revoked, and Diagnostics pages -- see cli_wrapper.dashboard_summary()'s
+    # docstring for why they all ride the same timer instead of each having
+    # their own background loop and subprocess-spawn burst.
     while True:
         try:
             await asyncio.to_thread(cli_wrapper.refresh_dashboard_snapshot)
         except Exception:
             # A transient script failure (e.g. a momentary timeout) should
             # never kill the background loop -- the next tick just tries
-            # again, and the route falls back to the last-good snapshot
-            # (or a direct call if there's genuinely never been one yet).
-            logger.exception("Dashboard background refresh failed; will retry next tick")
+            # again, and every route reading this snapshot falls back to
+            # the last-good one (or a direct call if there's genuinely
+            # never been one yet).
+            logger.exception("Background snapshot refresh failed; will retry next tick")
         await asyncio.sleep(DASHBOARD_REFRESH_INTERVAL_SECONDS)
 
 

@@ -40,6 +40,16 @@
 			</div>
 		</div>
 		<div class="form-row" style="margin-top:16px">
+			<div class="field">
+				<label for="u-email">Email <span class="muted">(optional)</span></label>
+				<input type="email" id="u-email" placeholder="e.g. asif@example.com">
+			</div>
+			<div class="field">
+				<label for="u-phone">Phone <span class="muted">(optional)</span></label>
+				<input type="tel" id="u-phone" placeholder="e.g. +92 300 1234567">
+			</div>
+		</div>
+		<div class="form-row" style="margin-top:16px">
 			<button type="submit" class="btn-primary">Add User</button>
 			<button type="button" class="btn-secondary" id="add-user-clear">Clear</button>
 		</div>
@@ -83,6 +93,10 @@
 					</select>
 				</div>
 				<div class="field"><label for="e-team-toggle">Teams <span class="muted">(select several)</span></label><div id="e-team-ms"></div></div>
+			</div>
+			<div class="form-row" style="margin-top:14px">
+				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email"></div>
+				<div class="field"><label for="e-phone">Phone</label><input type="tel" id="e-phone"></div>
 			</div>
 			<fieldset style="margin-top:16px">
 				<legend>Access</legend>
@@ -274,6 +288,8 @@ function openEdit(u) {
 	document.getElementById("e-first").value = u.first_name || "";
 	document.getElementById("e-last").value = u.last_name || "";
 	document.getElementById("e-gender").value = u.gender || "unspecified";
+	document.getElementById("e-email").value = u.email || "";
+	document.getElementById("e-phone").value = u.phone || "";
 	editTeamMs.setSelected(u.team_ids);
 	document.getElementById("e-role").value = u.role;
 	document.getElementById("e-active").value = String(u.is_active);
@@ -298,6 +314,8 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		first_name: firstName,
 		last_name: document.getElementById("e-last").value.trim() || null,
 		gender: document.getElementById("e-gender").value,
+		email: document.getElementById("e-email").value.trim(),
+		phone: document.getElementById("e-phone").value.trim(),
 		team_ids: editTeamMs.getSelected(),
 	};
 	if (!editingUserIsBootstrapAdmin) {
@@ -334,6 +352,8 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				username, password, role,
 				first_name: firstName,
 				last_name: document.getElementById("u-last").value.trim() || null,
+				email: document.getElementById("u-email").value.trim() || null,
+				phone: document.getElementById("u-phone").value.trim() || null,
 				team_ids: addTeamMs.getSelected(),
 			},
 		});

@@ -18,7 +18,7 @@ def get_check(_: User = Depends(require_user)):
     for "which database is this app itself using" to be visible at a
     glance."""
     try:
-        result = cli.check_consistency()
+        result = dict(cli.get_check_consistency_snapshot())
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
     result["db_engine"] = get_db_engine_info()
@@ -28,6 +28,6 @@ def get_check(_: User = Depends(require_user)):
 @router.get("/lint-db")
 def get_lint_db(_: User = Depends(require_user)):
     try:
-        return cli.lint_db()
+        return cli.get_lint_db_snapshot()
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)

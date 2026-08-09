@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/status", tags=["status"])
 @router.get("")
 def get_connected(_: User = Depends(require_user)):
     try:
-        return cli.status_connected()
+        return cli.get_status_connected_snapshot()
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
 
@@ -21,7 +21,7 @@ def get_connected(_: User = Depends(require_user)):
 @router.get("/all")
 def get_all(_: User = Depends(require_user)):
     try:
-        return cli.status_all()
+        return cli.get_status_all_snapshot()
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
 
@@ -29,7 +29,7 @@ def get_all(_: User = Depends(require_user)):
 @router.get("/rejected")
 def get_rejected(limit: int = Query(20, ge=1, le=500), _: User = Depends(require_user)):
     try:
-        return cli.status_rejected(limit)
+        return cli.get_status_rejected_snapshot(limit)
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
 
