@@ -136,10 +136,14 @@ async function loadHostHealth() {
 			metricRow("Uptime", d.uptime_seconds != null ? fmtDuration(Math.round(d.uptime_seconds)) : "—"),
 			metricRow("Load average", d.load_avg ? d.load_avg.map(v => v.toFixed(2)).join(" / ") : "—"),
 		];
-		if (d.cpu_percent != null) {
-			rows.push(metricRow(`CPU (${d.cpu_count} core${d.cpu_count === 1 ? "" : "s"})`,
-				`${usageBar(d.cpu_percent)}<span class="metric-pct">${d.cpu_percent}%</span>`));
-		}
+		rows.push(metricRow(`CPU (${d.cpu_count} core${d.cpu_count === 1 ? "" : "s"})`,
+			d.cpu_percent != null
+				? `${usageBar(d.cpu_percent)}<span class="metric-pct">${d.cpu_percent}%</span>`
+				// No previous sample to diff against yet (right after a
+				// process restart, or the last one is too old) -- see
+				// health.py's _sample_cpu_percent docstring for why this
+				// needs two calls apart in time, not a number right away.
+				: '<span class="muted" style="font-size:0.82em">warming up -- refresh again shortly</span>'));
 		if (d.memory) {
 			rows.push(metricRow("Memory", `${usageBar(d.memory.percent)}<span class="metric-pct">${d.memory.percent}%</span> <span class="muted" style="font-size:0.82em">${humanBytes(d.memory.used_bytes)} / ${humanBytes(d.memory.total_bytes)}</span>`));
 		}

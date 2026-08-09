@@ -132,6 +132,56 @@ def _cpu_times(stat_content: str) -> tuple[int, int] | None:
     return None
 
 
+# Cross-request CPU sample state: (idle+iowait, total, wall_clock) from the
+# last call, keyed by nothing (this app is single-process -- see
+# docker-compose.yml, no multi-worker uvicorn flag -- so one shared pair of
+# module-level values is safe, same assumption cli_wrapper.py's caches and
+# app_settings.py's `runtime` already make).
+#
+# NOT a short in-request sleep-then-resample (an earlier version of this
+# function did that): confirmed by hand on the actual production droplet
+# that /proc/stat's idle+iowait counters here only advance in coarse
+# ~10-15s jumps while user/system advance every tick -- a sub-15-second
+# window reliably sees an idle delta of exactly 0 while real work keeps
+# ticking, producing a falsely pinned ~100% reading regardless of actual
+# load (verified: 0.5s and even 5s windows both read 100% while `top`
+# showed the host mostly idle; a 15s window read correctly). Blocking an
+# HTTP request for 15s isn't viable, so instead each call diffs against
+# whatever the previous call's sample was -- which, since Health is a
+# human clicking Refresh or loading a page, is naturally many seconds to
+# minutes old, comfortably past that ~15s granularity. The very first call
+# after a process start (or the first call in over CPU_SAMPLE_MAX_AGE_SECONDS)
+# has no usable previous sample, so it returns None rather than a number
+# computed from stale/absent state -- the Health page shows "—" for that
+# one request, not a wrong number.
+CPU_SAMPLE_MAX_AGE_SECONDS = 600  # beyond this, the delta itself is too coarse to mean "right now"
+_cpu_sample: tuple[int, int, float] | None = None
+
+
+def _sample_cpu_percent(proc_path: str) -> float | None:
+    global _cpu_sample
+    stat_content = _read_file(os.path.join(proc_path, "stat"))
+    times = _cpu_times(stat_content) if stat_content else None
+    if times is None:
+        return None
+    idle, total = times
+    now = time.monotonic()
+
+    previous = _cpu_sample
+    _cpu_sample = (idle, total, now)
+
+    if previous is None:
+        return None
+    prev_idle, prev_total, prev_at = previous
+    if now - prev_at > CPU_SAMPLE_MAX_AGE_SECONDS:
+        return None
+    idle_delta = idle - prev_idle
+    total_delta = total - prev_total
+    if total_delta <= 0:
+        return None
+    return round(100 * (1 - idle_delta / total_delta), 1)
+
+
 def get_host_health() -> dict:
     """Real droplet-level CPU/RAM/disk/uptime, read from the host's /proc,
     /sys, and root filesystem -- bind-mounted read-only into this
@@ -158,30 +208,7 @@ def get_host_health() -> dict:
     cpuinfo = _read_file(os.path.join(proc, "cpuinfo")) or ""
     result["cpu_count"] = sum(1 for line in cpuinfo.splitlines() if line.split(":")[0].strip() == "processor")
 
-    # CPU percent needs two samples -- a short, deliberate blocking sleep.
-    # Fine here: FastAPI runs sync route handlers in a threadpool, so this
-    # never blocks the event loop, and it's a low-traffic admin-only page
-    # (same tradeoff this app already makes for its subprocess calls).
-    # 0.5s, not something shorter: /proc/stat advances in whole USER_HZ
-    # ticks (10ms each on the standard 100Hz clock), so on this project's
-    # actual 1-vCPU production droplet a too-short window samples only
-    # ~15 ticks -- observed in practice swinging wildly between 0% and
-    # 100% purely from sampling noise, not real load. ~50 ticks at 0.5s
-    # is enough to average that out into a meaningful reading.
-    stat1 = _read_file(os.path.join(proc, "stat"))
-    times1 = _cpu_times(stat1) if stat1 else None
-    if times1:
-        time.sleep(0.5)
-        stat2 = _read_file(os.path.join(proc, "stat"))
-        times2 = _cpu_times(stat2) if stat2 else None
-        if times2:
-            idle_delta = times2[0] - times1[0]
-            total_delta = times2[1] - times1[1]
-            result["cpu_percent"] = round(100 * (1 - idle_delta / total_delta), 1) if total_delta > 0 else None
-        else:
-            result["cpu_percent"] = None
-    else:
-        result["cpu_percent"] = None
+    result["cpu_percent"] = _sample_cpu_percent(proc)
 
     meminfo_raw = _read_file(os.path.join(proc, "meminfo"))
     if meminfo_raw:
