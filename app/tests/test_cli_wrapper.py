@@ -162,6 +162,30 @@ class TestArgumentConstruction:
         with pytest.raises(cw.ScriptError, match="already registered"):
             cw.add_mac("alice", "aa:bb:cc:dd:ee:ff")
 
+    def test_add_client_duplicate_mac_across_clients_raises_with_owner_name(self, monkeypatch):
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda args, **kw: _completed(
+                args, 1, "", "MAC address aa:bb:cc:dd:ee:ff is already assigned to client 'bob'.",
+            ),
+        )
+        with pytest.raises(cw.ScriptError, match="already assigned to client 'bob'"):
+            cw.add_client("alice", "aa:bb:cc:dd:ee:ff")
+
+    def test_add_mac_duplicate_across_clients_raises_with_owner_name(self, monkeypatch):
+        # openvpn-install.sh's do_add_mac (and do_add_client) now reject a
+        # MAC already assigned to a DIFFERENT client -- see find_mac_owner.
+        # The script's exact wording is what routes/clients.py surfaces
+        # verbatim as the toast message, so it's worth pinning here.
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda args, **kw: _completed(
+                args, 1, "", "MAC address aa:bb:cc:dd:ee:ff is already assigned to client 'bob'.",
+            ),
+        )
+        with pytest.raises(cw.ScriptError, match="already assigned to client 'bob'"):
+            cw.add_mac("alice", "aa:bb:cc:dd:ee:ff")
+
 
 class TestCaching:
     def test_repeated_read_call_hits_cache_not_subprocess(self, monkeypatch):

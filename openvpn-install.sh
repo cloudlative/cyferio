@@ -189,6 +189,36 @@ normalize_mac () {
 	return 1
 }
 
+find_mac_owner () {
+	# Usage: find_mac_owner <mac> [name-to-exclude]
+	# Scans $DB_FILE for a normalized MAC already registered to any client,
+	# optionally excluding one name (so a client re-registering its own
+	# already-registered MAC isn't reported as a "conflict with itself" --
+	# see do_add_mac's own already-registered check, which handles that
+	# exact-match case with its own message; this helper is specifically
+	# for the cross-client case). Prints the owning client's name and
+	# returns 0 if found, prints nothing and returns 1 otherwise. Compares
+	# MACs case-insensitively (DB entries should already be normalized
+	# lowercase by normalize_mac, but tolerate anything that predates that)
+	# while leaving client names' case untouched, since names ARE
+	# case-sensitive (see do_add_client's sanitization, which allows both).
+	local mac="$1" exclude="${2:-}" line owner line_mac
+	[[ -f "$DB_FILE" ]] || return 1
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		owner="${line%%=*}"
+		line_mac=$(tr 'A-Z' 'a-z' <<< "${line#*=}")
+		if [[ -n "$exclude" && "$owner" == "$exclude" ]]; then
+			continue
+		fi
+		if [[ "$line_mac" == "$mac" ]]; then
+			printf '%s' "$owner"
+			return 0
+		fi
+	done < "$DB_FILE"
+	return 1
+}
+
 do_add_client () {
 	# Usage: do_add_client <name> <mac>
 	# Issues a client cert, generates the .ovpn, registers the client in
@@ -211,6 +241,11 @@ do_add_client () {
 	fi
 	if ! mac=$(normalize_mac "$raw_mac"); then
 		echo "Invalid MAC address: expected 12 hex characters (e.g. aa:bb:cc:dd:ee:ff), got '$raw_mac'." >&2
+		return 1
+	fi
+	local existing_owner
+	if existing_owner=$(find_mac_owner "$mac"); then
+		echo "MAC address $mac is already assigned to client '$existing_owner'." >&2
 		return 1
 	fi
 
@@ -439,6 +474,11 @@ do_add_mac () {
 		echo "$name is already registered with MAC $mac." >&2
 		return 1
 	fi
+	local existing_owner
+	if existing_owner=$(find_mac_owner "$mac" "$name"); then
+		echo "MAC address $mac is already assigned to client '$existing_owner'." >&2
+		return 1
+	fi
 	touch "$DB_FILE"
 	ensure_trailing_newline "$DB_FILE"
 	echo "$name=$mac" >> "$DB_FILE"
@@ -468,8 +508,36 @@ do_remove_mac () {
 		echo "$name has no registration for MAC $mac." >&2
 		return 1
 	fi
-	sed -i "/^${name}=${mac}$/Id" "$DB_FILE"
-	ensure_trailing_newline "$DB_FILE"
+	# Case-insensitive delete-matching-line, done in plain bash rather than
+	# `sed -i '.../Id'` -- GNU sed's `I` (case-insensitive) suffix flag
+	# isn't available in busybox sed (this project's containerized app now
+	# runs on an Alpine base -- see Dockerfile), so this needs to not
+	# depend on a GNU-only sed extension. Entries this script itself writes
+	# are always already lowercase (via normalize_mac), so the
+	# case-folding here is belt-and-suspenders for anything hand-edited or
+	# from before that was consistently enforced, matching the grep -qi
+	# check just above.
+	#
+	# $DB_FILE is normally owned by an unprivileged user (e.g. nobody:
+	# nogroup) so openvpn-mac-addr-check.py -- running as the OpenVPN
+	# server process, not root -- can still read it on every connection
+	# attempt; a plain `mv` of a freshly-mktemp'd file over it would
+	# silently replace that with root:root 0600 and break every future
+	# connection's MAC check. Capture and reapply the original mode/owner
+	# explicitly rather than relying on mv/sed -i to happen to preserve it.
+	local remove_line tmp_file orig_mode orig_owner
+	tmp_file=$(mktemp "${DB_FILE}.XXXXXX")
+	orig_mode=$(stat -c '%a' "$DB_FILE")
+	orig_owner=$(stat -c '%U:%G' "$DB_FILE")
+	while IFS= read -r remove_line || [[ -n "$remove_line" ]]; do
+		if [[ "$(tr 'A-Z' 'a-z' <<< "$remove_line")" == "$(tr 'A-Z' 'a-z' <<< "${name}=${mac}")" ]]; then
+			continue
+		fi
+		printf '%s\n' "$remove_line" >> "$tmp_file"
+	done < "$DB_FILE"
+	chmod "$orig_mode" "$tmp_file"
+	chown "$orig_owner" "$tmp_file" 2>/dev/null || true
+	mv "$tmp_file" "$DB_FILE"
 	echo "Removed MAC $mac for $name."
 	return 0
 }
@@ -575,6 +643,11 @@ do_lint_db () {
 	# 0 = clean, 1 = at least one problem found.
 	local as_json="${1:-}" issues=0 lineno=0 line
 	local -a problems=()
+	# Tracks every well-formed line's MAC -> owning names, so duplicate
+	# cross-client assignments can be reported once at the end rather than
+	# re-scanning the file per line (see the loop below for the O(n) build,
+	# and the block after the loop for the O(n) report).
+	local -A mac_owners=()
 
 	if [[ ! -f "$DB_FILE" ]]; then
 		if [[ "$as_json" == json ]]; then
@@ -594,8 +667,32 @@ do_lint_db () {
 		if [[ ! "$line" =~ ^[A-Za-z0-9_.-]+=([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$ ]]; then
 			problems+=("Line $lineno: malformed entry: '$line'")
 			issues=1
+			continue
+		fi
+		local entry_name="${line%%=*}" entry_mac
+		entry_mac=$(tr 'A-Z' 'a-z' <<< "${line#*=}")
+		if [[ -n "${mac_owners[$entry_mac]:-}" ]]; then
+			# Only append if this exact name isn't already recorded against
+			# this MAC (a client can legitimately have the *same* MAC
+			# duplicated on two lines, which is a different, harmless-ish
+			# issue not what this check is for -- it's specifically about
+			# two DIFFERENT client names sharing one MAC).
+			if [[ ",${mac_owners[$entry_mac]}," != *",${entry_name},"* ]]; then
+				mac_owners[$entry_mac]="${mac_owners[$entry_mac]},${entry_name}"
+			fi
+		else
+			mac_owners[$entry_mac]="$entry_name"
 		fi
 	done < "$DB_FILE"
+
+	local mac owners
+	for mac in "${!mac_owners[@]}"; do
+		owners="${mac_owners[$mac]}"
+		if [[ "$owners" == *,* ]]; then
+			problems+=("MAC $mac is assigned to multiple clients: ${owners//,/, }")
+			issues=1
+		fi
+	done
 
 	local trailing_ok=true
 	if [[ -s "$DB_FILE" ]] && [[ -n "$(tail -c1 "$DB_FILE")" ]]; then
