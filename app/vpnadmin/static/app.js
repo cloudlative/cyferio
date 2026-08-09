@@ -396,6 +396,17 @@ function populateCountrySelect(selectEl, selectedCode) {
 	selectEl.value = selectedCode || "";
 }
 
+// name lookup for a country code from the same ISO_3166_COUNTRIES list above
+// -- used anywhere a restriction needs to be shown back to an admin as text
+// (table badges, live restriction summaries) rather than picked from a
+// <select>. Falls back to the raw code itself if somehow not found, so a
+// stale/foreign code already saved in client_policy.json never disappears
+// from the UI silently.
+const _COUNTRY_NAME_BY_CODE = Object.fromEntries(ISO_3166_COUNTRIES);
+function countryName(code) {
+	return _COUNTRY_NAME_BY_CODE[code] || code;
+}
+
 function escapeHtml(s) {
 	const div = document.createElement("div");
 	div.textContent = s == null ? "" : String(s);

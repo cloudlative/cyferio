@@ -393,6 +393,50 @@ fieldset legend { padding: 0 8px; color: var(--text-muted); font-weight: 700; fo
 .toolbar .toolbar-title { display: flex; align-items: baseline; gap: 10px; }
 .count-badge { font-size: 0.85rem; font-weight: 700; color: var(--text-muted); background: var(--surface-alt); border: 1px solid var(--border-light); padding: 3px 12px; border-radius: 999px; }
 
+/* --- Collapsible "Add restrictions" panel (Add Client form) --------- */
+/* Same idea as .filter-chip's pill language but styled as an inline
+   link-button rather than a toggle chip -- this is a disclosure control,
+   not a filter, and it needs to sit unobtrusively above an otherwise
+   collapsed section so most client creations (no restrictions) never see
+   it expand. */
+.restrictions-toggle {
+	display: inline-flex; align-items: center; gap: 6px;
+	background: none; border: none; box-shadow: none; padding: 4px 0;
+	color: var(--accent-2); font-weight: 700; font-size: 0.88rem; cursor: pointer;
+}
+.restrictions-toggle:hover { text-decoration: underline; transform: none; }
+.restrictions-toggle .chevron { display: inline-block; font-size: 0.75rem; transition: transform 0.2s ease; }
+.restrictions-toggle[aria-expanded="true"] .chevron { transform: rotate(90deg); }
+.restrictions-toggle .count-badge { background: rgba(99, 102, 241, 0.16); color: var(--accent-2); border-color: rgba(99, 102, 241, 0.35); }
+
+.restrictions-panel {
+	max-height: 0; overflow: hidden; opacity: 0;
+	transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease;
+}
+.restrictions-panel.open { max-height: 640px; opacity: 1; margin-top: 14px; }
+
+.restrictions-summary { margin: 10px 0 0; font-size: 0.82rem; }
+.restrictions-summary strong { color: var(--text); }
+
+/* --- Per-client restriction badges (All Clients table) --------------- */
+/* Deliberately NOT reusing .status-pill's green/red/amber palette -- those
+   already mean online/offline/revoked elsewhere on this page. Restriction
+   chips get their own indigo/amber/cyan hues (pulled from the same
+   --accent-gradient stops used everywhere else in this app) so a client
+   row with restrictions reads as "informational" rather than "warning".
+   Only rendered when a client actually has that restriction set -- see
+   renderClients() -- so the common case (no restrictions) shows nothing. */
+.restriction-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.restriction-chip {
+	display: inline-flex; align-items: center;
+	padding: 1px 8px; border-radius: 999px;
+	font-size: 0.7rem; font-weight: 700; letter-spacing: 0.01em;
+	border: 1px solid transparent; white-space: nowrap;
+}
+.restriction-chip.chip-country { background: rgba(99, 102, 241, 0.14); color: #a5b4fc; border-color: rgba(99, 102, 241, 0.32); }
+.restriction-chip.chip-os { background: rgba(251, 191, 36, 0.14); color: var(--warning-text); border-color: rgba(251, 191, 36, 0.32); }
+.restriction-chip.chip-bw { background: rgba(34, 211, 238, 0.14); color: #67e8f9; border-color: rgba(34, 211, 238, 0.32); }
+
 .filter-bar { display: flex; gap: 8px; margin-bottom: 16px; }
 .filter-chip {
 	background: var(--surface-alt);

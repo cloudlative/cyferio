@@ -21,6 +21,30 @@
 			<button type="button" class="btn-secondary" id="add-clear">Clear</button>
 		</div>
 		<p class="muted" style="margin-top:10px">MAC can be entered in any common format (colons, dashes, or none — any case) and will be normalized automatically.</p>
+
+		<button type="button" class="restrictions-toggle" id="add-restrictions-toggle" aria-expanded="false">
+			<span class="chevron">▸</span> Add restrictions <span class="muted">(optional)</span>
+			<span class="count-badge" id="add-restrictions-count" style="display:none"></span>
+		</button>
+		<div class="restrictions-panel" id="add-restrictions-panel">
+			<div class="field">
+				<label for="add-policy-country">Restrict Country <span class="muted">(GeoIP on the client's connecting IP; blank = any country)</span></label>
+				<select id="add-policy-country"></select>
+			</div>
+			<div class="field">
+				<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
+				<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:4px">
+					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="add-policy-os-check" value="windows"> Windows</label>
+					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="add-policy-os-check" value="linux"> Linux</label>
+					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="add-policy-os-check" value="mac"> macOS</label>
+				</div>
+			</div>
+			<div class="field">
+				<label for="add-policy-bandwidth">Weekly Bandwidth Quota (GB) <span class="muted">(blank = unlimited)</span></label>
+				<input type="text" id="add-policy-bandwidth" inputmode="decimal" placeholder="Unlimited">
+			</div>
+			<p class="muted restrictions-summary" id="add-restrictions-summary"></p>
+		</div>
 	</form>
 	<div id="add-result" style="display:none;margin-top:18px">
 		<label>New Client's .ovpn Profile</label>
@@ -110,6 +134,7 @@
 				<input type="text" id="policy-bandwidth" inputmode="decimal" placeholder="Unlimited">
 				<p class="muted" style="margin:6px 0 0;font-size:0.82rem" id="policy-usage-note"></p>
 			</div>
+			<p class="muted restrictions-summary" id="policy-restrictions-summary"></p>
 			<p class="muted" style="font-size:0.82rem">
 				Restrictions are checked when a client connects (soft cutoff for bandwidth -- an already-connected session is never
 				killed mid-session, only the next connection attempt is gated). Usage shown above is updated when a session ends,
@@ -132,7 +157,7 @@ const _initialParams = new URLSearchParams(location.search);
 let currentFilter = _initialParams.get("online") === "1" ? "online"
 	: _initialParams.get("missing_mac") === "1" ? "missing_mac"
 	: "all";
-let lastClients = [], lastStatusByName = {};
+let lastClients = [], lastStatusByName = {}, lastPoliciesByName = {};
 
 function applyFilterUI() {
 	document.querySelectorAll(".filter-chip").forEach(c => c.classList.toggle("active", c.dataset.filter === currentFilter));
@@ -141,12 +166,17 @@ function applyFilterUI() {
 async function loadClients() {
 	const el = document.getElementById("clients-table");
 	try {
-		const [clients, statusAll] = await Promise.all([
+		const [clients, statusAll, policies] = await Promise.all([
 			apiFetch("/api/clients"),
 			apiFetch("/api/status/all"),
+			// Restriction badges are an admin-only feature (same gating as
+			// "Manage Restrictions" itself) -- viewers skip this fetch
+			// entirely rather than hitting a 403 on every page load.
+			isAdmin ? apiFetch("/api/clients/policies") : Promise.resolve({ policies: {} }),
 		]);
 		lastClients = clients;
 		lastStatusByName = Object.fromEntries(statusAll.map(s => [s.name, s]));
+		lastPoliciesByName = policies.policies || {};
 		const onlineCount = clients.filter(c => lastStatusByName[c.name]?.status === "online").length;
 		document.getElementById("client-count").innerHTML =
 			`${clients.length} client${clients.length === 1 ? "" : "s"} — ` +
@@ -206,8 +236,9 @@ function renderClients() {
 			<th></th>${isAdmin ? "<th></th><th></th><th></th><th></th>" : ""}
 		</tr></thead>
 		<tbody>${filtered.map(({ c, s, online }) => {
+			const policy = lastPoliciesByName[c.name];
 			return `<tr data-name="${escapeHtml(c.name)}" class="${online ? "row-online" : ""}">
-				<td>${escapeHtml(c.name)}</td>
+				<td>${escapeHtml(c.name)}${restrictionChipsHtml(policy)}</td>
 				<td><span class="status-pill status-${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span></td>
 				<td>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</td>
 				<td><span class="count-badge">${c.mac_count ?? 0}</span></td>
@@ -238,6 +269,46 @@ function renderClients() {
 			btn.addEventListener("click", () => openPolicyDialog(btn.closest("tr").dataset.name));
 		});
 	}
+}
+
+const OS_LABELS = { windows: "Win", linux: "Linux", mac: "macOS" };
+
+// Compact restriction-summary chips for one client's row in the All Clients
+// table -- only ever called for clients that actually have a policy (see
+// renderClients()), and only ever renders the chips for restrictions that
+// are actually set, so a client with none produces nothing.
+function restrictionChipsHtml(policy) {
+	if (!policy) return "";
+	const chips = [];
+	if (policy.country) {
+		chips.push(`<span class="restriction-chip chip-country" title="Restricted to ${escapeHtml(countryName(policy.country))}">${escapeHtml(policy.country)}</span>`);
+	}
+	if (policy.allowed_os && policy.allowed_os.length) {
+		const label = policy.allowed_os.map(o => OS_LABELS[o] || o).join("/");
+		chips.push(`<span class="restriction-chip chip-os" title="Allowed OS: ${escapeHtml(label)}">${escapeHtml(label)} only</span>`);
+	}
+	if (policy.bandwidth_weekly_gb) {
+		chips.push(`<span class="restriction-chip chip-bw" title="Weekly bandwidth quota: ${policy.bandwidth_weekly_gb}GB">${policy.bandwidth_weekly_gb}GB/wk</span>`);
+	}
+	if (!chips.length) return "";
+	return `<div class="restriction-chips">${chips.join("")}</div>`;
+}
+
+// Live "This client will be restricted to: ..." summary sentence, shared
+// between the Manage Restrictions dialog and the Add form's collapsible
+// restrictions panel -- pass the three field elements in, get back the
+// same human-readable sentence either way. Deliberately top-level (not
+// nested in either `if (isAdmin)` block below) so both call sites can
+// reach it regardless of function-hoisting quirks inside blocks.
+function restrictionsSummaryText(countryEl, osChecks, bandwidthEl) {
+	const bits = [];
+	if (countryEl.value) bits.push(countryName(countryEl.value));
+	const osVals = [...osChecks].filter(cb => cb.checked).map(cb => cb.value);
+	if (osVals.length) bits.push(osVals.map(o => OS_LABELS[o] || o).join("/"));
+	const bw = bandwidthEl.value.trim();
+	if (bw) bits.push(`${bw}GB/week`);
+	if (!bits.length) return "";
+	return `This client will be restricted to: <strong>${escapeHtml(bits.join(", "))}</strong>.`;
 }
 
 document.querySelectorAll(".filter-chip").forEach(chip => {
@@ -442,12 +513,25 @@ if (isAdmin) {
 				document.getElementById("policy-usage-note").textContent =
 					`Used this week (as of last disconnect, not live): ${humanBytes(used)} / ${quota} GB`;
 			}
+			updatePolicyDialogSummary();
 		} catch (e) {
 			toast(e.message, "error");
 			dlg.close();
 		}
 	}
 	window.openPolicyDialog = openPolicyDialog;
+
+	function updatePolicyDialogSummary() {
+		document.getElementById("policy-restrictions-summary").innerHTML = restrictionsSummaryText(
+			document.getElementById("policy-country"),
+			document.querySelectorAll(".policy-os-check"),
+			document.getElementById("policy-bandwidth"),
+		);
+	}
+	document.getElementById("policy-country").addEventListener("change", updatePolicyDialogSummary);
+	document.querySelectorAll(".policy-os-check").forEach(cb => cb.addEventListener("change", updatePolicyDialogSummary));
+	document.getElementById("policy-bandwidth").addEventListener("input", updatePolicyDialogSummary);
+
 	document.getElementById("policy-dialog-cancel").addEventListener("click", () => document.getElementById("policy-dialog").close());
 	document.getElementById("policy-form").addEventListener("submit", async (ev) => {
 		ev.preventDefault();
@@ -488,19 +572,92 @@ async function revokeClient(name) {
 }
 
 if (isAdmin) {
+	populateCountrySelect(document.getElementById("add-policy-country"));
+
+	const addRestrictionsToggle = document.getElementById("add-restrictions-toggle");
+	const addRestrictionsPanel = document.getElementById("add-restrictions-panel");
+	const addRestrictionsCount = document.getElementById("add-restrictions-count");
+
+	function collapseAddRestrictions() {
+		addRestrictionsPanel.classList.remove("open");
+		addRestrictionsToggle.setAttribute("aria-expanded", "false");
+	}
+	function expandAddRestrictions() {
+		addRestrictionsPanel.classList.add("open");
+		addRestrictionsToggle.setAttribute("aria-expanded", "true");
+	}
+	addRestrictionsToggle.addEventListener("click", () => {
+		if (addRestrictionsPanel.classList.contains("open")) collapseAddRestrictions();
+		else expandAddRestrictions();
+	});
+
+	// Reads the three restriction fields currently entered in the Add
+	// form's (possibly still-collapsed) panel -- used both to decide
+	// whether the create flow needs a follow-up policy PUT at all, and to
+	// build that PUT's request body.
+	function readAddRestrictionFields() {
+		const country = document.getElementById("add-policy-country").value || null;
+		const allowedOs = [...document.querySelectorAll(".add-policy-os-check:checked")].map(cb => cb.value);
+		const bwRaw = document.getElementById("add-policy-bandwidth").value.trim();
+		return { country, allowedOs, bandwidthWeeklyGb: bwRaw ? Number(bwRaw) : null, anySet: !!(country || allowedOs.length || bwRaw) };
+	}
+
+	function updateAddRestrictionsUI() {
+		const { anySet, country, allowedOs, bandwidthWeeklyGb } = readAddRestrictionFields();
+		document.getElementById("add-restrictions-summary").innerHTML = restrictionsSummaryText(
+			document.getElementById("add-policy-country"),
+			document.querySelectorAll(".add-policy-os-check"),
+			document.getElementById("add-policy-bandwidth"),
+		);
+		const n = (country ? 1 : 0) + (allowedOs.length ? 1 : 0) + (bandwidthWeeklyGb ? 1 : 0);
+		addRestrictionsCount.style.display = n ? "" : "none";
+		addRestrictionsCount.textContent = n ? `${n} set` : "";
+	}
+	document.getElementById("add-policy-country").addEventListener("change", updateAddRestrictionsUI);
+	document.querySelectorAll(".add-policy-os-check").forEach(cb => cb.addEventListener("change", updateAddRestrictionsUI));
+	document.getElementById("add-policy-bandwidth").addEventListener("input", updateAddRestrictionsUI);
+
 	document.getElementById("add-clear").addEventListener("click", () => {
 		document.getElementById("add-form").reset();
+		collapseAddRestrictions();
+		updateAddRestrictionsUI();
 	});
 	document.getElementById("add-form").addEventListener("submit", async (ev) => {
 		ev.preventDefault();
 		const name = document.getElementById("add-name").value.trim();
 		const mac = document.getElementById("add-mac").value.trim();
+		const restrictions = readAddRestrictionFields();
 		const submitBtn = document.getElementById("add-submit");
 		submitBtn.disabled = true;
 		try {
 			const result = await apiFetch("/api/clients", { method: "POST", body: { name, mac } });
 			toast(result.message, "success");
+
+			// The client + cert already exist at this point -- reusing the
+			// same PUT /api/clients/{name}/policy the "Manage Restrictions"
+			// dialog uses, exactly as an admin would do manually right
+			// after creating the client. A failure here must NOT look like
+			// the whole create failed (it didn't), so it's reported as its
+			// own separate toast rather than thrown into the outer catch.
+			if (restrictions.anySet) {
+				try {
+					await apiFetch(`/api/clients/${encodeURIComponent(name)}/policy`, {
+						method: "PUT",
+						body: {
+							country: restrictions.country,
+							allowed_os: restrictions.allowedOs,
+							bandwidth_weekly_gb: restrictions.bandwidthWeeklyGb,
+						},
+					});
+					toast("Restrictions saved.", "success");
+				} catch (e) {
+					toast(`Client created, but restrictions couldn't be saved: ${e.message} -- use Manage Restrictions to set them.`, "error");
+				}
+			}
+
 			document.getElementById("add-form").reset();
+			collapseAddRestrictions();
+			updateAddRestrictionsUI();
 			loadClients();
 			// Show the new client's .ovpn profile right away so it can be
 			// copied/delivered without a separate lookup.

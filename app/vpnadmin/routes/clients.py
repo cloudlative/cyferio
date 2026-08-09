@@ -289,6 +289,15 @@ class PolicyRequest(BaseModel):
     bandwidth_weekly_gb: float | None = None
 
 
+@router.get("/policies")
+def get_all_client_policies(_: User = Depends(require_client_manager)):
+    """Bulk name -> policy dict for every client with a restriction set
+    (clients with none simply don't appear in the result). Admin-only, same
+    as the per-client GET below -- exists purely so the All Clients table
+    can render restriction-summary badges per row without an N+1 fetch."""
+    return {"policies": policy_store.get_all_policies()}
+
+
 @router.get("/{name}/policy")
 def get_client_policy(name: str, _: User = Depends(require_client_manager)):
     if not NAME_RE.match(name):
