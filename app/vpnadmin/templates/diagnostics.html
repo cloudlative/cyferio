@@ -42,6 +42,10 @@
 			<label for="rejected-filter-os">OS</label>
 			<select id="rejected-filter-os"><option value="">All</option></select>
 		</div>
+		<div class="field" style="flex:1;min-width:180px">
+			<label for="rejected-filter-reason">Reason</label>
+			<select id="rejected-filter-reason"><option value="">All</option></select>
+		</div>
 	</div>
 	<div id="rejected-result"><p class="muted">Loading…</p></div>
 </div>
@@ -116,18 +120,35 @@ function renderRejectedChart(data) {
 
 let rejectedEntries = [];
 
+// Machine reason -> human label. Falls back to the raw value itself for
+// anything not listed here, so a future reason added to the connect
+// script without a matching UI update still displays as *something*
+// readable rather than disappearing.
+const REJECTION_REASON_LABELS = {
+	mac_mismatch: "MAC mismatch",
+	os_not_allowed: "OS not allowed",
+	country_not_allowed: "Country not allowed",
+	country_lookup_failed: "Country lookup failed",
+	bandwidth_exceeded: "Bandwidth exceeded",
+};
+function reasonLabel(r) { return REJECTION_REASON_LABELS[r] || r; }
+
 function populateRejectedFilters(data) {
 	const nameSel = document.getElementById("rejected-filter-name");
 	const osSel = document.getElementById("rejected-filter-os");
-	const prevName = nameSel.value, prevOs = osSel.value;
+	const reasonSel = document.getElementById("rejected-filter-reason");
+	const prevName = nameSel.value, prevOs = osSel.value, prevReason = reasonSel.value;
 	const names = [...new Set(data.map(r => r.claimed_name))].sort();
 	const oses = [...new Set(data.map(r => r.os))].sort();
+	const reasons = [...new Set(data.map(r => r.reason))].sort();
 	nameSel.innerHTML = '<option value="">All</option>' + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
 	osSel.innerHTML = '<option value="">All</option>' + oses.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("");
+	reasonSel.innerHTML = '<option value="">All</option>' + reasons.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(reasonLabel(r))}</option>`).join("");
 	// Preserve the operator's current filter selection across a refresh,
 	// as long as that value still exists in the new data.
 	if (names.includes(prevName)) nameSel.value = prevName;
 	if (oses.includes(prevOs)) osSel.value = prevOs;
+	if (reasons.includes(prevReason)) reasonSel.value = prevReason;
 }
 
 const REJECTED_PAGE_SIZE = 20;
@@ -137,8 +158,10 @@ function renderRejectedTable() {
 	const el = document.getElementById("rejected-result");
 	const nameFilter = document.getElementById("rejected-filter-name").value;
 	const osFilter = document.getElementById("rejected-filter-os").value;
+	const reasonFilter = document.getElementById("rejected-filter-reason").value;
 	const data = rejectedEntries.filter(r =>
-		(!nameFilter || r.claimed_name === nameFilter) && (!osFilter || r.os === osFilter));
+		(!nameFilter || r.claimed_name === nameFilter) && (!osFilter || r.os === osFilter) &&
+		(!reasonFilter || r.reason === reasonFilter));
 
 	// The chart always reflects the full filtered set, not just the
 	// current page -- pagination is a display concern for the table only.
@@ -160,7 +183,7 @@ function renderRejectedTable() {
 
 	el.innerHTML = `<table>
 		<thead><tr>
-			<th>Timestamp</th><th>VPN Profile</th><th>MAC Presented</th><th>MAC Registered</th>
+			<th>Timestamp</th><th>VPN Profile</th><th>Reason</th><th>MAC Presented</th><th>MAC Registered</th>
 			<th>OS</th><th>Source IP:Port</th><th>Attempts (This Profile)</th>
 		</tr></thead>
 		<tbody>${pageRows.map(r => {
@@ -169,6 +192,7 @@ function renderRejectedTable() {
 			return `<tr>
 				<td>${escapeHtml(r.timestamp)}</td>
 				<td>${escapeHtml(r.claimed_name)}</td>
+				<td><span class="status-pill status-revoked">${escapeHtml(reasonLabel(r.reason))}</span></td>
 				<td class="mono">${escapeHtml(r.mac_presented)}</td>
 				<td class="mono">${mismatch ? `<span style="color:var(--warning-text)">${escapeHtml(r.mac_registered)}</span>` : escapeHtml(r.mac_registered)}</td>
 				<td>${escapeHtml(r.os)}</td>
@@ -210,6 +234,7 @@ async function loadRejected() {
 
 document.getElementById("rejected-filter-name").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
 document.getElementById("rejected-filter-os").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
+document.getElementById("rejected-filter-reason").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
 document.getElementById("check-refresh").addEventListener("click", loadCheck);
 document.getElementById("lint-refresh").addEventListener("click", loadLint);
 document.getElementById("rejected-refresh").addEventListener("click", loadRejected);

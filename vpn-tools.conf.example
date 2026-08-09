@@ -27,6 +27,27 @@
 #STATUS_LOG=/var/log/openvpn/openvpn-status.log
 #CONN_LOG=/etc/openvpn/server/openvpn.log
 
+# --- Per-client restrictions (country / OS / bandwidth quota) ---
+# See README.md's "Per-client restrictions" section for the full picture.
+# Enforced by the client-connect/client-disconnect scripts on the OpenVPN
+# host (host-scripts/ in this repo -- installed to /etc/openvpn/server/,
+# NOT part of the web app's Docker image); read/written by
+# client_policy_cli.py (this script's --set-country/--set-os/
+# --set-bandwidth/--get-policy subcommands) and by the web app directly
+# (it bind-mounts /etc/openvpn rw, see docker-compose.yml).
+#CLIENT_POLICY_FILE=/etc/openvpn/server/client_policy.json
+#CLIENT_USAGE_FILE=/etc/openvpn/server/client_usage.json
+
+# MaxMind GeoLite2-Country database, used only by the country-restriction
+# check -- unused, and never even opened, for a client with no country
+# restriction configured (see host-scripts/policy_lib.py's
+# geoip_lookup_country docstring for the fail-safe design). Sign up for a
+# free license key at https://www.maxmind.com/en/geolite2/signup and set
+# MAXMIND_LICENSE_KEY to enable this feature; leave it blank to keep it
+# disabled (geoip-update.sh exits cleanly, without erroring, when unset).
+#MAXMIND_LICENSE_KEY=
+#MAXMIND_DB_PATH=/etc/openvpn/server/GeoLite2-Country.mmdb
+
 # Where newly-generated .ovpn client files are delivered, and to whom they
 # should be chown'd (so they can be retrieved without needing root).
 #

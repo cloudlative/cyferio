@@ -107,6 +107,20 @@ CONN_LOG=/etc/openvpn/server/openvpn.log
 SERVICE_NAME=openvpn-server@server.service
 OVPN_OUTPUT_MODE=600
 
+# Per-client restrictions (country/OS/bandwidth quota) -- read AND written
+# by client_policy_cli.py, this script's own --set-country/--set-os/
+# --set-bandwidth/--get-policy subcommands just shell out to it (bash has
+# no good native JSON support). Enforced at connection time by the
+# client-connect/client-disconnect scripts on the OpenVPN host itself (see
+# host-scripts/ in this repo) -- NOT by this script or the web app
+# directly. CLIENT_POLICY_SCRIPT defaults to a sibling of this script
+# (wherever it was cloned/installed to), not a hardcoded /opt path, so it
+# keeps working regardless of install location; override in vpn-tools.conf
+# only if client_policy_cli.py has been placed somewhere else.
+_ovpn_script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+CLIENT_POLICY_SCRIPT="$_ovpn_script_dir/client_policy_cli.py"
+unset _ovpn_script_dir
+
 # OVPN_OUTPUT_DIR / OVPN_OUTPUT_OWNER (where generated .ovpn files are
 # delivered, and to whom) default to whoever actually ran `sudo` to invoke
 # this script -- not a hardcoded "ubuntu", since the community running this
@@ -737,6 +751,105 @@ do_lint_db () {
 	return "$issues"
 }
 
+_require_valid_client () {
+	# Usage: _require_valid_client <name> -- shared guard for the
+	# --set-country/--set-os/--set-bandwidth subcommands below, matching
+	# do_add_mac's own "no such client" check: a policy shouldn't be
+	# settable for a name that was never actually issued a certificate.
+	local name="$1"
+	if [[ -z "$name" ]]; then
+		echo "Client name required." >&2
+		return 1
+	fi
+	if [[ ! -e "$EASYRSA_DIR/pki/issued/$name.crt" ]]; then
+		echo "$name: no such client (no valid certificate)." >&2
+		return 1
+	fi
+	return 0
+}
+
+do_set_country () {
+	# Usage: do_set_country <name> <CODE|ANY>
+	# Restricts <name> to connecting only from the given ISO 3166-1
+	# alpha-2 country code (as seen via GeoIP on their connection's source
+	# IP), or clears the restriction with "ANY". Enforced by
+	# openvpn-mac-addr-check.py on the OpenVPN host -- see host-scripts/ in
+	# this repo; this subcommand only edits client_policy.json.
+	local name="$1" value="$2" out
+	_require_valid_client "$name" || return 1
+	if [[ -z "$value" ]]; then
+		echo "A country code (e.g. PK) or ANY is required." >&2
+		return 1
+	fi
+	[[ "$value" == "ANY" ]] && value="-"
+	out=$(python3 "$CLIENT_POLICY_SCRIPT" set-country "$name" "$value") || return 1
+	echo "$name: country restriction updated -- $out"
+	return 0
+}
+
+do_set_os () {
+	# Usage: do_set_os <name> <windows,linux,mac|ANY>
+	# Restricts <name> to connecting only from the listed device
+	# platform(s) (comma-separated, any of windows/linux/mac), or clears
+	# the restriction with "ANY" -- an empty/absent list means
+	# unrestricted (any OS allowed), NOT "block everything".
+	local name="$1" value="$2" out
+	_require_valid_client "$name" || return 1
+	if [[ -z "$value" ]]; then
+		echo "A comma list of windows,linux,mac (or ANY) is required." >&2
+		return 1
+	fi
+	[[ "$value" == "ANY" ]] && value="-"
+	out=$(python3 "$CLIENT_POLICY_SCRIPT" set-os "$name" "$value") || return 1
+	echo "$name: allowed-OS restriction updated -- $out"
+	return 0
+}
+
+do_set_bandwidth () {
+	# Usage: do_set_bandwidth <name> <GB|ANY>
+	# Sets <name>'s weekly bandwidth quota in GB (soft cutoff, checked at
+	# connection time only -- see host-scripts/openvpn-mac-addr-check.py
+	# and openvpn-client-disconnect.py), or clears it with "ANY".
+	local name="$1" value="$2" out
+	_require_valid_client "$name" || return 1
+	if [[ -z "$value" ]]; then
+		echo "A quota in GB (e.g. 5) or ANY is required." >&2
+		return 1
+	fi
+	[[ "$value" == "ANY" ]] && value="-"
+	out=$(python3 "$CLIENT_POLICY_SCRIPT" set-bandwidth "$name" "$value") || return 1
+	echo "$name: bandwidth quota updated -- $out"
+	return 0
+}
+
+do_get_policy () {
+	# Usage: do_get_policy [name] [json]
+	# Prints the restriction policy for one client, or every client with a
+	# policy entry if no name is given. Always JSON (client_policy.json's
+	# own format), regardless of the [json] flag -- there's no meaningfully
+	# different "table" rendering for an arbitrarily-shaped policy object,
+	# so [json] here only controls whether a human-readable wrapper
+	# sentence is also printed.
+	local name="${1:-}" as_json="${2:-}" out
+	if [[ -n "$name" ]]; then
+		_require_valid_client "$name" || return 1
+		out=$(python3 "$CLIENT_POLICY_SCRIPT" get "$name") || return 1
+		if [[ "$as_json" == json ]]; then
+			printf '%s\n' "$out"
+		else
+			echo "Policy for $name: $out"
+		fi
+	else
+		out=$(python3 "$CLIENT_POLICY_SCRIPT" get-all) || return 1
+		if [[ "$as_json" == json ]]; then
+			printf '%s\n' "$out"
+		else
+			echo "All client policies: $out"
+		fi
+	fi
+	return 0
+}
+
 print_usage () {
 	cat <<-USAGE
 	Usage: $0 [command]
@@ -758,12 +871,16 @@ print_usage () {
 	                         (NOT un-revoking the old cert -- see --help output below)
 	  --check-certs          Cross-check PKI valid certs against $DB_FILE for orphans
 	  --lint-mac-db          Validate $DB_FILE formatting and trailing-newline health
+	  --set-country NAME CODE|ANY    Restrict NAME to one country (ISO alpha-2, e.g. PK) or ANY to clear
+	  --set-os NAME LIST|ANY         Restrict NAME to a comma list of windows,linux,mac, or ANY to clear
+	  --set-bandwidth NAME GB|ANY    Set NAME's weekly bandwidth quota in GB, or ANY to clear
+	  --get-policy [NAME]             Show restriction policy for NAME, or every client if omitted
 	  --help                 Show this help
 
 	--json can be combined with --list-users, --list-revoked-users, --macs,
-	--check-certs, or --lint-mac-db to print structured JSON instead of a
-	table (order doesn't matter, e.g. both "--list-users --json" and
-	"--json --list-users" work). Not valid with any other command.
+	--check-certs, --lint-mac-db, or --get-policy to print structured JSON
+	instead of a table (order doesn't matter, e.g. both "--list-users --json"
+	and "--json --list-users" work). Not valid with any other command.
 
 	Note on --restore: a revoked certificate cannot be un-revoked once its
 	CRL entry exists (that's how PKI revocation is supposed to work).
@@ -792,7 +909,7 @@ set -- "${_cli_args[@]}"
 unset _a _cli_args
 
 case "${1:-}" in
-	--add-user|--revoke-user|--list-users|--list-revoked-users|--macs|--add-mac|--remove-mac|--show-ovpn|--purge-revoked|--restore|--check-certs|--lint-mac-db)
+	--add-user|--revoke-user|--list-users|--list-revoked-users|--macs|--add-mac|--remove-mac|--show-ovpn|--purge-revoked|--restore|--check-certs|--lint-mac-db|--set-country|--set-os|--set-bandwidth|--get-policy)
 		if [[ ! -e "$OPENVPN_DIR/server.conf" ]]; then
 			echo "OpenVPN is not installed yet (no $OPENVPN_DIR/server.conf) -- run without arguments first to install." >&2
 			exit 1
@@ -802,7 +919,7 @@ esac
 
 if [[ -n "$json_flag" ]]; then
 	case "${1:-}" in
-		--list-users|--list-revoked-users|--macs|--check-certs|--lint-mac-db) ;;
+		--list-users|--list-revoked-users|--macs|--check-certs|--lint-mac-db|--get-policy) ;;
 		*)
 			echo "--json option is not allowed with this command." >&2
 			exit 1
@@ -857,6 +974,22 @@ case "${1:-}" in
 		;;
 	--lint-mac-db)
 		do_lint_db "$json_flag"
+		exit $?
+		;;
+	--set-country)
+		do_set_country "$2" "$3"
+		exit $?
+		;;
+	--set-os)
+		do_set_os "$2" "$3"
+		exit $?
+		;;
+	--set-bandwidth)
+		do_set_bandwidth "$2" "$3"
+		exit $?
+		;;
+	--get-policy)
+		do_get_policy "$2" "$json_flag"
 		exit $?
 		;;
 	--help|-h)

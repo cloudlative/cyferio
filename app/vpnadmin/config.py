@@ -96,6 +96,18 @@ class Settings:
     SMTP_FROM: str = os.environ.get("SMTP_FROM", "")
     SMTP_USE_TLS: bool = _env_bool("SMTP_USE_TLS", True)
 
+    # --- Per-client restrictions (country / OS / bandwidth quota) -----------
+    # See README.md's "Per-client restrictions" section for the full design.
+    # These two JSON files live under /etc/openvpn (bind-mounted rw into
+    # this container already, same mount used for openvpn_db.txt etc. --
+    # see docker-compose.yml), so the app reads/writes them directly in
+    # Python (policy_store.py), no subprocess/CLI call needed. Enforcement
+    # itself happens entirely on the OpenVPN host's client-connect/
+    # client-disconnect scripts (host-scripts/ in this repo), which this
+    # app does not invoke -- it only edits the policy file they read.
+    CLIENT_POLICY_FILE: str = os.environ.get("CLIENT_POLICY_FILE", "/etc/openvpn/server/client_policy.json")
+    CLIENT_USAGE_FILE: str = os.environ.get("CLIENT_USAGE_FILE", "/etc/openvpn/server/client_usage.json")
+
 
 settings = Settings()
 

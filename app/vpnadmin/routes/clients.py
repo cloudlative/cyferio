@@ -6,11 +6,13 @@ from sqlalchemy.orm import Session
 
 from .. import cli_wrapper as cli
 from .. import mailer
+from .. import policy_store
 from ..audit import log_action
 from ..auth import require_admin, require_client_manager, require_user
 from ..cli_wrapper import ScriptError
 from ..db import get_db
 from ..models import User
+from ..policy_store import PolicyValidationError
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 
@@ -262,3 +264,63 @@ def restore_revoked_client(name: str, body: RestoreClientRequest, user: User = D
         raise HTTPException(status_code=400, detail=e.message)
     log_action(db, user, "restore_client", target=name, detail=result, success=True)
     return {"message": f"Client '{name}' restored (reissued with a new certificate)."}
+
+
+# --- Per-client restrictions (country / OS / bandwidth quota) ---------------
+# Enforced entirely by the client-connect/client-disconnect scripts on the
+# OpenVPN host (host-scripts/ in this repo, not part of this Docker image)
+# -- these endpoints only read/write client_policy.json via policy_store,
+# they never invoke cli_wrapper/openvpn-install.sh for this feature.
+
+class PolicyRequest(BaseModel):
+    """Same partial-update-by-field-presence convention as Settings'
+    UpdateSettingsRequest: a field omitted from the request body is left
+    untouched; an explicit null clears it. The "Manage Restrictions"
+    dialog always sends all three fields together (it always shows/edits
+    the full current state at once), but the API itself stays field-level
+    partial for consistency with the rest of this app.
+
+    `country` is a per-client ISO 3166-1 alpha-2 code chosen independently
+    from a full country dropdown (see templates/clients.html) -- there is
+    no deployment-wide "the one restricted country" concept; every client
+    can be restricted to a different country, or none at all."""
+    country: str | None = None
+    allowed_os: list[str] | None = None
+    bandwidth_weekly_gb: float | None = None
+
+
+@router.get("/{name}/policy")
+def get_client_policy(name: str, _: User = Depends(require_client_manager)):
+    if not NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid client name.")
+    return {
+        "policy": policy_store.get_policy(name),
+        "usage": policy_store.get_usage(name),
+    }
+
+
+@router.put("/{name}/policy")
+def update_client_policy(name: str, body: PolicyRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+    if not NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid client name.")
+
+    try:
+        result = policy_store.set_policy(
+            name,
+            country=body.country if "country" in fields_set else ...,
+            allowed_os=body.allowed_os if "allowed_os" in fields_set else ...,
+            bandwidth_weekly_gb=body.bandwidth_weekly_gb if "bandwidth_weekly_gb" in fields_set else ...,
+        )
+    except PolicyValidationError as e:
+        log_action(db, user, "update_client_policy", target=name, detail=str(e), success=False)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    detail_bits = []
+    if "country" in fields_set:
+        detail_bits.append(f"country={body.country or 'ANY'}")
+    if "allowed_os" in fields_set:
+        detail_bits.append(f"allowed_os={','.join(body.allowed_os) if body.allowed_os else 'ANY'}")
+    if "bandwidth_weekly_gb" in fields_set:
+        detail_bits.append(f"bandwidth_weekly_gb={body.bandwidth_weekly_gb or 'ANY'}")
+    log_action(db, user, "update_client_policy", target=name, detail="; ".join(detail_bits) or "no changes", success=True)
+    return {"policy": result}

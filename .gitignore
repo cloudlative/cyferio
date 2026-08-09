@@ -25,3 +25,5 @@ __pycache__/
 /.env
 app/data/
 app/pgdata/
+GeoLite2-Country/
+*.mmdb

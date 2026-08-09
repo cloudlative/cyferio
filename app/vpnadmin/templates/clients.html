@@ -87,6 +87,41 @@
 		</form>
 	</div>
 </dialog>
+
+<dialog id="policy-dialog">
+	<div class="dialog-body">
+		<h2 id="policy-dialog-title">Manage Restrictions</h2>
+		<form id="policy-form">
+			<div class="field">
+				<label for="policy-country">Restrict Country <span class="muted">(GeoIP on the client's connecting IP; blank = any country)</span></label>
+				<select id="policy-country"></select>
+			</div>
+			<div class="field">
+				<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
+				<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:4px">
+					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="policy-os-check" value="windows"> Windows</label>
+					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="policy-os-check" value="linux"> Linux</label>
+					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="policy-os-check" value="mac"> macOS</label>
+				</div>
+				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Leaving all three unchecked means <strong>no restriction</strong> (any OS can connect) -- it does NOT block every OS.</p>
+			</div>
+			<div class="field">
+				<label for="policy-bandwidth">Weekly Bandwidth Quota (GB) <span class="muted">(blank = unlimited)</span></label>
+				<input type="text" id="policy-bandwidth" inputmode="decimal" placeholder="Unlimited">
+				<p class="muted" style="margin:6px 0 0;font-size:0.82rem" id="policy-usage-note"></p>
+			</div>
+			<p class="muted" style="font-size:0.82rem">
+				Restrictions are checked when a client connects (soft cutoff for bandwidth -- an already-connected session is never
+				killed mid-session, only the next connection attempt is gated). Usage shown above is updated when a session ends,
+				not live.
+			</p>
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" id="policy-dialog-cancel">Cancel</button>
+				<button type="submit" class="btn-primary" id="policy-submit">Save Restrictions</button>
+			</div>
+		</form>
+	</div>
+</dialog>
 {% endif %}
 {% endblock %}
 
@@ -168,7 +203,7 @@ function renderClients() {
 	el.innerHTML = `<table>
 		<thead><tr>
 			<th>Name</th><th>Status</th><th>In MAC DB</th><th>MACs</th><th>Last Seen</th>
-			<th></th>${isAdmin ? "<th></th><th></th><th></th>" : ""}
+			<th></th>${isAdmin ? "<th></th><th></th><th></th><th></th>" : ""}
 		</tr></thead>
 		<tbody>${filtered.map(({ c, s, online }) => {
 			return `<tr data-name="${escapeHtml(c.name)}" class="${online ? "row-online" : ""}">
@@ -178,6 +213,7 @@ function renderClients() {
 				<td><span class="count-badge">${c.mac_count ?? 0}</span></td>
 				<td>${escapeHtml(s ? s.last_seen : "—")}</td>
 				<td><button class="btn-secondary btn-sm macs-btn">${isAdmin ? "Manage MACs" : "View MACs"}</button></td>
+				${isAdmin ? `<td><button class="btn-secondary btn-sm policy-btn">Manage Restrictions</button></td>` : ""}
 				${isAdmin ? `<td><button class="btn-secondary btn-sm ovpn-btn">View / Copy .ovpn</button></td>` : ""}
 				${isAdmin ? `<td><button class="btn-secondary btn-sm email-btn">Email Profile</button></td>` : ""}
 				${isAdmin ? `<td class="text-right"><button class="btn-danger btn-sm revoke-btn">Revoke</button></td>` : ""}
@@ -197,6 +233,9 @@ function renderClients() {
 		});
 		el.querySelectorAll(".email-btn").forEach(btn => {
 			btn.addEventListener("click", () => openEmailDialog(btn.closest("tr").dataset.name));
+		});
+		el.querySelectorAll(".policy-btn").forEach(btn => {
+			btn.addEventListener("click", () => openPolicyDialog(btn.closest("tr").dataset.name));
 		});
 	}
 }
@@ -368,6 +407,66 @@ if (isAdmin) {
 			// page-level container, which stays visible.
 			document.getElementById("email-dialog").close();
 			toast(result.message, "success");
+		} catch (e) {
+			toast(e.message, "error");
+		} finally {
+			submitBtn.disabled = false;
+		}
+	});
+
+	function humanBytes(n) {
+		if (!n) return "0B";
+		const units = ["B", "KB", "MB", "GB", "TB"];
+		let i = 0, v = n;
+		while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+		return i === 0 ? `${Math.round(v)}${units[i]}` : `${v.toFixed(1)}${units[i]}`;
+	}
+
+	let policyClientName = null;
+	async function openPolicyDialog(name) {
+		policyClientName = name;
+		document.getElementById("policy-dialog-title").textContent = `Manage Restrictions — ${name}`;
+		document.getElementById("policy-form").reset();
+		document.getElementById("policy-usage-note").textContent = "";
+		const dlg = document.getElementById("policy-dialog");
+		dlg.showModal();
+		try {
+			const data = await apiFetch(`/api/clients/${encodeURIComponent(name)}/policy`);
+			populateCountrySelect(document.getElementById("policy-country"), data.policy.country);
+			const allowedOs = data.policy.allowed_os || [];
+			document.querySelectorAll(".policy-os-check").forEach(cb => { cb.checked = allowedOs.includes(cb.value); });
+			document.getElementById("policy-bandwidth").value = data.policy.bandwidth_weekly_gb ?? "";
+			if (data.policy.bandwidth_weekly_gb) {
+				const used = data.usage.bytes_used || 0;
+				const quota = data.policy.bandwidth_weekly_gb;
+				document.getElementById("policy-usage-note").textContent =
+					`Used this week (as of last disconnect, not live): ${humanBytes(used)} / ${quota} GB`;
+			}
+		} catch (e) {
+			toast(e.message, "error");
+			dlg.close();
+		}
+	}
+	window.openPolicyDialog = openPolicyDialog;
+	document.getElementById("policy-dialog-cancel").addEventListener("click", () => document.getElementById("policy-dialog").close());
+	document.getElementById("policy-form").addEventListener("submit", async (ev) => {
+		ev.preventDefault();
+		const countryCode = document.getElementById("policy-country").value || null;
+		const allowedOs = [...document.querySelectorAll(".policy-os-check:checked")].map(cb => cb.value);
+		const bwRaw = document.getElementById("policy-bandwidth").value.trim();
+		const submitBtn = document.getElementById("policy-submit");
+		submitBtn.disabled = true;
+		try {
+			await apiFetch(`/api/clients/${encodeURIComponent(policyClientName)}/policy`, {
+				method: "PUT",
+				body: {
+					country: countryCode,
+					allowed_os: allowedOs,
+					bandwidth_weekly_gb: bwRaw ? Number(bwRaw) : null,
+				},
+			});
+			document.getElementById("policy-dialog").close();
+			toast("Restrictions updated.", "success");
 		} catch (e) {
 			toast(e.message, "error");
 		} finally {

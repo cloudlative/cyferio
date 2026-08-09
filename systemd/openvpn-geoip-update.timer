@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly GeoLite2-Country database refresh for OpenVPN Toolkit
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+RandomizedDelaySec=1800
+Unit=openvpn-geoip-update.service
+
+[Install]
+WantedBy=timers.target
