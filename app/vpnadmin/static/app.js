@@ -152,10 +152,18 @@ function renderDonutChart(mountEl, entries, { size = 220, thickness = 34 } = {})
 	const arcs = entries.map((e, i) => {
 		const fraction = e.value / total;
 		const dash = fraction * circumference;
+		// Rotation to start segments at 12 o'clock comes from CSS
+		// (.donut-segment { transform: rotate(-90deg) }), not an SVG
+		// "transform" attribute here -- mixing a presentation-attribute
+		// transform with the CSS `transition: transform` on this class is
+		// a known Chromium paint bug where the segment can silently fail
+		// to render after an innerHTML swap until something forces a
+		// style recalc. transform-origin is fixed at the shape's own
+		// center via CSS custom property since size/cx/cy vary per call.
 		const circle = `<circle class="donut-segment" cx="${cx}" cy="${cy}" r="${r}" fill="none"
 			stroke="${CHART_COLORS[i % CHART_COLORS.length]}" stroke-width="${thickness}"
 			stroke-dasharray="${dash} ${circumference - dash}"
-			stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})">
+			stroke-dashoffset="${-offset}" style="transform-origin:${cx}px ${cy}px">
 			<title>${escapeHtml(e.label)}: ${e.value} (${(fraction * 100).toFixed(1)}%)</title>
 		</circle>`;
 		offset += dash;

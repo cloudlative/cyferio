@@ -301,12 +301,16 @@ function renderActivityBreakdown(entries) {
 		return seg;
 	});
 
+	// Rotation to start segments at 12 o'clock comes from CSS
+	// (.donut-segment { transform: rotate(-90deg) }), not an SVG "transform"
+	// attribute here -- see style.css for why (a Chromium paint bug where
+	// mixing a presentation-attribute transform with `transition: transform`
+	// can make the segment silently fail to render).
 	const donut = segments.filter(s => s.count > 0).map(s => `
 		<circle class="donut-segment" cx="70" cy="70" r="${r}" stroke="${CATEGORY_META[s.key].color}"
 			stroke-width="16" fill="none"
 			stroke-dasharray="${s.dash} ${circumference - s.dash}"
-			stroke-dashoffset="${s.dashoffset}"
-			transform="rotate(-90 70 70)">
+			stroke-dashoffset="${s.dashoffset}">
 			<title>${escapeHtml(CATEGORY_META[s.key].label)}: ${s.count} (${Math.round(s.pct * 100)}%)</title>
 		</circle>`).join("");
 

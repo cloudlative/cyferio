@@ -550,8 +550,18 @@ a.team-card:hover .stat-hint { opacity: 1; }
    value the donut encodes visually is also plain text here. */
 .donut-layout { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 4px; }
 .donut-chart { width: 84px; height: 84px; flex: none; }
-.donut-segment { transition: opacity 0.15s ease, transform 0.15s ease; transform-box: fill-box; transform-origin: center; cursor: pointer; }
-.donut-segment:hover { opacity: 0.82; transform: scale(1.035); }
+/* Rotation is applied here in CSS, not as an SVG "transform" attribute on
+   the <circle> -- mixing a presentation-attribute transform with a CSS
+   `transition: transform` (as this previously did) is a known Chromium
+   paint bug: the segment can silently fail to render on first paint after
+   an innerHTML swap (which happens on every periodic dashboard refresh)
+   until something forces a style recalc. Keeping the whole transform
+   CSS-driven from the start avoids the attribute/CSS-transition conflict,
+   and lets the hover scale compose with the base rotation instead of
+   replacing it (a CSS `transform` overrides the attribute entirely, it
+   doesn't combine with it). */
+.donut-segment { transition: opacity 0.15s ease; transform: rotate(-90deg); transform-origin: 70px 70px; cursor: pointer; }
+.donut-segment:hover { opacity: 0.82; transform: rotate(-90deg) scale(1.035); }
 .donut-center-value { font-size: 1.1rem; font-weight: 800; fill: var(--text); font-family: inherit; }
 .donut-center-label { font-size: 0.42rem; fill: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-family: inherit; }
 .donut-legend { flex: 1; min-width: 170px; max-width: 320px; font-size: 0.83rem; }
