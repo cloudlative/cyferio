@@ -93,13 +93,8 @@ class Settings:
 
 settings = Settings()
 
-
-def apply_branding_globals(templates) -> None:
-    """Registers the branding settings as Jinja2 globals on a
-    Jinja2Templates instance. There are two separate Jinja2Templates
-    instances in this app (routes/pages.py and routes/auth.py each create
-    their own) so every template -- including login.html, rendered only by
-    the auth router -- needs this applied, not just one of them."""
-    templates.env.globals["APP_NAME"] = settings.APP_NAME
-    templates.env.globals["APP_TAGLINE"] = settings.APP_TAGLINE
-    templates.env.globals["APP_FOOTER_CREDIT"] = settings.APP_FOOTER_CREDIT
+# Note: branding/SMTP/security values above are now only the seed/fallback
+# defaults -- the admin-editable, DB-backed source of truth (once anything's
+# been changed via the Settings page) lives in app_settings.py, which is
+# what templates/mailer.py/auth.py actually read at runtime. See that
+# module's docstring for the full env-var -> DB -> in-process-cache layering.

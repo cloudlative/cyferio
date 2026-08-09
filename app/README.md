@@ -32,8 +32,9 @@ Everything the CLI can do, plus more:
 - Self-service profile page (click your username in the sidebar): any user can set their own name/gender/teams and change their own password
 - Teams are a real, many-to-many resource: a user can belong to several teams at once, assignable from the Users page, the Teams page's per-team add/remove-member controls, or the profile page; a team can only be deleted once it has no members; the Teams page shows a summary (team/assigned/unassigned counts) plus per-team member management
 - Admin user management: edit any user's role, profile fields, and reset their password (account creation date is immutable); soft-delete/restore accounts (deleted users are recoverable, never silently gone, unless permanently deleted)
-- Configurable branding (app name / tagline / footer credit) via environment variables -- see `.env.example`
-- Every add/revoke/user-management/team/email action is written to an audit log (who, when, what, success/failure)
+- Team pickers everywhere (add-user, edit-user, profile) are a closed-by-default dropdown multiselect, not a giant always-open checkbox list
+- **Settings page** (admin-only, `/settings`): branding, SMTP, security (minimum password length, session timeout), and audit-log-retention are all editable at runtime from the UI, stored in the database, and take effect immediately app-wide -- no `.env` edit or restart needed. Environment variables (see `.env.example`) remain the seed/fallback default for anything never touched on this page. Includes a "Send Test Email" action that dry-runs whatever SMTP values are currently in the form (not necessarily saved yet) against a destination address, without persisting anything
+- Every add/revoke/user-management/team/email/settings action is written to an audit log (who, when, what, success/failure)
 
 ## Architecture
 
@@ -108,11 +109,12 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
-101 tests, none of which require a real OpenVPN install or root — the CLI
+123 tests, none of which require a real OpenVPN install or root — the CLI
 wrapper tests monkeypatch `subprocess.run` and assert on the exact argument
 lists constructed (including an explicit injection-safety test); the auth/
-role/DB tests run against an in-memory SQLite database; the .ovpn/email
-tests monkeypatch `cli_wrapper`/`mailer` directly.
+role/DB tests run against an in-memory SQLite database; the .ovpn/email and
+Settings-page tests monkeypatch `cli_wrapper`/`mailer` directly (including a
+simulated SMTP failure for the test-email path).
 
 ## What this app deliberately does NOT expose
 

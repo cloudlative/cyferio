@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
+from .. import app_settings
 from ..audit import log_action
 from ..auth import hash_password, require_admin, require_user, verify_password
 from ..db import get_db
@@ -13,8 +14,13 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 
 def _valid_password(v: str) -> str:
-    if len(v) < 8:
-        raise ValueError("Password must be at least 8 characters.")
+    # Minimum length is admin-configurable (Settings page -> Security);
+    # read live off the runtime cache rather than a hardcoded 8, so a
+    # changed policy applies to the very next request, not just after a
+    # restart. See app_settings.py.
+    min_len = app_settings.runtime.min_password_length
+    if len(v) < min_len:
+        raise ValueError(f"Password must be at least {min_len} characters.")
     return v
 
 

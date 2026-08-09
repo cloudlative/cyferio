@@ -3,14 +3,14 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from ..app_settings import apply_settings_globals
 from ..auth import get_current_user, login_user, logout_user, verify_password
-from ..config import apply_branding_globals
 from ..db import get_db
 from ..models import User
 
 router = APIRouter()
 templates = Jinja2Templates(directory="vpnadmin/templates")
-apply_branding_globals(templates)
+apply_settings_globals(templates)
 
 
 @router.get("/login")

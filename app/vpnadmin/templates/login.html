@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Log In — {{ APP_NAME }}{% endblock %}
+{% block title %}Log In — {{ app_settings.app_name }}{% endblock %}
 {% block content %}
 <div class="login-page">
 	<div class="login-box">
 		<div class="login-brand">
 			<div class="login-logo">⚡</div>
-			<h1>{{ APP_NAME }}</h1>
-			<p class="login-tagline">{{ APP_TAGLINE }}</p>
+			<h1>{{ app_settings.app_name }}</h1>
+			<p class="login-tagline">{{ app_settings.app_tagline }}</p>
 		</div>
 		{% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
 		<form method="post" action="/login">

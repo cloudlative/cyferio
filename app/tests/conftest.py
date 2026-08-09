@@ -28,6 +28,38 @@ from vpnadmin.models import Role, User
 
 
 @pytest.fixture(autouse=True)
+def _reset_runtime_settings():
+    """app_settings.runtime is a module-level singleton (see app_settings.py)
+    mutated in place by refresh_runtime_cache() -- including via the real
+    lifespan startup every app_client fixture triggers, and directly by the
+    Settings API routes during tests that exercise them. Reset it to pure
+    env-var defaults before and after every test so a settings change made
+    in one test can never leak into an unrelated one, regardless of
+    whichever DB/connection-pool path happened to touch it."""
+    from vpnadmin import app_settings
+    from vpnadmin.config import settings as env_settings
+
+    def _reset():
+        r = app_settings.runtime
+        r.app_name = env_settings.APP_NAME
+        r.app_tagline = env_settings.APP_TAGLINE
+        r.app_footer_credit = env_settings.APP_FOOTER_CREDIT
+        r.smtp_host = env_settings.SMTP_HOST
+        r.smtp_port = env_settings.SMTP_PORT
+        r.smtp_username = env_settings.SMTP_USERNAME
+        r.smtp_password = env_settings.SMTP_PASSWORD
+        r.smtp_from = env_settings.SMTP_FROM
+        r.smtp_use_tls = env_settings.SMTP_USE_TLS
+        r.min_password_length = 8
+        r.session_timeout_minutes = max(1, env_settings.SESSION_MAX_AGE_SECONDS // 60)
+        r.audit_retention_days = None
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
 def _clear_cli_wrapper_cache():
     """cli_wrapper caches read-only script results for a few seconds (see
     its own docstring) to avoid redundant subprocess spawns in production.

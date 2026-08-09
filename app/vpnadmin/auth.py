@@ -11,6 +11,7 @@ import bcrypt
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from . import app_settings
 from .config import settings
 from .db import get_db
 from .models import Role, User
@@ -88,6 +89,27 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | 
     user = db.get(User, user_id)
     if user is None or not user.is_active or user.deleted:
         return None
+
+    # Session-timeout enforcement (Settings page -> session_timeout_minutes,
+    # see app_settings.py). Deliberately enforced here at the application
+    # level -- based on time since last activity, checked/refreshed on
+    # every request -- rather than by trying to change SessionMiddleware's
+    # cookie max_age at runtime, which is fixed at process startup and
+    # would need a full restart to pick up a new value. This approach also
+    # gives a sliding (not fixed) session: any activity resets the clock,
+    # matching how "session timeout" is understood in most admin tools.
+    last_activity_iso = request.session.get("last_activity")
+    now = datetime.now(timezone.utc)
+    if last_activity_iso is not None:
+        try:
+            last_activity = datetime.fromisoformat(last_activity_iso)
+        except ValueError:
+            last_activity = now  # malformed value -- don't hard-lock the user out over it
+        elapsed_minutes = (now - last_activity).total_seconds() / 60
+        if elapsed_minutes > app_settings.runtime.session_timeout_minutes:
+            request.session.clear()
+            return None
+    request.session["last_activity"] = now.isoformat()
     return user
 
 

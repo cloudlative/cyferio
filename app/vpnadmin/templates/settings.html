@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}Settings — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">Settings</h1></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Admin-only. Changes apply immediately, app-wide -- no restart or redeploy needed.</p>
+
+<form id="settings-form">
+	<div class="card">
+		<h2>Branding</h2>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-app-name">App Name</label>
+				<input type="text" id="s-app-name" maxlength="128" placeholder="OpenVPN Toolkit">
+			</div>
+			<div class="field">
+				<label for="s-app-tagline">Login Tagline</label>
+				<input type="text" id="s-app-tagline" maxlength="256" placeholder="Sign in to manage clients, MACs &amp; live status">
+			</div>
+			<div class="field">
+				<label for="s-app-footer">Sidebar Footer Credit <span class="muted">(optional)</span></label>
+				<input type="text" id="s-app-footer" maxlength="256" placeholder="e.g. Operated by Example Corp">
+			</div>
+		</div>
+	</div>
+
+	<div class="card">
+		<h2>Outbound Email (SMTP)</h2>
+		<p class="muted" style="margin-top:0">Used to email VPN client .ovpn profiles. Leave the host blank to keep this feature disabled.</p>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-smtp-host">SMTP Host</label>
+				<input type="text" id="s-smtp-host" placeholder="smtp.example.com">
+			</div>
+			<div class="field">
+				<label for="s-smtp-port">SMTP Port</label>
+				<input type="text" id="s-smtp-port" inputmode="numeric" placeholder="587">
+			</div>
+			<div class="field">
+				<label for="s-smtp-username">SMTP Username</label>
+				<input type="text" id="s-smtp-username" placeholder="e.g. apikey or a full email address">
+			</div>
+			<div class="field">
+				<label for="s-smtp-password">SMTP Password</label>
+				<input type="password" id="s-smtp-password" placeholder="Leave as-is to keep the current password" autocomplete="new-password">
+			</div>
+			<div class="field">
+				<label for="s-smtp-from">From Address</label>
+				<input type="email" id="s-smtp-from" placeholder="vpn@example.com">
+			</div>
+			<div class="field">
+				<label for="s-smtp-tls">Connection Security</label>
+				<select id="s-smtp-tls">
+					<option value="true">Use STARTTLS</option>
+					<option value="false">No TLS (not recommended)</option>
+				</select>
+			</div>
+		</div>
+		<div class="form-row" style="margin-top:6px">
+			<button type="button" class="btn-secondary" id="smtp-test-btn">Send Test Email</button>
+			<span class="muted" id="smtp-status" style="font-size:0.85rem"></span>
+		</div>
+	</div>
+
+	<div class="card">
+		<h2>Security</h2>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-min-pw-len">Minimum Password Length</label>
+				<input type="text" id="s-min-pw-len" inputmode="numeric" placeholder="8">
+			</div>
+			<div class="field">
+				<label for="s-session-timeout">Session Timeout <span class="muted">(minutes of inactivity)</span></label>
+				<input type="text" id="s-session-timeout" inputmode="numeric" placeholder="480">
+			</div>
+		</div>
+	</div>
+
+	<div class="card">
+		<h2>Audit Log Retention</h2>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-audit-retention">Keep Audit Log Entries For <span class="muted">(days; blank or 0 = keep forever)</span></label>
+				<input type="text" id="s-audit-retention" inputmode="numeric" placeholder="Keep forever">
+			</div>
+		</div>
+		<p class="muted" style="margin-bottom:0">Pruning of older entries happens on app startup/deploy, not instantly on save.</p>
+	</div>
+
+	<div class="form-row">
+		<button type="submit" class="btn-primary">Save Settings</button>
+	</div>
+</form>
+
+<dialog id="test-email-dialog">
+	<div class="dialog-body">
+		<h2>Send Test Email</h2>
+		<form id="test-email-form">
+			<p class="muted" style="margin-top:0">Tests the SMTP settings currently in this form (even if not saved yet).</p>
+			<div class="field">
+				<label for="test-email-address">Destination Email Address</label>
+				<input type="email" id="test-email-address" required placeholder="you@example.com">
+			</div>
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" id="test-email-cancel">Cancel</button>
+				<button type="submit" class="btn-primary" id="test-email-submit">Send</button>
+			</div>
+		</form>
+	</div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function val(id) { return document.getElementById(id).value.trim(); }
+function setVal(id, v) { document.getElementById(id).value = v == null ? "" : v; }
+function intOrNull(s) {
+	if (!s) return null;
+	const n = Number(s);
+	return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+async function loadSettings() {
+	try {
+		const s = await apiFetch("/api/settings");
+		setVal("s-app-name", s.app_name);
+		setVal("s-app-tagline", s.app_tagline);
+		setVal("s-app-footer", s.app_footer_credit);
+		setVal("s-smtp-host", s.smtp_host);
+		setVal("s-smtp-port", s.smtp_port);
+		setVal("s-smtp-username", s.smtp_username);
+		setVal("s-smtp-password", s.smtp_password); // masked placeholder or empty
+		setVal("s-smtp-from", s.smtp_from);
+		document.getElementById("s-smtp-tls").value = String(!!s.smtp_use_tls);
+		setVal("s-min-pw-len", s.min_password_length);
+		setVal("s-session-timeout", s.session_timeout_minutes);
+		setVal("s-audit-retention", s.audit_retention_days);
+		document.getElementById("smtp-status").textContent = s.smtp_configured ? "Currently configured." : "Not configured -- email features are disabled.";
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+document.getElementById("settings-form").addEventListener("submit", async (ev) => {
+	ev.preventDefault();
+	const body = {
+		app_name: val("s-app-name") || null,
+		app_tagline: val("s-app-tagline") || null,
+		app_footer_credit: val("s-app-footer"),
+		smtp_host: val("s-smtp-host"),
+		smtp_port: intOrNull(val("s-smtp-port")),
+		smtp_username: val("s-smtp-username"),
+		smtp_password: document.getElementById("s-smtp-password").value, // may be the masked placeholder -- server leaves it alone in that case
+		smtp_from: val("s-smtp-from"),
+		smtp_use_tls: document.getElementById("s-smtp-tls").value === "true",
+		min_password_length: intOrNull(val("s-min-pw-len")),
+		session_timeout_minutes: intOrNull(val("s-session-timeout")),
+		audit_retention_days: intOrNull(val("s-audit-retention")),
+	};
+	try {
+		await apiFetch("/api/settings", { method: "PATCH", body });
+		toast("Settings saved.");
+		loadSettings();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+document.getElementById("smtp-test-btn").addEventListener("click", () => {
+	if (!val("s-smtp-host")) {
+		toast("Enter an SMTP host before sending a test email.", "error");
+		return;
+	}
+	document.getElementById("test-email-address").value = "";
+	document.getElementById("test-email-dialog").showModal();
+});
+document.getElementById("test-email-cancel").addEventListener("click", () => document.getElementById("test-email-dialog").close());
+document.getElementById("test-email-form").addEventListener("submit", async (ev) => {
+	ev.preventDefault();
+	const submitBtn = document.getElementById("test-email-submit");
+	submitBtn.disabled = true;
+	try {
+		const result = await apiFetch("/api/settings/smtp/test", {
+			method: "POST",
+			body: {
+				email: val("test-email-address"),
+				smtp_host: val("s-smtp-host"),
+				smtp_port: intOrNull(val("s-smtp-port")) || 587,
+				smtp_username: val("s-smtp-username"),
+				smtp_password: document.getElementById("s-smtp-password").value,
+				smtp_from: val("s-smtp-from"),
+				smtp_use_tls: document.getElementById("s-smtp-tls").value === "true",
+			},
+		});
+		toast(result.message, "success");
+		document.getElementById("test-email-dialog").close();
+	} catch (e) {
+		toast(e.message, "error");
+	} finally {
+		submitBtn.disabled = false;
+	}
+});
+
+document.getElementById("refresh-btn").addEventListener("click", loadSettings);
+loadSettings();
+</script>
+{% endblock %}

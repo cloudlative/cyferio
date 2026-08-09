@@ -2,15 +2,18 @@
 import pytest
 
 import vpnadmin.routes.clients as clients_mod
-from vpnadmin.config import settings
+from vpnadmin.app_settings import runtime as runtime_settings
 
 from .conftest import login
 
 
 @pytest.fixture(autouse=True)
 def _reset_smtp(monkeypatch):
-    monkeypatch.setattr(settings, "SMTP_HOST", "")
-    monkeypatch.setattr(settings, "SMTP_FROM", "vpn@example.com")
+    # mailer.py reads the in-process runtime settings cache (app_settings.py),
+    # not config.settings directly -- it's admin-editable via the Settings
+    # page now, seeded from config.settings only as a fallback default.
+    monkeypatch.setattr(runtime_settings, "smtp_host", "")
+    monkeypatch.setattr(runtime_settings, "smtp_from", "vpn@example.com")
 
 
 class TestShowOvpn:
@@ -46,7 +49,7 @@ class TestEmailOvpn:
         assert r.status_code == 422
 
     def test_success_path_sends_mail(self, app_client, monkeypatch):
-        monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
+        monkeypatch.setattr(runtime_settings, "smtp_host", "smtp.example.com")
         monkeypatch.setattr(clients_mod.cli, "show_ovpn", lambda name: "content")
 
         sent = {}

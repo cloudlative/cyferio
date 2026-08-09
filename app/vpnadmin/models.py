@@ -114,6 +114,44 @@ class User(Base):
         return full or self.username
 
 
+class AppSettings(Base):
+    """Runtime-editable application settings, admin-managed via the
+    Settings page (routes/settings.py) -- a single singleton row (id is
+    always 1), not a key/value table, so every setting is well-typed and
+    discoverable straight from this class rather than a stringly-typed
+    blob. Every column is nullable: NULL means "not overridden here, fall
+    back to the environment-variable default in config.py" (see
+    app_settings.py's EffectiveSettings), so a fresh install with no admin
+    ever touching this page behaves exactly as it did before this table
+    existed."""
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True)
+
+    # Branding (see config.py's APP_NAME/APP_TAGLINE/APP_FOOTER_CREDIT)
+    app_name = Column(String(128), nullable=True)
+    app_tagline = Column(String(256), nullable=True)
+    app_footer_credit = Column(String(256), nullable=True)
+
+    # Outbound email (see config.py's SMTP_* / mailer.py)
+    smtp_host = Column(String(255), nullable=True)
+    smtp_port = Column(Integer, nullable=True)
+    smtp_username = Column(String(255), nullable=True)
+    smtp_password = Column(String(255), nullable=True)
+    smtp_from = Column(String(255), nullable=True)
+    smtp_use_tls = Column(Boolean, nullable=True)
+
+    # Security
+    min_password_length = Column(Integer, nullable=True)
+    session_timeout_minutes = Column(Integer, nullable=True)
+
+    # Audit log retention -- NULL/0 means "keep forever" (no pruning).
+    audit_retention_days = Column(Integer, nullable=True)
+
+    updated_at = Column(DateTime(timezone=True), nullable=True)
+    updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
+
+
 class AuditLog(Base):
     """Records every state-changing action (add/revoke client, user
     management), for accountability -- who did what, and when. Read-only

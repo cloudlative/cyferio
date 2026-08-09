@@ -3,14 +3,14 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>{% block title %}{{ APP_NAME }}{% endblock %}</title>
+	<title>{% block title %}{{ app_settings.app_name }}{% endblock %}</title>
 	<link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="{{ 'has-sidebar' if user }}">
 	<div id="page-progress"><span class="ring"></span></div>
 	{% if user %}
 	<aside class="sidebar">
-		<a href="/" class="brand">{{ APP_NAME }}</a>
+		<a href="/" class="brand">{{ app_settings.app_name }}</a>
 		<nav>
 			<a href="/" class="{{ 'active' if request.url.path == '/' }}"><span class="nav-icon">◆</span>Dashboard</a>
 			<a href="/clients" class="{{ 'active' if request.url.path == '/clients' }}"><span class="nav-icon">◇</span>VPN Clients</a>
@@ -19,6 +19,7 @@
 			<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
 			{% if is_admin %}
 			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
+			<a href="/settings" class="{{ 'active' if request.url.path == '/settings' }}"><span class="nav-icon">⛭</span>Settings</a>
 			{% endif %}
 		</nav>
 		<div class="sidebar-footer">
@@ -31,8 +32,8 @@
 					<button type="submit" class="link-button">Log out</button>
 				</form>
 			</div>
-			{% if APP_FOOTER_CREDIT %}
-			<div class="sidebar-credit">{{ APP_FOOTER_CREDIT }}</div>
+			{% if app_settings.app_footer_credit %}
+			<div class="sidebar-credit">{{ app_settings.app_footer_credit }}</div>
 			{% endif %}
 		</div>
 	</aside>

@@ -11,10 +11,11 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from vpnadmin.app_settings import prune_audit_log, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db
-from vpnadmin.routes import auth, clients, diagnostics, pages, status, teams, users
+from vpnadmin.routes import auth, clients, diagnostics, pages, settings as settings_routes, status, teams, users
 
 
 @asynccontextmanager
@@ -24,6 +25,12 @@ async def lifespan(_app: FastAPI):
     try:
         bootstrap_admin(db)
         ensure_bootstrap_admin_flag(db)
+        # Load the DB-backed settings override (Settings page) into the
+        # in-process cache templates/mailer.py/auth.py actually read, then
+        # prune the audit log per whatever retention that config specifies.
+        # See app_settings.py's docstring for the full env->DB->cache chain.
+        refresh_runtime_cache(db)
+        prune_audit_log(db)
     finally:
         db.close()
     yield
@@ -49,6 +56,7 @@ app.include_router(status.dashboard_router)
 app.include_router(diagnostics.router)
 app.include_router(users.router)
 app.include_router(teams.router)
+app.include_router(settings_routes.router)
 
 
 @app.get("/healthz")
