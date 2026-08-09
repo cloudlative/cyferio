@@ -1,3 +1,13 @@
+# Pinned so the Compose project name stays "app" (matching what it always
+# was, back when this file lived in app/ and Compose inferred the project
+# name from the containing directory) regardless of which directory it's
+# run from now that it's at the repo root -- keeps it bound to the existing
+# `app_pgdata`/`app_traefik-acme` named volumes and the containers already
+# running under that project, instead of Compose inferring a new
+# "openvpn-toolkit" project name from the repo root's directory name and
+# trying to stand up parallel volumes/containers alongside them.
+name: app
+
 services:
   traefik:
     image: traefik:v3.5
