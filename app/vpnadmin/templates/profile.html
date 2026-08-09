@@ -57,8 +57,8 @@
 				<input type="email" id="p-email" placeholder="e.g. asif@example.com">
 			</div>
 			<div class="field">
-				<label for="p-phone">Phone</label>
-				<input type="tel" id="p-phone" placeholder="e.g. +92 300 1234567">
+				<label for="p-phone-mount">Phone</label>
+				<div id="p-phone-mount"></div>
 			</div>
 		</div>
 		<button type="submit" class="btn-primary" style="margin-top:8px">Save Profile</button>
@@ -89,6 +89,26 @@
 let myTeamIds = [];
 const isViewer = {{ "true" if user.role.value == "viewer" else "false" }};
 const teamMs = createMultiselectDropdown(document.getElementById("p-team-ms"), { placeholder: "Unassigned", disabled: isViewer });
+const profilePhone = createPhoneInput(document.getElementById("p-phone-mount"));
+
+// Mirrors routes/users.py's _valid_email/_valid_phone -- server-side is
+// still the real check, this is just real-time UX feedback (same functions
+// as users.html's Add/Edit User forms).
+function emailError(v) {
+	v = (v || "").trim();
+	if (!v) return null;
+	if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) || v.includes("..") || v.split("@")[0].startsWith(".") || v.split("@")[0].endsWith(".")) {
+		return "That doesn't look like a valid email address.";
+	}
+	return null;
+}
+function phoneError(combined) {
+	if (!combined) return null;
+	if (!/^\+\d{7,15}$/.test(combined)) return "Enter a valid phone number: pick a country code and enter 7-15 digits.";
+	return null;
+}
+const pEmailValidation = attachInlineValidation(document.getElementById("p-email"), emailError);
+const pPhoneValidation = attachInlineValidation(profilePhone.getLocalInputEl(), () => phoneError(profilePhone.getValue()));
 
 async function loadTeamOptions() {
 	try {
@@ -119,7 +139,7 @@ async function loadProfile() {
 		document.getElementById("p-last").value = me.last_name || "";
 		document.getElementById("p-gender").value = me.gender || "unspecified";
 		document.getElementById("p-email").value = me.email || "";
-		document.getElementById("p-phone").value = me.phone || "";
+		profilePhone.setValue(me.phone || "");
 		myTeamIds = me.team_ids || [];
 		await loadTeamOptions();
 		updateDisplayedIdentity(me);
@@ -132,6 +152,10 @@ document.getElementById("profile-form").addEventListener("submit", async (ev) =>
 	ev.preventDefault();
 	const firstName = document.getElementById("p-first").value.trim();
 	if (!firstName) { toast("First Name is required.", "error"); return; }
+	if (!pEmailValidation.check() || !pPhoneValidation.check()) {
+		toast("Please fix the highlighted field(s) before saving.", "error");
+		return;
+	}
 	try {
 		const updated = await apiFetch("/api/users/me", {
 			method: "PATCH",
@@ -140,7 +164,7 @@ document.getElementById("profile-form").addEventListener("submit", async (ev) =>
 				last_name: document.getElementById("p-last").value.trim() || null,
 				gender: document.getElementById("p-gender").value,
 				email: document.getElementById("p-email").value.trim(),
-				phone: document.getElementById("p-phone").value.trim(),
+				phone: profilePhone.getValue(),
 				team_ids: teamMs.getSelected(),
 			},
 		});

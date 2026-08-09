@@ -45,8 +45,8 @@
 				<input type="email" id="u-email" placeholder="e.g. asif@example.com">
 			</div>
 			<div class="field">
-				<label for="u-phone">Phone <span class="muted">(optional)</span></label>
-				<input type="tel" id="u-phone" placeholder="e.g. +92 300 1234567">
+				<label for="u-phone-mount">Phone <span class="muted">(optional)</span></label>
+				<div id="u-phone-mount"></div>
 			</div>
 		</div>
 		<div class="form-row" style="margin-top:16px">
@@ -96,7 +96,7 @@
 			</div>
 			<div class="form-row" style="margin-top:14px">
 				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email"></div>
-				<div class="field"><label for="e-phone">Phone</label><input type="tel" id="e-phone"></div>
+				<div class="field"><label for="e-phone-mount">Phone</label><div id="e-phone-mount"></div></div>
 			</div>
 			<fieldset style="margin-top:16px">
 				<legend>Access</legend>
@@ -149,6 +149,31 @@ function fmtDate(iso) {
 
 const addTeamMs = createMultiselectDropdown(document.getElementById("u-team-ms"), { placeholder: "Unassigned" });
 const editTeamMs = createMultiselectDropdown(document.getElementById("e-team-ms"), { placeholder: "Unassigned" });
+
+const addPhone = createPhoneInput(document.getElementById("u-phone-mount"));
+const editPhone = createPhoneInput(document.getElementById("e-phone-mount"));
+
+// Server-side validators are the real check (see routes/users.py's
+// _valid_email/_valid_phone) -- these mirror the same rules purely for
+// real-time UX feedback.
+function emailError(v) {
+	v = (v || "").trim();
+	if (!v) return null;
+	if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) || v.includes("..") || v.split("@")[0].startsWith(".") || v.split("@")[0].endsWith(".")) {
+		return "That doesn't look like a valid email address.";
+	}
+	return null;
+}
+function phoneError(combined) {
+	if (!combined) return null;
+	if (!/^\+\d{7,15}$/.test(combined)) return "Enter a valid phone number: pick a country code and enter 7-15 digits.";
+	return null;
+}
+
+const uEmailValidation = attachInlineValidation(document.getElementById("u-email"), emailError);
+const eEmailValidation = attachInlineValidation(document.getElementById("e-email"), emailError);
+const uPhoneValidation = attachInlineValidation(addPhone.getLocalInputEl(), () => phoneError(addPhone.getValue()));
+const ePhoneValidation = attachInlineValidation(editPhone.getLocalInputEl(), () => phoneError(editPhone.getValue()));
 
 async function loadTeamOptions() {
 	try {
@@ -289,7 +314,7 @@ function openEdit(u) {
 	document.getElementById("e-last").value = u.last_name || "";
 	document.getElementById("e-gender").value = u.gender || "unspecified";
 	document.getElementById("e-email").value = u.email || "";
-	document.getElementById("e-phone").value = u.phone || "";
+	editPhone.setValue(u.phone || "");
 	editTeamMs.setSelected(u.team_ids);
 	document.getElementById("e-role").value = u.role;
 	document.getElementById("e-active").value = String(u.is_active);
@@ -310,12 +335,16 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
 	const firstName = document.getElementById("e-first").value.trim();
 	if (!firstName) { toast("First Name is required.", "error"); return; }
+	if (!eEmailValidation.check() || !ePhoneValidation.check()) {
+		toast("Please fix the highlighted field(s) before saving.", "error");
+		return;
+	}
 	const body = {
 		first_name: firstName,
 		last_name: document.getElementById("e-last").value.trim() || null,
 		gender: document.getElementById("e-gender").value,
 		email: document.getElementById("e-email").value.trim(),
-		phone: document.getElementById("e-phone").value.trim(),
+		phone: editPhone.getValue(),
 		team_ids: editTeamMs.getSelected(),
 	};
 	if (!editingUserIsBootstrapAdmin) {
@@ -345,6 +374,10 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 	const role = document.getElementById("u-role").value;
 	const firstName = document.getElementById("u-first").value.trim();
 	if (!firstName) { toast("First Name is required.", "error"); return; }
+	if (!uEmailValidation.check() || !uPhoneValidation.check()) {
+		toast("Please fix the highlighted field(s) before submitting.", "error");
+		return;
+	}
 	try {
 		await apiFetch("/api/users", {
 			method: "POST",
@@ -353,13 +386,14 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				first_name: firstName,
 				last_name: document.getElementById("u-last").value.trim() || null,
 				email: document.getElementById("u-email").value.trim() || null,
-				phone: document.getElementById("u-phone").value.trim() || null,
+				phone: addPhone.getValue() || null,
 				team_ids: addTeamMs.getSelected(),
 			},
 		});
 		toast(`User '${username}' created.`);
 		document.getElementById("add-user-form").reset();
 		addTeamMs.reset();
+		addPhone.reset();
 		loadUsers();
 	} catch (e) {
 		toast(e.message, "error");
@@ -369,6 +403,7 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 document.getElementById("add-user-clear").addEventListener("click", () => {
 	document.getElementById("add-user-form").reset();
 	addTeamMs.reset();
+	addPhone.reset();
 });
 
 document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); loadTeamOptions(); });
