@@ -36,9 +36,25 @@ elif [[ -e /etc/fedora-release ]]; then
 	os="fedora"
 	os_version=$(grep -oE '[0-9]+' /etc/fedora-release | head -1)
 	group_name="nobody"
+elif [[ -e /etc/alpine-release ]]; then
+	# Not a real target for the interactive installer/OS-package-setup
+	# flow below (which this branch deliberately never reaches -- see
+	# app/Dockerfile) -- this is the openvpn-toolkit web app's own
+	# container, which only ever invokes this script's client/MAC
+	# management subcommands (--add, --add-mac, --lint-db, etc.) against
+	# an OpenVPN server that's already installed and running on the real
+	# (Debian/Ubuntu) host, via the bind-mounted /etc/openvpn. group_name
+	# matches "nogroup" (the Debian/Ubuntu convention, group_name's other
+	# two settings above) rather than "nobody" (centos/fedora) because the
+	# actual host these files live on in practice is Debian/Ubuntu -- see
+	# do_revoke_client's crl.pem chown, the one place this container path
+	# actually uses $group_name at runtime.
+	os="alpine"
+	os_version=$(cat /etc/alpine-release 2>/dev/null | tr -d '.')
+	group_name="nogroup"
 else
 	echo "This installer seems to be running on an unsupported distribution.
-Supported distros are Ubuntu, Debian, AlmaLinux, Rocky Linux, CentOS and Fedora."
+Supported distros are Ubuntu, Debian, AlmaLinux, Rocky Linux, CentOS, Fedora, and Alpine (web app container only)."
 	exit
 fi
 
