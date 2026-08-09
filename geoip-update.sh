@@ -63,7 +63,11 @@ download_url="https://download.maxmind.com/app/geoip_download?edition_id=GeoLite
 archive="$tmp_dir/GeoLite2-Country.tar.gz"
 
 if command -v curl >/dev/null 2>&1; then
-	http_status=$(curl -sS -w '%{http_code}' -o "$archive" "$download_url")
+	# -L: MaxMind's download endpoint issues a 302 redirect to the actual
+	# file location -- without follow-redirects, curl reports the
+	# redirect's own 302 status and writes its (non-archive) body to
+	# $archive instead of the real .tar.gz, which then fails to extract.
+	http_status=$(curl -sS -L -w '%{http_code}' -o "$archive" "$download_url")
 elif command -v wget >/dev/null 2>&1; then
 	wget -q -O "$archive" "$download_url" && http_status=200 || http_status=000
 else
