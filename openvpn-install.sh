@@ -41,7 +41,7 @@ elif [[ -e /etc/alpine-release ]]; then
 	# flow below (which this branch deliberately never reaches -- see
 	# app/Dockerfile) -- this is the openvpn-toolkit web app's own
 	# container, which only ever invokes this script's client/MAC
-	# management subcommands (--add, --add-mac, --lint-db, etc.) against
+	# management subcommands (--add-user, --add-mac, --lint-mac-db, etc.) against
 	# an OpenVPN server that's already installed and running on the real
 	# (Debian/Ubuntu) host, via the bind-mounted /etc/openvpn. group_name
 	# matches "nogroup" (the Debian/Ubuntu convention, group_name's other
@@ -357,7 +357,7 @@ do_purge_revoked () {
 	fi
 	is_revoked=$(tail -n +2 "$EASYRSA_DIR/pki/index.txt" 2>/dev/null | awk -F'\t' -v n="/CN=$name" '$1=="R" && $6==n {print "yes"; exit}')
 	if [[ "$is_revoked" != "yes" ]]; then
-		echo "$name: not a revoked client -- nothing to purge (use --revoke first)." >&2
+		echo "$name: not a revoked client -- nothing to purge (use --revoke-user first)." >&2
 		return 1
 	fi
 	rm -f "$EASYRSA_DIR/pki/issued/$name.crt" "$EASYRSA_DIR/pki/private/$name.key" "$EASYRSA_DIR/pki/reqs/$name.req" "$OVPN_OUTPUT_DIR/$name.ovpn"
@@ -475,7 +475,7 @@ do_add_mac () {
 		return 1
 	fi
 	if [[ ! -e "$EASYRSA_DIR/pki/issued/$name.crt" ]]; then
-		echo "$name: no such client (no valid certificate). Use --add to create a new client." >&2
+		echo "$name: no such client (no valid certificate). Use --add-user to create a new client." >&2
 		return 1
 	fi
 	if [[ -z "$raw_mac" ]]; then
@@ -506,7 +506,7 @@ do_remove_mac () {
 	# Usage: do_remove_mac <name> <mac>
 	# Removes one specific MAC registration for a client, leaving any other
 	# MACs they have registered (and their certificate) untouched. Use
-	# --revoke instead to remove a client entirely.
+	# --revoke-user instead to remove a client entirely.
 	local name="$1" raw_mac="$2" mac
 	if [[ -z "$name" ]]; then
 		echo "Client name required." >&2
@@ -602,7 +602,7 @@ do_list_revoked () {
 			name="${name#/CN=}"
 			local stale_col files_col
 			if grep -q "^${name}=" "$DB_FILE" 2>/dev/null; then
-				stale_col="yes -- consider removing (see --check)"
+				stale_col="yes -- consider removing (see --check-certs)"
 			else
 				stale_col="no"
 			fi
@@ -744,26 +744,26 @@ print_usage () {
 	With no command, runs the interactive installer/menu.
 
 	Commands:
-	  --add NAME MAC   Add a new client non-interactively (MAC in any common
-	                   separator style/case -- normalized automatically)
-	  --revoke NAME    Revoke an existing client
-	  --list           List valid clients and their MAC-db registration status
-	  --list-revoked   List revoked clients, when revoked, and any stale db entries
-	  --macs NAME      List every MAC address registered for one client
+	  --add-user NAME MAC    Add a new client non-interactively (MAC in any common
+	                         separator style/case -- normalized automatically)
+	  --revoke-user NAME     Revoke an existing client
+	  --list-users           List valid clients and their MAC-db registration status
+	  --list-revoked-users   List revoked clients, when revoked, and any stale db entries
+	  --macs NAME            List every MAC address registered for one client
 	  --add-mac NAME MAC     Register an additional device MAC for an existing client
 	  --remove-mac NAME MAC  Remove one specific MAC registration (client keeps its cert)
 	  --show-ovpn NAME       Print an existing client's .ovpn config to stdout
 	  --purge-revoked NAME   Permanently delete a revoked client's leftover PKI/.ovpn files
 	  --restore NAME MAC     Reissue a brand-new cert under a revoked client's name
 	                         (NOT un-revoking the old cert -- see --help output below)
-	  --check          Cross-check PKI valid certs against $DB_FILE for orphans
-	  --lint-db        Validate $DB_FILE formatting and trailing-newline health
-	  --help           Show this help
+	  --check-certs          Cross-check PKI valid certs against $DB_FILE for orphans
+	  --lint-mac-db          Validate $DB_FILE formatting and trailing-newline health
+	  --help                 Show this help
 
-	--json can be combined with --list, --list-revoked, --macs, --check, or
-	--lint-db to print structured JSON instead of a table (order doesn't
-	matter, e.g. both "--list --json" and "--json --list" work). Not valid
-	with any other command.
+	--json can be combined with --list-users, --list-revoked-users, --macs,
+	--check-certs, or --lint-mac-db to print structured JSON instead of a
+	table (order doesn't matter, e.g. both "--list-users --json" and
+	"--json --list-users" work). Not valid with any other command.
 
 	Note on --restore: a revoked certificate cannot be un-revoked once its
 	CRL entry exists (that's how PKI revocation is supposed to work).
@@ -776,8 +776,8 @@ print_usage () {
 
 # --- Non-interactive CLI dispatch --------------------------------------------
 
-# --json can appear anywhere in the arguments ("--list --json" or
-# "--json --list" both work) -- pull it out first, leaving the rest of the
+# --json can appear anywhere in the arguments ("--list-users --json" or
+# "--json --list-users" both work) -- pull it out first, leaving the rest of the
 # arguments (the actual command) to dispatch on as before.
 json_flag=""
 _cli_args=()
@@ -792,7 +792,7 @@ set -- "${_cli_args[@]}"
 unset _a _cli_args
 
 case "${1:-}" in
-	--add|--revoke|--list|--list-revoked|--macs|--add-mac|--remove-mac|--show-ovpn|--purge-revoked|--restore|--check|--lint-db)
+	--add-user|--revoke-user|--list-users|--list-revoked-users|--macs|--add-mac|--remove-mac|--show-ovpn|--purge-revoked|--restore|--check-certs|--lint-mac-db)
 		if [[ ! -e "$OPENVPN_DIR/server.conf" ]]; then
 			echo "OpenVPN is not installed yet (no $OPENVPN_DIR/server.conf) -- run without arguments first to install." >&2
 			exit 1
@@ -802,7 +802,7 @@ esac
 
 if [[ -n "$json_flag" ]]; then
 	case "${1:-}" in
-		--list|--list-revoked|--macs|--check|--lint-db) ;;
+		--list-users|--list-revoked-users|--macs|--check-certs|--lint-mac-db) ;;
 		*)
 			echo "--json option is not allowed with this command." >&2
 			exit 1
@@ -811,19 +811,19 @@ if [[ -n "$json_flag" ]]; then
 fi
 
 case "${1:-}" in
-	--add)
+	--add-user)
 		do_add_client "$2" "$3"
 		exit $?
 		;;
-	--revoke)
+	--revoke-user)
 		do_revoke_client "$2"
 		exit $?
 		;;
-	--list)
+	--list-users)
 		do_list_clients "$json_flag"
 		exit $?
 		;;
-	--list-revoked)
+	--list-revoked-users)
 		do_list_revoked "$json_flag"
 		exit $?
 		;;
@@ -851,11 +851,11 @@ case "${1:-}" in
 		do_restore_client "$2" "$3"
 		exit $?
 		;;
-	--check)
+	--check-certs)
 		do_check_consistency "$json_flag"
 		exit $?
 		;;
-	--lint-db)
+	--lint-mac-db)
 		do_lint_db "$json_flag"
 		exit $?
 		;;

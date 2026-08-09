@@ -72,7 +72,7 @@ services:
     # app/traefik/dynamic.yml rather than labels here -- see that file's
     # comment for why.
     # openvpn-install.sh unconditionally probes /dev/net/tun at startup
-    # (even for read-only commands like --list/--check) as a sanity check
+    # (even for read-only commands like --list-users/--check-certs) as a sanity check
     # that OpenVPN could run on this host -- pass the device through rather
     # than granting --privileged.
     devices:
@@ -82,7 +82,7 @@ services:
     volumes:
       # --- REQUIRED: gives the app the same access a human running
       #     openvpn-install.sh/vpn-status.py directly on the host would
-      #     have. rw on /etc/openvpn because --add/--revoke write there
+      #     have. rw on /etc/openvpn because --add-user/--revoke-user write there
       #     (new certs, openvpn_db.txt updates); ro on the log dir since
       #     the status tool only ever reads it.
       - /etc/openvpn:/etc/openvpn

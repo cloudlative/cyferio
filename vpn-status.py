@@ -5,10 +5,10 @@ online right now, all known clients with last-seen, bandwidth usage, and
 rejected (MAC-mismatch) connection attempts.
 
 Usage:
-  python3 vpn-status.py                   Currently-connected clients
-  python3 vpn-status.py --all             All known clients (online + offline), with last-seen
-  python3 vpn-status.py --rejected [N]    Last N rejected connection attempts (default 20)
-  python3 vpn-status.py --json            Any of the above, as JSON instead of a table
+  python3 vpn-status.py                               Currently-connected clients
+  python3 vpn-status.py --all-clients                 All known clients (online + offline), with last-seen
+  python3 vpn-status.py --rejected-connections [N]    Last N rejected connection attempts (default 20)
+  python3 vpn-status.py --json                        Any of the above, as JSON instead of a table
 
 Config: reads /etc/openvpn/vpn-tools.conf if present (KEY=VALUE lines),
 falls back to the defaults below otherwise -- see vpn-tools.conf.example.
@@ -447,15 +447,15 @@ def cmd_rejected(limit, as_json):
 
 def main():
     ap = argparse.ArgumentParser(description="Inspect OpenVPN client connections.")
-    ap.add_argument("--all", action="store_true", help="Show all known clients (online + offline) with last-seen")
-    ap.add_argument("--rejected", nargs="?", const=20, type=int, metavar="N",
+    ap.add_argument("--all-clients", action="store_true", help="Show all known clients (online + offline) with last-seen")
+    ap.add_argument("--rejected-connections", nargs="?", const=20, type=int, metavar="N",
                      help="Show the last N rejected (MAC-mismatch) connection attempts (default 20)")
     ap.add_argument("--json", action="store_true", help="Output as JSON instead of a table")
     args = ap.parse_args()
 
-    if args.rejected is not None:
-        cmd_rejected(args.rejected, args.json)
-    elif args.all:
+    if args.rejected_connections is not None:
+        cmd_rejected(args.rejected_connections, args.json)
+    elif args.all_clients:
         cmd_all(args.json)
     else:
         cmd_connected(args.json)

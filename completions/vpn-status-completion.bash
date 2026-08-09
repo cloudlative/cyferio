@@ -9,7 +9,7 @@
 # every *other* Python script you run that way too. To get completion when
 # invoking it as `python3 vpn-status.py ...`, either run it directly
 # (it's executable and has a #!/usr/bin/env python3 shebang -- `./vpn-status.py
-# --all` works as-is), or add a shell alias/function named exactly
+# --all-clients` works as-is), or add a shell alias/function named exactly
 # `vpn-status.py` that wraps the python3 invocation, e.g. in ~/.bashrc:
 #   vpn-status.py() { python3 /path/to/vpn-status.py "$@"; }
 # Completion is looked up by the literal first word you type, so either
@@ -19,7 +19,7 @@ _vpn_status_completions() {
 	local cur opts
 	COMPREPLY=()
 	cur="${COMP_WORDS[COMP_CWORD]}"
-	opts="--all --rejected --json --help"
+	opts="--all-clients --rejected-connections --json --help"
 	COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
 	return 0
 }

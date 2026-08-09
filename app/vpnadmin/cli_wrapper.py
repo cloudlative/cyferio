@@ -100,8 +100,8 @@ def _run_status_script(*args: str) -> subprocess.CompletedProcess:
 
 
 def _parse_json_or_raise(proc: subprocess.CompletedProcess, *, allow_nonzero_json: bool = False):
-    """Most read-only --json commands print valid JSON on success. --check,
-    --lint-db, and --macs intentionally exit 1 (with still-valid JSON) when
+    """Most read-only --json commands print valid JSON on success. --check-certs,
+    --lint-mac-db, and --macs intentionally exit 1 (with still-valid JSON) when
     they find issues / an empty result -- that's informative output, not a
     failed call, so callers for those pass allow_nonzero_json=True."""
     if proc.returncode != 0 and not allow_nonzero_json:
@@ -122,12 +122,12 @@ def _parse_json_or_raise(proc: subprocess.CompletedProcess, *, allow_nonzero_jso
 
 def list_clients() -> list[dict]:
     return _cached(("list_clients",), lambda:
-        _parse_json_or_raise(_run_install_script("--list", "--json")))
+        _parse_json_or_raise(_run_install_script("--list-users", "--json")))
 
 
 def list_revoked() -> list[dict]:
     return _cached(("list_revoked",), lambda:
-        _parse_json_or_raise(_run_install_script("--list-revoked", "--json")))
+        _parse_json_or_raise(_run_install_script("--list-revoked-users", "--json")))
 
 
 def list_macs(name: str) -> dict:
@@ -171,22 +171,22 @@ def _invalidate_client_caches(name: str) -> None:
 
 def check_consistency() -> dict:
     return _cached(("check_consistency",), lambda:
-        _parse_json_or_raise(_run_install_script("--check", "--json"), allow_nonzero_json=True))
+        _parse_json_or_raise(_run_install_script("--check-certs", "--json"), allow_nonzero_json=True))
 
 
 def lint_db() -> dict:
     return _cached(("lint_db",), lambda:
-        _parse_json_or_raise(_run_install_script("--lint-db", "--json"), allow_nonzero_json=True))
+        _parse_json_or_raise(_run_install_script("--lint-mac-db", "--json"), allow_nonzero_json=True))
 
 
 def add_client(name: str, mac: str) -> str:
-    """Returns the script's plain-text confirmation on success. --add has
+    """Returns the script's plain-text confirmation on success. --add-user has
     no --json support by design (see openvpn-install.sh --help) -- it's a
     mutating action best surfaced with its real stdout, not silently
     swallowed. Raises ScriptError with the script's own stderr message on
     failure (bad name, bad MAC, duplicate client, etc.) -- already
     human-readable, written for exactly this purpose."""
-    proc = _run_install_script("--add", name, mac)
+    proc = _run_install_script("--add-user", name, mac)
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to add client",
@@ -197,7 +197,7 @@ def add_client(name: str, mac: str) -> str:
 
 
 def revoke_client(name: str) -> str:
-    proc = _run_install_script("--revoke", name)
+    proc = _run_install_script("--revoke-user", name)
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to revoke client",
@@ -257,12 +257,12 @@ def status_connected() -> list[dict]:
 
 def status_all() -> list[dict]:
     return _cached(("status_all",), lambda:
-        _parse_json_or_raise(_run_status_script("--all", "--json")))
+        _parse_json_or_raise(_run_status_script("--all-clients", "--json")))
 
 
 def status_rejected(limit: int = 20) -> list[dict]:
     return _cached(("status_rejected", limit), lambda:
-        _parse_json_or_raise(_run_status_script("--rejected", str(limit), "--json")))
+        _parse_json_or_raise(_run_status_script("--rejected-connections", str(limit), "--json")))
 
 
 # --- Combined dashboard summary ------------------------------------------
@@ -273,8 +273,8 @@ def dashboard_summary(rejected_limit: int = 20) -> dict:
     5 underlying script calls (each individually cached above), but callers
     only pay one HTTP request and one JSON parse.
 
-    Note "all_clients" (vpn-status.py --all) and "clients" (openvpn-install.sh
-    --list) are deliberately both included and are NOT interchangeable:
+    Note "all_clients" (vpn-status.py --all-clients) and "clients" (openvpn-install.sh
+    --list-users) are deliberately both included and are NOT interchangeable:
     "all_clients" carries live status/last-seen/single-MAC-in-use info,
     while "clients" carries MAC-*db* registration counts (mac_count,
     in_db) -- a dashboard stat about "how many MACs are registered" must

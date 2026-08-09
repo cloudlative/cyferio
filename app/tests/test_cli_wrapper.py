@@ -35,7 +35,7 @@ class TestArgumentConstruction:
 
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.list_clients()
-        assert seen["args"] == ["sudo", "-n", "bash", "/fake/openvpn-install.sh", "--list", "--json"]
+        assert seen["args"] == ["sudo", "-n", "bash", "/fake/openvpn-install.sh", "--list-users", "--json"]
 
     def test_add_client_args(self, monkeypatch):
         seen = {}
@@ -47,7 +47,7 @@ class TestArgumentConstruction:
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.add_client("alice", "aa:bb:cc:dd:ee:ff")
         assert seen["args"] == [
-            "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--add", "alice", "aa:bb:cc:dd:ee:ff",
+            "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--add-user", "alice", "aa:bb:cc:dd:ee:ff",
         ]
 
     def test_status_rejected_args_include_limit(self, monkeypatch):
@@ -60,7 +60,7 @@ class TestArgumentConstruction:
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.status_rejected(limit=42)
         assert seen["args"] == [
-            "sudo", "-n", "python3", "/fake/vpn-status.py", "--rejected", "42", "--json",
+            "sudo", "-n", "python3", "/fake/vpn-status.py", "--rejected-connections", "42", "--json",
         ]
 
     def test_no_sudo_when_use_sudo_false(self, monkeypatch):
@@ -206,7 +206,7 @@ class TestCaching:
 
         def fake_run(args, **kwargs):
             calls["n"] += 1
-            if "--add" in args:
+            if "--add-user" in args:
                 return _completed(args, 0, "alice added.")
             return _completed(args, 0, "[]")
 

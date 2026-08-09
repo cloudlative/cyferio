@@ -20,7 +20,7 @@ Everything the CLI can do, plus more:
 - Email a client's .ovpn profile directly to a recipient's inbox, with a branded HTML template (requires SMTP config -- see `.env.example`; the UI stays present either way, and the action fails cleanly with a clear message if SMTP isn't set up)
 - Selective, permanent cleanup of a revoked client's leftover certificate/key files (checkboxes + bulk delete, admin-only) -- the revocation record itself always stays, for CRL correctness and audit history
 - Restore a revoked client: since a revoked certificate can never be un-revoked (that's how PKI revocation is supposed to work), this issues a brand-new certificate under the same name instead -- documented plainly in the UI, not oversold as reactivating the old cert
-- Consistency check (`--check`) and MAC-db formatting health (`--lint-db`)
+- Consistency check (`--check-certs`) and MAC-db formatting health (`--lint-mac-db`)
 - Live connection status: who's online now, bandwidth, rejected (MAC-mismatch) connection attempts with expected-vs-presented MAC and repeat-attempt counts
 - A donut chart of rejected-connection attempts broken down by claimed client name, on the Diagnostics page
 - Clickable dashboard stat cards (plus a second row of MAC/rejection stats) linking straight to the filtered table behind each number
@@ -96,7 +96,7 @@ and `docker compose up -d --build`.
 
 | Mount | Why |
 |---|---|
-| `/etc/openvpn:/etc/openvpn` (rw) | `--add`/`--revoke` write new certs and update `openvpn_db.txt` here |
+| `/etc/openvpn:/etc/openvpn` (rw) | `--add-user`/`--revoke-user` write new certs and update `openvpn_db.txt` here |
 | `/var/log/openvpn:/var/log/openvpn` (ro) | `vpn-status.py` reads connection/rejection history from here |
 | `./openvpn-install.sh`, `./vpn-status.py` (ro) | the actual scripts this app wraps — bind-mounted, not baked into the image, so a `git pull` on the host takes effect without rebuilding |
 | `./app/data` | SQLite file persistence (only relevant if `DATABASE_URL` stays on the SQLite default — see below) |

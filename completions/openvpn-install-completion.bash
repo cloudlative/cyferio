@@ -18,14 +18,14 @@ _openvpn_install_completions() {
 	COMPREPLY=()
 	cur="${COMP_WORDS[COMP_CWORD]}"
 	prev="${COMP_WORDS[COMP_CWORD-1]}"
-	opts="--add --revoke --list --list-revoked --macs --add-mac --remove-mac --show-ovpn --purge-revoked --restore --check --lint-db --json --help"
+	opts="--add-user --revoke-user --list-users --list-revoked-users --macs --add-mac --remove-mac --show-ovpn --purge-revoked --restore --check-certs --lint-mac-db --json --help"
 
 	# Best-effort dynamic client-name completion for any command that takes
 	# an existing client's NAME as its first argument: only if the PKI index
 	# happens to already be readable by the completing user. Never invokes
 	# sudo or prompts a password just to tab-complete.
 	case "$prev" in
-		--revoke|--macs|--add-mac|--remove-mac|--show-ovpn)
+		--revoke-user|--macs|--add-mac|--remove-mac|--show-ovpn)
 			local index="/etc/openvpn/server/easy-rsa/pki/index.txt" names
 			if [[ -r "$index" ]]; then
 				names=$(tail -n +2 "$index" 2>/dev/null | awk -F'\t' '$1=="V"{print $6}' | sed 's#^/CN=##' | grep -v '^server$')
