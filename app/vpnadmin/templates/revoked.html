@@ -79,7 +79,8 @@ async function loadRevoked() {
 						? '<span class="status-pill status-offline">Present</span>'
 						: '<span class="status-pill status-online">Purged</span>'}</td>
 					${isAdmin ? `<td class="text-right">
-						${r.files_present ? '<button class="btn-secondary btn-sm restore-btn" title="Issue a brand-new certificate under this same name -- not a reactivation of the old one.">Restore</button>' : '<span class="muted">—</span>'}
+						${r.files_present ? '<button class="btn-secondary btn-sm restore-btn" title="Issue a brand-new certificate under this same name -- not a reactivation of the old one.">Restore</button>' : ''}
+						${r.files_present ? '<button class="btn-danger btn-sm purge-btn" style="margin-left:8px" title="Permanently delete this revoked client\\'s leftover certificate/key files. The revocation record itself is never removed.">Purge</button>' : '<span class="muted">—</span>'}
 					</td>` : ""}
 				</tr>`).join("")}</tbody>
 		</table>`;
@@ -87,6 +88,9 @@ async function loadRevoked() {
 		if (isAdmin) {
 			el.querySelectorAll(".restore-btn").forEach(btn => {
 				btn.addEventListener("click", () => openRestoreDialog(btn.closest("tr").dataset.name));
+			});
+			el.querySelectorAll(".purge-btn").forEach(btn => {
+				btn.addEventListener("click", () => purgeClient(btn.closest("tr").dataset.name));
 			});
 		}
 	} catch (e) {
@@ -120,6 +124,27 @@ if (isAdmin) {
 			toast(e.message, "error");
 		}
 	});
+
+	async function purgeClient(name) {
+		// Uses the existing bulk /revoked/purge endpoint with a single-name
+		// list -- no separate single-item endpoint exists, and none is
+		// needed just for this button.
+		const ok = await confirmDialog(
+			`Permanently delete <strong>${escapeHtml(name)}</strong>'s leftover certificate/key files? This cannot be undone. The revocation record itself stays either way.`,
+			{ confirmLabel: "Purge", danger: true },
+		);
+		if (!ok) return;
+		try {
+			const { results } = await apiFetch("/api/clients/revoked/purge", {
+				method: "POST", body: { names: [name] },
+			});
+			const r = results[0];
+			toast(r.message, r.ok ? "success" : "error");
+			loadRevoked();
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	}
 }
 
 document.getElementById("refresh-btn").addEventListener("click", loadRevoked);
