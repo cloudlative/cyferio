@@ -80,7 +80,7 @@ async function loadRevoked() {
 						: '<span class="status-pill status-online">Purged</span>'}</td>
 					${isAdmin ? `<td class="text-right">
 						${r.files_present ? '<button class="btn-secondary btn-sm restore-btn" title="Issue a brand-new certificate under this same name -- not a reactivation of the old one.">Restore</button>' : ''}
-						${r.files_present ? '<button class="btn-danger btn-sm purge-btn" style="margin-left:8px" title="Permanently delete this revoked client\\'s leftover certificate/key files. The revocation record itself is never removed.">Purge</button>' : '<span class="muted">—</span>'}
+						${r.files_present ? '<button class="btn-danger btn-sm purge-btn" style="margin-left:8px" title="Permanently delete this revoked client\'s leftover certificate/key files. The revocation record itself is never removed.">Purge</button>' : '<span class="muted">—</span>'}
 					</td>` : ""}
 				</tr>`).join("")}</tbody>
 		</table>`;
