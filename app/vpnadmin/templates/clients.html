@@ -315,11 +315,24 @@ if (isAdmin) {
 				<textarea readonly rows="12" class="mono" style="resize:vertical" id="ovpn-copy-textarea">${escapeHtml(data.ovpn)}</textarea>
 				<div class="form-row" style="margin-top:12px">
 					<button type="button" class="btn-primary btn-sm" id="ovpn-copy-btn">Copy to Clipboard</button>
+					<button type="button" class="btn-secondary btn-sm" id="ovpn-download-btn">Download</button>
 				</div>`;
 			document.getElementById("ovpn-copy-btn").addEventListener("click", async () => {
 				const ta = document.getElementById("ovpn-copy-textarea");
 				const copied = await copyTextToClipboard(data.ovpn, ta);
 				toast(copied ? "Copied to clipboard." : "Couldn't copy automatically -- the text is selected, press Ctrl+C (Cmd+C on Mac) to copy.", copied ? "success" : "error");
+			});
+			document.getElementById("ovpn-download-btn").addEventListener("click", () => {
+				const blob = new Blob([data.ovpn], { type: "application/x-openvpn-profile" });
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement("a");
+				a.href = url;
+				a.download = `${name}.ovpn`;
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+				URL.revokeObjectURL(url);
+				toast("Download started.");
 			});
 		} catch (e) {
 			document.getElementById("ovpn-dialog-content").innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;

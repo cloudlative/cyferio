@@ -66,6 +66,28 @@
 	<div class="toolbar">
 		<h2 style="margin:0">Recent Activity</h2>
 	</div>
+	<div class="form-row" style="margin-bottom:16px;gap:12px">
+		<div class="field" style="flex:1;min-width:150px">
+			<label for="activity-filter-who">Who</label>
+			<select id="activity-filter-who"><option value="">All</option></select>
+		</div>
+		<div class="field" style="flex:1;min-width:150px">
+			<label for="activity-filter-action">Action</label>
+			<select id="activity-filter-action"><option value="">All</option></select>
+		</div>
+		<div class="field" style="flex:1;min-width:150px">
+			<label for="activity-filter-target">Target</label>
+			<select id="activity-filter-target"><option value="">All</option></select>
+		</div>
+		<div class="field" style="flex:1;min-width:150px">
+			<label for="activity-filter-result">Result</label>
+			<select id="activity-filter-result">
+				<option value="">All</option>
+				<option value="success">Success</option>
+				<option value="failed">Failed</option>
+			</select>
+		</div>
+	</div>
 	<div id="activity-table"><p class="muted">Loading…</p></div>
 </div>
 {% endif %}
@@ -127,6 +149,20 @@ function humanizeDetail(action, detail) {
 		}
 		return detail.replace(/->/g, " → ");
 	}
+	if (action === "revoke_client") {
+		// do_revoke_client's stdout is dominated by easy-rsa's own noisy
+		// "revoke" + "gen-crl" output (WARNING banners, PKI file paths,
+		// OpenSSL version lines, ...) before its own two closing lines
+		// ("<name> revoked!" / "Removed <name>'s entries from <db>").
+		// Only those two closing facts matter here.
+		const removedMatch = detail.match(/Removed .+?'s entries from (\S+)/);
+		if (/revoked!/.test(detail)) {
+			return removedMatch
+				? `Revoked; MAC-DB entry removed from ${removedMatch[1]}.`
+				: "Revoked.";
+		}
+		return detail.replace(/->/g, " → ");
+	}
 	if (action !== "update_user" && action !== "update_own_profile") {
 		// Every other action's detail is already short, single-line prose
 		// -- either the CLI script's own stdout message or an
@@ -177,9 +213,17 @@ const CATEGORY_META = {
 // table below them: clicking a tile filters the table to match, without
 // re-fetching (both draw from the same already-fetched window).
 let activityEntries = [];
-const ACTIVITY_PAGE_SIZE = 20;
+const ACTIVITY_PAGE_SIZE = 15;
 let activityPage = 1;
 let activityFilter = "all"; // "all" | "success" | "failed"
+
+// Dropdown filters (Who/Action/Target/Result), independent of and
+// additive with the stat-tile success/failed filter above. Empty string
+// means "All" for each.
+let activityWhoFilter = "";
+let activityActionFilter = "";
+let activityTargetFilter = "";
+let activityResultFilter = "";
 
 function setActivityFilter(filter) {
 	activityFilter = activityFilter === filter ? "all" : filter; // click again to clear
@@ -187,7 +231,31 @@ function setActivityFilter(filter) {
 	document.querySelectorAll("#activity-stat-grid .stat-card[data-filter]").forEach(card => {
 		card.classList.toggle("stat-card-active", card.dataset.filter === activityFilter);
 	});
+	const resultSelect = document.getElementById("activity-filter-result");
+	if (resultSelect) resultSelect.value = activityFilter === "all" ? "" : activityFilter;
 	renderActivityTable();
+}
+
+// Populates the Who/Action/Target dropdowns from whatever's actually in
+// the fetched window (rather than a hardcoded list) so they never show an
+// option with zero matching rows. Called once per fetch, not per render,
+// so re-rendering (e.g. on pagination) doesn't reset the user's selection.
+function populateActivityFilters(entries) {
+	const who = [...new Set(entries.map(e => e.username))].filter(Boolean).sort();
+	const actions = [...new Set(entries.map(e => e.action))].filter(Boolean).sort();
+	const targets = [...new Set(entries.map(e => e.target))].filter(Boolean).sort();
+
+	const fill = (id, values, current, labelFn) => {
+		const el = document.getElementById(id);
+		if (!el) return;
+		el.innerHTML = '<option value="">All</option>' + values.map(v =>
+			`<option value="${escapeHtml(v)}">${escapeHtml(labelFn ? labelFn(v) : v)}</option>`
+		).join("");
+		el.value = current;
+	};
+	fill("activity-filter-who", who, activityWhoFilter);
+	fill("activity-filter-action", actions, activityActionFilter, a => ACTION_LABELS[a] || a);
+	fill("activity-filter-target", targets, activityTargetFilter);
 }
 
 function renderActivityBreakdown(entries) {
@@ -285,22 +353,42 @@ function renderActivityBreakdown(entries) {
 	});
 }
 
+function clearAllActivityFilters() {
+	activityFilter = "all";
+	activityWhoFilter = "";
+	activityActionFilter = "";
+	activityTargetFilter = "";
+	activityResultFilter = "";
+	activityPage = 1;
+	document.querySelectorAll("#activity-stat-grid .stat-card[data-filter]").forEach(card => {
+		card.classList.toggle("stat-card-active", card.dataset.filter === "all");
+	});
+	["activity-filter-who", "activity-filter-action", "activity-filter-target", "activity-filter-result"]
+		.forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+	renderActivityTable();
+}
+
 function renderActivityTable() {
 	const activityEl = document.getElementById("activity-table");
 	if (!activityEl) return;
-	const filtered = activityFilter === "success" ? activityEntries.filter(e => e.success)
-		: activityFilter === "failed" ? activityEntries.filter(e => !e.success)
-		: activityEntries;
-	const filterNote = activityFilter === "all" ? "" : `
+	const filtered = activityEntries.filter(e =>
+		(activityFilter === "all" || (activityFilter === "success" ? e.success : !e.success)) &&
+		(!activityWhoFilter || e.username === activityWhoFilter) &&
+		(!activityActionFilter || e.action === activityActionFilter) &&
+		(!activityTargetFilter || e.target === activityTargetFilter) &&
+		(!activityResultFilter || (activityResultFilter === "success" ? e.success : !e.success))
+	);
+	const anyFilterActive = activityFilter !== "all" || activityWhoFilter || activityActionFilter
+		|| activityTargetFilter || activityResultFilter;
+	const filterNote = !anyFilterActive ? "" : `
 		<p class="muted" style="margin:-4px 0 14px;font-size:0.85rem">
-			Filtered to <strong>${activityFilter === "success" ? "succeeded" : "failed"}</strong> actions
-			(${filtered.length} of ${activityEntries.length}) --
-			<button type="button" class="link-button" id="clear-activity-filter">clear filter</button>
+			Showing ${filtered.length} of ${activityEntries.length} matching the selected filters --
+			<button type="button" class="link-button" id="clear-activity-filter">clear filters</button>
 		</p>`;
 	if (filtered.length === 0) {
 		activityEl.innerHTML = filterNote + '<div class="empty-state">No matching activity.</div>';
 		const clearBtn0 = document.getElementById("clear-activity-filter");
-		if (clearBtn0) clearBtn0.addEventListener("click", () => setActivityFilter(activityFilter));
+		if (clearBtn0) clearBtn0.addEventListener("click", clearAllActivityFilters);
 		return;
 	}
 
@@ -334,7 +422,7 @@ function renderActivityTable() {
 	</div>`;
 
 	const clearBtn = document.getElementById("clear-activity-filter");
-	if (clearBtn) clearBtn.addEventListener("click", () => setActivityFilter(activityFilter));
+	if (clearBtn) clearBtn.addEventListener("click", clearAllActivityFilters);
 	const prevBtn = document.getElementById("activity-prev-page");
 	const nextBtn = document.getElementById("activity-next-page");
 	if (prevBtn) prevBtn.addEventListener("click", () => { activityPage -= 1; renderActivityTable(); });
@@ -414,6 +502,7 @@ async function loadActivity() {
 		// active filter) -- one round-trip instead of two.
 		activityEntries = await apiFetch("/api/audit?limit=200");
 		if (breakdownEl) renderActivityBreakdown(activityEntries);
+		populateActivityFilters(activityEntries);
 		activityPage = 1;
 		renderActivityTable();
 	} catch (e) {
@@ -421,6 +510,31 @@ async function loadActivity() {
 		if (breakdownEl) breakdownEl.innerHTML = `<p class="muted">Could not load activity: ${escapeHtml(e.message)}</p>`;
 	}
 }
+
+const activityFilterWho = document.getElementById("activity-filter-who");
+const activityFilterAction = document.getElementById("activity-filter-action");
+const activityFilterTarget = document.getElementById("activity-filter-target");
+const activityFilterResult = document.getElementById("activity-filter-result");
+if (activityFilterWho) activityFilterWho.addEventListener("change", (e) => {
+	activityWhoFilter = e.target.value;
+	activityPage = 1;
+	renderActivityTable();
+});
+if (activityFilterAction) activityFilterAction.addEventListener("change", (e) => {
+	activityActionFilter = e.target.value;
+	activityPage = 1;
+	renderActivityTable();
+});
+if (activityFilterTarget) activityFilterTarget.addEventListener("change", (e) => {
+	activityTargetFilter = e.target.value;
+	activityPage = 1;
+	renderActivityTable();
+});
+if (activityFilterResult) activityFilterResult.addEventListener("change", (e) => {
+	activityResultFilter = e.target.value;
+	activityPage = 1;
+	renderActivityTable();
+});
 
 function loadDashboard() {
 	// Deliberately not awaited/sequenced -- each renders into its own part

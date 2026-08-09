@@ -18,7 +18,7 @@ function _progressDone() {
 }
 
 /**
- * Shows a toast notification. Auto-dismisses after 4s, or immediately via
+ * Shows a toast notification. Auto-dismisses after 3s, or immediately via
  * its "×" close button. Multiple toasts stack (newest at the bottom,
  * pushing older ones up) rather than replacing each other.
  *
@@ -53,7 +53,7 @@ function toast(message, kind = "success") {
 	el.appendChild(closeBtn);
 
 	container.appendChild(el);
-	setTimeout(() => el.remove(), 4000);
+	setTimeout(() => el.remove(), 3000);
 }
 
 /**
