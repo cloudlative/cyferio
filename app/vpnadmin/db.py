@@ -37,6 +37,27 @@ def get_db():
         db.close()
 
 
+def get_db_engine_info() -> str:
+    """Human-readable label for whichever database this deployment is
+    actually using (e.g. 'PostgreSQL 16.10' or 'SQLite 3.45.1') -- surfaced
+    on the Diagnostics page so an operator can see it at a glance instead of
+    having to check .env. Falls back to just the dialect name if a version
+    query fails for any reason (never raises -- this is diagnostic sugar,
+    not something that should be able to break the page)."""
+    try:
+        if engine.dialect.name == "sqlite":
+            with engine.connect() as conn:
+                version = conn.exec_driver_sql("SELECT sqlite_version()").scalar()
+            return f"SQLite {version}" if version else "SQLite"
+        if engine.dialect.name == "postgresql":
+            with engine.connect() as conn:
+                version = conn.exec_driver_sql("SHOW server_version").scalar()
+            return f"PostgreSQL {version}" if version else "PostgreSQL"
+        return engine.dialect.name
+    except Exception:
+        return engine.dialect.name
+
+
 def init_db():
     """Create all tables if they don't already exist, then reconcile any
     columns a model has that an already-existing table doesn't (e.g. after

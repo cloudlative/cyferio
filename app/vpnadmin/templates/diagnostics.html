@@ -19,6 +19,16 @@
 
 <div class="card" id="rejected">
 	<div class="toolbar"><h2 style="margin:0">Recent Rejected Connection Attempts</h2><button class="btn-secondary" id="rejected-refresh">Refresh</button></div>
+	<div class="form-row" style="margin-bottom:16px;gap:12px">
+		<div class="field" style="flex:1;min-width:180px">
+			<label for="rejected-filter-name">Claimed Name</label>
+			<select id="rejected-filter-name"><option value="">All names</option></select>
+		</div>
+		<div class="field" style="flex:1;min-width:180px">
+			<label for="rejected-filter-os">OS</label>
+			<select id="rejected-filter-os"><option value="">All OSes</option></select>
+		</div>
+	</div>
 	<div id="rejected-result"><p class="muted">Loading…</p></div>
 </div>
 
@@ -40,7 +50,7 @@ async function loadCheck() {
 	const el = document.getElementById("check-result");
 	try {
 		const data = await apiFetch("/api/check");
-		let html = `<p>${okBadge(data.clean)}</p>`;
+		let html = `<p>${okBadge(data.clean)} <span class="muted mono" style="font-size:0.85rem">App database: ${escapeHtml(data.db_engine || "unknown")}</span></p>`;
 		if (data.orphan_pki.length) {
 			html += `<p><strong>Valid cert but no MAC-db entry</strong> (cannot connect until added):</p><ul>${data.orphan_pki.map(n => `<li>${escapeHtml(n)}</li>`).join("")}</ul>`;
 		}
@@ -89,40 +99,76 @@ function renderRejectedChart(data) {
 	renderDonutChart(chartEl, entries);
 }
 
+let rejectedEntries = [];
+
+function populateRejectedFilters(data) {
+	const nameSel = document.getElementById("rejected-filter-name");
+	const osSel = document.getElementById("rejected-filter-os");
+	const prevName = nameSel.value, prevOs = osSel.value;
+	const names = [...new Set(data.map(r => r.claimed_name))].sort();
+	const oses = [...new Set(data.map(r => r.os))].sort();
+	nameSel.innerHTML = '<option value="">All names</option>' + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+	osSel.innerHTML = '<option value="">All OSes</option>' + oses.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("");
+	// Preserve the operator's current filter selection across a refresh,
+	// as long as that value still exists in the new data.
+	if (names.includes(prevName)) nameSel.value = prevName;
+	if (oses.includes(prevOs)) osSel.value = prevOs;
+}
+
+function renderRejectedTable() {
+	const el = document.getElementById("rejected-result");
+	const nameFilter = document.getElementById("rejected-filter-name").value;
+	const osFilter = document.getElementById("rejected-filter-os").value;
+	const data = rejectedEntries.filter(r =>
+		(!nameFilter || r.claimed_name === nameFilter) && (!osFilter || r.os === osFilter));
+
+	renderRejectedChart(data);
+	if (rejectedEntries.length === 0) {
+		el.innerHTML = '<div class="empty-state">No rejected connection attempts found.</div>';
+		return;
+	}
+	if (data.length === 0) {
+		el.innerHTML = '<div class="empty-state">No rejected attempts match the selected filters.</div>';
+		return;
+	}
+	el.innerHTML = `<table>
+		<thead><tr>
+			<th>Timestamp</th><th>Claimed Name</th><th>MAC Presented</th><th>MAC Registered</th>
+			<th>OS</th><th>Source IP:Port</th><th>Attempts (This Name)</th>
+		</tr></thead>
+		<tbody>${data.map(r => {
+			const mismatch = r.mac_registered !== "not registered" && r.mac_registered !== r.mac_presented;
+			const repeat = r.total_attempts_this_name > 5;
+			return `<tr>
+				<td>${escapeHtml(r.timestamp)}</td>
+				<td>${escapeHtml(r.claimed_name)}</td>
+				<td class="mono">${escapeHtml(r.mac_presented)}</td>
+				<td class="mono">${mismatch ? `<span style="color:var(--warning-text)">${escapeHtml(r.mac_registered)}</span>` : escapeHtml(r.mac_registered)}</td>
+				<td>${escapeHtml(r.os)}</td>
+				<td class="mono">${escapeHtml(r.source_ip)}:${escapeHtml(String(r.source_port))}</td>
+				<td>${repeat ? `<span class="status-pill status-revoked">${r.total_attempts_this_name}×</span>` : `${r.total_attempts_this_name}×`}</td>
+			</tr>`;
+		}).join("")}</tbody>
+	</table>
+	<p class="muted" style="margin-top:12px">"MAC registered" is what's on file for that name in <span class="mono">openvpn_db.txt</span> — compare against "MAC presented" to see if it's a wrong/unregistered device, a stale entry, or a name that was never registered at all. "Attempts (this name)" counts the full rejection history, not just what's shown here. Repeated entries for the same name/IP are usually a client-side device/network issue, not necessarily an attack.</p>`;
+}
+
 async function loadRejected() {
 	const el = document.getElementById("rejected-result");
 	try {
-		const data = await apiFetch("/api/status/rejected?limit=20");
-		renderRejectedChart(data);
-		if (data.length === 0) {
-			el.innerHTML = '<div class="empty-state">No rejected connection attempts found.</div>';
-			return;
-		}
-		el.innerHTML = `<table>
-			<thead><tr>
-				<th>Timestamp</th><th>Claimed Name</th><th>MAC Presented</th><th>MAC Registered</th>
-				<th>OS</th><th>Source IP:Port</th><th>Attempts (This Name)</th>
-			</tr></thead>
-			<tbody>${data.map(r => {
-				const mismatch = r.mac_registered !== "not registered" && r.mac_registered !== r.mac_presented;
-				const repeat = r.total_attempts_this_name > 5;
-				return `<tr>
-					<td>${escapeHtml(r.timestamp)}</td>
-					<td>${escapeHtml(r.claimed_name)}</td>
-					<td class="mono">${escapeHtml(r.mac_presented)}</td>
-					<td class="mono">${mismatch ? `<span style="color:var(--warning-text)">${escapeHtml(r.mac_registered)}</span>` : escapeHtml(r.mac_registered)}</td>
-					<td>${escapeHtml(r.os)}</td>
-					<td class="mono">${escapeHtml(r.source_ip)}:${escapeHtml(String(r.source_port))}</td>
-					<td>${repeat ? `<span class="status-pill status-revoked">${r.total_attempts_this_name}×</span>` : `${r.total_attempts_this_name}×`}</td>
-				</tr>`;
-			}).join("")}</tbody>
-		</table>
-		<p class="muted" style="margin-top:12px">"MAC registered" is what's on file for that name in <span class="mono">openvpn_db.txt</span> — compare against "MAC presented" to see if it's a wrong/unregistered device, a stale entry, or a name that was never registered at all. "Attempts (this name)" counts the full rejection history, not just what's shown here. Repeated entries for the same name/IP are usually a client-side device/network issue, not necessarily an attack.</p>`;
+		// A larger window than the table's old fixed 20 -- the Claimed
+		// Name/OS filters are only useful if there's enough history behind
+		// them to filter through (500 is the API's own cap).
+		rejectedEntries = await apiFetch("/api/status/rejected?limit=500");
+		populateRejectedFilters(rejectedEntries);
+		renderRejectedTable();
 	} catch (e) {
 		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
 	}
 }
 
+document.getElementById("rejected-filter-name").addEventListener("change", renderRejectedTable);
+document.getElementById("rejected-filter-os").addEventListener("change", renderRejectedTable);
 document.getElementById("check-refresh").addEventListener("click", loadCheck);
 document.getElementById("lint-refresh").addEventListener("click", loadLint);
 document.getElementById("rejected-refresh").addEventListener("click", loadRejected);
