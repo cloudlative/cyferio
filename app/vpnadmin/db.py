@@ -50,16 +50,27 @@ def init_db():
 
 
 def _sync_missing_columns():
+    # Each ALTER TABLE (+ its backfill UPDATE, see below) runs in its own
+    # short transaction (engine.begin() per column) rather than one shared
+    # transaction for every table/column -- SQLite implicitly manages
+    # schema-changing DDL in a way that, chained many-deep inside a single
+    # transaction alongside DML, has been observed to silently drop later
+    # statements in that same transaction on newer sqlite3/Python builds
+    # (no exception raised, no error logged -- the column addition just
+    # doesn't stick). Committing after each column sidesteps that entirely
+    # and is free either way: this function is already idempotent/safe to
+    # call repeatedly (see test_sync_is_idempotent), so smaller transactions
+    # change nothing about its semantics, only its reliability.
     inspector = inspect(engine)
-    with engine.begin() as conn:
-        for table in Base.metadata.sorted_tables:
-            if not inspector.has_table(table.name):
-                continue  # brand new table, create_all already handled it
-            existing = {col["name"] for col in inspector.get_columns(table.name)}
-            for column in table.columns:
-                if column.name in existing:
-                    continue
-                ddl_type = column.type.compile(dialect=engine.dialect)
+    for table in Base.metadata.sorted_tables:
+        if not inspector.has_table(table.name):
+            continue  # brand new table, create_all already handled it
+        existing = {col["name"] for col in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in existing:
+                continue
+            ddl_type = column.type.compile(dialect=engine.dialect)
+            with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {ddl_type}"))
                 # ALTER TABLE ADD COLUMN always leaves existing rows NULL
                 # regardless of the model's `default=` (that's an

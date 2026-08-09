@@ -49,9 +49,36 @@ def bootstrap_admin(db: Session) -> None:
         username=settings.BOOTSTRAP_ADMIN_USERNAME,
         password_hash=hash_password(settings.BOOTSTRAP_ADMIN_PASSWORD),
         role=Role.admin,
+        is_bootstrap_admin=True,
     )
     db.add(admin)
     db.commit()
+
+
+def ensure_bootstrap_admin_flag(db: Session) -> None:
+    """Idempotent backfill for User.is_bootstrap_admin: if no account is
+    currently flagged, designate one. This covers deployments that existed
+    before the flag did (bootstrap_admin() above only sets it at the
+    moment of first-ever account creation, which already happened for
+    those) -- without this, the "bootstrap admin can never be demoted"
+    rule would silently protect nobody on any pre-existing database. Prefers
+    whichever admin's username still matches BOOTSTRAP_ADMIN_USERNAME;
+    falls back to the earliest-created admin account. No-op once any
+    account already has the flag, so this is safe to call on every
+    startup, not just the first."""
+    if db.query(User).filter(User.is_bootstrap_admin.is_(True)).first() is not None:
+        return
+    candidate = None
+    if settings.BOOTSTRAP_ADMIN_USERNAME:
+        candidate = db.query(User).filter(
+            User.username == settings.BOOTSTRAP_ADMIN_USERNAME.strip().lower(),
+            User.role == Role.admin,
+        ).first()
+    if candidate is None:
+        candidate = db.query(User).filter(User.role == Role.admin).order_by(User.created_at).first()
+    if candidate is not None:
+        candidate.is_bootstrap_admin = True
+        db.commit()
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | None:

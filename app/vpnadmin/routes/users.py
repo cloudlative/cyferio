@@ -18,26 +18,45 @@ def _valid_password(v: str) -> str:
     return v
 
 
-def _resolve_team_id(db: Session, team_id: int | None) -> int | None:
-    """Validates a team_id references an existing Team (or is None/
-    "Unassigned"). Used by both the admin-edit and self-service endpoints so
-    a client can only ever land a user in a real team, never arbitrary
-    free text."""
-    if team_id is None:
+def _valid_first_name(v: str | None) -> str | None:
+    """First Name is required (see task feedback): must be present and
+    non-blank wherever this runs. Callers that allow the field to be
+    entirely omitted (self-service password-only updates, admin edits that
+    don't touch it) pass None through untouched -- this only rejects an
+    explicitly-provided-but-blank value, it doesn't force every request to
+    include the field."""
+    if v is None:
         return None
-    if db.get(Team, team_id) is None:
-        raise HTTPException(status_code=400, detail="No such team.")
-    return team_id
+    v = v.strip()
+    if not v:
+        raise ValueError("First Name is required.")
+    return v
+
+
+def _resolve_teams(db: Session, team_ids: list[int]) -> list[Team]:
+    """Validates every id in team_ids references an existing Team, and
+    returns the Team rows themselves (for assigning to User.teams). Used by
+    both the admin-edit and self-service endpoints so a client can only
+    ever land a user in real teams, never arbitrary free text or bogus ids.
+    A user can belong to zero, one, or several teams at once."""
+    if not team_ids:
+        return []
+    teams = db.query(Team).filter(Team.id.in_(team_ids)).all()
+    found_ids = {t.id for t in teams}
+    missing = [tid for tid in team_ids if tid not in found_ids]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"No such team(s): {missing}")
+    return teams
 
 
 class CreateUserRequest(BaseModel):
     username: str
     password: str
     role: Role = Role.viewer
-    first_name: str | None = None
+    first_name: str
     last_name: str | None = None
     gender: Gender = Gender.unspecified
-    team_id: int | None = None
+    team_ids: list[int] = []
 
     @field_validator("username")
     @classmethod
@@ -52,6 +71,14 @@ class CreateUserRequest(BaseModel):
     def _pw(cls, v: str) -> str:
         return _valid_password(v)
 
+    @field_validator("first_name")
+    @classmethod
+    def _first_name(cls, v: str) -> str:
+        result = _valid_first_name(v)
+        if result is None:
+            raise ValueError("First Name is required.")
+        return result
+
 
 class UpdateUserRequest(BaseModel):
     """Admin-only edits to another (or their own, for non-guardrailed
@@ -64,12 +91,17 @@ class UpdateUserRequest(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     gender: Gender | None = None
-    team_id: int | None = None  # explicit null = unassign; see model_fields_set usage below
+    team_ids: list[int] | None = None  # explicit [] = clear all teams; see model_fields_set usage below
 
     @field_validator("password")
     @classmethod
     def _pw(cls, v: str | None) -> str | None:
         return _valid_password(v) if v else v
+
+    @field_validator("first_name")
+    @classmethod
+    def _first_name(cls, v: str | None) -> str | None:
+        return _valid_first_name(v)
 
 
 class UpdateProfileRequest(BaseModel):
@@ -78,7 +110,7 @@ class UpdateProfileRequest(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     gender: Gender | None = None
-    team_id: int | None = None
+    team_ids: list[int] | None = None
     current_password: str | None = None
     new_password: str | None = None
 
@@ -87,6 +119,11 @@ class UpdateProfileRequest(BaseModel):
     def _pw(cls, v: str | None) -> str | None:
         return _valid_password(v) if v else v
 
+    @field_validator("first_name")
+    @classmethod
+    def _first_name(cls, v: str | None) -> str | None:
+        return _valid_first_name(v)
+
 
 def _serialize(u: User) -> dict:
     return {
@@ -94,6 +131,7 @@ def _serialize(u: User) -> dict:
         "username": u.username,
         "role": u.role.value,
         "is_active": u.is_active,
+        "is_bootstrap_admin": u.is_bootstrap_admin,
         "deleted": u.deleted,
         "deleted_at": u.deleted_at.isoformat() if u.deleted_at else None,
         "created_at": u.created_at.isoformat() if u.created_at else None,
@@ -102,8 +140,8 @@ def _serialize(u: User) -> dict:
         "last_name": u.last_name,
         "display_name": u.display_name,
         "gender": u.gender.value if u.gender else Gender.unspecified.value,
-        "team_id": u.team_id,
-        "team": u.team.name if u.team else None,
+        "team_ids": [t.id for t in u.teams],
+        "teams": [t.name for t in u.teams],
     }
 
 
@@ -148,11 +186,11 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
             setattr(user, field, value)
             changes.append(field)
 
-    if "team_id" in body.model_fields_set:
-        new_team_id = _resolve_team_id(db, body.team_id)
-        if new_team_id != user.team_id:
-            user.team_id = new_team_id
-            changes.append("team")
+    if "team_ids" in body.model_fields_set:
+        new_teams = _resolve_teams(db, body.team_ids or [])
+        if {t.id for t in new_teams} != {t.id for t in user.teams}:
+            user.teams = new_teams
+            changes.append("teams")
 
     if body.new_password:
         if not body.current_password or not verify_password(body.current_password, user.password_hash):
@@ -170,7 +208,7 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
 def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == body.username).first() is not None:
         raise HTTPException(status_code=409, detail=f"Username '{body.username}' already exists.")
-    team_id = _resolve_team_id(db, body.team_id)
+    teams = _resolve_teams(db, body.team_ids)
     user = User(
         username=body.username,
         password_hash=hash_password(body.password),
@@ -178,7 +216,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         first_name=body.first_name,
         last_name=body.last_name,
         gender=body.gender,
-        team_id=team_id,
+        teams=teams,
     )
     db.add(user)
     db.commit()
@@ -197,19 +235,33 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     # PATCH. Other mutations on an already-deleted account are harmless too
     # (they just take effect if/when it's restored).
 
-    # An admin account can never be demoted -- by anyone, including another
-    # admin -- full stop. Unlike the self-lockout guardrails below (which
-    # only kick in for the *last* admin, or acting on yourself), this is an
-    # unconditional rule: once an account is admin, it stays admin until
-    # deleted/deactivated by someone else, but its role itself never changes.
-    if target.role == Role.admin and body.role is not None and body.role != Role.admin:
-        raise HTTPException(status_code=400, detail="Admin accounts cannot be demoted.")
+    # The bootstrap admin -- the very first admin account a deployment ever
+    # creates (see User.is_bootstrap_admin / auth.bootstrap_admin) -- can
+    # never be demoted, deactivated, or (soft-)deleted, by anyone, including
+    # another admin. Every other admin account remains demotable/removable
+    # by another admin, same as before this rule existed, subject only to
+    # the last-admin-standing/self-lockout guardrails below.
+    if target.is_bootstrap_admin:
+        if body.role is not None and body.role != Role.admin:
+            raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be demoted.")
+        if body.is_active is False:
+            raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deactivated.")
+        if body.deleted is True:
+            raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deleted.")
 
     # Guardrails against an admin locking everyone (including themselves)
-    # out: deactivating or deleting the last active admin (or yourself) is
-    # blocked, regardless of which of those two the request is doing. (Role
-    # demotion of an admin is already unconditionally blocked above.)
-    would_remove = target.role == Role.admin and (body.is_active is False or body.deleted is True)
+    # out: demoting, deactivating, or deleting the last active admin (or
+    # yourself) is blocked, regardless of which of those three the request
+    # is doing -- this is the general rule that predates the bootstrap-admin
+    # special case above, and still applies to every admin (bootstrap or
+    # not), including situations the unconditional bootstrap check above
+    # doesn't cover (e.g. a non-bootstrap admin demoting/deactivating/
+    # deleting themselves, or removing the last other active admin).
+    would_remove = target.role == Role.admin and (
+        (body.role is not None and body.role != Role.admin)
+        or body.is_active is False
+        or body.deleted is True
+    )
     _guard_against_self_lockout(db, target, admin, removing=would_remove)
 
     changes = []
@@ -231,11 +283,11 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         if value is not None and value != getattr(target, field):
             setattr(target, field, value)
             changes.append(field)
-    if "team_id" in body.model_fields_set:
-        new_team_id = _resolve_team_id(db, body.team_id)
-        if new_team_id != target.team_id:
-            target.team_id = new_team_id
-            changes.append("team")
+    if "team_ids" in body.model_fields_set:
+        new_teams = _resolve_teams(db, body.team_ids or [])
+        if {t.id for t in new_teams} != {t.id for t in target.teams}:
+            target.teams = new_teams
+            changes.append("teams")
     # created_at is intentionally immutable here -- it's a factual record of
     # account creation, not admin-editable through this endpoint (unlike the
     # other profile fields above).
@@ -250,11 +302,13 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
 def delete_user(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     """Soft delete: the account is deactivated, hidden from the main user
     list, and can no longer log in, but the row and its audit history are
-    kept and remain visible/restorable under GET /api/users/deleted. There
-    is deliberately no hard-delete path."""
+    kept and remain visible/restorable under GET /api/users/deleted, or
+    permanently removable via DELETE /{user_id}/permanent below."""
     target = db.get(User, user_id)
     if target is None or target.deleted:
         raise HTTPException(status_code=404, detail="User not found.")
+    if target.is_bootstrap_admin:
+        raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deleted.")
     _guard_against_self_lockout(db, target, admin, removing=(target.role == Role.admin))
     target.deleted = True
     target.deleted_at = datetime.now(timezone.utc)
@@ -262,3 +316,31 @@ def delete_user(user_id: int, admin: User = Depends(require_admin), db: Session 
     db.commit()
     log_action(db, admin, "delete_user", target=target.username)
     return {"message": f"User '{target.username}' deleted (recoverable from the Deleted users list)."}
+
+
+@router.delete("/{user_id}/permanent")
+def permanently_delete_user(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Hard delete: irreversibly removes the row from the database. Only
+    available for accounts that are already soft-deleted (see delete_user
+    above) -- a distinct, more destructive action from soft-delete, with
+    its own confirmation in the UI. Safe with respect to the audit log:
+    AuditLog.username is a plain string snapshot, not a foreign key to
+    User, so history for a permanently-deleted account is preserved (this
+    action is itself logged, before the row is removed, for exactly that
+    reason)."""
+    target = db.get(User, user_id)
+    if target is None or not target.deleted:
+        raise HTTPException(status_code=404, detail="User not found in the deleted list.")
+    if target.is_bootstrap_admin:
+        # Belt-and-suspenders: delete_user() above already prevents the
+        # bootstrap admin from ever reaching deleted=True in the first
+        # place, so this should be unreachable in practice, but the rule is
+        # "cannot be deleted, full stop" -- enforce it here too rather than
+        # relying solely on that earlier check never being bypassed.
+        raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deleted.")
+    username = target.username
+    log_action(db, admin, "permanently_delete_user", target=username,
+               detail="hard-deleted from the deleted-users list -- irreversible")
+    db.delete(target)
+    db.commit()
+    return {"message": f"User '{username}' permanently deleted. This cannot be undone."}

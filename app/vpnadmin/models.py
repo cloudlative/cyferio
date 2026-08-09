@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, ForeignKey, Table
 from sqlalchemy.orm import validates, relationship
 
 from .db import Base
@@ -27,17 +27,36 @@ class Team(Base):
     """A proper team resource (added on top of the earlier free-text `team`
     field on User -- see git history) so teams can be created/deleted/listed
     on their own, independent of whether any user currently belongs to one.
-    Membership is User.team_id, a nullable FK -- a user with no team is
-    simply team_id IS NULL ("Unassigned"), not a row here."""
+    Membership is many-to-many (see user_teams below) -- a user can belong
+    to zero, one, or several teams; a user with no team is simply absent
+    from every team's `members`, not a row here ("Unassigned" is a UI
+    concept, not a database one)."""
     __tablename__ = "teams"
 
     id = Column(Integer, primary_key=True)
     name = Column(String(64), unique=True, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
+    members = relationship("User", secondary="user_teams", back_populates="teams", order_by="User.username")
+
     @validates("name")
     def _normalize_name(self, key, value):
         return value.strip()
+
+
+# Pure association table for the many-to-many User<->Team membership
+# (replaces the earlier single nullable User.team_id FK -- see git history).
+# A composite primary key (user_id, team_id) is enough here; there's no need
+# for a surrogate id since a given user/team pair can only be linked once.
+# New tables like this are picked up automatically by db.init_db()'s
+# `Base.metadata.create_all()` -- no change needed to the migration helper
+# itself, same as when the `teams` table was first added.
+user_teams = Table(
+    "user_teams",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+    Column("team_id", Integer, ForeignKey("teams.id"), primary_key=True),
+)
 
 
 class User(Base):
@@ -50,18 +69,30 @@ class User(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
-    # Profile fields -- all optional, self-service editable (see
+    # Set once, only by auth.bootstrap_admin(), on the very first admin
+    # account a fresh deployment creates. Used solely to make that specific
+    # account's role permanently un-demotable (see routes/users.py) --
+    # deliberately NOT the same thing as "any admin account" (every other
+    # admin, including ones later promoted to admin, can be demoted by
+    # another admin) or "whichever account is currently named
+    # BOOTSTRAP_ADMIN_USERNAME" (that env var could be changed or reused
+    # after the fact; this flag is a stable, one-time-set fact about the
+    # account itself, immune to later config or username changes).
+    is_bootstrap_admin = Column(Boolean, nullable=False, default=False)
+
+    # Profile fields -- all optional except first_name (required, see
+    # routes/users.py validators), self-service editable (see
     # routes/users.py PATCH /api/users/me) as well as admin-editable.
     first_name = Column(String(64), nullable=True)
     last_name = Column(String(64), nullable=True)
     gender = Column(Enum(Gender), nullable=False, default=Gender.unspecified)
-    # FK to Team, nullable = "Unassigned". Replaces the earlier free-text
-    # `team` column (see git history) now that Teams are a real CRUD
-    # resource -- a stray legacy `team` string column may still physically
-    # exist in older databases (this app's migration approach only ever
-    # ADDs columns, see db.py), but it is no longer read or written anywhere.
+    # Deprecated: replaced by the many-to-many `teams` relationship below
+    # (a user can now belong to several teams at once, see git history) --
+    # this nullable FK column may still physically exist in older databases
+    # (this app's migration approach only ever ADDs columns, see db.py) but
+    # is no longer read or written anywhere.
     team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
-    team = relationship("Team")
+    teams = relationship("Team", secondary="user_teams", back_populates="members", order_by="Team.name")
 
     last_login_at = Column(DateTime(timezone=True), nullable=True)
 

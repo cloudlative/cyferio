@@ -1,8 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Teams — {{ APP_NAME }}{% endblock %}
 {% block content %}
-<h1>Teams</h1>
-<p class="page-subtitle">Portal users grouped by team. Click a team to see its members.</p>
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">Teams</h1></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Portal users grouped by team — a user can belong to several teams at once. Click a team to see and manage its members.</p>
+
+<div class="stat-grid" id="summary-grid" style="margin-bottom:24px">
+	<div class="stat-card accent-total"><div class="stat-value" id="stat-team-count">—</div><div class="stat-label">Teams</div></div>
+	<div class="stat-card accent-online"><div class="stat-value" id="stat-assigned-count">—</div><div class="stat-label">Assigned Users</div></div>
+	<div class="stat-card accent-rejected"><div class="stat-value" id="stat-unassigned-count">—</div><div class="stat-label">Unassigned Users</div></div>
+</div>
 
 {% if is_admin %}
 <div class="card">
@@ -19,11 +28,10 @@
 </div>
 {% endif %}
 
-<div class="toolbar" style="margin-bottom:0">
-	<div class="toolbar-title"><h2 style="margin:0">All Teams</h2></div>
-	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">All Teams</h2></div>
+	<div id="team-grid"><p class="muted">Loading…</p></div>
 </div>
-<div class="stat-grid" id="team-grid"><p class="muted">Loading…</p></div>
 
 <div class="card" id="team-detail-card" style="display:none">
 	<div class="toolbar">
@@ -32,6 +40,15 @@
 		<button class="btn-danger btn-sm" id="team-delete-btn">Delete Team</button>
 		{% endif %}
 	</div>
+	{% if is_admin %}
+	<form id="add-member-form" class="form-row" style="margin-bottom:16px">
+		<div class="field" style="flex:2">
+			<label for="add-member-select">Add a member</label>
+			<select id="add-member-select"></select>
+		</div>
+		<button type="submit" class="btn-secondary">Add to Team</button>
+	</form>
+	{% endif %}
 	<div id="team-detail-table"></div>
 </div>
 {% endblock %}
@@ -40,21 +57,35 @@
 <script>
 const isAdmin = {{ "true" if is_admin else "false" }};
 let lastTeams = [];
+let allUsers = [];
 let currentTeamId = "unassigned";
+
+function renderSummary() {
+	const namedTeams = lastTeams.filter(t => t.id != null);
+	const unassigned = lastTeams.find(t => t.id == null);
+	document.getElementById("stat-team-count").textContent = namedTeams.length;
+	document.getElementById("stat-assigned-count").textContent = namedTeams.reduce((sum, t) => sum + t.count, 0);
+	document.getElementById("stat-unassigned-count").textContent = unassigned ? unassigned.count : 0;
+}
 
 async function loadTeams() {
 	const grid = document.getElementById("team-grid");
 	try {
-		lastTeams = await apiFetch("/api/teams");
+		const requests = [apiFetch("/api/teams")];
+		if (isAdmin) requests.push(apiFetch("/api/users"));
+		const [teams, users] = await Promise.all(requests);
+		lastTeams = teams;
+		if (isAdmin) allUsers = users;
+		renderSummary();
 		if (lastTeams.length === 0) {
 			grid.innerHTML = '<div class="empty-state">No teams yet.</div>';
 			return;
 		}
-		grid.innerHTML = lastTeams.map((t, i) => `
+		grid.innerHTML = `<div class="stat-grid" style="margin-bottom:0">${lastTeams.map((t, i) => `
 			<a class="stat-card ${i % 4 === 0 ? "accent-online" : i % 4 === 1 ? "accent-total" : i % 4 === 2 ? "accent-rejected" : "accent-revoked"}" href="#" data-team-id="${t.id == null ? "unassigned" : t.id}">
 				<span class="stat-hint">View →</span>
 				<div class="stat-value">${t.count}</div><div class="stat-label">${escapeHtml(t.team)}</div>
-			</a>`).join("");
+			</a>`).join("")}</div>`;
 		grid.querySelectorAll("[data-team-id]").forEach(card => {
 			card.addEventListener("click", (ev) => { ev.preventDefault(); showTeam(card.dataset.teamId); });
 		});
@@ -63,12 +94,6 @@ async function loadTeams() {
 	} catch (e) {
 		toast(e.message, "error");
 	}
-}
-
-function teamOptionsHtml(selectedId) {
-	return lastTeams.filter(t => t.id != null).map(t =>
-		`<option value="${t.id}" ${String(t.id) === String(selectedId) ? "selected" : ""}>${escapeHtml(t.team)}</option>`
-	).join("") + `<option value="" ${selectedId == null ? "selected" : ""}>Unassigned</option>`;
 }
 
 function showTeam(id) {
@@ -80,41 +105,57 @@ function showTeam(id) {
 	document.getElementById("team-detail-title").textContent = team.team;
 	document.getElementById("team-detail-count").textContent = `${team.count} member${team.count === 1 ? "" : "s"}`;
 	const deleteBtn = document.getElementById("team-delete-btn");
-	if (deleteBtn) deleteBtn.style.display = team.id == null ? "none" : "";
+	const addForm = document.getElementById("add-member-form");
+	const isRealTeam = team.id != null;
+	if (deleteBtn) {
+		deleteBtn.style.display = isRealTeam ? "" : "none";
+		deleteBtn.disabled = team.count > 0;
+		deleteBtn.title = team.count > 0 ? "Remove all members before deleting a team." : "";
+	}
+	if (addForm) {
+		addForm.style.display = isRealTeam ? "" : "none";
+		if (isRealTeam) {
+			const memberIds = new Set(team.members.map(m => m.id));
+			const candidates = allUsers.filter(u => !memberIds.has(u.id));
+			const select = document.getElementById("add-member-select");
+			select.innerHTML = candidates.length
+				? candidates.map(u => `<option value="${u.id}">${escapeHtml(u.display_name)} (${escapeHtml(u.username)})</option>`).join("")
+				: '<option value="">No other users available</option>';
+			select.disabled = candidates.length === 0;
+			addForm.querySelector("button[type=submit]").disabled = candidates.length === 0;
+		}
+	}
 	const el = document.getElementById("team-detail-table");
 	if (team.members.length === 0) {
 		el.innerHTML = '<div class="empty-state">No members in this team.</div>';
-		return;
-	}
-	el.innerHTML = `<table>
-		<thead><tr><th>User</th><th>Role</th><th>Status</th>${isAdmin ? "<th>Reassign To</th>" : ""}</tr></thead>
-		<tbody>${team.members.map(m => `
-			<tr data-user-id="${m.id}">
-				<td>${escapeHtml(m.display_name)} <span class="muted" style="font-size:0.82em">(${escapeHtml(m.username)})</span></td>
-				<td><span class="role-badge role-${m.role}">${m.role}</span></td>
-				<td>${m.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
-				${isAdmin ? `<td><select class="reassign-select" style="width:auto;padding:6px 10px">${teamOptionsHtml(team.id)}</select></td>` : ""}
-			</tr>`).join("")}</tbody>
-	</table>`;
-	document.getElementById("team-detail-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
-
-	if (isAdmin) {
-		el.querySelectorAll(".reassign-select").forEach(sel => {
-			sel.addEventListener("change", async () => {
-				const userId = sel.closest("tr").dataset.userId;
-				sel.disabled = true;
-				try {
-					await apiFetch(`/api/users/${userId}`, { method: "PATCH", body: { team_id: sel.value ? Number(sel.value) : null } });
-					toast("User reassigned.");
-					await loadTeams();
-					showTeam(currentTeamId);
-				} catch (e) {
-					toast(e.message, "error");
-					sel.disabled = false;
-				}
+	} else {
+		el.innerHTML = `<table>
+			<thead><tr><th>User</th><th>Role</th><th>Status</th>${isAdmin && isRealTeam ? "<th></th>" : ""}</tr></thead>
+			<tbody>${team.members.map(m => `
+				<tr data-user-id="${m.id}">
+					<td>${escapeHtml(m.display_name)} <span class="muted" style="font-size:0.82em">(${escapeHtml(m.username)})</span></td>
+					<td><span class="role-badge role-${m.role}">${m.role}</span></td>
+					<td>${m.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
+					${isAdmin && isRealTeam ? `<td class="text-right"><button class="btn-secondary btn-sm remove-member-btn">Remove from Team</button></td>` : ""}
+				</tr>`).join("")}</tbody>
+		</table>`;
+		if (isAdmin && isRealTeam) {
+			el.querySelectorAll(".remove-member-btn").forEach(btn => {
+				btn.addEventListener("click", async () => {
+					const userId = btn.closest("tr").dataset.userId;
+					try {
+						await apiFetch(`/api/teams/${team.id}/members/${userId}`, { method: "DELETE" });
+						toast("Member removed from team.");
+						await loadTeams();
+						showTeam(currentTeamId);
+					} catch (e) {
+						toast(e.message, "error");
+					}
+				});
 			});
-		});
+		}
 	}
+	document.getElementById("team-detail-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 if (isAdmin) {
@@ -131,10 +172,29 @@ if (isAdmin) {
 		}
 	});
 
+	document.getElementById("add-member-form").addEventListener("submit", async (ev) => {
+		ev.preventDefault();
+		const team = lastTeams.find(t => String(t.id) === String(currentTeamId));
+		const userId = document.getElementById("add-member-select").value;
+		if (!team || !userId) return;
+		try {
+			await apiFetch(`/api/teams/${team.id}/members`, { method: "POST", body: { user_id: Number(userId) } });
+			toast("Member added to team.");
+			await loadTeams();
+			showTeam(currentTeamId);
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+
 	document.getElementById("team-delete-btn").addEventListener("click", async () => {
 		const team = lastTeams.find(t => String(t.id) === String(currentTeamId));
 		if (!team || team.id == null) return;
-		const ok = await confirmDialog(`Delete team <strong>${escapeHtml(team.team)}</strong>? Members will be moved to Unassigned, not deleted.`, { confirmLabel: "Delete Team" });
+		if (team.count > 0) {
+			toast("Cannot delete a team with members assigned -- reassign or remove its members first.", "error");
+			return;
+		}
+		const ok = await confirmDialog(`Delete team <strong>${escapeHtml(team.team)}</strong>? This cannot be undone.`, { confirmLabel: "Delete Team" });
 		if (!ok) return;
 		try {
 			const result = await apiFetch(`/api/teams/${team.id}`, { method: "DELETE" });

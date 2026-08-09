@@ -25,10 +25,13 @@ Everything the CLI can do, plus more:
 - Live connection status: who's online now, bandwidth, rejected (MAC-mismatch) connection attempts with expected-vs-presented MAC and repeat-attempt counts
 - A donut chart of rejected-connection attempts broken down by claimed client name, on the Diagnostics page
 - Clickable dashboard stat cards (plus a second row of MAC/rejection stats) linking straight to the filtered table behind each number
-- Multi-user accounts with two roles: **admin** (full control) and **viewer** (read-only); admin accounts can never be demoted by anyone, including another admin
-- Self-service profile page (click your username in the sidebar): any user can set their own name/gender/team and change their own password
-- Teams are a real resource: admins can create/delete teams, and assign users to a team from either the Users page or the Teams page itself (dropdown-driven, not free text); the Teams page lists members grouped by team, including empty teams
-- Admin user management: edit any user's role, profile fields, and reset their password (account creation date is immutable); soft-delete/restore accounts (deleted users are recoverable, never silently gone)
+- Multi-user accounts with two roles: **admin** (full control) and **viewer** (read-only); the bootstrap admin (the very first admin account a deployment ever creates) can never be demoted, deactivated, or deleted by anyone -- every other admin account remains fully manageable by another admin
+- First Name is required for every account (add-user and edit-user, both client- and server-side validated) -- it's also now the primary displayed identity (profile page heading), not the raw login username
+- Search box on the Users page filters the list by name, username, or team as you type
+- Soft-deleted accounts can be restored, or permanently (irreversibly) deleted as a distinct, separately-confirmed admin action -- audit history survives a permanent delete since it stores a username snapshot, not a foreign key
+- Self-service profile page (click your username in the sidebar): any user can set their own name/gender/teams and change their own password
+- Teams are a real, many-to-many resource: a user can belong to several teams at once, assignable from the Users page, the Teams page's per-team add/remove-member controls, or the profile page; a team can only be deleted once it has no members; the Teams page shows a summary (team/assigned/unassigned counts) plus per-team member management
+- Admin user management: edit any user's role, profile fields, and reset their password (account creation date is immutable); soft-delete/restore accounts (deleted users are recoverable, never silently gone, unless permanently deleted)
 - Configurable branding (app name / tagline / footer credit) via environment variables -- see `.env.example`
 - Every add/revoke/user-management/team/email action is written to an audit log (who, when, what, success/failure)
 
@@ -88,12 +91,15 @@ hardcoded to any specific server — every path/setting is env-driven.
 - **admin**: everything, including adding/revoking clients and managing app user accounts.
 - **viewer**: read-only — can see status/clients/diagnostics, cannot mutate anything.
 
-Guardrails prevent an admin from locking everyone out: you can't deactivate
-or delete your own account, and you can't remove the last active admin.
-Role demotion is stricter still -- an admin account can never be demoted to
-viewer by anyone, including another admin; the only way to change who's an
-admin is by creating new admin accounts or deleting existing ones (subject
-to the same last-admin/self-lockout guardrails).
+Guardrails prevent an admin from locking everyone out: you can't deactivate,
+delete, or demote your own account, and you can't remove the last active
+admin. The bootstrap admin -- the very first admin account a deployment
+ever creates (tracked via `User.is_bootstrap_admin`, set once by
+`auth.bootstrap_admin()`) -- has a stricter rule on top of that: it can
+never be demoted, deactivated, or deleted (soft or permanent) by anyone,
+including another admin, full stop. Every *other* admin account remains
+fully demotable/deactivatable/deletable by another admin, same as any
+account, subject only to the last-admin/self-lockout guardrails above.
 
 ## Testing
 
@@ -102,7 +108,7 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
-85 tests, none of which require a real OpenVPN install or root — the CLI
+101 tests, none of which require a real OpenVPN install or root — the CLI
 wrapper tests monkeypatch `subprocess.run` and assert on the exact argument
 lists constructed (including an explicit injection-safety test); the auth/
 role/DB tests run against an in-memory SQLite database; the .ovpn/email

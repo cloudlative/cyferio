@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from vpnadmin.auth import bootstrap_admin
+from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db
 from vpnadmin.routes import auth, clients, diagnostics, pages, status, teams, users
@@ -23,6 +23,7 @@ async def lifespan(_app: FastAPI):
     db = SessionLocal()
     try:
         bootstrap_admin(db)
+        ensure_bootstrap_admin_flag(db)
     finally:
         db.close()
     yield

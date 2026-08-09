@@ -280,6 +280,11 @@ input[type=text], input[type=password], input[type=date], select, textarea {
 	transition: border-color 0.15s ease, background 0.15s ease;
 }
 select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+/* Multi-selects render as a listbox, not a dropdown -- the single-select
+   custom arrow above doesn't apply, and a bit of height/padding helps them
+   read as a proper "pick several" control rather than a cramped list. */
+select[multiple] { appearance: auto; background-image: none; min-height: 110px; padding: 6px; }
+select[multiple] option { padding: 6px 8px; border-radius: 6px; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-2); background: var(--surface); box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.14); }
 input::placeholder { color: var(--text-faint); }
 input:disabled, select:disabled, textarea:disabled { opacity: 0.7; cursor: not-allowed; color: var(--text-muted); }

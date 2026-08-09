@@ -26,16 +26,16 @@
 		</div>
 		<div class="form-row" style="margin-top:16px">
 			<div class="field">
-				<label for="u-first">First Name <span class="muted">(optional)</span></label>
-				<input type="text" id="u-first">
+				<label for="u-first">First Name</label>
+				<input type="text" id="u-first" required>
 			</div>
 			<div class="field">
 				<label for="u-last">Last Name <span class="muted">(optional)</span></label>
 				<input type="text" id="u-last">
 			</div>
 			<div class="field">
-				<label for="u-team">Team <span class="muted">(optional)</span></label>
-				<select id="u-team"><option value="">Unassigned</option></select>
+				<label for="u-team">Teams <span class="muted">(optional, select several)</span></label>
+				<select id="u-team" multiple></select>
 			</div>
 			<button type="submit" class="btn-primary">Add User</button>
 		</div>
@@ -46,6 +46,9 @@
 	<div class="toolbar">
 		<div class="toolbar-title"><h2 style="margin:0">All Users</h2><span class="count-badge" id="users-count">— users</span></div>
 		<button class="btn-secondary" id="refresh-btn">Refresh</button>
+	</div>
+	<div class="field" style="max-width:320px;margin-bottom:16px">
+		<input type="text" id="user-search" placeholder="Search by name, username, or team…">
 	</div>
 	<div id="users-table"><p class="muted">Loading…</p></div>
 </div>
@@ -62,7 +65,7 @@
 		<h2>Edit User</h2>
 		<form id="edit-form">
 			<div class="form-row">
-				<div class="field"><label for="e-first">First Name</label><input type="text" id="e-first"></div>
+				<div class="field"><label for="e-first">First Name</label><input type="text" id="e-first" required></div>
 				<div class="field"><label for="e-last">Last Name</label><input type="text" id="e-last"></div>
 			</div>
 			<div class="form-row" style="margin-top:14px">
@@ -75,7 +78,7 @@
 						<option value="other">Other</option>
 					</select>
 				</div>
-				<div class="field"><label for="e-team">Team</label><select id="e-team"><option value="">Unassigned</option></select></div>
+				<div class="field"><label for="e-team">Teams <span class="muted">(select several)</span></label><select id="e-team" multiple></select></div>
 			</div>
 			<fieldset style="margin-top:16px">
 				<legend>Access</legend>
@@ -83,7 +86,7 @@
 					<div class="field">
 						<label for="e-role">Role</label>
 						<select id="e-role"><option value="viewer">Viewer</option><option value="admin">Admin</option></select>
-						<p class="muted" id="e-role-note" style="margin:6px 0 0;font-size:0.8rem;display:none">Admin accounts can't be demoted.</p>
+						<p class="muted" id="e-role-note" style="margin:6px 0 0;font-size:0.8rem;display:none">The bootstrap admin account can't be demoted, deactivated, or deleted.</p>
 					</div>
 					<div class="field">
 						<label for="e-active">Status</label>
@@ -117,72 +120,106 @@
 <script>
 const currentUsername = {{ user.username | tojson }};
 let editingUserId = null;
-let editingUserRole = null;
-let teamOptionsHtml = '<option value="">Unassigned</option>';
+let editingUserIsBootstrapAdmin = false;
+let allTeams = [];
+let lastUsers = [];
+let userSearchTerm = "";
 
 function fmtDate(iso) {
 	return iso ? new Date(iso).toLocaleString() : "—";
 }
 
+function teamOptionsHtml() {
+	return allTeams.map(t => `<option value="${t.id}">${escapeHtml(t.team)}</option>`).join("");
+}
+
+function setMultiSelectValues(select, ids) {
+	const set = new Set((ids || []).map(String));
+	[...select.options].forEach(opt => { opt.selected = set.has(opt.value); });
+}
+
+function getMultiSelectValues(select) {
+	return [...select.selectedOptions].map(opt => Number(opt.value));
+}
+
 async function loadTeamOptions() {
 	try {
-		const teams = await apiFetch("/api/teams");
-		teamOptionsHtml = '<option value="">Unassigned</option>' +
-			teams.filter(t => t.team !== "Unassigned").map(t => `<option value="${t.id}">${escapeHtml(t.team)}</option>`).join("");
-		document.getElementById("u-team").innerHTML = teamOptionsHtml;
+		allTeams = (await apiFetch("/api/teams")).filter(t => t.team !== "Unassigned");
+		document.getElementById("u-team").innerHTML = teamOptionsHtml();
 	} catch (e) {
 		toast(e.message, "error");
 	}
 }
 
+function matchesSearch(u) {
+	if (!userSearchTerm) return true;
+	const haystack = `${u.display_name} ${u.username} ${(u.teams || []).join(" ")}`.toLowerCase();
+	return haystack.includes(userSearchTerm);
+}
+
 async function loadUsers() {
 	const el = document.getElementById("users-table");
 	try {
-		const users = await apiFetch("/api/users");
-		document.getElementById("users-count").textContent = `${users.length} user${users.length === 1 ? "" : "s"}`;
-		if (users.length === 0) {
-			el.innerHTML = '<div class="empty-state">No users.</div>';
-		} else {
-			el.innerHTML = `<table>
-				<thead><tr><th>User</th><th>Team</th><th>Role</th><th>Status</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
-				<tbody>${users.map(u => `
-					<tr data-id="${u.id}">
-						<td>
-							<div>${escapeHtml(u.display_name)}</div>
-							<div class="muted" style="font-size:0.82em">${escapeHtml(u.username)}${u.username === currentUsername ? " (you)" : ""}</div>
-						</td>
-						<td class="muted">${escapeHtml(u.team || "—")}</td>
-						<td><span class="role-badge role-${u.role}">${u.role}</span></td>
-						<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
-						<td class="muted">${fmtDate(u.created_at)}</td>
-						<td class="muted">${fmtDate(u.last_login_at)}</td>
-						<td class="text-right">
-							<button class="btn-secondary btn-sm edit-btn" data-user='${JSON.stringify(u).replace(/'/g, "&apos;")}'>Edit</button>
-							<button class="btn-danger btn-sm delete-btn">Delete</button>
-						</td>
-					</tr>`).join("")}</tbody>
-			</table>`;
-		}
-		el.querySelectorAll(".edit-btn").forEach(btn => {
-			btn.addEventListener("click", () => openEdit(JSON.parse(btn.dataset.user.replace(/&apos;/g, "'"))));
-		});
-		el.querySelectorAll(".delete-btn").forEach(btn => {
-			btn.addEventListener("click", async () => {
-				const row = btn.closest("tr");
-				const id = row.dataset.id;
-				const ok = await confirmDialog("Delete this user? They'll be moved to the Deleted users list and can be restored later.", { confirmLabel: "Delete" });
-				if (!ok) return;
-				try {
-					const result = await apiFetch(`/api/users/${id}`, { method: "DELETE" });
-					toast(result.message);
-					loadUsers(); loadDeleted();
-				} catch (e) { toast(e.message, "error"); }
-			});
-		});
+		lastUsers = await apiFetch("/api/users");
+		renderUsers();
 	} catch (e) {
 		toast(e.message, "error");
 	}
 }
+
+function renderUsers() {
+	const el = document.getElementById("users-table");
+	const filtered = lastUsers.filter(matchesSearch);
+	document.getElementById("users-count").textContent = `${filtered.length} of ${lastUsers.length} user${lastUsers.length === 1 ? "" : "s"}`;
+	if (lastUsers.length === 0) {
+		el.innerHTML = '<div class="empty-state">No users.</div>';
+		return;
+	}
+	if (filtered.length === 0) {
+		el.innerHTML = '<div class="empty-state">No users match this search.</div>';
+		return;
+	}
+	el.innerHTML = `<table>
+		<thead><tr><th>User</th><th>Teams</th><th>Role</th><th>Status</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
+		<tbody>${filtered.map(u => `
+			<tr data-id="${u.id}">
+				<td>
+					<div>${escapeHtml(u.display_name)}</div>
+					<div class="muted" style="font-size:0.82em">${escapeHtml(u.username)}${u.username === currentUsername ? " (you)" : ""}</div>
+				</td>
+				<td class="muted">${u.teams && u.teams.length ? escapeHtml(u.teams.join(", ")) : "—"}</td>
+				<td><span class="role-badge role-${u.role}">${u.role}</span>${u.is_bootstrap_admin ? ' <span class="muted" style="font-size:0.78em">(bootstrap)</span>' : ""}</td>
+				<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
+				<td class="muted">${fmtDate(u.created_at)}</td>
+				<td class="muted">${fmtDate(u.last_login_at)}</td>
+				<td class="text-right">
+					<button class="btn-secondary btn-sm edit-btn" data-user='${JSON.stringify(u).replace(/'/g, "&apos;")}'>Edit</button>
+					<button class="btn-danger btn-sm delete-btn">Delete</button>
+				</td>
+			</tr>`).join("")}</tbody>
+	</table>`;
+	el.querySelectorAll(".edit-btn").forEach(btn => {
+		btn.addEventListener("click", () => openEdit(JSON.parse(btn.dataset.user.replace(/&apos;/g, "'"))));
+	});
+	el.querySelectorAll(".delete-btn").forEach(btn => {
+		btn.addEventListener("click", async () => {
+			const row = btn.closest("tr");
+			const id = row.dataset.id;
+			const ok = await confirmDialog("Delete this user? They'll be moved to the Deleted users list and can be restored later.", { confirmLabel: "Delete" });
+			if (!ok) return;
+			try {
+				const result = await apiFetch(`/api/users/${id}`, { method: "DELETE" });
+				toast(result.message);
+				loadUsers(); loadDeleted();
+			} catch (e) { toast(e.message, "error"); }
+		});
+	});
+}
+
+document.getElementById("user-search").addEventListener("input", (ev) => {
+	userSearchTerm = ev.target.value.trim().toLowerCase();
+	renderUsers();
+});
 
 async function loadDeleted() {
 	const el = document.getElementById("deleted-table");
@@ -200,7 +237,10 @@ async function loadDeleted() {
 					<td>${escapeHtml(u.display_name)} <span class="muted" style="font-size:0.82em">(${escapeHtml(u.username)})</span></td>
 					<td><span class="role-badge role-${u.role}">${u.role}</span></td>
 					<td class="muted">${fmtDate(u.deleted_at)}</td>
-					<td class="text-right"><button class="btn-secondary btn-sm restore-btn">Restore</button></td>
+					<td class="text-right">
+						<button class="btn-secondary btn-sm restore-btn">Restore</button>
+						<button class="btn-danger btn-sm permanent-delete-btn">Delete Permanently</button>
+					</td>
 				</tr>`).join("")}</tbody>
 		</table>`;
 		el.querySelectorAll(".restore-btn").forEach(btn => {
@@ -213,6 +253,20 @@ async function loadDeleted() {
 				} catch (e) { toast(e.message, "error"); }
 			});
 		});
+		el.querySelectorAll(".permanent-delete-btn").forEach(btn => {
+			btn.addEventListener("click", async () => {
+				const row = btn.closest("tr");
+				const id = row.dataset.id;
+				const name = row.querySelector("td").textContent.trim();
+				const ok = await confirmDialog(`Permanently delete <strong>${escapeHtml(name)}</strong>? This is separate from the earlier soft-delete and <strong>cannot be undone</strong> -- the account will be gone for good.`, { confirmLabel: "Delete Permanently" });
+				if (!ok) return;
+				try {
+					const result = await apiFetch(`/api/users/${id}/permanent`, { method: "DELETE" });
+					toast(result.message);
+					loadDeleted();
+				} catch (e) { toast(e.message, "error"); }
+			});
+		});
 	} catch (e) {
 		toast(e.message, "error");
 	}
@@ -220,19 +274,21 @@ async function loadDeleted() {
 
 function openEdit(u) {
 	editingUserId = u.id;
-	editingUserRole = u.role;
+	editingUserIsBootstrapAdmin = !!u.is_bootstrap_admin;
 	document.getElementById("e-first").value = u.first_name || "";
 	document.getElementById("e-last").value = u.last_name || "";
 	document.getElementById("e-gender").value = u.gender || "unspecified";
-	document.getElementById("e-team").innerHTML = teamOptionsHtml;
-	document.getElementById("e-team").value = u.team_id != null ? String(u.team_id) : "";
+	document.getElementById("e-team").innerHTML = teamOptionsHtml();
+	setMultiSelectValues(document.getElementById("e-team"), u.team_ids);
 	document.getElementById("e-role").value = u.role;
-	// Admin accounts can never be demoted (by anyone, even another admin) --
-	// the API enforces this unconditionally; disable the control here too so
-	// the UI doesn't offer an action that will just be rejected.
-	document.getElementById("e-role").disabled = u.role === "admin";
-	document.getElementById("e-role-note").style.display = u.role === "admin" ? "" : "none";
 	document.getElementById("e-active").value = String(u.is_active);
+	// The bootstrap admin account can never be demoted/deactivated/deleted
+	// (by anyone, even another admin) -- the API enforces this
+	// unconditionally; disable those controls here too so the UI doesn't
+	// offer actions that will just be rejected.
+	document.getElementById("e-role").disabled = editingUserIsBootstrapAdmin;
+	document.getElementById("e-active").disabled = editingUserIsBootstrapAdmin;
+	document.getElementById("e-role-note").style.display = editingUserIsBootstrapAdmin ? "" : "none";
 	document.getElementById("e-password").value = "";
 	document.getElementById("e-created").value = fmtDate(u.created_at);
 	document.getElementById("edit-dialog").showModal();
@@ -241,15 +297,18 @@ document.getElementById("edit-cancel").addEventListener("click", () => document.
 
 document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
-	const teamValue = document.getElementById("e-team").value;
+	const firstName = document.getElementById("e-first").value.trim();
+	if (!firstName) { toast("First Name is required.", "error"); return; }
 	const body = {
-		first_name: document.getElementById("e-first").value.trim() || null,
+		first_name: firstName,
 		last_name: document.getElementById("e-last").value.trim() || null,
 		gender: document.getElementById("e-gender").value,
-		team_id: teamValue ? Number(teamValue) : null,
-		is_active: document.getElementById("e-active").value === "true",
+		team_ids: getMultiSelectValues(document.getElementById("e-team")),
 	};
-	if (editingUserRole !== "admin") body.role = document.getElementById("e-role").value;
+	if (!editingUserIsBootstrapAdmin) {
+		body.role = document.getElementById("e-role").value;
+		body.is_active = document.getElementById("e-active").value === "true";
+	}
 	const pw = document.getElementById("e-password").value;
 	if (pw) body.password = pw;
 	try {
@@ -267,15 +326,16 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 	const username = document.getElementById("u-username").value.trim();
 	const password = document.getElementById("u-password").value;
 	const role = document.getElementById("u-role").value;
-	const teamValue = document.getElementById("u-team").value;
+	const firstName = document.getElementById("u-first").value.trim();
+	if (!firstName) { toast("First Name is required.", "error"); return; }
 	try {
 		await apiFetch("/api/users", {
 			method: "POST",
 			body: {
 				username, password, role,
-				first_name: document.getElementById("u-first").value.trim() || null,
+				first_name: firstName,
 				last_name: document.getElementById("u-last").value.trim() || null,
-				team_id: teamValue ? Number(teamValue) : null,
+				team_ids: getMultiSelectValues(document.getElementById("u-team")),
 			},
 		});
 		toast(`User '${username}' created.`);

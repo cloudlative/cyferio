@@ -4,7 +4,7 @@
 <div class="profile-header">
 	<div class="avatar-circle" id="avatar-initials">{{ user.username[:2].upper() }}</div>
 	<div>
-		<h1 style="display:block">My Profile</h1>
+		<h1 style="display:block" id="profile-heading">{{ user.display_name }}</h1>
 		<p class="page-subtitle" style="margin:0">{{ user.username }} · <span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span></p>
 	</div>
 </div>
@@ -26,7 +26,7 @@
 		<div class="form-row">
 			<div class="field">
 				<label for="p-first">First Name</label>
-				<input type="text" id="p-first" placeholder="e.g. Asif">
+				<input type="text" id="p-first" placeholder="e.g. Asif" required>
 			</div>
 			<div class="field">
 				<label for="p-last">Last Name</label>
@@ -44,8 +44,8 @@
 				</select>
 			</div>
 			<div class="field">
-				<label for="p-team">Team</label>
-				<select id="p-team"><option value="">Unassigned</option></select>
+				<label for="p-team">Teams <span class="muted">(select several)</span></label>
+				<select id="p-team" multiple></select>
 			</div>
 		</div>
 		<button type="submit" class="btn-primary" style="margin-top:8px">Save Profile</button>
@@ -73,17 +73,31 @@
 
 {% block scripts %}
 <script>
-let myTeamId = null;
+let myTeamIds = [];
+
+function setMultiSelectValues(select, ids) {
+	const set = new Set((ids || []).map(String));
+	[...select.options].forEach(opt => { opt.selected = set.has(opt.value); });
+}
 
 async function loadTeamOptions() {
 	const select = document.getElementById("p-team");
 	try {
 		const teams = await apiFetch("/api/teams");
-		select.innerHTML = '<option value="">Unassigned</option>' +
-			teams.filter(t => t.team !== "Unassigned").map(t => `<option value="${t.id}">${escapeHtml(t.team)}</option>`).join("");
-		select.value = myTeamId != null ? String(myTeamId) : "";
+		select.innerHTML = teams.filter(t => t.team !== "Unassigned").map(t => `<option value="${t.id}">${escapeHtml(t.team)}</option>`).join("");
+		setMultiSelectValues(select, myTeamIds);
 	} catch (e) {
 		toast(e.message, "error");
+	}
+}
+
+function updateDisplayedIdentity(me) {
+	// First Name is the primary displayed identity, not the login username
+	// (which stays visible as secondary/account info below it).
+	const heading = document.getElementById("profile-heading");
+	if (heading) heading.textContent = me.display_name || me.username;
+	if (me.display_name && me.display_name !== me.username) {
+		document.getElementById("avatar-initials").textContent = me.display_name.split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
 	}
 }
 
@@ -95,11 +109,9 @@ async function loadProfile() {
 		document.getElementById("p-first").value = me.first_name || "";
 		document.getElementById("p-last").value = me.last_name || "";
 		document.getElementById("p-gender").value = me.gender || "unspecified";
-		myTeamId = me.team_id;
+		myTeamIds = me.team_ids || [];
 		await loadTeamOptions();
-		if (me.display_name && me.display_name !== me.username) {
-			document.getElementById("avatar-initials").textContent = me.display_name.split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
-		}
+		updateDisplayedIdentity(me);
 	} catch (e) {
 		toast(e.message, "error");
 	}
@@ -107,17 +119,19 @@ async function loadProfile() {
 
 document.getElementById("profile-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
-	const teamValue = document.getElementById("p-team").value;
+	const firstName = document.getElementById("p-first").value.trim();
+	if (!firstName) { toast("First Name is required.", "error"); return; }
 	try {
-		await apiFetch("/api/users/me", {
+		const updated = await apiFetch("/api/users/me", {
 			method: "PATCH",
 			body: {
-				first_name: document.getElementById("p-first").value.trim() || null,
+				first_name: firstName,
 				last_name: document.getElementById("p-last").value.trim() || null,
 				gender: document.getElementById("p-gender").value,
-				team_id: teamValue ? Number(teamValue) : null,
+				team_ids: [...document.getElementById("p-team").selectedOptions].map(o => Number(o.value)),
 			},
 		});
+		updateDisplayedIdentity(updated);
 		toast("Profile updated.");
 	} catch (e) {
 		toast(e.message, "error");

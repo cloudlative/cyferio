@@ -117,26 +117,70 @@ class TestSelfLockoutGuardrails:
         r = app_client.delete(f"/api/users/{admin_id}")
         assert r.status_code == 400
 
-    def test_admin_cannot_be_demoted_even_by_another_admin(self, app_client, db_session):
-        # Admin accounts can never be demoted -- by anyone, including another
-        # admin -- full stop, regardless of how many other admins exist.
+    def test_bootstrap_admin_cannot_be_demoted_even_by_another_admin(self, app_client, db_session):
+        # ONLY the bootstrap admin (the very first admin account a
+        # deployment ever creates -- see User.is_bootstrap_admin) can never
+        # be demoted, by anyone, including another admin.
+        admin = db_session.query(User).filter(User.username == "admin").one()
+        admin.is_bootstrap_admin = True
         second_admin = User(username="admin2", password_hash=hash_password("admin2pass123"), role=Role.admin)
         db_session.add(second_admin)
         db_session.commit()
 
         login(app_client, "admin2", "admin2pass123")
-        admin_id = db_session.query(User).filter(User.username == "admin").one().id
-        r = app_client.patch(f"/api/users/{admin_id}", json={"role": "viewer"})
+        r = app_client.patch(f"/api/users/{admin.id}", json={"role": "viewer"})
         assert r.status_code == 400
         assert "cannot be demoted" in r.json()["detail"].lower()
 
         db_session.expire_all()
         assert db_session.query(User).filter(User.username == "admin").one().role == Role.admin
 
+    def test_bootstrap_admin_cannot_be_deactivated_or_deleted_by_another_admin(self, app_client, db_session):
+        # Task #65: the bootstrap-admin protection also covers deactivate
+        # and both delete paths (soft + permanent), not just role changes.
+        admin = db_session.query(User).filter(User.username == "admin").one()
+        admin.is_bootstrap_admin = True
+        second_admin = User(username="admin2", password_hash=hash_password("admin2pass123"), role=Role.admin)
+        db_session.add(second_admin)
+        db_session.commit()
+
+        login(app_client, "admin2", "admin2pass123")
+
+        r = app_client.patch(f"/api/users/{admin.id}", json={"is_active": False})
+        assert r.status_code == 400
+
+        r = app_client.delete(f"/api/users/{admin.id}")
+        assert r.status_code == 400
+
+        # Permanent-delete requires the target to already be soft-deleted,
+        # which the check above proves the API itself will never do to the
+        # bootstrap admin -- simulate that (otherwise-unreachable) state
+        # directly to prove the belt-and-suspenders guard in the permanent-
+        # delete endpoint itself also rejects it, not just relying on
+        # soft-delete never happening in the first place.
+        admin.deleted = True
+        db_session.commit()
+        r = app_client.delete(f"/api/users/{admin.id}/permanent")
+        assert r.status_code == 400
+
+    def test_non_bootstrap_admin_can_be_demoted_by_another_admin(self, app_client, db_session):
+        # A NON-bootstrap admin account remains demotable by another admin,
+        # same as before the bootstrap-only rule existed -- this is the
+        # corrected scope: it's not "no admin can ever be demoted", only
+        # the specific bootstrap account.
+        second_admin = User(username="admin2", password_hash=hash_password("admin2pass123"), role=Role.admin)
+        db_session.add(second_admin)
+        db_session.commit()
+        assert second_admin.is_bootstrap_admin is False
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch(f"/api/users/{second_admin.id}", json={"role": "viewer"})
+        assert r.status_code == 200
+        assert r.json()["role"] == "viewer"
+
     def test_admin_can_still_be_deactivated_by_another_admin(self, app_client, db_session):
-        # The unconditional "never demoted" rule only covers role changes --
-        # deactivating (not role-changing) a non-self admin, when another
-        # active admin remains, is still allowed.
+        # A non-bootstrap admin can still be deactivated by another admin,
+        # when another active admin remains.
         second_admin = User(username="admin2", password_hash=hash_password("admin2pass123"), role=Role.admin)
         db_session.add(second_admin)
         db_session.commit()
@@ -215,6 +259,84 @@ class TestSoftDeleteAndRestore:
         assert third_admin_check == 1
 
 
+class TestPermanentDelete:
+    def test_permanent_delete_requires_prior_soft_delete(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+        r = app_client.delete(f"/api/users/{viewer_id}/permanent")
+        assert r.status_code == 404
+
+    def test_permanent_delete_removes_row_from_db(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+        app_client.delete(f"/api/users/{viewer_id}")  # soft-delete first
+
+        r = app_client.delete(f"/api/users/{viewer_id}/permanent")
+        assert r.status_code == 200
+
+        db_session.expire_all()
+        assert db_session.get(User, viewer_id) is None
+
+    def test_permanent_delete_logged_before_row_removed(self, app_client, db_session):
+        from vpnadmin.models import AuditLog
+
+        login(app_client, "admin", "adminpass123")
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+        app_client.delete(f"/api/users/{viewer_id}")
+        app_client.delete(f"/api/users/{viewer_id}/permanent")
+
+        entry = db_session.query(AuditLog).filter(AuditLog.action == "permanently_delete_user").one()
+        assert entry.target == "viewer"  # username snapshot, not a FK -- survives the row's deletion
+
+    def test_permanent_delete_admin_only(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+        app_client.delete(f"/api/users/{viewer_id}")
+        app_client.post("/logout")
+
+        # Re-create a second viewer to log in as (the original was just
+        # soft-deleted and can no longer authenticate).
+        second_viewer = User(username="viewer2", password_hash=hash_password("viewer2pass123"), role=Role.viewer)
+        db_session.add(second_viewer)
+        db_session.commit()
+        login(app_client, "viewer2", "viewer2pass123")
+        r = app_client.delete(f"/api/users/{viewer_id}/permanent")
+        assert r.status_code == 403
+
+
+class TestFirstNameRequired:
+    def test_create_user_without_first_name_rejected(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/users", json={"username": "nofirstname", "password": "somepass123"})
+        assert r.status_code == 422
+
+    def test_create_user_with_blank_first_name_rejected(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/users", json={
+            "username": "blankfirstname", "password": "somepass123", "first_name": "   ",
+        })
+        assert r.status_code == 422
+
+    def test_create_user_with_first_name_succeeds(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/users", json={
+            "username": "hasfirstname", "password": "somepass123", "first_name": "Alex",
+        })
+        assert r.status_code == 201
+        assert r.json()["first_name"] == "Alex"
+
+    def test_admin_edit_cannot_blank_out_first_name(self, app_client, db_session):
+        login(app_client, "admin", "adminpass123")
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"first_name": ""})
+        assert r.status_code == 422
+
+    def test_self_service_cannot_blank_out_first_name(self, app_client):
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.patch("/api/users/me", json={"first_name": "  "})
+        assert r.status_code == 422
+
+
 class TestSelfServiceProfile:
     def test_can_view_own_profile(self, app_client):
         login(app_client, "viewer", "viewerpass123")
@@ -228,11 +350,22 @@ class TestSelfServiceProfile:
         db_session.commit()
 
         login(app_client, "viewer", "viewerpass123")
-        r = app_client.patch("/api/users/me", json={"first_name": "Val", "team_id": team.id})
+        r = app_client.patch("/api/users/me", json={"first_name": "Val", "team_ids": [team.id]})
         assert r.status_code == 200
         body = r.json()
         assert body["first_name"] == "Val"
-        assert body["team"] == "Support"
+        assert body["teams"] == ["Support"]
+
+    def test_viewer_can_belong_to_multiple_teams(self, app_client, db_session):
+        t1 = Team(name="Support")
+        t2 = Team(name="Infra")
+        db_session.add_all([t1, t2])
+        db_session.commit()
+
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.patch("/api/users/me", json={"team_ids": [t1.id, t2.id]})
+        assert r.status_code == 200
+        assert sorted(r.json()["teams"]) == ["Infra", "Support"]
 
     def test_profile_update_cannot_change_role(self, app_client, db_session):
         login(app_client, "viewer", "viewerpass123")
@@ -301,7 +434,7 @@ class TestTeams:
         db_session.commit()
         login(app_client, "admin", "adminpass123")
         viewer = db_session.query(User).filter(User.username == "viewer").one()
-        viewer.team_id = team.id
+        viewer.teams = [team]
         db_session.commit()
         r = app_client.get("/api/teams")
         assert r.status_code == 200
@@ -309,6 +442,27 @@ class TestTeams:
         platform = next(g for g in data if g["team"] == "Platform")
         assert platform["count"] == 1
         assert platform["members"][0]["username"] == "viewer"
+
+    def test_user_appears_under_every_team_they_belong_to(self, app_client, db_session):
+        # Task #63: membership is many-to-many -- a user in two teams must
+        # show up in both teams' member lists, not just one.
+        t1 = Team(name="Platform")
+        t2 = Team(name="Security")
+        db_session.add_all([t1, t2])
+        db_session.commit()
+        viewer = db_session.query(User).filter(User.username == "viewer").one()
+        viewer.teams = [t1, t2]
+        db_session.commit()
+
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.get("/api/teams")
+        data = r.json()
+        platform = next(g for g in data if g["team"] == "Platform")
+        security = next(g for g in data if g["team"] == "Security")
+        assert any(m["username"] == "viewer" for m in platform["members"])
+        assert any(m["username"] == "viewer" for m in security["members"])
+        unassigned = next(g for g in data if g["team"] == "Unassigned")
+        assert all(m["username"] != "viewer" for m in unassigned["members"])
 
     def test_deleted_users_excluded_from_teams(self, app_client, db_session):
         login(app_client, "admin", "adminpass123")
@@ -339,21 +493,36 @@ class TestTeams:
         r = app_client.post("/api/teams", json={"name": "Ops"})
         assert r.status_code == 409
 
-    def test_delete_team_unassigns_members_not_cascade_delete(self, app_client, db_session):
+    def test_delete_team_blocked_when_members_assigned(self, app_client, db_session):
+        # Corrected behavior (task #61): deleting a non-empty team is
+        # rejected, not auto-unassigned-then-deleted.
         team = Team(name="Ops")
         db_session.add(team)
         db_session.commit()
         viewer = db_session.query(User).filter(User.username == "viewer").one()
-        viewer.team_id = team.id
+        viewer.teams = [team]
+        db_session.commit()
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.delete(f"/api/teams/{team.id}")
+        assert r.status_code == 400
+        assert "members assigned" in r.json()["detail"].lower()
+
+        db_session.expire_all()
+        assert db_session.get(Team, team.id) is not None
+        still_there = db_session.query(User).filter(User.username == "viewer").one()
+        assert team in still_there.teams  # untouched, not unassigned
+
+    def test_delete_team_succeeds_when_empty(self, app_client, db_session):
+        team = Team(name="Ghost")
+        db_session.add(team)
         db_session.commit()
 
         login(app_client, "admin", "adminpass123")
         r = app_client.delete(f"/api/teams/{team.id}")
         assert r.status_code == 200
-
         db_session.expire_all()
-        still_there = db_session.query(User).filter(User.username == "viewer").one()
-        assert still_there.team_id is None  # unassigned, not deleted
+        assert db_session.get(Team, team.id) is None
 
     def test_assign_user_to_team_via_admin_edit_endpoint(self, app_client, db_session):
         team = Team(name="Infra")
@@ -362,12 +531,41 @@ class TestTeams:
         viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
 
         login(app_client, "admin", "adminpass123")
-        r = app_client.patch(f"/api/users/{viewer_id}", json={"team_id": team.id})
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"team_ids": [team.id]})
         assert r.status_code == 200
-        assert r.json()["team"] == "Infra"
+        assert r.json()["teams"] == ["Infra"]
+
+    def test_assign_user_to_multiple_teams_via_admin_edit_endpoint(self, app_client, db_session):
+        t1 = Team(name="Infra")
+        t2 = Team(name="Security")
+        db_session.add_all([t1, t2])
+        db_session.commit()
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"team_ids": [t1.id, t2.id]})
+        assert r.status_code == 200
+        assert sorted(r.json()["teams"]) == ["Infra", "Security"]
 
     def test_assign_user_to_nonexistent_team_rejected(self, app_client, db_session):
         viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
         login(app_client, "admin", "adminpass123")
-        r = app_client.patch(f"/api/users/{viewer_id}", json={"team_id": 99999})
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"team_ids": [99999]})
         assert r.status_code == 400
+
+    def test_add_and_remove_team_member_endpoints(self, app_client, db_session):
+        team = Team(name="Infra")
+        db_session.add(team)
+        db_session.commit()
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post(f"/api/teams/{team.id}/members", json={"user_id": viewer_id})
+        assert r.status_code == 201
+        db_session.expire_all()
+        assert team in db_session.get(User, viewer_id).teams
+
+        r = app_client.delete(f"/api/teams/{team.id}/members/{viewer_id}")
+        assert r.status_code == 200
+        db_session.expire_all()
+        assert team not in db_session.get(User, viewer_id).teams
