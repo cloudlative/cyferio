@@ -4,11 +4,12 @@ services:
     container_name: openvpn-toolkit-traefik
     restart: unless-stopped
     command:
-      # File provider (see traefik/dynamic.yml), not the usual Docker-socket
-      # provider -- this host's Docker Engine enforces a MinAPIVersion that
-      # Traefik's bundled Docker client can't satisfy (see dynamic.yml's
-      # comment for the full story). One fixed backend, so static routing
-      # config is simpler here anyway, and avoids mounting docker.sock at all.
+      # File provider (see app/traefik/dynamic.yml), not the usual
+      # Docker-socket provider -- this host's Docker Engine enforces a
+      # MinAPIVersion that Traefik's bundled Docker client can't satisfy
+      # (see dynamic.yml's comment for the full story). One fixed backend,
+      # so static routing config is simpler here anyway, and avoids
+      # mounting docker.sock at all.
       - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
       - --entrypoints.web.address=:80
@@ -36,7 +37,7 @@ services:
       - "443:443"
     volumes:
       - traefik-acme:/letsencrypt
-      - ./traefik/dynamic.yml:/etc/traefik/dynamic/dynamic.yml:ro
+      - ./app/traefik/dynamic.yml:/etc/traefik/dynamic/dynamic.yml:ro
     env_file: .env
 
   app:
@@ -57,8 +58,9 @@ services:
     # IP) alongside Traefik, that would leave an unauthenticated bypass.
     # ports:
     #   - "10.8.0.1:8000:8000"
-    # Routing (Host rule, TLS, backend port) is defined in traefik/dynamic.yml
-    # rather than labels here -- see that file's comment for why.
+    # Routing (Host rule, TLS, backend port) is defined in
+    # app/traefik/dynamic.yml rather than labels here -- see that file's
+    # comment for why.
     # openvpn-install.sh unconditionally probes /dev/net/tun at startup
     # (even for read-only commands like --list/--check) as a sanity check
     # that OpenVPN could run on this host -- pass the device through rather
@@ -77,18 +79,19 @@ services:
       - /var/log/openvpn:/var/log/openvpn:ro
 
       # --- REQUIRED: the actual scripts this app wraps, bind-mounted from
-      #     this repo's root so the container always runs whatever's
-      #     checked out on the host (no image rebuild to pick up a script
-      #     change). Point OPENVPN_INSTALL_SCRIPT/VPN_STATUS_SCRIPT in .env
-      #     at these same in-container paths.
-      - ../openvpn-install.sh:/opt/openvpn-toolkit/openvpn-install.sh:ro
-      - ../vpn-status.py:/opt/openvpn-toolkit/vpn-status.py:ro
+      #     this repo root (this compose file's own directory now that it
+      #     lives at the repo root, no longer app/) so the container always
+      #     runs whatever's checked out on the host (no image rebuild to
+      #     pick up a script change). Point OPENVPN_INSTALL_SCRIPT/
+      #     VPN_STATUS_SCRIPT in .env at these same in-container paths.
+      - ./openvpn-install.sh:/opt/openvpn-toolkit/openvpn-install.sh:ro
+      - ./vpn-status.py:/opt/openvpn-toolkit/vpn-status.py:ro
 
       # --- Only needed in SQLite mode (default) -- persists the app's own
       #     database (users, audit log) across container recreation. Not
       #     used if DATABASE_URL in .env points at the postgres service
       #     below instead.
-      - ./data:/app/data
+      - ./app/data:/app/data
     # This app manipulates root-owned files under /etc/openvpn and runs
     # easyrsa, so it runs as root inside the container (the image's
     # default user). USE_SUDO=false in .env reflects that no privilege

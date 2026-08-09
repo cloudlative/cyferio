@@ -19,7 +19,9 @@ __pycache__/
 *.pyc
 .venv/
 
-# app/ -- web app runtime artifacts, never the code itself
-app/.env
+# Web app runtime artifacts, never the code itself. docker-compose.yml and
+# .env now live at the repo root (moved out of app/); app/data/ stays put
+# since that's still where the app's SQLite file / bind mount lives.
+/.env
 app/data/
 app/pgdata/

@@ -59,35 +59,59 @@ scripts — set `USE_SUDO=true` in `.env` if this process isn't already root.
 
 ## Quick start (Docker)
 
+`docker-compose.yml` and `.env.example` live at the **repo root**, not
+here in `app/` — the compose file needs `../openvpn-install.sh` and
+`../vpn-status.py` at predictable paths for its bind mounts, and putting
+it at the root where those scripts actually live keeps every path in it a
+plain `./something` instead of a pile of `../`. Run everything from the
+repo root:
+
 ```bash
-cd app
 cp .env.example .env   # fill in SECRET_KEY, BOOTSTRAP_ADMIN_USERNAME/PASSWORD
 docker compose pull && docker compose up -d
 ```
 
-`docker-compose.yml`'s `app` service pulls a pre-built image from GHCR
+The `app` service pulls a pre-built image from GHCR
 (`ghcr.io/cloudlative/openvpn-toolkit-app`, public — no `docker login`
 needed) rather than building locally. It's published by
-[`.github/workflows/build.yml`](../.github/workflows/build.yml) on every
-push to `master`: tests → build/push (`latest` + a `sha-<short>` tag per
-commit) → Trivy scan. To deploy an exact version instead of always
-tracking `latest`, set `IMAGE_TAG=sha-<short>` in `.env` (find the tag on
-the [Packages page](https://github.com/cloudlative/openvpn-toolkit/pkgs/container/openvpn-toolkit-app)
-or a specific Actions run) before `docker compose pull`.
+[`.github/workflows/build.yml`](../.github/workflows/build.yml) whenever a
+version tag (`vX.Y.Z`) is pushed — see [Releases](#releases) below.
+Ordinary commits to `master` only run the test suite, they don't publish a
+new image. To deploy an exact version instead of always tracking `latest`,
+set `IMAGE_TAG=vX.Y.Z` in `.env` (see the
+[Packages page](https://github.com/cloudlative/openvpn-toolkit/pkgs/container/openvpn-toolkit-app)
+for what's been published) before `docker compose pull`.
 
 Rolling back a bad deploy: either set `IMAGE_TAG` in `.env` to a known-good
-`sha-<short>` and re-run `docker compose pull && docker compose up -d`, or
-check out the commit before the GHCR-image switch (`build: .` instead of
-`image:` in `docker-compose.yml`) and `docker compose up -d --build`.
+previous version tag and re-run `docker compose pull && docker compose up -d`,
+or check out the commit before the GHCR-image switch (`build: .` instead of
+`image:` in `docker-compose.yml`, and the compose file back under `app/`)
+and `docker compose up -d --build`.
 
-`docker-compose.yml` bind-mounts what the container needs from the host:
+`docker-compose.yml` bind-mounts what the container needs from the host
+(all paths below relative to the repo root, where the compose file lives):
 
 | Mount | Why |
 |---|---|
 | `/etc/openvpn:/etc/openvpn` (rw) | `--add`/`--revoke` write new certs and update `openvpn_db.txt` here |
 | `/var/log/openvpn:/var/log/openvpn` (ro) | `vpn-status.py` reads connection/rejection history from here |
-| `../openvpn-install.sh`, `../vpn-status.py` (ro) | the actual scripts this app wraps — bind-mounted, not baked into the image, so a `git pull` on the host takes effect without rebuilding |
-| `./data` | SQLite file persistence (only relevant if `DATABASE_URL` stays on the SQLite default — see below) |
+| `./openvpn-install.sh`, `./vpn-status.py` (ro) | the actual scripts this app wraps — bind-mounted, not baked into the image, so a `git pull` on the host takes effect without rebuilding |
+| `./app/data` | SQLite file persistence (only relevant if `DATABASE_URL` stays on the SQLite default — see below) |
+
+### Releases
+
+Image builds are tag-triggered, not push-triggered: pushing a version tag
+is what cuts a release and publishes a new image.
+
+```bash
+git tag v1.0.0
+git push --tags
+```
+
+That runs the full pipeline (test → build/push → Trivy scan) and publishes
+`ghcr.io/cloudlative/openvpn-toolkit-app:v1.0.0` and `:latest`. A plain
+`git push` to `master` only runs the test job — no image is built or
+published.
 
 The container runs as root (needed to touch root-owned `/etc/openvpn` and
 run `easyrsa`) with `USE_SUDO=false` — no `sudo` binary needed since the
