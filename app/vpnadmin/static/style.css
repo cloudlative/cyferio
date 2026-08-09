@@ -227,7 +227,7 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
    Sits above every logged-in page's own content (see base.html) -- holds
    the admin-only quick theme switcher plus the "who"/logout controls that
    used to live in .sidebar-footer. Themed automatically: every color used
-   below is one of the --accent*/--side-* custom properties the
+   below is one of the --accent* / --side-* custom properties the
    [data-theme="..."] rules above already override. -------------------- */
 .content-header {
 	display: flex;
@@ -655,20 +655,26 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 .login-bg .wave-3 { animation: theme-drift-x 110s linear infinite; }
 @keyframes theme-drift-x { from { transform: translateX(0); } to { transform: translateX(-400px); } }
 
-/* Perimeter Grid: faint grid + slow radar-style sweep */
+/* Perimeter Grid: faint grid + slow radar-style sweep.
+   Sized in vmax/% (not the fixed px the original preview used -- that
+   preview's stage was a bounded ~1180px panel, but a real login page is
+   the full, arbitrary-size viewport, so a fixed 900px mask only covered
+   the center and left every larger screen's edges plain/uncovered). vmax
+   scales with whichever of width/height is larger, guaranteeing the mask
+   and sweep both extend past every edge on any screen size. */
 .login-bg .grid {
 	position: absolute; inset: -1px;
 	background-image:
 		linear-gradient(rgba(129, 140, 248, 0.10) 1px, transparent 1px),
 		linear-gradient(90deg, rgba(129, 140, 248, 0.10) 1px, transparent 1px);
 	background-size: 46px 46px;
-	mask-image: radial-gradient(900px 650px at 50% 42%, #000 55%, transparent 92%);
+	mask-image: radial-gradient(75vmax 60vmax at 50% 42%, #000 55%, transparent 92%);
 }
 .login-bg .sweep {
 	position: absolute;
 	left: 50%; top: 42%;
-	width: 1400px; height: 1400px;
-	margin: -700px 0 0 -700px;
+	width: 220vmax; height: 220vmax;
+	margin: -110vmax 0 0 -110vmax;
 	background: conic-gradient(from 0deg, rgba(34, 211, 238, 0.20), transparent 12%, transparent 100%);
 	animation: theme-sweep-rotate 14s linear infinite;
 	border-radius: 50%;
