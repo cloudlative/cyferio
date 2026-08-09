@@ -393,6 +393,19 @@ label { display: block; font-weight: 700; font-size: 0.82rem; margin-bottom: 6px
 fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin: 0 0 18px; }
 fieldset legend { padding: 0 8px; color: var(--text-muted); font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
 
+/* --- Phone input (dial-code <select> + local-number field), see app.js's
+   createPhoneInput -- used anywhere a User.phone is entered/edited. */
+.phone-input { display: flex; gap: 8px; }
+.phone-input .phone-dial-select { flex: 0 0 40%; min-width: 120px; }
+.phone-input .phone-local-input { flex: 1; min-width: 0; }
+
+/* --- Inline field validation (email/phone), see app.js's
+   attachInlineValidation -- this app's first use of this pattern, so it's
+   reused as-is anywhere else inline validation is added later. */
+input.input-invalid, select.input-invalid { border-color: var(--danger-strong); box-shadow: 0 0 0 3px var(--danger-bg); }
+.field-error { color: var(--danger-text); font-size: 0.78rem; font-weight: 600; margin-top: 5px; min-height: 0; }
+.field-error:empty { margin-top: 0; }
+
 .empty-state { text-align: center; padding: 48px 20px; color: var(--text-muted); font-weight: 500; }
 
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }

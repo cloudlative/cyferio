@@ -42,7 +42,12 @@ def _valid_first_name(v: str | None) -> str | None:
 
 # Loose but real validation -- catches typos ("bob@@x", "bob@x") without
 # chasing full RFC 5322 (this field is informational, not used for login or
-# delivery today, see models.py's User.email comment).
+# delivery today, see models.py's User.email comment). The base pattern is
+# deliberately unchanged from before; the two extra structural checks below
+# (no ".." anywhere, local part doesn't start/end with ".") catch a couple
+# more common typos ("bob..smith@x.com", ".bob@x.com", "bob.@x.com") that
+# the regex alone lets through, without chasing full RFC 5322 -- still just
+# "does this look like a real address", not a deliverability guarantee.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -54,7 +59,27 @@ def _valid_email(v: str | None) -> str | None:
         return None  # explicit "" from the form means "clear it", not an error
     if not _EMAIL_RE.match(v):
         raise ValueError("That doesn't look like a valid email address.")
+    if ".." in v:
+        raise ValueError("That doesn't look like a valid email address.")
+    local = v.split("@", 1)[0]
+    if local.startswith(".") or local.endswith("."):
+        raise ValueError("That doesn't look like a valid email address.")
     return v
+
+
+# E.164-shaped bounds check: a leading "+", then 7-15 digits and nothing
+# else. This is deliberately NOT a per-country length/prefix validator (that
+# is a well-known rabbit hole -- see e.g. libphonenumber) -- it just rejects
+# the obviously-wrong stuff a fat-fingered admin might submit (missing "+",
+# letters, stray spaces/dashes/parens the client-side phone input isn't
+# supposed to be producing in the first place, way too few/many digits).
+# The client-side phone-input component (dial-code dropdown + local-number
+# field, see users.html/profile.html + app.js's createPhoneInput) is
+# responsible for assembling a clean "+<dialcode><digits>" string before it
+# ever reaches here; this is the real source of truth behind that UX sugar,
+# same as every other validator in this file, and also runs for any request
+# built by hand (curl, an older client, etc.) that skips the UI entirely.
+_PHONE_RE = re.compile(r"^\+\d{7,15}$")
 
 
 def _valid_phone(v: str | None) -> str | None:
@@ -62,9 +87,12 @@ def _valid_phone(v: str | None) -> str | None:
         return None
     v = v.strip()
     if not v:
-        return None
-    if len(v) > 32:
-        raise ValueError("Phone number is too long.")
+        return None  # explicit "" from the form means "clear it", not an error
+    if not _PHONE_RE.match(v):
+        raise ValueError(
+            "Phone number must start with '+' followed by 7-15 digits "
+            "(country code + number), e.g. +923001234567."
+        )
     return v
 
 

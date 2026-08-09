@@ -51,6 +51,7 @@
 		<textarea id="add-result-ovpn" readonly rows="6" class="mono" style="resize:vertical"></textarea>
 		<div class="form-row" style="margin-top:10px">
 			<button type="button" class="btn-secondary btn-sm" id="add-result-copy">Copy to Clipboard</button>
+			<button type="button" class="btn-secondary btn-sm" id="add-result-download">Download</button>
 			<button type="button" class="btn-secondary btn-sm" id="add-result-dismiss">Dismiss</button>
 		</div>
 	</div>
@@ -664,7 +665,9 @@ if (isAdmin) {
 			// copied/delivered without a separate lookup.
 			try {
 				const ovpnData = await apiFetch(`/api/clients/${encodeURIComponent(name)}/ovpn`);
-				document.getElementById("add-result-ovpn").value = ovpnData.ovpn;
+				const resultTa = document.getElementById("add-result-ovpn");
+				resultTa.value = ovpnData.ovpn;
+				resultTa.dataset.clientName = name;
 				document.getElementById("add-result").style.display = "";
 			} catch (_) { /* non-fatal -- the client is still added either way */ }
 		} catch (e) {
@@ -678,6 +681,21 @@ if (isAdmin) {
 		const ta = document.getElementById("add-result-ovpn");
 		const copied = await copyTextToClipboard(ta.value, ta);
 		toast(copied ? "Copied to clipboard." : "Couldn't copy automatically -- the text is selected, press Ctrl+C (Cmd+C on Mac) to copy.", copied ? "success" : "error");
+	});
+	document.getElementById("add-result-download").addEventListener("click", () => {
+		// Same download pattern as the "View / Copy .ovpn" dialog elsewhere
+		// on this page (see ovpn-download-btn above) -- kept consistent
+		// rather than introducing a second way to trigger a file download.
+		const ta = document.getElementById("add-result-ovpn");
+		const blob = new Blob([ta.value], { type: "application/x-openvpn-profile" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = `${ta.dataset.clientName || "client"}.ovpn`;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(url);
 	});
 	document.getElementById("add-result-dismiss").addEventListener("click", () => {
 		document.getElementById("add-result").style.display = "none";

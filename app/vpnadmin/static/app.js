@@ -407,6 +407,178 @@ function countryName(code) {
 	return _COUNTRY_NAME_BY_CODE[code] || code;
 }
 
+// Static country -> international calling ("dial") code table -- a
+// different dataset from ISO_3166_COUNTRIES above (that one has no dial
+// codes, and is used for GeoIP country restriction, an unrelated feature).
+// Country names are deliberately kept the same as ISO_3166_COUNTRIES's for
+// consistency across the app, even though this is a separate list. Covers
+// every country in ISO_3166_COUNTRIES (~195 entries) so nothing that shows
+// up in the GeoIP restriction dropdown is missing here.
+//
+// NANP members (US/CA + the Caribbean island nations that share the "+1"
+// country code) are listed with their real, distinguishing area code
+// (e.g. Jamaica "+1876") rather than a bare "+1" for every one of them --
+// that's how every other phone-input widget in the wild disambiguates them,
+// and it lets round-tripping a stored number (see _dialCodesByLength below)
+// pick the right country back out for e.g. Jamaica instead of always
+// falling back to "United States". US and Canada themselves both
+// genuinely are just "+1" -- there's no way to tell them apart from the
+// number alone, and this app doesn't need to.
+const DIAL_CODES = [
+	["Afghanistan", "+93"], ["Albania", "+355"], ["Algeria", "+213"], ["American Samoa", "+1684"], ["Andorra", "+376"],
+	["Angola", "+244"], ["Anguilla", "+1264"], ["Antigua and Barbuda", "+1268"], ["Argentina", "+54"], ["Armenia", "+374"],
+	["Aruba", "+297"], ["Australia", "+61"], ["Austria", "+43"], ["Azerbaijan", "+994"],
+	["Bahamas", "+1242"], ["Bahrain", "+973"], ["Bangladesh", "+880"], ["Barbados", "+1246"], ["Belarus", "+375"],
+	["Belgium", "+32"], ["Belize", "+501"], ["Benin", "+229"], ["Bermuda", "+1441"], ["Bhutan", "+975"],
+	["Bolivia", "+591"], ["Bosnia and Herzegovina", "+387"], ["Botswana", "+267"], ["Brazil", "+55"], ["Brunei", "+673"],
+	["Bulgaria", "+359"], ["Burkina Faso", "+226"], ["Burundi", "+257"], ["Cabo Verde", "+238"], ["Cambodia", "+855"],
+	["Cameroon", "+237"], ["Canada", "+1"], ["Cayman Islands", "+1345"], ["Central African Republic", "+236"], ["Chad", "+235"],
+	["Chile", "+56"], ["China", "+86"], ["Colombia", "+57"], ["Comoros", "+269"], ["Congo", "+242"],
+	["Congo (DRC)", "+243"], ["Costa Rica", "+506"], ["Côte d'Ivoire", "+225"], ["Croatia", "+385"], ["Cuba", "+53"],
+	["Curaçao", "+599"], ["Cyprus", "+357"], ["Czechia", "+420"], ["Denmark", "+45"], ["Djibouti", "+253"],
+	["Dominica", "+1767"], ["Dominican Republic", "+1809"], ["Ecuador", "+593"], ["Egypt", "+20"], ["El Salvador", "+503"],
+	["Equatorial Guinea", "+240"], ["Eritrea", "+291"], ["Estonia", "+372"], ["Eswatini", "+268"], ["Ethiopia", "+251"],
+	["Fiji", "+679"], ["Finland", "+358"], ["France", "+33"], ["French Guiana", "+594"], ["French Polynesia", "+689"],
+	["Gabon", "+241"], ["Gambia", "+220"], ["Georgia", "+995"], ["Germany", "+49"], ["Ghana", "+233"],
+	["Gibraltar", "+350"], ["Greece", "+30"], ["Greenland", "+299"], ["Grenada", "+1473"], ["Guadeloupe", "+590"],
+	["Guam", "+1671"], ["Guatemala", "+502"], ["Guernsey", "+44"], ["Guinea", "+224"], ["Guinea-Bissau", "+245"],
+	["Guyana", "+592"], ["Haiti", "+509"], ["Honduras", "+504"], ["Hong Kong", "+852"], ["Hungary", "+36"],
+	["Iceland", "+354"], ["India", "+91"], ["Indonesia", "+62"], ["Iran", "+98"], ["Iraq", "+964"],
+	["Ireland", "+353"], ["Isle of Man", "+44"], ["Israel", "+972"], ["Italy", "+39"], ["Jamaica", "+1876"],
+	["Japan", "+81"], ["Jersey", "+44"], ["Jordan", "+962"], ["Kazakhstan", "+7"], ["Kenya", "+254"],
+	["Kiribati", "+686"], ["Korea (North)", "+850"], ["Korea (South)", "+82"], ["Kuwait", "+965"], ["Kyrgyzstan", "+996"],
+	["Laos", "+856"], ["Latvia", "+371"], ["Lebanon", "+961"], ["Lesotho", "+266"], ["Liberia", "+231"],
+	["Libya", "+218"], ["Liechtenstein", "+423"], ["Lithuania", "+370"], ["Luxembourg", "+352"], ["Macao", "+853"],
+	["Madagascar", "+261"], ["Malawi", "+265"], ["Malaysia", "+60"], ["Maldives", "+960"], ["Mali", "+223"],
+	["Malta", "+356"], ["Marshall Islands", "+692"], ["Martinique", "+596"], ["Mauritania", "+222"], ["Mauritius", "+230"],
+	["Mexico", "+52"], ["Micronesia", "+691"], ["Moldova", "+373"], ["Monaco", "+377"], ["Mongolia", "+976"],
+	["Montenegro", "+382"], ["Montserrat", "+1664"], ["Morocco", "+212"], ["Mozambique", "+258"], ["Myanmar", "+95"],
+	["Namibia", "+264"], ["Nauru", "+674"], ["Nepal", "+977"], ["Netherlands", "+31"], ["New Caledonia", "+687"],
+	["New Zealand", "+64"], ["Nicaragua", "+505"], ["Niger", "+227"], ["Nigeria", "+234"], ["Niue", "+683"],
+	["North Macedonia", "+389"], ["Norway", "+47"], ["Oman", "+968"], ["Pakistan", "+92"], ["Palau", "+680"],
+	["Palestine", "+970"], ["Panama", "+507"], ["Papua New Guinea", "+675"], ["Paraguay", "+595"], ["Peru", "+51"],
+	["Philippines", "+63"], ["Poland", "+48"], ["Portugal", "+351"], ["Puerto Rico", "+1787"], ["Qatar", "+974"],
+	["Romania", "+40"], ["Russia", "+7"], ["Rwanda", "+250"], ["Saint Kitts and Nevis", "+1869"], ["Saint Lucia", "+1758"],
+	["Saint Vincent and the Grenadines", "+1784"], ["Samoa", "+685"], ["San Marino", "+378"], ["Sao Tome and Principe", "+239"], ["Saudi Arabia", "+966"],
+	["Senegal", "+221"], ["Serbia", "+381"], ["Seychelles", "+248"], ["Sierra Leone", "+232"], ["Singapore", "+65"],
+	["Slovakia", "+421"], ["Slovenia", "+386"], ["Solomon Islands", "+677"], ["Somalia", "+252"], ["South Africa", "+27"],
+	["South Sudan", "+211"], ["Spain", "+34"], ["Sri Lanka", "+94"], ["Sudan", "+249"], ["Suriname", "+597"],
+	["Sweden", "+46"], ["Switzerland", "+41"], ["Syria", "+963"], ["Taiwan", "+886"], ["Tajikistan", "+992"],
+	["Tanzania", "+255"], ["Thailand", "+66"], ["Timor-Leste", "+670"], ["Togo", "+228"], ["Tonga", "+676"],
+	["Trinidad and Tobago", "+1868"], ["Tunisia", "+216"], ["Turkey", "+90"], ["Turkmenistan", "+993"], ["Tuvalu", "+688"],
+	["Uganda", "+256"], ["Ukraine", "+380"], ["United Arab Emirates", "+971"], ["United Kingdom", "+44"], ["United States", "+1"],
+	["Uruguay", "+598"], ["Uzbekistan", "+998"], ["Vanuatu", "+678"], ["Vatican City", "+379"], ["Venezuela", "+58"],
+	["Vietnam", "+84"], ["Virgin Islands (British)", "+1284"], ["Virgin Islands (U.S.)", "+1340"], ["Yemen", "+967"], ["Zambia", "+260"],
+	["Zimbabwe", "+263"],
+];
+
+// Longest-dial-code-first copy of DIAL_CODES, used to parse a stored
+// "+<dialcode><localnumber>" string back into (dial code, local number) for
+// the Edit User dialog: trying the longest codes first is what correctly
+// picks e.g. Jamaica's "+1876" out of a number that would otherwise also
+// match the shorter generic "+1", since both are valid prefixes of the same
+// string.
+const _DIAL_CODES_BY_LENGTH = [...DIAL_CODES].sort((a, b) => b[1].length - a[1].length);
+
+/**
+ * A reusable phone input: a country dial-code <select> paired with a plain
+ * text input for the local number, backed by a single combined value (e.g.
+ * "+923001234567") so callers -- and the server, which stores User.phone as
+ * one string column -- never need to know it's really two controls.
+ *
+ * A plain <select> rather than a custom dropdown like
+ * createMultiselectDropdown: with 195+ entries a native listbox's built-in
+ * type-to-jump keyboard search matters a lot more than visual flourish, and
+ * it stays inside this app's existing dark-theme form-control styling for
+ * free (see style.css's `select` rules) without reinventing that here.
+ *
+ * Usage:
+ *   const phone = createPhoneInput(document.getElementById("mount"));
+ *   phone.setValue(u.phone);       // parses "+923001234567" -> ("+92", "3001234567")
+ *   phone.getValue();              // -> "+923001234567", or "" if local number is blank
+ *   phone.getLocalInputEl();       // the local-number <input>, for attaching blur/input validation
+ */
+function createPhoneInput(root) {
+	root.classList.add("phone-input");
+	root.innerHTML = `
+		<select class="phone-dial-select" aria-label="Country code">
+			<option value="">+‎ —</option>
+			${DIAL_CODES.map(([name, dial]) => `<option value="${dial}">${dial} ${escapeHtml(name)}</option>`).join("")}
+		</select>
+		<input type="text" class="phone-local-input" inputmode="tel" placeholder="Local number">`;
+	const dialSelect = root.querySelector(".phone-dial-select");
+	const localInput = root.querySelector(".phone-local-input");
+
+	return {
+		setValue(phone) {
+			phone = (phone || "").trim();
+			if (!phone) {
+				dialSelect.value = "";
+				localInput.value = "";
+				return;
+			}
+			const match = _DIAL_CODES_BY_LENGTH.find(([, dial]) => phone.startsWith(dial));
+			if (match) {
+				dialSelect.value = match[1];
+				localInput.value = phone.slice(match[1].length);
+			} else {
+				// Doesn't cleanly match any known dial code (e.g. a legacy
+				// value entered before this UI existed) -- don't crash or
+				// guess, just show it raw with no dial code preselected, per
+				// the task's documented fallback.
+				dialSelect.value = "";
+				localInput.value = phone;
+			}
+		},
+		getValue() {
+			const local = localInput.value.trim().replace(/[^\d]/g, "");
+			if (!local) return "";
+			const dial = dialSelect.value || "";
+			return dial + local;
+		},
+		getLocalInputEl() {
+			return localInput;
+		},
+		reset() {
+			dialSelect.value = "";
+			localInput.value = "";
+		},
+	};
+}
+
+/**
+ * Wires up real-time inline validation for a text input: on blur (and on
+ * every keystroke once it's already been marked invalid, so the error
+ * clears as soon as the user fixes it) runs `validateFn(value) -> error
+ * string | null` and toggles an `.input-invalid` border plus a `.field-error`
+ * message right below the field. Shared by the email and phone fields on
+ * the Add User form, Edit User dialog, and Profile page -- this app had no
+ * existing inline-validation convention (checked for `.field-error`/
+ * `setCustomValidity` first), so this establishes one rather than blocking
+ * submission client-side with nothing but the browser's own default popup.
+ * Purely a UX layer: the server-side validator is still the real check --
+ * see routes/users.py's _valid_email/_valid_phone.
+ */
+function attachInlineValidation(inputEl, validateFn) {
+	let errorEl = inputEl.nextElementSibling;
+	if (!errorEl || !errorEl.classList.contains("field-error")) {
+		errorEl = document.createElement("div");
+		errorEl.className = "field-error";
+		inputEl.insertAdjacentElement("afterend", errorEl);
+	}
+	function run() {
+		const msg = validateFn(inputEl.value);
+		inputEl.classList.toggle("input-invalid", !!msg);
+		errorEl.textContent = msg || "";
+		return !msg;
+	}
+	inputEl.addEventListener("blur", run);
+	inputEl.addEventListener("input", () => {
+		if (inputEl.classList.contains("input-invalid")) run();
+	});
+	return { check: run };
+}
+
 function escapeHtml(s) {
 	const div = document.createElement("div");
 	div.textContent = s == null ? "" : String(s);
