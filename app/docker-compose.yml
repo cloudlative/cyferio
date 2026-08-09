@@ -40,7 +40,13 @@ services:
     env_file: .env
 
   app:
-    build: .
+    # Pulled from GHCR (public image, built by .github/workflows/build.yml on
+    # every push to master) rather than built locally -- production just
+    # does `docker compose pull && docker compose up -d`. Pin IMAGE_TAG in
+    # .env (e.g. sha-abc1234 from a specific Actions run) to deploy an exact
+    # version instead of always tracking latest; unset it and it defaults to
+    # latest.
+    image: ghcr.io/cloudlative/openvpn-toolkit-app:${IMAGE_TAG:-latest}
     container_name: openvpn-toolkit-app
     restart: unless-stopped
     env_file: .env

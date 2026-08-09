@@ -62,8 +62,23 @@ scripts — set `USE_SUDO=true` in `.env` if this process isn't already root.
 ```bash
 cd app
 cp .env.example .env   # fill in SECRET_KEY, BOOTSTRAP_ADMIN_USERNAME/PASSWORD
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
+
+`docker-compose.yml`'s `app` service pulls a pre-built image from GHCR
+(`ghcr.io/cloudlative/openvpn-toolkit-app`, public — no `docker login`
+needed) rather than building locally. It's published by
+[`.github/workflows/build.yml`](../.github/workflows/build.yml) on every
+push to `master`: tests → build/push (`latest` + a `sha-<short>` tag per
+commit) → Trivy scan. To deploy an exact version instead of always
+tracking `latest`, set `IMAGE_TAG=sha-<short>` in `.env` (find the tag on
+the [Packages page](https://github.com/cloudlative/openvpn-toolkit/pkgs/container/openvpn-toolkit-app)
+or a specific Actions run) before `docker compose pull`.
+
+Rolling back a bad deploy: either set `IMAGE_TAG` in `.env` to a known-good
+`sha-<short>` and re-run `docker compose pull && docker compose up -d`, or
+check out the commit before the GHCR-image switch (`build: .` instead of
+`image:` in `docker-compose.yml`) and `docker compose up -d --build`.
 
 `docker-compose.yml` bind-mounts what the container needs from the host:
 
