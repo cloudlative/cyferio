@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
 COPY vpnadmin ./vpnadmin
+COPY scripts ./scripts
 
 # The two toolkit scripts are bind-mounted at runtime from the repo root
 # (see docker-compose.yml) rather than baked into the image, so the
