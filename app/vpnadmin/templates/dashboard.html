@@ -111,9 +111,25 @@ const FIELD_LABELS = {
 
 function humanizeDetail(action, detail) {
 	if (!detail) return "";
+	if (action === "add_client" || action === "restore_client") {
+		// do_add_client's real stdout is NOT just its own short final
+		// message -- it's whatever verbose noise easyrsa/openssl print
+		// while actually building the cert (No 'vars' file exists!,
+		// OpenSSL version banner, Private-Key/Certificate-Request/Inline
+		// file notices, ...) followed by the script's own two lines. The
+		// wrapper returns that whole blob as-is (it's genuinely useful
+		// output for someone running the CLI directly), so pull just the
+		// two meaningful facts -- added + MAC registered -- back out of
+		// it for the table instead of dumping the entire easy-rsa log.
+		const macMatch = detail.match(/registered in \S+ with MAC ([0-9a-fA-F:]+)/);
+		if (/added\. Configuration available/.test(detail)) {
+			return macMatch ? `Added, MAC ${macMatch[1]} registered.` : "Added.";
+		}
+		return detail.replace(/->/g, " → ");
+	}
 	if (action !== "update_user" && action !== "update_own_profile") {
-		// Every other action's detail is already prose -- either the CLI
-		// script's own stdout message (e.g. "alice added.") or an
+		// Every other action's detail is already short, single-line prose
+		// -- either the CLI script's own stdout message or an
 		// explicitly-written sentence (mailer send result, role=x on
 		// create_user, etc.) -- just clean up any "old->new" arrows.
 		return detail.replace(/->/g, " → ");

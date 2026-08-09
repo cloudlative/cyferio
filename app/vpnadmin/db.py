@@ -6,7 +6,7 @@ is in use.
 """
 import os
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import Enum as SAEnum, create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 from .config import settings
@@ -68,6 +68,7 @@ def init_db():
     from . import models  # noqa: F401  (ensure models are registered on Base)
     Base.metadata.create_all(bind=engine)
     _sync_missing_columns()
+    _sync_enum_values()
 
 
 def _sync_missing_columns():
@@ -112,3 +113,55 @@ def _sync_missing_columns():
                             text(f"UPDATE {table.name} SET {column.name} = :v WHERE {column.name} IS NULL"),
                             {"v": value},
                         )
+
+
+def _sync_enum_values():
+    """Adds any Python-side enum member missing from an existing PostgreSQL
+    native enum TYPE (e.g. Role gaining 'editor' after Role.admin/viewer
+    were already in production) -- caught the hard way: promoting a user
+    to a role added after the DB was first created failed with
+    psycopg2.errors.InvalidTextRepresentation, because create_all() only
+    creates a TYPE once and never alters it afterward, and
+    _sync_missing_columns() above only handles missing *columns*, not new
+    *values* on an already-existing enum type.
+
+    SQLite has no native enum type (SQLAlchemy renders Enum columns there
+    as plain VARCHAR, nothing to alter), so this is a no-op there --
+    intentionally scoped to postgresql only.
+
+    ALTER TYPE ... ADD VALUE cannot run inside a transaction block, so this
+    uses its own autocommit connection rather than engine.begin()."""
+    if engine.dialect.name != "postgresql":
+        return
+    for table in Base.metadata.sorted_tables:
+        for column in table.columns:
+            if not isinstance(column.type, SAEnum):
+                continue
+            pg_type_name = column.type.name
+            if not pg_type_name:
+                continue
+            with engine.connect() as conn:
+                existing = {
+                    row[0] for row in conn.execute(
+                        text(
+                            "SELECT enumlabel FROM pg_enum "
+                            "JOIN pg_type ON pg_enum.enumtypid = pg_type.oid "
+                            "WHERE pg_type.typname = :type_name"
+                        ),
+                        {"type_name": pg_type_name},
+                    )
+                }
+            if not existing:
+                continue  # type doesn't exist yet -- create_all() will make it fresh, nothing to add
+            if column.type.enum_class:
+                missing = [m.value for m in column.type.enum_class if m.value not in existing]
+            else:
+                missing = [v for v in column.type.enums if v not in existing]
+            for value in missing:
+                # ADD VALUE takes a string literal, not a bind parameter --
+                # safe to inline here since `value` always comes from our
+                # own Python Enum definition, never user input. Escape any
+                # embedded quote defensively anyway.
+                escaped = value.replace("'", "''")
+                with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+                    conn.execute(text(f"ALTER TYPE {pg_type_name} ADD VALUE IF NOT EXISTS '{escaped}'"))

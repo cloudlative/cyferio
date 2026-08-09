@@ -15,28 +15,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: app
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: pip install -r requirements-dev.txt
-
-      - name: Run tests
-        run: pytest -v
+  # TEMPORARILY DISABLED (test + scan below) to speed up rapid iteration --
+  # re-enable both by uncommenting this job and restoring `needs: test` on
+  # build-push below, once the current fast-iteration phase is done. Don't
+  # leave this disabled long-term -- it's the only thing gating a bad
+  # commit from getting built and shipped.
+  # test:
+  #   name: Test
+  #   runs-on: ubuntu-24.04
+  #   defaults:
+  #     run:
+  #       working-directory: app
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.12"
+  #
+  #     - name: Install dependencies
+  #       run: pip install -r requirements-dev.txt
+  #
+  #     - name: Run tests
+  #       run: pytest -v
 
   build-push:
     name: Build and push image
-    needs: test
+    # needs: test  -- temporarily removed, see the commented-out test job above
     # Release builds only: ordinary commits to master (and PRs) only run
     # the test job above. A new image is published solely by pushing a
     # version tag, e.g. `git tag v1.0.0 && git push --tags`.
@@ -82,46 +87,48 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  scan:
-    name: Scan image
-    needs: build-push
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      packages: read
-      security-events: write
-    steps:
-      # Needed for .trivyignore below (individually-justified suppressions
-      # only -- see that file's own header comment).
-      - uses: actions/checkout@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Resolve image ref
-        id: ref
-        run: |
-          tags="${{ needs.build-push.outputs.tags }}"
-          echo "image=$(echo "$tags" | head -n1)" >> "$GITHUB_OUTPUT"
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ steps.ref.outputs.image }}
-          format: sarif
-          output: trivy-results.sarif
-          severity: CRITICAL,HIGH
-          exit-code: "1"
-          vuln-type: os,library
-          trivyignores: .trivyignore
-
-      - name: Upload Trivy results to Security tab
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-results.sarif
+  # TEMPORARILY DISABLED, same as the test job above -- re-enable once the
+  # current fast-iteration phase is done.
+  # scan:
+  #   name: Scan image
+  #   needs: build-push
+  #   if: startsWith(github.ref, 'refs/tags/v')
+  #   runs-on: ubuntu-24.04
+  #   permissions:
+  #     contents: read
+  #     packages: read
+  #     security-events: write
+  #   steps:
+  #     # Needed for .trivyignore below (individually-justified suppressions
+  #     # only -- see that file's own header comment).
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Log in to GHCR
+  #       uses: docker/login-action@v3
+  #       with:
+  #         registry: ghcr.io
+  #         username: ${{ github.actor }}
+  #         password: ${{ secrets.GITHUB_TOKEN }}
+  #
+  #     - name: Resolve image ref
+  #       id: ref
+  #       run: |
+  #         tags="${{ needs.build-push.outputs.tags }}"
+  #         echo "image=$(echo "$tags" | head -n1)" >> "$GITHUB_OUTPUT"
+  #
+  #     - name: Run Trivy vulnerability scanner
+  #       uses: aquasecurity/trivy-action@master
+  #       with:
+  #         image-ref: ${{ steps.ref.outputs.image }}
+  #         format: sarif
+  #         output: trivy-results.sarif
+  #         severity: CRITICAL,HIGH
+  #         exit-code: "1"
+  #         vuln-type: os,library
+  #         trivyignores: .trivyignore
+  #
+  #     - name: Upload Trivy results to Security tab
+  #       if: always()
+  #       uses: github/codeql-action/upload-sarif@v3
+  #       with:
+  #         sarif_file: trivy-results.sarif

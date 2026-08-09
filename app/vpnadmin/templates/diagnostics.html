@@ -17,6 +17,20 @@
 	<div id="lint-result"><p class="muted">Loading…</p></div>
 </div>
 
+<div class="card" id="rejected-chart-card" style="display:none">
+	<div class="toolbar"><h2 style="margin:0">Rejections Breakdown</h2></div>
+	<div style="display:flex;gap:24px;flex-wrap:wrap">
+		<div style="flex:1;min-width:260px">
+			<h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--text-muted);font-weight:700">By VPN Profile</h3>
+			<div id="rejected-chart"></div>
+		</div>
+		<div style="flex:1;min-width:260px">
+			<h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--text-muted);font-weight:700">By OS</h3>
+			<div id="rejected-os-chart"></div>
+		</div>
+	</div>
+</div>
+
 <div class="card" id="rejected">
 	<div class="toolbar"><h2 style="margin:0">Recent Rejected Connection Attempts</h2><button class="btn-secondary" id="rejected-refresh">Refresh</button></div>
 	<div class="form-row" style="margin-bottom:16px;gap:12px">
@@ -30,16 +44,6 @@
 		</div>
 	</div>
 	<div id="rejected-result"><p class="muted">Loading…</p></div>
-</div>
-
-<div class="card" id="rejected-chart-card" style="display:none">
-	<div class="toolbar"><h2 style="margin:0">Rejections by VPN Profile</h2></div>
-	<div id="rejected-chart"></div>
-</div>
-
-<div class="card" id="rejected-os-chart-card" style="display:none">
-	<div class="toolbar"><h2 style="margin:0">Rejections by OS</h2></div>
-	<div id="rejected-os-chart"></div>
 </div>
 {% endblock %}
 
@@ -100,15 +104,12 @@ function topRejectionEntries(data, keyFn, fallbackLabel) {
 function renderRejectedChart(data) {
 	const chartCard = document.getElementById("rejected-chart-card");
 	const chartEl = document.getElementById("rejected-chart");
-	const osChartCard = document.getElementById("rejected-os-chart-card");
 	const osChartEl = document.getElementById("rejected-os-chart");
 	if (!data || data.length === 0) {
 		chartCard.style.display = "none";
-		osChartCard.style.display = "none";
 		return;
 	}
 	chartCard.style.display = "";
-	osChartCard.style.display = "";
 	renderDonutChart(chartEl, topRejectionEntries(data, r => r.claimed_name, "(unknown)"));
 	renderDonutChart(osChartEl, topRejectionEntries(data, r => r.os, "(unknown)"));
 }
