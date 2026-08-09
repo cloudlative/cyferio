@@ -288,3 +288,42 @@ def dashboard_summary(rejected_limit: int = 20) -> dict:
         "revoked": list_revoked(),
         "rejected": status_rejected(rejected_limit),
     }
+
+
+# --- Background-refreshed dashboard snapshot --------------------------------
+# GET /api/dashboard used to call dashboard_summary() directly per request:
+# 5 sequential script spawns (each individually cached above, but that only
+# helps a *second* request within the 3s TTL), so a cold dashboard load was
+# genuinely slow -- and _script_lock intentionally serializes them (see its
+# own comment), so making the route async/threaded wouldn't have helped at
+# all; every one of those 5 calls would just queue on the same lock anyway.
+#
+# Instead, a periodic background task (started in main.py's lifespan) calls
+# refresh_dashboard_snapshot() on a timer, independent of any request. The
+# route below just returns whatever's currently cached here -- near-instant,
+# at the cost of the data being up to one refresh interval stale, which is
+# a reasonable trade for a live-status dashboard that already has a manual
+# Refresh button for "I want it *right now*".
+_dashboard_snapshot: dict | None = None
+_dashboard_snapshot_lock = threading.Lock()
+
+
+def get_dashboard_snapshot() -> dict | None:
+    """Returns the most recently computed snapshot, or None if the
+    background refresh loop hasn't completed its first tick yet (e.g. right
+    after a fresh app startup)."""
+    with _dashboard_snapshot_lock:
+        return _dashboard_snapshot
+
+
+def refresh_dashboard_snapshot(rejected_limit: int = 20) -> dict:
+    """Computes a fresh dashboard_summary() and stores it as the snapshot
+    get_dashboard_snapshot() serves. Still goes through the same
+    _script_lock-serialized, individually-cached calls as always -- this
+    doesn't change how the underlying scripts are invoked, only who's
+    calling them and when (a timer, not a request)."""
+    global _dashboard_snapshot
+    result = dashboard_summary(rejected_limit)
+    with _dashboard_snapshot_lock:
+        _dashboard_snapshot = result
+    return result

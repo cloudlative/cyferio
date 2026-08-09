@@ -5,17 +5,45 @@ Run directly with:
     uvicorn main:app --host 0.0.0.0 --port 8000
 or via the Dockerfile's CMD.
 """
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from vpnadmin import cli_wrapper
 from vpnadmin.app_settings import prune_audit_log, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db
 from vpnadmin.routes import auth, clients, diagnostics, pages, settings as settings_routes, status, teams, users
+
+logger = logging.getLogger(__name__)
+
+# How often the background task recomputes the /api/dashboard snapshot --
+# see cli_wrapper.py's refresh_dashboard_snapshot()/get_dashboard_snapshot()
+# docstrings for the full reasoning. 10s: frequent enough that "stale"
+# never really registers for a human looking at the page, infrequent enough
+# not to matter for script-spawn load on a small box (still fully
+# serialized through the same _script_lock as ever -- this doesn't add any
+# concurrent spawning, just moves the existing sequential spawns off the
+# request path and onto a timer).
+DASHBOARD_REFRESH_INTERVAL_SECONDS = 10
+
+
+async def _dashboard_refresh_loop():
+    while True:
+        try:
+            await asyncio.to_thread(cli_wrapper.refresh_dashboard_snapshot)
+        except Exception:
+            # A transient script failure (e.g. a momentary timeout) should
+            # never kill the background loop -- the next tick just tries
+            # again, and the route falls back to the last-good snapshot
+            # (or a direct call if there's genuinely never been one yet).
+            logger.exception("Dashboard background refresh failed; will retry next tick")
+        await asyncio.sleep(DASHBOARD_REFRESH_INTERVAL_SECONDS)
 
 
 @asynccontextmanager
@@ -33,7 +61,15 @@ async def lifespan(_app: FastAPI):
         prune_audit_log(db)
     finally:
         db.close()
-    yield
+    refresh_task = asyncio.create_task(_dashboard_refresh_loop())
+    try:
+        yield
+    finally:
+        refresh_task.cancel()
+        try:
+            await refresh_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="OpenVPN Toolkit Admin", docs_url="/api/docs", redoc_url=None, lifespan=lifespan)

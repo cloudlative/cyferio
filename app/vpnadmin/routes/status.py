@@ -45,9 +45,20 @@ def get_dashboard(_: User = Depends(require_user)):
     """Everything the dashboard page needs in one round-trip, instead of 4
     separate fetches -- each underlying script call is still individually
     cached/serialized (see cli_wrapper), this just saves HTTP overhead and
-    gives the frontend one loading state to manage instead of four."""
+    gives the frontend one loading state to manage instead of four.
+
+    Serves the periodically-background-refreshed snapshot (near-instant)
+    rather than computing dashboard_summary() fresh per request -- see
+    cli_wrapper.py's get_dashboard_snapshot()/refresh_dashboard_snapshot()
+    and main.py's lifespan for the refresh loop. Falls back to a direct
+    (blocking) call only if the background loop hasn't completed its first
+    tick yet -- e.g. the very first request right after a fresh restart --
+    so a request is never served nothing."""
+    snapshot = cli.get_dashboard_snapshot()
+    if snapshot is not None:
+        return snapshot
     try:
-        return cli.dashboard_summary()
+        return cli.refresh_dashboard_snapshot()
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
 
