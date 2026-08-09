@@ -186,7 +186,13 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 }
 .link-button:hover { text-decoration: underline; }
 
-.content { flex: 1; min-width: 0; max-width: 1200px; margin: 0 auto; padding: 40px 32px 64px; }
+/* 1200px -> 1440px: tables like VPN Clients now carry 5 action buttons
+   plus restriction badges per row (Manage MACs/Restrictions, View/Copy
+   .ovpn, Email Profile, Revoke) and were cramped/wrapping awkwardly at the
+   old width. Tables are width:100% within their .card (see `table` below),
+   so the extra room actually gets used rather than just adding empty
+   margin either side. */
+.content { flex: 1; min-width: 0; max-width: 1440px; margin: 0 auto; padding: 40px 32px 64px; }
 
 h1 {
 	font-size: 1.85rem;
@@ -305,7 +311,7 @@ button, .btn {
 .btn-sm { padding: 5px 12px; font-size: 0.78rem; }
 button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; }
 
-input[type=text], input[type=password], input[type=date], input[type=email], select, textarea {
+input[type=text], input[type=password], input[type=date], input[type=email], input[type=tel], select, textarea {
 	padding: 10px 14px;
 	border-radius: 9px;
 	border: 1.5px solid var(--border);
