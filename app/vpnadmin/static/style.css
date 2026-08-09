@@ -764,32 +764,22 @@ dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; ma
 dialog ul { padding-left: 20px; margin: 8px 0; }
 dialog li { margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 
-/* --- Team cards (teams.html) -- name is the primary heading, member
-   count is secondary info underneath, unlike the numeric-KPI-first
-   .stat-card layout used for dashboard stats. */
-a.team-card {
-	position: relative;
-	display: block;
-	background: var(--surface);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-lg);
-	padding: 20px 20px 18px;
-	box-shadow: var(--shadow);
-	overflow: hidden;
-	text-decoration: none;
-	color: inherit;
-	transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-}
-a.team-card:hover { transform: translateY(-2px); border-color: var(--border-light); box-shadow: var(--shadow), 0 0 0 1px rgba(99,102,241,0.25); text-decoration: none; }
-a.team-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent-gradient); }
-a.team-card.accent-online::before { background: linear-gradient(90deg, #10b981, #34d399); }
-a.team-card.accent-total::before { background: linear-gradient(90deg, #6366f1, #818cf8); }
-a.team-card.accent-revoked::before { background: linear-gradient(90deg, #f43f5e, #fb7185); }
-a.team-card.accent-rejected::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
-a.team-card .team-card-name { font-size: 1.15rem; font-weight: 800; letter-spacing: -0.01em; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-a.team-card .team-card-count { color: var(--text-muted); font-size: 0.85rem; font-weight: 600; margin-top: 4px; }
-a.team-card .stat-hint { position: absolute; top: 18px; right: 18px; color: var(--text-faint); font-size: 0.75rem; opacity: 0; transition: opacity 0.15s ease; }
-a.team-card:hover .stat-hint { opacity: 1; }
+/* --- Team rows (teams.html) -- a plain table row per team, same list
+   pattern as Clients/Revoked/Users, instead of a KPI-style card grid.
+   Card grids size columns by auto-fit, which looks fine for short fixed
+   numbers (dashboard stats) but produced uneven row widths and
+   truncated/colliding text once the content was a variable-length team
+   name -- a table keeps every row's columns aligned regardless of name
+   length. */
+tr.team-row { cursor: pointer; }
+tr.team-row:hover td { background: var(--surface-alt); }
+tr.team-row:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; }
+.team-row-count { display: flex; align-items: center; gap: 10px; }
+.team-row-bar { position: relative; display: inline-block; width: 110px; height: 6px; border-radius: 999px; background: var(--surface-alt); overflow: hidden; flex: none; }
+.team-row-bar-fill { position: absolute; inset: 0; width: 0; border-radius: inherit; background: var(--accent-gradient); }
+.team-row-bar-fill.muted-fill { background: var(--text-faint); opacity: 0.5; }
+.team-row-view { color: var(--text-faint); font-size: 0.82rem; font-weight: 600; opacity: 0; transition: opacity 0.15s ease; }
+tr.team-row:hover .team-row-view, tr.team-row:focus-visible .team-row-view { opacity: 1; }
 
 .mac-list { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 8px; }
 .mac-list li { background: var(--surface-alt); border: 1px solid var(--border-light); border-radius: 8px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; }
