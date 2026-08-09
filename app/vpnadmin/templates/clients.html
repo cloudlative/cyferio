@@ -18,6 +18,7 @@
 				<input type="text" id="add-mac" required placeholder="aa:bb:cc:dd:ee:ff">
 			</div>
 			<button type="submit" class="btn-primary" id="add-submit">Add Client</button>
+			<button type="button" class="btn-secondary" id="add-clear">Clear</button>
 		</div>
 		<p class="muted" style="margin-top:10px">MAC can be entered in any common format (colons, dashes, or none — any case) and will be normalized automatically.</p>
 	</form>
@@ -111,7 +112,9 @@ async function loadClients() {
 		]);
 		lastClients = clients;
 		lastStatusByName = Object.fromEntries(statusAll.map(s => [s.name, s]));
-		document.getElementById("client-count").textContent = `${clients.length} client${clients.length === 1 ? "" : "s"}`;
+		const onlineCount = clients.filter(c => lastStatusByName[c.name]?.status === "online").length;
+		document.getElementById("client-count").textContent =
+			`${clients.length} client${clients.length === 1 ? "" : "s"} — ${onlineCount} online`;
 		renderClients();
 	} catch (e) {
 		toast(e.message, "error");
@@ -134,6 +137,23 @@ function renderClients() {
 		if (currentFilter === "missing_mac") return !row.c.mac_count;
 		return true;
 	});
+
+	// "Offline Only" is a uniformly-offline list, so the online-first sort
+	// above is a no-op there (everything ties on `online`) and it falls
+	// back to alphabetical -- not what you want when scanning for who's
+	// been gone longest/shortest. Re-sort that view specifically by
+	// last_seen, most recent first; "never connected" sorts to the very
+	// end (oldest possible), and "All"/"Online Only" keep the online-first
+	// sort as-is.
+	if (currentFilter === "offline") {
+		const lastSeenMs = (row) => {
+			const raw = row.s && row.s.last_seen;
+			if (!raw || raw === "never") return -Infinity;
+			const t = Date.parse(raw);
+			return isNaN(t) ? -Infinity : t;
+		};
+		filtered.sort((a, b) => lastSeenMs(b) - lastSeenMs(a));
+	}
 
 	if (lastClients.length === 0) {
 		el.innerHTML = '<div class="empty-state">No clients yet.</div>';
@@ -348,6 +368,9 @@ async function revokeClient(name) {
 }
 
 if (isAdmin) {
+	document.getElementById("add-clear").addEventListener("click", () => {
+		document.getElementById("add-form").reset();
+	});
 	document.getElementById("add-form").addEventListener("submit", async (ev) => {
 		ev.preventDefault();
 		const name = document.getElementById("add-name").value.trim();

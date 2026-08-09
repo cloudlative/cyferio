@@ -23,6 +23,7 @@
 				<input type="text" id="new-team-name" required maxlength="64" placeholder="e.g. Infrastructure">
 			</div>
 			<button type="submit" class="btn-primary">Create Team</button>
+			<button type="button" class="btn-secondary" id="create-team-clear">Clear</button>
 		</div>
 	</form>
 </div>
@@ -160,6 +161,9 @@ function showTeam(id) {
 }
 
 if (isAdmin) {
+	document.getElementById("create-team-clear").addEventListener("click", () => {
+		document.getElementById("create-team-form").reset();
+	});
 	document.getElementById("create-team-form").addEventListener("submit", async (ev) => {
 		ev.preventDefault();
 		const name = document.getElementById("new-team-name").value.trim();
