@@ -232,7 +232,7 @@ function renderClients() {
 
 	el.innerHTML = `<table>
 		<thead><tr>
-			<th>Name</th><th>Status</th><th>In MAC DB</th><th>MACs</th><th>Last Seen</th><th>Restrictions</th>
+			<th>Name</th><th>Status</th><th>In MAC DB</th><th>MAC Addresses</th><th>Last Seen</th><th>Restrictions</th>
 			<th></th>${isAdmin ? "<th></th><th></th><th></th><th></th>" : ""}
 		</tr></thead>
 		<tbody>${filtered.map(({ c, s, online }) => {
