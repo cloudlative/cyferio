@@ -157,6 +157,20 @@ const CATEGORY_META = {
 	settings: { label: "Settings & email", color: "#c98500" },
 };
 
+// Shared state for the Activity Breakdown stat tiles <-> Recent Activity
+// table below them: clicking a tile filters the table to match, without
+// re-fetching (both draw from the same already-fetched window).
+let activityEntries = [];
+let activityFilter = "all"; // "all" | "success" | "failed"
+
+function setActivityFilter(filter) {
+	activityFilter = activityFilter === filter ? "all" : filter; // click again to clear
+	document.querySelectorAll("#activity-stat-grid .stat-card[data-filter]").forEach(card => {
+		card.classList.toggle("stat-card-active", card.dataset.filter === activityFilter);
+	});
+	renderActivityTable();
+}
+
 function renderActivityBreakdown(entries) {
 	const el = document.getElementById("activity-breakdown-body");
 	document.getElementById("activity-window-badge").textContent =
@@ -220,9 +234,18 @@ function renderActivityBreakdown(entries) {
 
 	el.innerHTML = `
 		<div class="stat-grid" id="activity-stat-grid">
-			<div class="stat-card accent-total"><div class="stat-value">${entries.length}</div><div class="stat-label">Total Actions</div></div>
-			<div class="stat-card accent-online"><div class="stat-value">${succeeded}</div><div class="stat-label">Succeeded</div></div>
-			<div class="stat-card accent-revoked"><div class="stat-value">${failed}</div><div class="stat-label">Failed</div></div>
+			<button type="button" class="stat-card accent-total" data-filter="all" title="Show all activity">
+				<span class="stat-hint">Filter →</span>
+				<div class="stat-value">${entries.length}</div><div class="stat-label">Total Actions</div>
+			</button>
+			<button type="button" class="stat-card accent-online" data-filter="success" title="Show only successful actions">
+				<span class="stat-hint">Filter →</span>
+				<div class="stat-value">${succeeded}</div><div class="stat-label">Succeeded</div>
+			</button>
+			<button type="button" class="stat-card accent-revoked" data-filter="failed" title="Show only failed actions">
+				<span class="stat-hint">Filter →</span>
+				<div class="stat-value">${failed}</div><div class="stat-label">Failed</div>
+			</button>
 			<div class="stat-card accent-rejected"><div class="stat-value">${activeUsers}</div><div class="stat-label">Active Users</div></div>
 		</div>
 		<div class="donut-layout">
@@ -236,9 +259,56 @@ function renderActivityBreakdown(entries) {
 				<tbody>${legendRows}</tbody>
 			</table>
 		</div>`;
+
+	document.querySelectorAll("#activity-stat-grid .stat-card[data-filter]").forEach(card => {
+		card.classList.toggle("stat-card-active", card.dataset.filter === activityFilter);
+		card.addEventListener("click", () => setActivityFilter(card.dataset.filter));
+	});
 }
 
-async function loadDashboard() {
+function renderActivityTable() {
+	const activityEl = document.getElementById("activity-table");
+	if (!activityEl) return;
+	const filtered = activityFilter === "success" ? activityEntries.filter(e => e.success)
+		: activityFilter === "failed" ? activityEntries.filter(e => !e.success)
+		: activityEntries;
+	const recent = filtered.slice(0, 20);
+	const filterNote = activityFilter === "all" ? "" : `
+		<p class="muted" style="margin:-4px 0 14px;font-size:0.85rem">
+			Filtered to <strong>${activityFilter === "success" ? "succeeded" : "failed"}</strong> actions
+			(${filtered.length} of ${activityEntries.length}) --
+			<button type="button" class="link-button" id="clear-activity-filter">clear filter</button>
+		</p>`;
+	if (recent.length === 0) {
+		activityEl.innerHTML = filterNote + '<div class="empty-state">No matching activity.</div>';
+	} else {
+		activityEl.innerHTML = filterNote + `<table class="activity-table">
+			<thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th><th>Result</th></tr></thead>
+			<tbody>${recent.map(e => `
+				<tr>
+					<td class="mono activity-when">${escapeHtml(new Date(e.timestamp).toLocaleString())}</td>
+					<td>${escapeHtml(e.username)}</td>
+					<td><span class="activity-action">${escapeHtml(ACTION_LABELS[e.action] || e.action)}</span></td>
+					<td>${escapeHtml(e.target || '—')}</td>
+					<td class="activity-detail">${escapeHtml(humanizeDetail(e.action, e.detail))}</td>
+					<td>${e.success
+						? '<span class="status-pill status-online">Success</span>'
+						: '<span class="status-pill status-revoked">Failed</span>'}</td>
+				</tr>`).join("")}</tbody>
+		</table>`;
+	}
+	const clearBtn = document.getElementById("clear-activity-filter");
+	if (clearBtn) clearBtn.addEventListener("click", () => setActivityFilter(activityFilter));
+}
+
+// Split into two independent fetches (previously one function, sequential
+// await) so Recent Activity/Activity Breakdown -- backed by a cheap
+// indexed DB query -- render as soon as they're ready instead of being
+// gated behind /api/dashboard, which is a slower composite of several
+// CLI subprocess calls (see status.py's dashboard_summary docstring).
+// loadDashboard() below fires both concurrently, not one-after-the-other.
+
+async function loadConnectedStats() {
 	try {
 		const data = await apiFetch("/api/dashboard");
 		const connected = data.connected, all = data.all_clients, clients = data.clients, revoked = data.revoked, rejected = data.rejected;
@@ -249,7 +319,7 @@ async function loadDashboard() {
 		document.getElementById("stat-rejected").textContent = rejected.length;
 
 		// MAC registration counts come from `clients` (openvpn-install.sh
-		// --list), NOT `all_clients` (vpn-status.py --all) -- the latter has
+		// --list-users), NOT `all_clients` (vpn-status.py --all-clients) -- the latter has
 		// no mac_count field at all, which previously made every client look
 		// like it was "missing a MAC" regardless of its real MAC-db state.
 		const totalMacs = clients.reduce((sum, c) => sum + (c.mac_count || 0), 0);
@@ -288,45 +358,35 @@ async function loadDashboard() {
 	} catch (e) {
 		toast(e.message, "error");
 	}
+}
 
+async function loadActivity() {
 	// Admin-only section (the container only exists in the DOM for admins --
 	// see the `is_admin` guard in the template -- and the endpoint itself is
 	// admin-only too, so a viewer never even attempts this fetch).
 	const activityEl = document.getElementById("activity-table");
 	const breakdownEl = document.getElementById("activity-breakdown-body");
-	if (activityEl) {
-		try {
-			// Fetch the max window once (200, the API's own cap) and reuse it
-			// for both the breakdown chart (wants a representative sample)
-			// and the table below (only ever shows the most recent 20 of it)
-			// -- one round-trip instead of two.
-			const entries = await apiFetch("/api/audit?limit=200");
-			if (breakdownEl) renderActivityBreakdown(entries);
-
-			const recent = entries.slice(0, 20);
-			if (recent.length === 0) {
-				activityEl.innerHTML = '<div class="empty-state">No activity recorded yet.</div>';
-			} else {
-				activityEl.innerHTML = `<table class="activity-table">
-					<thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th><th>Result</th></tr></thead>
-					<tbody>${recent.map(e => `
-						<tr>
-							<td class="mono activity-when">${escapeHtml(new Date(e.timestamp).toLocaleString())}</td>
-							<td>${escapeHtml(e.username)}</td>
-							<td><span class="activity-action">${escapeHtml(ACTION_LABELS[e.action] || e.action)}</span></td>
-							<td>${escapeHtml(e.target || '—')}</td>
-							<td class="activity-detail">${escapeHtml(humanizeDetail(e.action, e.detail))}</td>
-							<td>${e.success
-								? '<span class="status-pill status-online">Success</span>'
-								: '<span class="status-pill status-revoked">Failed</span>'}</td>
-						</tr>`).join("")}</tbody>
-				</table>`;
-			}
-		} catch (e) {
-			activityEl.innerHTML = `<p class="muted">Could not load activity: ${escapeHtml(e.message)}</p>`;
-			if (breakdownEl) breakdownEl.innerHTML = `<p class="muted">Could not load activity: ${escapeHtml(e.message)}</p>`;
-		}
+	if (!activityEl) return;
+	try {
+		// Fetch the max window once (200, the API's own cap) and reuse it
+		// for both the breakdown chart (wants a representative sample)
+		// and the table below (only ever shows the most recent 20 of the
+		// active filter) -- one round-trip instead of two.
+		activityEntries = await apiFetch("/api/audit?limit=200");
+		if (breakdownEl) renderActivityBreakdown(activityEntries);
+		renderActivityTable();
+	} catch (e) {
+		activityEl.innerHTML = `<p class="muted">Could not load activity: ${escapeHtml(e.message)}</p>`;
+		if (breakdownEl) breakdownEl.innerHTML = `<p class="muted">Could not load activity: ${escapeHtml(e.message)}</p>`;
 	}
+}
+
+function loadDashboard() {
+	// Deliberately not awaited/sequenced -- each renders into its own part
+	// of the page independently as soon as its own (possibly much faster)
+	// fetch resolves.
+	loadConnectedStats();
+	loadActivity();
 }
 
 document.getElementById("refresh-btn").addEventListener("click", loadDashboard);

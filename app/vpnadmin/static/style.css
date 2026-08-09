@@ -199,9 +199,10 @@ h2 { font-size: 1.08rem; font-weight: 700; margin: 0 0 14px; color: var(--text);
 }
 
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 18px; margin-bottom: 28px; }
-a.stat-card, .stat-card {
+a.stat-card, button.stat-card, .stat-card {
 	position: relative;
 	display: block;
+	width: 100%;
 	background: var(--surface);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-lg);
@@ -210,10 +211,13 @@ a.stat-card, .stat-card {
 	overflow: hidden;
 	text-decoration: none;
 	color: inherit;
+	text-align: left;
+	font: inherit;
 	transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
-a.stat-card { cursor: pointer; }
-a.stat-card:hover { transform: translateY(-2px); border-color: var(--border-light); box-shadow: var(--shadow), 0 0 0 1px rgba(99,102,241,0.25); text-decoration: none; }
+a.stat-card, button.stat-card { cursor: pointer; }
+a.stat-card:hover, button.stat-card:hover { transform: translateY(-2px); border-color: var(--border-light); box-shadow: var(--shadow), 0 0 0 1px rgba(99,102,241,0.25); text-decoration: none; }
+button.stat-card.stat-card-active { border-color: var(--accent-2); box-shadow: var(--shadow), 0 0 0 2px rgba(99,102,241,0.45); }
 .stat-card::before {
 	content: "";
 	position: absolute;
@@ -529,15 +533,15 @@ a.team-card:hover .stat-hint { opacity: 1; }
 /* Dashboard "Activity Breakdown" donut chart + legend (see dashboard.html).
    Legend doubles as the WCAG table-view equivalent of the chart -- every
    value the donut encodes visually is also plain text here. */
-.donut-layout { display: flex; align-items: center; gap: 36px; flex-wrap: wrap; margin-top: 8px; }
-.donut-chart { width: 160px; height: 160px; flex: none; }
+.donut-layout { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; margin-top: 4px; }
+.donut-chart { width: 108px; height: 108px; flex: none; }
 .donut-segment { transition: opacity 0.15s ease; }
 .donut-segment:hover { opacity: 0.82; }
-.donut-center-value { font-size: 1.7rem; font-weight: 800; fill: var(--text); font-family: inherit; }
-.donut-center-label { font-size: 0.62rem; fill: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-family: inherit; }
-.donut-legend { flex: 1; min-width: 240px; font-size: 0.88rem; }
-.donut-legend th { background: none; padding: 4px 10px; font-size: 0.68rem; }
-.donut-legend td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.donut-center-value { font-size: 1.35rem; font-weight: 800; fill: var(--text); font-family: inherit; }
+.donut-center-label { font-size: 0.5rem; fill: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-family: inherit; }
+.donut-legend { flex: 1; min-width: 200px; max-width: 340px; font-size: 0.85rem; }
+.donut-legend th { background: none; padding: 3px 8px; font-size: 0.66rem; }
+.donut-legend td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
 .donut-legend tr:last-child td { border-bottom: none; }
 .legend-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 9px; vertical-align: middle; }
 .activity-breakdown #activity-stat-grid { margin-bottom: 24px; }
