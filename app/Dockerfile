@@ -33,7 +33,28 @@ RUN pip install --no-cache-dir --upgrade pip \
     # (dependencies are all installed above, at build time), so the wheel
     # is dead weight that exists only to trip a vulnerability scanner over
     # code that's never executed. Remove it.
-    && rm -rf /usr/local/lib/python3.12/ensurepip/_bundled
+    && rm -rf /usr/local/lib/python3.12/ensurepip/_bundled \
+    # pip/_vendor/bom.cdx.json is pip's own bundled CycloneDX SBOM,
+    # documenting every package it vendors (Trivy explicitly supports
+    # reading embedded SBOMs as an authoritative package inventory -- see
+    # its own "Third-party SBOM may lead to inaccurate vulnerability
+    # detection" warning). It lists setuptools 70.3.0 as a vendored
+    # component even though no such package is actually installed
+    # anywhere in this image (confirmed: no setuptools files exist,
+    # `python3 -c "import setuptools"` fails). vendor.txt (a second,
+    # plain-text version of the same vendoring manifest) has the same
+    # problem. Neither file is read by pip at runtime -- pip imports its
+    # vendored modules directly (e.g. `from pip._vendor import certifi`)
+    # and pip install/import both work fine with these removed (verified)
+    # -- they exist purely as documentation that a vulnerability scanner
+    # can misread as an installed-package inventory. Because that phantom
+    # "setuptools 70.3.0" keeps re-triggering under a fresh CVE ID every
+    # time a new setuptools CVE is published (CVE-2025-47273, then
+    # CVE-2026-59890 by the very next scan) a per-CVE-ID .trivyignore
+    # entry can't keep up -- removing the files that cause the misparse
+    # fixes it at the root instead, permanently.
+    && rm -f /usr/local/lib/python3.12/site-packages/pip/_vendor/vendor.txt \
+             /usr/local/lib/python3.12/site-packages/pip/_vendor/bom.cdx.json
 
 COPY main.py .
 COPY vpnadmin ./vpnadmin

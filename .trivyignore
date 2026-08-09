@@ -7,18 +7,24 @@
 
 # GHSA-6v7p-g79w-8964 -- msgpack 1.1.2, HIGH.
 # This is pip's own vendored copy (site-packages/pip/_vendor/msgpack),
-# bundled inside the python:3.12-slim base image's pip installation for
-# pip's *own* internal HTTP-cache serialization. This app's code never
-# imports msgpack, and pip itself is only invoked at build time (`pip
-# install -r requirements.txt` in the Dockerfile) -- it is not present in
-# the running process, never receives network/user input at runtime, and
-# ships in the image purely as a byproduct of how pip is packaged.
+# bundled inside the base image's pip installation for pip's *own*
+# internal HTTP-cache serialization. This app's code never imports
+# msgpack, and pip itself is only invoked at build time (`pip install -r
+# requirements.txt` in the Dockerfile) -- it is not present in the running
+# process, never receives network/user input at runtime, and ships in the
+# image purely as a byproduct of how pip is packaged.
 GHSA-6v7p-g79w-8964
 
-# CVE-2025-47273 -- setuptools 70.3.0, HIGH.
-# Trivy is parsing pip/_vendor/vendor.txt, a plain-text manifest pip ships
-# documenting which versions it vendors -- it is not an installed package
-# (confirmed: no setuptools files exist anywhere in the image, `python3 -c
-# "import setuptools"` fails with ModuleNotFoundError). False positive from
-# text-file parsing, not a real installed dependency.
-CVE-2025-47273
+# Note: an earlier round of this file also carried a per-CVE-ID entry for
+# a Trivy false positive against a phantom "setuptools 70.3.0" -- Trivy
+# was misparsing pip/_vendor/vendor.txt (a plain-text manifest, not an
+# installed package) as setuptools being installed. That kept recurring
+# under a fresh CVE ID every time a new setuptools CVE got published
+# (CVE-2025-47273, then CVE-2026-59890 turned up by the very next scan),
+# which a per-ID ignore list can't keep up with. Fixed at the root instead
+# -- see the Dockerfile, which now deletes that file at build time (pip
+# doesn't read it; confirmed pip install/import both still work without
+# it) -- so no ignore entry should be needed for it going forward. If a
+# new "setuptools" or other pip/_vendor/vendor.txt-sourced finding shows
+# up again here, check whether the Dockerfile's rm actually ran before
+# reaching for a new ignore entry.
