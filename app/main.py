@@ -18,7 +18,8 @@ from vpnadmin.app_settings import prune_audit_log, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db
-from vpnadmin.routes import auth, clients, diagnostics, health, pages, settings as settings_routes, status, teams, users
+from vpnadmin import geo_lists
+from vpnadmin.routes import auth, clients, diagnostics, geo, health, pages, settings as settings_routes, status, teams, users
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,13 @@ async def lifespan(_app: FastAPI):
         prune_audit_log(db)
     finally:
         db.close()
+    # Kick the City/ASN pick-list build (or a disk-cache load) off in a
+    # background thread now rather than waiting for the first admin to
+    # open the Users page -- see geo_lists.py's ensure_fresh docstring.
+    # Non-blocking either way: a disk cache load is near-instant, and a
+    # full rebuild (~100s) just continues in its own thread while the app
+    # finishes starting up normally.
+    geo_lists.ensure_fresh()
     refresh_task = asyncio.create_task(_dashboard_refresh_loop())
     try:
         yield
@@ -97,6 +105,7 @@ app.include_router(status.dashboard_router)
 app.include_router(diagnostics.router)
 app.include_router(health.router)
 app.include_router(users.router)
+app.include_router(geo.router)
 app.include_router(teams.router)
 app.include_router(settings_routes.router)
 

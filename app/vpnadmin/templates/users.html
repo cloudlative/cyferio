@@ -66,16 +66,24 @@
 					<input type="checkbox" id="u-restrict-city">
 					Restrict login by city
 				</label>
-				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these cities (detected via GeoIP), one per line -- exact name match, e.g. Karachi. GeoIP city detection is approximate, not precise. Leave unchecked, or the list empty, to allow any city.</p>
-				<textarea id="u-allowed-cities" rows="3" placeholder="Karachi&#10;Lahore"></textarea>
+				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these cities (detected via GeoIP). Pick a country to browse its cities, then select any number -- picks accumulate across countries. GeoIP city detection is approximate, not precise. Leave unchecked, or the list empty, to allow any city.</p>
+				<p class="muted" id="u-cities-building" style="display:none;font-size:0.82rem">City list is still building (first-time setup takes a couple of minutes) -- try again shortly.</p>
+				<div class="geo-picker-row">
+					<select id="u-city-country"><option value="">Loading countries…</option></select>
+					<div id="u-cities-ms"></div>
+				</div>
 			</div>
 			<div class="field" style="margin-top:14px">
 				<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
 					<input type="checkbox" id="u-restrict-asn">
 					Restrict login by network (ASN)
 				</label>
-				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these networks/ISPs, one per line (e.g. AS15169 or just 15169) -- identifies the network a connection came from, regardless of which country it geolocates to. Leave unchecked, or the list empty, to allow any network.</p>
-				<textarea id="u-allowed-asns" rows="3" class="mono" placeholder="AS15169&#10;AS8075"></textarea>
+				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these networks/ISPs -- identifies the network a connection came from, regardless of which country it geolocates to. "Any country" searches every known network by name (needed for global operators like Google or Cloudflare, which don't confidently belong to one country). Leave unchecked, or the list empty, to allow any network.</p>
+				<p class="muted" id="u-asns-building" style="display:none;font-size:0.82rem">Network list is still building (first-time setup takes a moment) -- try again shortly.</p>
+				<div class="geo-picker-row">
+					<select id="u-asn-country"><option value="">Any country (search all networks)</option></select>
+					<div id="u-asns-ms"></div>
+				</div>
 			</div>
 			<div class="field" style="margin-top:14px">
 				<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
@@ -165,16 +173,24 @@
 						<input type="checkbox" id="e-restrict-city">
 						Restrict login by city
 					</label>
-					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these cities (detected via GeoIP), one per line -- exact name match, e.g. Karachi. GeoIP city detection is approximate, not precise. Leave unchecked, or the list empty, to allow any city.</p>
-					<textarea id="e-allowed-cities" rows="3" placeholder="Karachi&#10;Lahore"></textarea>
+					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these cities (detected via GeoIP). Pick a country to browse its cities, then select any number -- picks accumulate across countries. GeoIP city detection is approximate, not precise. Leave unchecked, or the list empty, to allow any city.</p>
+					<p class="muted" id="e-cities-building" style="display:none;font-size:0.82rem">City list is still building (first-time setup takes a couple of minutes) -- try again shortly.</p>
+					<div class="geo-picker-row">
+						<select id="e-city-country"><option value="">Loading countries…</option></select>
+						<div id="e-cities-ms"></div>
+					</div>
 				</div>
 				<div class="field" style="margin-top:14px">
 					<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
 						<input type="checkbox" id="e-restrict-asn">
 						Restrict login by network (ASN)
 					</label>
-					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these networks/ISPs, one per line (e.g. AS15169 or just 15169) -- identifies the network a connection came from, regardless of which country it geolocates to. Leave unchecked, or the list empty, to allow any network.</p>
-					<textarea id="e-allowed-asns" rows="3" class="mono" placeholder="AS15169&#10;AS8075"></textarea>
+					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these networks/ISPs -- identifies the network a connection came from, regardless of which country it geolocates to. "Any country" searches every known network by name (needed for global operators like Google or Cloudflare, which don't confidently belong to one country). Leave unchecked, or the list empty, to allow any network.</p>
+					<p class="muted" id="e-asns-building" style="display:none;font-size:0.82rem">Network list is still building (first-time setup takes a moment) -- try again shortly.</p>
+					<div class="geo-picker-row">
+						<select id="e-asn-country"><option value="">Any country (search all networks)</option></select>
+						<div id="e-asns-ms"></div>
+					</div>
 				</div>
 				<div class="field" style="margin-top:14px;margin-bottom:0">
 					<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
@@ -232,6 +248,76 @@ const editCountriesMs = createMultiselectDropdown(document.getElementById("e-cou
 const countryOptions = ISO_3166_COUNTRIES.map(([code, name]) => ({ id: code, label: `${name} (${code})` }));
 addCountriesMs.setOptions(countryOptions);
 editCountriesMs.setOptions(countryOptions);
+
+// City/ASN Login Restrictions: cascading "pick a country, browse its
+// GeoIP-real values" pickers -- see geo_lists.py for how /api/geo/* is
+// built (an offline walk of the actual GeoLite2 databases, so nothing
+// shown here can ever be a value GeoIP could never return at login time).
+// One wiring function, called 4x (Add form + Edit dialog, city + ASN).
+function wireGeoPicker({ countrySelectEl, ms, kind, buildingEl }) {
+	// kind: "cities" or "asns". ASN's country select additionally carries
+	// a "" (any country) option already in the HTML -- fetched via
+	// /api/geo/asns with no country param, searching every known network.
+	const countriesUrl = kind === "cities" ? "/api/geo/countries-with-cities" : "/api/geo/countries-with-asns";
+	const valuesUrl = (country) => kind === "cities"
+		? `/api/geo/cities?country=${encodeURIComponent(country)}`
+		: `/api/geo/asns${country ? `?country=${encodeURIComponent(country)}` : ""}`;
+	const toOption = kind === "cities"
+		? (v) => ({ id: v, label: v })
+		: (v) => ({ id: v.asn, label: `${v.asn} — ${v.org}` });
+
+	async function loadValues(country) {
+		try {
+			const values = await apiFetch(valuesUrl(country));
+			ms.setOptions(values.map(toOption));
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	}
+
+	countrySelectEl.addEventListener("change", () => loadValues(countrySelectEl.value));
+
+	(async () => {
+		try {
+			const [status, countries] = await Promise.all([
+				apiFetch("/api/geo/status"),
+				apiFetch(countriesUrl),
+			]);
+			const ready = kind === "cities" ? status.city_ready : status.asn_ready;
+			if (buildingEl) buildingEl.style.display = ready ? "none" : "";
+			const placeholderOpt = kind === "asns"
+				? '<option value="">Any country (search all networks)</option>'
+				: '<option value="">Select a country…</option>';
+			countrySelectEl.innerHTML = placeholderOpt + countries
+				.map(code => `<option value="${code}">${escapeHtml(_COUNTRY_NAME_BY_CODE[code] || code)} (${code})</option>`)
+				.join("");
+			// ASN's "any country" default is immediately useful (searches
+			// everything); city has no equivalent "any" mode (the picker
+			// would be enormous/unfiltered), so it starts empty until a
+			// country is picked.
+			if (kind === "asns") loadValues("");
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	})();
+}
+
+const addCitiesMs = createMultiselectDropdown(document.getElementById("u-cities-ms"), {
+	placeholder: "No cities selected", idType: "string", emptyLabel: "Pick a country above first.", unitLabel: "cities",
+});
+const editCitiesMs = createMultiselectDropdown(document.getElementById("e-cities-ms"), {
+	placeholder: "No cities selected", idType: "string", emptyLabel: "Pick a country above first.", unitLabel: "cities",
+});
+const addAsnsMs = createMultiselectDropdown(document.getElementById("u-asns-ms"), {
+	placeholder: "No networks selected", idType: "string", emptyLabel: "No networks found.", unitLabel: "networks",
+});
+const editAsnsMs = createMultiselectDropdown(document.getElementById("e-asns-ms"), {
+	placeholder: "No networks selected", idType: "string", emptyLabel: "No networks found.", unitLabel: "networks",
+});
+wireGeoPicker({ countrySelectEl: document.getElementById("u-city-country"), ms: addCitiesMs, kind: "cities", buildingEl: document.getElementById("u-cities-building") });
+wireGeoPicker({ countrySelectEl: document.getElementById("e-city-country"), ms: editCitiesMs, kind: "cities", buildingEl: document.getElementById("e-cities-building") });
+wireGeoPicker({ countrySelectEl: document.getElementById("u-asn-country"), ms: addAsnsMs, kind: "asns", buildingEl: document.getElementById("u-asns-building") });
+wireGeoPicker({ countrySelectEl: document.getElementById("e-asn-country"), ms: editAsnsMs, kind: "asns", buildingEl: document.getElementById("e-asns-building") });
 
 const addPhone = createPhoneInput(document.getElementById("u-phone-mount"));
 const editPhone = createPhoneInput(document.getElementById("e-phone-mount"));
@@ -442,9 +528,9 @@ function openEdit(u) {
 	document.getElementById("e-restrict-country").checked = !!u.restrict_login_by_country;
 	editCountriesMs.setSelected(u.allowed_login_countries || []);
 	document.getElementById("e-restrict-city").checked = !!u.restrict_login_by_city;
-	document.getElementById("e-allowed-cities").value = (u.allowed_login_cities || []).join("\n");
+	editCitiesMs.setSelected(u.allowed_login_cities || []);
 	document.getElementById("e-restrict-asn").checked = !!u.restrict_login_by_asn;
-	document.getElementById("e-allowed-asns").value = (u.allowed_login_asns || []).join("\n");
+	editAsnsMs.setSelected(u.allowed_login_asns || []);
 	document.getElementById("e-restrict-ip").checked = !!u.restrict_login_by_ip;
 	document.getElementById("e-allowed-ips").value = (u.allowed_login_ips || []).join("\n");
 	document.getElementById("edit-dialog").showModal();
@@ -469,9 +555,9 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		restrict_login_by_country: document.getElementById("e-restrict-country").checked,
 		allowed_login_countries: editCountriesMs.getSelected(),
 		restrict_login_by_city: document.getElementById("e-restrict-city").checked,
-		allowed_login_cities: parseLineList(document.getElementById("e-allowed-cities").value),
+		allowed_login_cities: editCitiesMs.getSelected(),
 		restrict_login_by_asn: document.getElementById("e-restrict-asn").checked,
-		allowed_login_asns: parseLineList(document.getElementById("e-allowed-asns").value),
+		allowed_login_asns: editAsnsMs.getSelected(),
 		restrict_login_by_ip: document.getElementById("e-restrict-ip").checked,
 		allowed_login_ips: parseLineList(document.getElementById("e-allowed-ips").value),
 	};
@@ -519,9 +605,9 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				restrict_login_by_country: document.getElementById("u-restrict-country").checked,
 				allowed_login_countries: addCountriesMs.getSelected(),
 				restrict_login_by_city: document.getElementById("u-restrict-city").checked,
-				allowed_login_cities: parseLineList(document.getElementById("u-allowed-cities").value),
+				allowed_login_cities: addCitiesMs.getSelected(),
 				restrict_login_by_asn: document.getElementById("u-restrict-asn").checked,
-				allowed_login_asns: parseLineList(document.getElementById("u-allowed-asns").value),
+				allowed_login_asns: addAsnsMs.getSelected(),
 				restrict_login_by_ip: document.getElementById("u-restrict-ip").checked,
 				allowed_login_ips: parseLineList(document.getElementById("u-allowed-ips").value),
 			},
@@ -542,6 +628,8 @@ document.getElementById("add-user-clear").addEventListener("click", () => {
 	addTeamMs.reset();
 	addPhone.reset();
 	addCountriesMs.reset();
+	addCitiesMs.reset();
+	addAsnsMs.reset();
 });
 
 document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); loadTeamOptions(); });

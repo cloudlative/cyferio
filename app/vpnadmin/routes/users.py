@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
-from .. import app_settings
+from .. import app_settings, geo_lists
 from ..audit import log_action
 from ..auth import hash_password, require_admin, require_user, verify_password
 from ..db import get_db
@@ -162,32 +162,42 @@ def _valid_ip_list(v: list[str]) -> list[str]:
 
 
 def _valid_city_list(v: list[str]) -> list[str]:
-    """Each entry is a free-text city name, matched case-insensitively
-    (exact match, not substring) against geoip.lookup_city()'s result at
-    login time -- there's no fixed enumerable list of world cities to
-    validate against the way there is for ISO country codes, so this only
-    trims/length-checks and dedupes case-insensitively, preserving the
-    admin's original casing for display."""
+    """Each entry must be a real city name from geo_lists.py's City
+    pick-list -- picker-only, no free text (see users.html's cascading
+    country -> city selector): a hand-typed name GeoIP could never
+    actually return at login time would create a restriction that can
+    never be satisfied, i.e. a silent, permanent lockout for that
+    restriction type. Canonicalizes to the exact casing MaxMind uses and
+    dedupes case-insensitively. If the city index hasn't finished its
+    first build yet (fresh install / just-replaced mmdb, see geo_lists.py
+    for the rebuild window), city_exists() returns None and this falls
+    back to a shape-only check instead of blocking admins entirely during
+    that window."""
     seen_lower = set()
     result = []
     for name in v:
         name = (name or "").strip()
         if not name:
             continue
-        if len(name) > 100:
-            raise ValueError(f"City name too long (max 100 characters): '{name[:40]}...'")
-        key = name.lower()
+        exists = geo_lists.city_exists(name)
+        if exists is False:
+            raise ValueError(f"'{name}' isn't a known city in the GeoIP database -- pick one from the list.")
+        canonical = geo_lists.canonical_city(name) if exists else name
+        if len(canonical) > 100:
+            raise ValueError(f"City name too long (max 100 characters): '{canonical[:40]}...'")
+        key = canonical.lower()
         if key not in seen_lower:
             seen_lower.add(key)
-            result.append(name)
+            result.append(canonical)
     return result
 
 
 def _valid_asn_list(v: list[str]) -> list[str]:
-    """Each entry identifies an Autonomous System (network/ISP), e.g.
-    "AS15169" or plain "15169" -- normalized to the "ASxxxx" form (matches
-    geoip.lookup_asn()'s int -> f"AS{n}" comparison at login time) and
-    deduped, preserving first-seen order."""
+    """Each entry must be a real ASN from geo_lists.py's ASN pick-list --
+    same picker-only rationale as _valid_city_list. Normalizes shape
+    ("15169" or "as15169" -> "AS15169") first, then checks membership;
+    same not-yet-built fallback as _valid_city_list via asn_exists()
+    returning None."""
     seen = []
     for entry in v:
         entry = (entry or "").strip().upper()
@@ -197,6 +207,9 @@ def _valid_asn_list(v: list[str]) -> list[str]:
         if not digits.isdigit():
             raise ValueError(f"'{entry}' isn't a valid AS number -- expected e.g. AS15169 or 15169.")
         normalized = f"AS{int(digits)}"
+        exists = geo_lists.asn_exists(normalized)
+        if exists is False:
+            raise ValueError(f"'{normalized}' isn't a known network in the GeoIP database -- pick one from the list.")
         if normalized not in seen:
             seen.append(normalized)
     return seen

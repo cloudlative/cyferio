@@ -473,6 +473,13 @@ input[type=text], input[type=password], input[type=date], input[type=email], inp
 }
 select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 
+/* --- Geo-scoped restriction pickers (users.html's City/ASN Login
+   Restrictions) -- a country <select> narrows what the multiselect next
+   to it offers, so the two sit side by side as one control. */
+.geo-picker-row { display: flex; gap: 8px; align-items: flex-start; }
+.geo-picker-row select { flex: 0 0 auto; width: 200px; }
+.geo-picker-row .ms-dropdown { flex: 1 1 auto; min-width: 0; }
+
 /* --- Multiselect dropdown (createMultiselectDropdown in app.js) --------
    Closed-by-default team picker: looks/behaves like a normal <select>
    until clicked, then expands into a checkable options panel, instead of

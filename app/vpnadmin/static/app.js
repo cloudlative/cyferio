@@ -231,13 +231,20 @@ function createMultiselectDropdown(root, { placeholder = "Select…", disabled =
 	const castId = idType === "string" ? String : Number;
 	let options = [];
 	let selected = new Set();
+	// Accumulates label-by-id across every setOptions() call, not just the
+	// currently-loaded batch -- needed for callers that swap the option
+	// list in and out (e.g. users.html's country -> city/ASN cascading
+	// pickers): a selection made while "Pakistan" was loaded should still
+	// show its real name in the toggle button/count after switching to
+	// "United States", even though that id is no longer in `options`.
+	const labelCache = new Map();
 
 	function refreshLabel() {
 		if (selected.size === 0) {
 			toggleLabel.textContent = placeholder;
 			toggleLabel.classList.add("muted");
 		} else {
-			const names = options.filter(o => selected.has(o.id)).map(o => o.label);
+			const names = [...selected].map(id => labelCache.get(id) ?? String(id));
 			toggleLabel.textContent = names.length <= 2 ? names.join(", ") : `${names.length} ${unitLabel} selected`;
 			toggleLabel.classList.remove("muted");
 		}
@@ -273,6 +280,7 @@ function createMultiselectDropdown(root, { placeholder = "Select…", disabled =
 	return {
 		setOptions(opts) {
 			options = opts;
+			opts.forEach(o => labelCache.set(o.id, o.label));
 			renderPanel();
 			refreshLabel();
 		},
@@ -288,6 +296,13 @@ function createMultiselectDropdown(root, { placeholder = "Select…", disabled =
 			selected = new Set();
 			renderPanel();
 			refreshLabel();
+		},
+		selectedLabels() {
+			// Every currently-selected id's label, even ones from an
+			// option batch that's no longer loaded (see labelCache above)
+			// -- used by users.html to render a "currently selected"
+			// summary next to the country-scoped picker.
+			return [...selected].map(id => ({ id, label: labelCache.get(id) ?? String(id) }));
 		},
 	};
 }
