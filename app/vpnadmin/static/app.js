@@ -357,7 +357,15 @@ function createMultiselectDropdown(root, {
 		},
 		reset() {
 			selected = new Set();
-			options = [];
+			// Only searchable pickers clear `options` here -- they refetch
+			// on next open via runSearch(), so an empty list is transient.
+			// Non-searchable pickers (teams, the country restriction list)
+			// get their options via a single setOptions() call at page
+			// load and never repopulate them on their own -- wiping
+			// `options` here left them permanently empty (showing
+			// emptyLabel forever) after any reset()/form-clear, until a
+			// full page reload re-ran that initial setOptions() call.
+			if (searchable) options = [];
 			if (searchEl) searchEl.value = "";
 			if (hintEl) hintEl.textContent = "";
 			renderOptions();
