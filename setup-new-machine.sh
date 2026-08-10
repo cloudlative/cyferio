@@ -346,8 +346,7 @@ bring_up_stack() {
 
 	if [[ "$USE_STAGING_FIRST" -eq 1 ]]; then
 		log "  waiting for staging cert to issue..."
-		sleep 5
-		_curl_check || log "  (staging check didn't get a clean 200 yet -- check 'docker compose logs traefik')"
+		_curl_check_retry || log "  (staging check didn't get a clean 200 yet -- check 'docker compose logs traefik')"
 
 		log "  switching to production Let's Encrypt CA..."
 		sed -i 's|^ACME_CASERVER=.*|ACME_CASERVER=|' .env
@@ -355,18 +354,48 @@ bring_up_stack() {
 		docker run --rm -v "$(docker compose config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["volumes"]["traefik-acme"]["name"])'):/letsencrypt" \
 			alpine:3.20 sh -c 'rm -f /letsencrypt/acme.json'
 		docker compose up -d traefik
-		sleep 5
-		_curl_check
+		_curl_check_retry || log "  (production cert check didn't get a clean 200 yet -- check 'docker compose logs traefik')"
 	else
-		_curl_check
+		_curl_check_retry || log "  (connectivity check didn't get a clean 200 yet -- containers may still be starting; check 'docker compose ps'/'docker compose logs')"
 	fi
 }
 
-_curl_check() {
+# Retries for up to ~30s (freshly (re)started containers -- app in
+# particular, which runs full Python/uvicorn startup, RBAC seeding, etc. --
+# can take a few seconds to bind their port) rather than failing on the
+# first attempt. Deliberately never propagates a hard failure via `set -e`
+# (every call site above uses `|| log ...`) -- a slow-to-start container on
+# an otherwise-successful run shouldn't make the whole script look like it
+# failed; the operator can always re-check manually.
+_curl_check_retry() {
+	local attempt code
+	for attempt in 1 2 3 4 5 6; do
+		code=$(_curl_check_once)
+		if [[ "$code" == "200" ]]; then
+			log "  https://${DOMAIN:-localhost}/login -> HTTP $code"
+			return 0
+		fi
+		sleep 5
+	done
+	log "  https://${DOMAIN:-localhost}/login -> HTTP $code (after $attempt attempts)"
+	return 1
+}
+
+_curl_check_once() {
+	# NOTE: curl's own -w "%{http_code}" already prints "000" on a total
+	# connection failure (before it exits non-zero) -- appending `|| echo
+	# "000"` here would double that up into a bogus "000000". Capture
+	# whatever curl printed and fall back to "000" only if it printed
+	# nothing at all (e.g. curl itself failed to start).
 	local code
-	code=$(curl -sk -m 20 -o /dev/null -w "%{http_code}" "https://${DOMAIN:-localhost}/login" || echo "000")
-	log "  https://${DOMAIN:-localhost}/login -> HTTP $code"
-	[[ "$code" == "200" ]]
+	# `|| true`: under `set -e`, `code=$(cmd)` aborts the whole script the
+	# instant curl returns non-zero (e.g. connection refused while the
+	# container is still starting) -- exactly the premature-exit bug this
+	# retry helper exists to avoid, just one level deeper. The `|| true`
+	# only affects how this statement's exit status is treated; `code`
+	# still captures whatever curl wrote to stdout either way.
+	code=$(curl -sk -m 10 -o /dev/null -w "%{http_code}" "https://${DOMAIN:-localhost}/login" 2>/dev/null) || true
+	echo "${code:-000}"
 }
 
 # --- Main -----------------------------------------------------------------
