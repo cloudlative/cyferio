@@ -13,6 +13,23 @@
 # private half never has to leave it) but registers the public half with
 # GitHub from wherever `gh` is already logged in -- i.e. here.
 #
+# Everything here runs as --user (ubuntu by default), NOT root: the deploy
+# key, its SSH config alias, and the actual `git clone`/`git fetch` all live
+# under and run as that user. The one root-requiring step is creating
+# --repo-dir itself (/opt is root-owned, so a plain user can't mkdir there)
+# -- handled with a single `sudo mkdir + chown` up front, after which the
+# directory belongs to --user and every git operation against it is a plain
+# unprivileged command. (An earlier version of this script did the whole
+# clone via `sudo git clone`, which meant the key/alias had to live under
+# /root/.ssh too, since a sudo'd git process only reads root's own SSH
+# config -- root ownership of the checkout was never actually needed by
+# anything downstream: docker (its daemon already runs as root regardless
+# of file ownership), the sudo'd openvpn_admin.py invocations (root can
+# read any file regardless of owner), and setup-new-machine.sh (already
+# runs as root for its own reasons) -- so this version drops the extra
+# complexity and lets --user manage the checkout normally, e.g. a plain
+# `git pull` with no sudo needed for that.)
+#
 # Prereqs:
 #   - `gh` CLI installed and authenticated locally (gh auth status).
 #   - You can already SSH to the target host as --user (password or an
@@ -20,17 +37,24 @@
 #     own login to the box.
 #
 # What this does, in order:
-#   1. SSH to the target host; generate an ed25519 deploy keypair there if
-#      one doesn't already exist (idempotent -- never regenerates/orphans
-#      an existing one).
+#   1. SSH to the target host; generate an ed25519 deploy keypair under
+#      --user's own home if one doesn't already exist there (idempotent --
+#      never regenerates/orphans an existing one). If an OLDER, root-owned
+#      key from a previous version of this script is found instead, moves
+#      it to --user's home rather than generating a fresh one (avoids
+#      re-registering a new key with GitHub for no reason).
 #   2. Register the public half as a READ-ONLY deploy key on
 #      cloudlative/openvpn-toolkit via `gh repo deploy-key add`, run HERE
 #      (skips cleanly if a key with this exact content is already
 #      registered).
-#   3. Add an SSH config alias on the target host so git operations against
-#      this repo unambiguously use that key.
-#   4. Clone the repo to --repo-dir on the target host (or `git pull` if
-#      it's already cloned there).
+#   3. Add an SSH config alias under --user's home so git operations
+#      against this repo unambiguously use that key (and remove any old
+#      root-based alias/key left over from a previous version of this
+#      script).
+#   4. Create --repo-dir (root, once) and chown it to --user, then clone
+#      the repo there as --user (or `git fetch` if it's already cloned --
+#      chowning it to --user first if it was left root-owned by an older
+#      run of this script).
 #
 # Usage:
 #   ./add-machine.sh --host 203.0.113.10 [--user ubuntu] \
@@ -57,7 +81,7 @@ while [[ $# -gt 0 ]]; do
 		--repo) GH_REPO="$2"; shift 2 ;;
 		--repo-dir) REPO_DIR="$2"; shift 2 ;;
 		--key-title) KEY_TITLE="$2"; shift 2 ;;
-		-h|--help) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help) sed -n '2,63p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) die "Unknown argument: $1 (see --help)" ;;
 	esac
 done
@@ -74,27 +98,23 @@ SSH() { ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_TARGET" -- "$@"; }
 log "Checking SSH connectivity to $SSH_TARGET..."
 SSH "true" >/dev/null 2>&1 || die "Cannot SSH to $SSH_TARGET (key-based, non-interactive). Make sure your own key/agent is already authorized there -- this script bootstraps REPO access, not your login to the box."
 
-# --- Phase 1: generate the deploy keypair on the target host ---------------
-#
-# Deliberately under /root/.ssh, not $SSH_USER's own home: Phase 4 clones
-# via `sudo git clone` (the repo ends up root-owned, matching how
-# docker-compose is run there too -- see setup-new-machine.sh), which means
-# git runs as root and only ever reads root's own ~/.ssh/config. A key/alias
-# placed under $SSH_USER's home would be invisible to that `sudo` git
-# process -- the clone would silently fail to resolve the alias and error
-# out trying to resolve "github.com-<repo>" as a literal (nonexistent) DNS
-# name. Using sudo for every command in this phase (not just the clone
-# itself) keeps it consistent with where the key/config actually need to
-# live.
-REMOTE_KEY_PATH="/root/.ssh/openvpn-toolkit-deploy"
-log "Phase 1: deploy keypair on $HOST"
-if SSH "sudo test -f $REMOTE_KEY_PATH"; then
-	log "  key already exists at $REMOTE_KEY_PATH on $HOST -- reusing."
+# --- Phase 1: deploy keypair under $SSH_USER's own home --------------------
+# `~` in these remote command strings is expanded by the remote shell in
+# $SSH_USER's own context (that's who the SSH() connection logs in as) --
+# no need to reference an absolute home-directory path from here.
+log "Phase 1: deploy keypair on $HOST (as $SSH_USER)"
+OLD_ROOT_KEY="/root/.ssh/openvpn-toolkit-deploy"
+if SSH "test -f ~/.ssh/openvpn-toolkit-deploy"; then
+	log "  key already exists at ~/.ssh/openvpn-toolkit-deploy on $HOST -- reusing."
+elif SSH "sudo test -f $OLD_ROOT_KEY" 2>/dev/null; then
+	log "  found an older root-owned key from a previous version of this script -- migrating it to $SSH_USER's home instead of generating a new one."
+	SSH "mkdir -p ~/.ssh && chmod 700 ~/.ssh && sudo cp $OLD_ROOT_KEY ~/.ssh/openvpn-toolkit-deploy && sudo cp ${OLD_ROOT_KEY}.pub ~/.ssh/openvpn-toolkit-deploy.pub && sudo chown $SSH_USER:$SSH_USER ~/.ssh/openvpn-toolkit-deploy ~/.ssh/openvpn-toolkit-deploy.pub && chmod 600 ~/.ssh/openvpn-toolkit-deploy && chmod 644 ~/.ssh/openvpn-toolkit-deploy.pub && sudo rm -f $OLD_ROOT_KEY ${OLD_ROOT_KEY}.pub"
+	log "  migrated; removed the old root-owned copy."
 else
-	SSH "sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh && sudo ssh-keygen -t ed25519 -f $REMOTE_KEY_PATH -N '' -C 'openvpn-toolkit-deploy@$HOST' -q"
+	SSH "mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -t ed25519 -f ~/.ssh/openvpn-toolkit-deploy -N '' -C 'openvpn-toolkit-deploy@$HOST' -q"
 	log "  generated new key on $HOST"
 fi
-PUBLIC_KEY=$(SSH "sudo cat ${REMOTE_KEY_PATH}.pub")
+PUBLIC_KEY=$(SSH "cat ~/.ssh/openvpn-toolkit-deploy.pub")
 [[ -n "$PUBLIC_KEY" ]] || die "Could not read the generated public key back from $HOST."
 
 # --- Phase 2: register with GitHub (runs HERE, where gh is authenticated) --
@@ -108,39 +128,50 @@ else
 	log "  registered as: $KEY_TITLE"
 fi
 
-# --- Phase 3: SSH config alias on the target host, so git uses this key ---
-# Same reasoning as Phase 1 -- root's own ~/.ssh/config, since Phase 4's
-# `sudo git clone` runs as root and would never see an alias placed under
-# $SSH_USER's home.
-log "Phase 3: SSH config alias for github.com on $HOST"
+# --- Phase 3: SSH config alias under $SSH_USER's own home ------------------
+log "Phase 3: SSH config alias for github.com on $HOST (as $SSH_USER)"
 ALIAS="github.com-$(basename "$GH_REPO")"
-if SSH "sudo grep -q '^Host $ALIAS\$' /root/.ssh/config 2>/dev/null"; then
+if SSH "grep -q '^Host $ALIAS\$' ~/.ssh/config 2>/dev/null"; then
 	log "  alias '$ALIAS' already present -- reusing."
 else
-	SSH "sudo tee -a /root/.ssh/config > /dev/null <<CFG
+	SSH "tee -a ~/.ssh/config > /dev/null <<CFG
 Host $ALIAS
     HostName github.com
     User git
-    IdentityFile ${REMOTE_KEY_PATH}
+    IdentityFile ~/.ssh/openvpn-toolkit-deploy
     IdentitiesOnly yes
 CFG
-sudo chmod 600 /root/.ssh/config"
+chmod 600 ~/.ssh/config"
 	log "  added alias '$ALIAS' -> github.com"
 fi
-# Prime known_hosts non-interactively (as root, since that's who'll actually
-# run the clone) so Phase 4 doesn't hang on a host-key prompt.
-SSH "sudo ssh -o StrictHostKeyChecking=accept-new -T git@github.com -i $REMOTE_KEY_PATH" >/dev/null 2>&1 || true
-
-# --- Phase 4: clone (or update) the repo on the target host ---------------
-log "Phase 4: repo at $REPO_DIR on $HOST"
-if SSH "sudo test -d $REPO_DIR/.git"; then
-	log "  already cloned -- fetching latest instead."
-	SSH "cd $REPO_DIR && sudo git fetch origin && sudo git status --short | head -5"
-else
-	SSH "sudo mkdir -p $REPO_DIR && sudo git clone $ALIAS:$GH_REPO.git $REPO_DIR"
-	log "  cloned to $REPO_DIR"
+# Clean up a previous version's root-based alias/key, if present -- avoids
+# two working copies of the same access sitting around indefinitely.
+if SSH "sudo grep -q '^Host $ALIAS\$' /root/.ssh/config 2>/dev/null"; then
+	SSH "sudo sed -i '/^Host $ALIAS\$/,/^\$/d' /root/.ssh/config" || true
+	log "  removed the old root-based alias entry (already migrated in Phase 1)."
 fi
-SSH "cd $REPO_DIR && sudo git log --oneline -1"
+# Prime known_hosts non-interactively so Phase 4's clone doesn't hang on a
+# host-key prompt.
+SSH "ssh -o StrictHostKeyChecking=accept-new -T git@github.com -i ~/.ssh/openvpn-toolkit-deploy" >/dev/null 2>&1 || true
+
+# --- Phase 4: create/own the repo dir, then clone (or update) as $SSH_USER -
+log "Phase 4: repo at $REPO_DIR on $HOST"
+if SSH "test -d $REPO_DIR/.git"; then
+	log "  already cloned."
+	# If a previous (root-based) version of this script left it root-owned,
+	# fix that now rather than requiring a separate manual step.
+	if SSH "[ \"\$(stat -c %U $REPO_DIR)\" != \"$SSH_USER\" ]"; then
+		SSH "sudo chown -R $SSH_USER:$SSH_USER $REPO_DIR"
+		log "  fixed ownership: $REPO_DIR is now owned by $SSH_USER (was root, from an older run)."
+	fi
+	log "  fetching latest..."
+	SSH "cd $REPO_DIR && git fetch origin && git status --short | head -5"
+else
+	SSH "sudo mkdir -p $REPO_DIR && sudo chown $SSH_USER:$SSH_USER $REPO_DIR"
+	SSH "git clone $ALIAS:$GH_REPO.git $REPO_DIR"
+	log "  cloned to $REPO_DIR (owned by $SSH_USER)"
+fi
+SSH "cd $REPO_DIR && git log --oneline -1"
 
 log "Done. Next: ssh $SSH_TARGET, then run:"
 log "  cd $REPO_DIR && sudo ./setup-new-machine.sh --domain <your-domain> --acme-email <you@example.com> --use-staging-first"
