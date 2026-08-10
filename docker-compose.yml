@@ -71,6 +71,15 @@ services:
     image: ghcr.io/cloudlative/openvpn-toolkit-app:${IMAGE_TAG:-latest}
     container_name: openvpn-toolkit-app
     restart: unless-stopped
+    # Runs Docker's built-in tini as PID 1 instead of uvicorn directly.
+    # Belt-and-suspenders zombie reaper: uvicorn/Python never calls wait()
+    # on children it didn't spawn itself, so any orphaned grandchild left
+    # behind by openvpn-install.sh/vpn-status.py (e.g. the process-
+    # substitution zombie leak fixed in do_check_consistency) would
+    # otherwise sit as a zombie forever and eventually exhaust the
+    # container's pids cgroup limit -- exactly what happened in production
+    # on 2026-08-10. tini reaps anything reparented to PID 1 automatically.
+    init: true
     env_file: .env
     # No public host port: Traefik (above) is the only public entrypoint now.
     # Uncomment the line below to bind the app port to the VPN-internal

@@ -669,11 +669,26 @@ do_check_consistency () {
 	# Cross-checks PKI valid certs against DB_FILE entries in both
 	# directions. Exit status: 0 = clean, 1 = at least one orphan found.
 	local as_json="${1:-}" pki_names db_names orphan_pki orphan_db issues=0
+	local pki_sorted db_sorted
 	pki_names=$(tail -n +2 "$EASYRSA_DIR/pki/index.txt" 2>/dev/null | grep "^V" | cut -d '=' -f 2)
 	db_names=$(cut -d '=' -f 1 "$DB_FILE" 2>/dev/null | sort -u)
 
-	orphan_pki=$(comm -23 <(sort <<< "$pki_names") <(sort <<< "$db_names"))
-	orphan_db=$(comm -13 <(sort <<< "$pki_names") <(sort <<< "$db_names"))
+	# Sort to temp files rather than `comm <(sort ...) <(sort ...)` --
+	# process substitution spawns each `sort` as an unwaited background
+	# child (bash doesn't reliably reap process-substitution processes
+	# before this function/script returns), which leaked zombie `sort`
+	# processes in production (reparented to the app container's PID 1,
+	# which has no reaper) until the container's pids cgroup limit was
+	# exhausted and every API call started failing with 5xx. Temp files
+	# avoid the extra unwaited subshells entirely.
+	pki_sorted=$(mktemp) && db_sorted=$(mktemp) || { issues=1; pki_sorted=""; db_sorted=""; }
+	if [[ -n "$pki_sorted" && -n "$db_sorted" ]]; then
+		sort <<< "$pki_names" > "$pki_sorted"
+		sort <<< "$db_names" > "$db_sorted"
+		orphan_pki=$(comm -23 "$pki_sorted" "$db_sorted")
+		orphan_db=$(comm -13 "$pki_sorted" "$db_sorted")
+		rm -f "$pki_sorted" "$db_sorted"
+	fi
 
 	[[ -n "$orphan_pki" ]] && issues=1
 	[[ -n "$orphan_db" ]] && issues=1
