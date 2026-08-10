@@ -16,7 +16,7 @@
 http:
   routers:
     openvpn-toolkit:
-      rule: "Host(`vpn-mgmt.apkamuaalij.com`)"
+      rule: "Host(`vpn-mgmt.cloudlative.com`)"
       entryPoints:
         - websecure
       service: openvpn-toolkit

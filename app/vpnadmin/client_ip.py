@@ -3,7 +3,7 @@ Real client IP extraction for the login-restriction feature (routes/
 auth.py) -- used to enforce per-user allowed-IP/allowed-country login
 restrictions.
 
-vpn-mgmt.apkamuaalij.com's Cloudflare DNS record is proxied (orange
+vpn-mgmt.cloudlative.com's Cloudflare DNS record is proxied (orange
 cloud): every real request into Traefik/this app arrives FROM Cloudflare's
 edge, never directly from the visitor, so `request.client.host` (and a
 bare X-Forwarded-For) would only ever show a Cloudflare edge IP -- useless

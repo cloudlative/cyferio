@@ -7,7 +7,7 @@ without touching a terminal. It's a thin FastAPI frontend over
 single source of truth for all VPN logic; this app doesn't reimplement any
 of it, only calls it and renders the result.
 
-> **Status**: deployed to production at https://vpn-mgmt.apkamuaalij.com,
+> **Status**: deployed to production at https://vpn-mgmt.cloudlative.com,
 > fronted by Traefik (automatic Let's Encrypt TLS) and backed by PostgreSQL.
 
 ## Features
