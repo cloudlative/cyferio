@@ -126,6 +126,56 @@ the host, but they're invisible to this container — every "View .ovpn" /
 though the file exists. Set `OVPN_OUTPUT_DIR=/etc/openvpn/client` (see
 `vpn-tools.conf.example`) before running the app in Docker.
 
+### First-time setup on a new machine
+
+[`setup-new-machine.sh`](../setup-new-machine.sh) (repo root) automates
+everything a fresh Ubuntu+Docker host needs *beyond* `docker compose up -d`
+itself to get the OpenVPN Install page's web-triggered install/uninstall
+working (see [Roles & Permissions](#roles--permissions) and
+`app/vpnadmin/routes/openvpn_install.py`): generating the scoped SSH
+"host executor" key + forced-command wrapper + sudoers grant, writing
+`.env`, enabling the deploy-key volume mount, and bringing the stack up
+(Let's Encrypt staging cert first if requested, then production).
+
+Three things it does **not** do for you, since they need to happen before
+the script can run at all:
+
+1. Docker + the Compose plugin already installed on the host.
+2. A DNS A record for your domain already pointing at the host's public IP.
+3. This repo cloned there — it's a **private** repo, so that means adding a
+   read-only [GitHub deploy key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys)
+   first:
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/openvpn-toolkit-deploy -N "" -C "<hostname>"
+   gh repo deploy-key add --repo cloudlative/openvpn-toolkit --title "<hostname>" ~/.ssh/openvpn-toolkit-deploy.pub
+   # then clone via that key, e.g. into /opt/openvpn-toolkit
+   ```
+
+Then:
+
+```bash
+sudo /opt/openvpn-toolkit/setup-new-machine.sh \
+  --domain vpn.example.com \
+  --acme-email you@example.com \
+  --use-staging-first    # first time on a genuinely new domain
+```
+
+Re-running it (e.g. after changing `--deploy-user`, or just to pick up
+config-file changes from a newer commit) is safe — every phase checks its
+own current state first, so keys/sudoers/`authorized_keys` entries aren't
+duplicated and an existing `.env` is left alone unless you pass
+`--force-env`. See `setup-new-machine.sh --help` for the full flag list.
+
+**Why the host-executor key logs in as a regular deploy user (`ubuntu` by
+default), never root**: even with the forced-command wrapper restricting
+*what* the key can run, a root SSH session is categorically higher
+blast-radius than a normal user's session escalated via one narrowly-scoped
+`sudo` rule for an exact command path — and "root login enabled" gets
+flagged by security scanners/compliance checks regardless of what
+restricts it. The script grants `NOPASSWD` sudo for exactly
+`app/cli/openvpn_admin.py`, nothing broader, via a generated,
+`visudo`-validated `/etc/sudoers.d` file.
+
 ### Releases
 
 Image builds are tag-triggered, not push-triggered: pushing a version tag
