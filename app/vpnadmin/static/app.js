@@ -215,28 +215,52 @@ function renderDonutChart(mountEl, entries, { size = 220, thickness = 34 } = {})
  * the toggle's "N selected" text (default "teams", overridden by callers
  * picking something else, e.g. "countries").
  */
-function createMultiselectDropdown(root, { placeholder = "Select…", disabled = false, idType = "number", emptyLabel = "No teams yet.", unitLabel = "teams" } = {}) {
+function createMultiselectDropdown(root, {
+	placeholder = "Select…", disabled = false, idType = "number",
+	emptyLabel = "No teams yet.", unitLabel = "teams",
+	// searchable mode (users.html's City/ASN pickers): instead of a single
+	// setOptions() call with the full list up front, the panel shows a
+	// search box and calls onSearch(query) -- async, returns
+	// { results: [{id,label}], total } -- on open and on every keystroke
+	// (debounced). Exists because some of those lists run into the tens
+	// of thousands of entries (e.g. ~18.6k ASNs just for the US, ~78k for
+	// "any country") -- shipping all of that to the browser and rendering
+	// it as that many checkboxes on every page load was a real, measured
+	// performance regression (Users page went from instant to
+	// multi-second). searchable:false (the default) preserves the exact
+	// prior behavior for every other caller (teams, the country picker).
+	searchable = false, onSearch = null, searchPlaceholder = "Type to search…",
+} = {}) {
 	root.classList.add("ms-dropdown");
 	root.innerHTML = `
 		<button type="button" class="ms-toggle"${disabled ? " disabled" : ""}>
 			<span class="ms-toggle-label">${escapeHtml(placeholder)}</span>
 			<span class="ms-toggle-caret">▾</span>
 		</button>
-		<div class="ms-panel"></div>`;
+		<div class="ms-panel">
+			${searchable ? `<input type="text" class="ms-search" placeholder="${escapeHtml(searchPlaceholder)}">` : ""}
+			<div class="ms-options"></div>
+			${searchable ? `<div class="ms-hint muted"></div>` : ""}
+		</div>`;
 	if (disabled) root.classList.add("ms-disabled");
 
 	const toggle = root.querySelector(".ms-toggle");
 	const toggleLabel = root.querySelector(".ms-toggle-label");
 	const panel = root.querySelector(".ms-panel");
+	const optionsEl = root.querySelector(".ms-options");
+	const searchEl = searchable ? root.querySelector(".ms-search") : null;
+	const hintEl = searchable ? root.querySelector(".ms-hint") : null;
 	const castId = idType === "string" ? String : Number;
 	let options = [];
 	let selected = new Set();
-	// Accumulates label-by-id across every setOptions() call, not just the
-	// currently-loaded batch -- needed for callers that swap the option
-	// list in and out (e.g. users.html's country -> city/ASN cascading
-	// pickers): a selection made while "Pakistan" was loaded should still
-	// show its real name in the toggle button/count after switching to
-	// "United States", even though that id is no longer in `options`.
+	let searchTimer = null;
+	// Accumulates label-by-id across every setOptions()/search result
+	// batch, not just the currently-shown one -- needed for callers that
+	// swap the option list in and out (e.g. users.html's country ->
+	// city/ASN cascading pickers): a selection made while "Pakistan" was
+	// loaded should still show its real name in the toggle button/count
+	// after switching to "United States", even though that id is no
+	// longer in `options`.
 	const labelCache = new Map();
 
 	function refreshLabel() {
@@ -250,15 +274,15 @@ function createMultiselectDropdown(root, { placeholder = "Select…", disabled =
 		}
 	}
 
-	function renderPanel() {
-		panel.innerHTML = options.length === 0
+	function renderOptions() {
+		optionsEl.innerHTML = options.length === 0
 			? `<div class="ms-empty muted">${escapeHtml(emptyLabel)}</div>`
 			: options.map(o => `
 				<label class="ms-option">
 					<input type="checkbox" value="${escapeHtml(String(o.id))}" ${selected.has(o.id) ? "checked" : ""}>
 					<span>${escapeHtml(o.label)}</span>
 				</label>`).join("");
-		panel.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+		optionsEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
 			cb.addEventListener("change", () => {
 				const id = castId(cb.value);
 				if (cb.checked) selected.add(id); else selected.delete(id);
@@ -267,11 +291,48 @@ function createMultiselectDropdown(root, { placeholder = "Select…", disabled =
 		});
 	}
 
+	async function runSearch(query) {
+		if (!onSearch) return;
+		optionsEl.innerHTML = `<div class="ms-empty muted">Searching…</div>`;
+		if (hintEl) hintEl.textContent = "";
+		let result;
+		try {
+			result = await onSearch(query);
+		} catch (e) {
+			optionsEl.innerHTML = `<div class="ms-empty muted">Couldn't load -- try again.</div>`;
+			return;
+		}
+		const results = result?.results ?? [];
+		const total = result?.total ?? results.length;
+		results.forEach(o => labelCache.set(o.id, o.label));
+		options = results;
+		renderOptions();
+		refreshLabel();
+		if (hintEl) {
+			hintEl.textContent = results.length === 0 ? ""
+				: total > results.length ? `Showing ${results.length} of ${total.toLocaleString()} -- type to narrow`
+				: `${results.length} shown`;
+		}
+	}
+
+	if (searchable) {
+		searchEl.addEventListener("input", () => {
+			clearTimeout(searchTimer);
+			searchTimer = setTimeout(() => runSearch(searchEl.value.trim()), 250);
+		});
+	}
+
 	toggle.addEventListener("click", () => {
 		if (disabled) return;
 		const willOpen = !panel.classList.contains("open");
 		document.querySelectorAll(".ms-panel.open").forEach(p => p.classList.remove("open"));
-		if (willOpen) panel.classList.add("open");
+		if (willOpen) {
+			panel.classList.add("open");
+			// Lazy-load: a searchable picker fetches nothing until the
+			// admin actually opens it, not on page load -- see the
+			// searchable option's docstring above for why that matters.
+			if (searchable) runSearch(searchEl.value.trim());
+		}
 	});
 	document.addEventListener("click", (ev) => {
 		if (!root.contains(ev.target)) panel.classList.remove("open");
@@ -279,14 +340,16 @@ function createMultiselectDropdown(root, { placeholder = "Select…", disabled =
 
 	return {
 		setOptions(opts) {
+			// Non-searchable mode only -- searchable pickers manage their
+			// own `options` internally via runSearch().
 			options = opts;
 			opts.forEach(o => labelCache.set(o.id, o.label));
-			renderPanel();
+			renderOptions();
 			refreshLabel();
 		},
 		setSelected(ids) {
 			selected = new Set((ids || []).map(castId));
-			renderPanel();
+			renderOptions();
 			refreshLabel();
 		},
 		getSelected() {
@@ -294,8 +357,17 @@ function createMultiselectDropdown(root, { placeholder = "Select…", disabled =
 		},
 		reset() {
 			selected = new Set();
-			renderPanel();
+			options = [];
+			if (searchEl) searchEl.value = "";
+			if (hintEl) hintEl.textContent = "";
+			renderOptions();
 			refreshLabel();
+		},
+		refresh() {
+			// Re-runs the current search -- for searchable pickers whose
+			// results depend on external state that just changed (e.g.
+			// users.html's country <select> next to the picker).
+			if (searchable) runSearch(searchEl.value.trim());
 		},
 		selectedLabels() {
 			// Every currently-selected id's label, even ones from an

@@ -249,35 +249,38 @@ const countryOptions = ISO_3166_COUNTRIES.map(([code, name]) => ({ id: code, lab
 addCountriesMs.setOptions(countryOptions);
 editCountriesMs.setOptions(countryOptions);
 
-// City/ASN Login Restrictions: cascading "pick a country, browse its
+// City/ASN Login Restrictions: cascading "pick a country, search its
 // GeoIP-real values" pickers -- see geo_lists.py for how /api/geo/* is
 // built (an offline walk of the actual GeoLite2 databases, so nothing
 // shown here can ever be a value GeoIP could never return at login time).
+// Lazy end to end -- NOTHING here fetches until the admin actually opens
+// this picker's dropdown, and the multiselect itself is in searchable
+// mode (capped, server-ranked results per keystroke) rather than ever
+// holding a whole country's list client-side. Both matter: some
+// countries have thousands of cities/ASNs (the US alone: ~11.7k cities,
+// ~18.6k ASNs) and "any country" ASN search spans ~78k entries -- eagerly
+// fetching and rendering that on every Users page load was a real,
+// measured performance regression fixed by this lazy/searchable design.
 // One wiring function, called 4x (Add form + Edit dialog, city + ASN).
-function wireGeoPicker({ countrySelectEl, ms, kind, buildingEl }) {
+// Returns { onSearch } for the multiselect's searchable mode -- doesn't
+// touch the multiselect widget directly, since it doesn't exist yet at
+// the point this needs to be called (see call sites below: the country
+// <select>'s wiring and the multiselect's own onSearch both need this
+// same closure, but the multiselect needs onSearch to already exist
+// before it can be constructed).
+function wireGeoPicker({ countrySelectEl, kind, buildingEl }) {
 	// kind: "cities" or "asns". ASN's country select additionally carries
-	// a "" (any country) option already in the HTML -- fetched via
-	// /api/geo/asns with no country param, searching every known network.
+	// a "" (any country) option already in the HTML -- searches every
+	// known network when no specific country is picked.
 	const countriesUrl = kind === "cities" ? "/api/geo/countries-with-cities" : "/api/geo/countries-with-asns";
-	const valuesUrl = (country) => kind === "cities"
-		? `/api/geo/cities?country=${encodeURIComponent(country)}`
-		: `/api/geo/asns${country ? `?country=${encodeURIComponent(country)}` : ""}`;
 	const toOption = kind === "cities"
 		? (v) => ({ id: v, label: v })
 		: (v) => ({ id: v.asn, label: `${v.asn} — ${v.org}` });
+	let countriesLoaded = false;
 
-	async function loadValues(country) {
-		try {
-			const values = await apiFetch(valuesUrl(country));
-			ms.setOptions(values.map(toOption));
-		} catch (e) {
-			toast(e.message, "error");
-		}
-	}
-
-	countrySelectEl.addEventListener("change", () => loadValues(countrySelectEl.value));
-
-	(async () => {
+	async function loadCountriesOnce() {
+		if (countriesLoaded) return;
+		countriesLoaded = true;
 		try {
 			const [status, countries] = await Promise.all([
 				apiFetch("/api/geo/status"),
@@ -291,33 +294,50 @@ function wireGeoPicker({ countrySelectEl, ms, kind, buildingEl }) {
 			countrySelectEl.innerHTML = placeholderOpt + countries
 				.map(code => `<option value="${code}">${escapeHtml(_COUNTRY_NAME_BY_CODE[code] || code)} (${code})</option>`)
 				.join("");
-			// ASN's "any country" default is immediately useful (searches
-			// everything); city has no equivalent "any" mode (the picker
-			// would be enormous/unfiltered), so it starts empty until a
-			// country is picked.
-			if (kind === "asns") loadValues("");
 		} catch (e) {
+			countriesLoaded = false; // allow a retry next time the picker opens
 			toast(e.message, "error");
 		}
-	})();
+	}
+
+	// Opening the country <select> itself is also a natural "the admin is
+	// about to use this picker" signal, so the country list loads then
+	// too, not just on the multiselect's own open -- whichever happens
+	// first.
+	countrySelectEl.addEventListener("mousedown", loadCountriesOnce, { once: true });
+
+	return async function onSearch(q) {
+		await loadCountriesOnce();
+		const country = countrySelectEl.value;
+		if (kind === "cities" && !country) {
+			return { results: [], total: 0 }; // no "any country" mode for cities -- see module comment above
+		}
+		const params = new URLSearchParams();
+		if (country) params.set("country", country);
+		if (q) params.set("q", q);
+		const { results, total } = await apiFetch(`/api/geo/${kind}?${params.toString()}`);
+		return { results: results.map(toOption), total };
+	};
 }
 
-const addCitiesMs = createMultiselectDropdown(document.getElementById("u-cities-ms"), {
-	placeholder: "No cities selected", idType: "string", emptyLabel: "Pick a country above first.", unitLabel: "cities",
-});
-const editCitiesMs = createMultiselectDropdown(document.getElementById("e-cities-ms"), {
-	placeholder: "No cities selected", idType: "string", emptyLabel: "Pick a country above first.", unitLabel: "cities",
-});
-const addAsnsMs = createMultiselectDropdown(document.getElementById("u-asns-ms"), {
-	placeholder: "No networks selected", idType: "string", emptyLabel: "No networks found.", unitLabel: "networks",
-});
-const editAsnsMs = createMultiselectDropdown(document.getElementById("e-asns-ms"), {
-	placeholder: "No networks selected", idType: "string", emptyLabel: "No networks found.", unitLabel: "networks",
-});
-wireGeoPicker({ countrySelectEl: document.getElementById("u-city-country"), ms: addCitiesMs, kind: "cities", buildingEl: document.getElementById("u-cities-building") });
-wireGeoPicker({ countrySelectEl: document.getElementById("e-city-country"), ms: editCitiesMs, kind: "cities", buildingEl: document.getElementById("e-cities-building") });
-wireGeoPicker({ countrySelectEl: document.getElementById("u-asn-country"), ms: addAsnsMs, kind: "asns", buildingEl: document.getElementById("u-asns-building") });
-wireGeoPicker({ countrySelectEl: document.getElementById("e-asn-country"), ms: editAsnsMs, kind: "asns", buildingEl: document.getElementById("e-asns-building") });
+function createGeoPicker({ mountEl, countrySelectEl, kind, buildingEl, pickerOpts }) {
+	const onSearch = wireGeoPicker({ countrySelectEl, kind, buildingEl });
+	const ms = createMultiselectDropdown(mountEl, { ...pickerOpts, searchable: true, onSearch });
+	// Re-searches with whatever's currently typed whenever the country
+	// changes -- this is the one piece that genuinely needs the real `ms`
+	// instance, so it's wired here, after ms exists, rather than inside
+	// wireGeoPicker.
+	countrySelectEl.addEventListener("change", () => ms.refresh());
+	return ms;
+}
+
+const cityPickerOpts = { placeholder: "No cities selected", idType: "string", unitLabel: "cities", emptyLabel: "No matching cities -- pick a country above, or try a different search.", searchPlaceholder: "Pick a country, then search its cities…" };
+const asnPickerOpts = { placeholder: "No networks selected", idType: "string", unitLabel: "networks", emptyLabel: "No matching networks -- try a different search.", searchPlaceholder: "Search by network/org name or AS number…" };
+
+const addCitiesMs = createGeoPicker({ mountEl: document.getElementById("u-cities-ms"), countrySelectEl: document.getElementById("u-city-country"), kind: "cities", buildingEl: document.getElementById("u-cities-building"), pickerOpts: cityPickerOpts });
+const editCitiesMs = createGeoPicker({ mountEl: document.getElementById("e-cities-ms"), countrySelectEl: document.getElementById("e-city-country"), kind: "cities", buildingEl: document.getElementById("e-cities-building"), pickerOpts: cityPickerOpts });
+const addAsnsMs = createGeoPicker({ mountEl: document.getElementById("u-asns-ms"), countrySelectEl: document.getElementById("u-asn-country"), kind: "asns", buildingEl: document.getElementById("u-asns-building"), pickerOpts: asnPickerOpts });
+const editAsnsMs = createGeoPicker({ mountEl: document.getElementById("e-asns-ms"), countrySelectEl: document.getElementById("e-asn-country"), kind: "asns", buildingEl: document.getElementById("e-asns-building"), pickerOpts: asnPickerOpts });
 
 const addPhone = createPhoneInput(document.getElementById("u-phone-mount"));
 const editPhone = createPhoneInput(document.getElementById("e-phone-mount"));

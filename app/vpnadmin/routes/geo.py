@@ -33,9 +33,18 @@ def get_countries_with_cities(_: User = Depends(require_user)):
 
 
 @router.get("/cities")
-def get_cities(country: str, _: User = Depends(require_user)):
+def get_cities(country: str, q: str | None = None, _: User = Depends(require_user)):
+    """`q` (optional): narrows via the same prefix/substring ranking as
+    /asns below. Response is always capped (see geo_lists._MAX_RESULTS) --
+    some countries have thousands of cities, and shipping all of them to
+    the browser every time (then rendering that many checkboxes) is what
+    made this page slow before this endpoint gained search/capping."""
     geo_lists.ensure_fresh()
-    return geo_lists.get_cities(country) or []
+    result = geo_lists.get_cities(country, q)
+    if result is None:
+        return {"results": [], "total": 0}
+    results, total = result
+    return {"results": results, "total": total}
 
 
 @router.get("/countries-with-asns")
@@ -45,9 +54,16 @@ def get_countries_with_asns(_: User = Depends(require_user)):
 
 
 @router.get("/asns")
-def get_asns(country: str | None = None, _: User = Depends(require_user)):
+def get_asns(country: str | None = None, q: str | None = None, _: User = Depends(require_user)):
     """No `country` = the "any country" bucket (every known ASN, for
     global operators that don't confidently belong to one place -- see
-    geo_lists.py's module docstring)."""
+    geo_lists.py's module docstring). `q` narrows by org name or AS
+    number, prefix matches ranked first; response is always capped (see
+    geo_lists._MAX_RESULTS) -- "any country" alone is ~78k entries, never
+    sent whole to the browser."""
     geo_lists.ensure_fresh()
-    return geo_lists.get_asns(country) or []
+    result = geo_lists.get_asns(country, q)
+    if result is None:
+        return {"results": [], "total": 0}
+    results, total = result
+    return {"results": results, "total": total}

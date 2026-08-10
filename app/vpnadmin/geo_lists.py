@@ -273,18 +273,51 @@ def get_status() -> dict:
         }
 
 
+# Hard cap on any single /api/geo/cities or /api/geo/asns response --
+# some countries have thousands-to-tens-of-thousands of entries (the US
+# alone has ~18.6k known ASNs and ~11.7k cities in these databases), and
+# "any country" ASN search spans the full ~78k-entry global list. Handing
+# all of that to the browser in one response -- and then rendering it as
+# that many checkboxes -- is what made the Users page slow to begin with
+# (see the fix that added this cap: a users.html regression report).
+# Ranked results (prefix match first) mean the cap rarely matters in
+# practice once an admin types a real search term.
+_MAX_RESULTS = 200
+
+
 def get_countries_with_cities() -> list[str] | None:
     with _lock:
         idx = _city_index
     return sorted(idx["by_country"].keys()) if idx else None
 
 
-def get_cities(country: str) -> list[str] | None:
+def _rank_and_cap(values: list, q: str | None, key) -> tuple[list, int]:
+    """Returns (capped results, total matches before capping). With no
+    query, just the first _MAX_RESULTS in `values`' existing (alphabetical
+    for cities, org-name for ASNs) order -- browsing, not searching, so
+    admins are expected to type rather than scroll thousands of entries.
+    With a query, prefix matches rank before substring matches."""
+    if not q:
+        return values[:_MAX_RESULTS], len(values)
+    q = q.strip().lower()
+    starts, contains = [], []
+    for v in values:
+        k = key(v).lower()
+        if k.startswith(q):
+            starts.append(v)
+        elif q in k:
+            contains.append(v)
+    matches = starts + contains
+    return matches[:_MAX_RESULTS], len(matches)
+
+
+def get_cities(country: str, q: str | None = None) -> tuple[list[str], int] | None:
     with _lock:
         idx = _city_index
     if idx is None:
         return None
-    return idx["by_country"].get(country.upper(), [])
+    values = idx["by_country"].get(country.upper(), [])
+    return _rank_and_cap(values, q, key=lambda v: v)
 
 
 def get_countries_with_asns() -> list[str] | None:
@@ -293,14 +326,13 @@ def get_countries_with_asns() -> list[str] | None:
     return sorted(idx["by_country"].keys()) if idx else None
 
 
-def get_asns(country: str | None) -> list[dict] | None:
+def get_asns(country: str | None, q: str | None = None) -> tuple[list[dict], int] | None:
     with _lock:
         idx = _asn_index
     if idx is None:
         return None
-    if country is None:
-        return idx["all"]
-    return idx["by_country"].get(country.upper(), [])
+    values = idx["all"] if country is None else idx["by_country"].get(country.upper(), [])
+    return _rank_and_cap(values, q, key=lambda v: f"{v['org']} {v['asn']}")
 
 
 def canonical_city(name: str) -> str | None:

@@ -516,8 +516,6 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 	left: 0;
 	right: 0;
 	z-index: 50;
-	max-height: 220px;
-	overflow-y: auto;
 	background: var(--surface);
 	border: 1.5px solid var(--border-light);
 	border-radius: 9px;
@@ -525,6 +523,18 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 	padding: 6px;
 }
 .ms-panel.open { display: block; }
+/* Searchable pickers (users.html's City/ASN) add a fixed search box +
+   results-count hint around the options list -- only .ms-options itself
+   scrolls, so those stay visible while browsing a long result set. */
+.ms-panel .ms-search {
+	width: 100%;
+	margin-bottom: 6px;
+}
+.ms-panel .ms-hint {
+	padding: 4px 10px 2px;
+	font-size: 0.78rem;
+}
+.ms-panel .ms-options { max-height: 220px; overflow-y: auto; }
 .ms-panel .ms-option {
 	display: flex;
 	align-items: center;
