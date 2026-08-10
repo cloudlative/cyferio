@@ -64,6 +64,23 @@ class Settings:
     # hardware; status/list calls should be near-instant.
     SCRIPT_TIMEOUT_SECONDS: int = int(os.environ.get("SCRIPT_TIMEOUT_SECONDS", 30))
 
+    # --- Host executor (Phase 1 Python service layer, install/uninstall only) --
+    # Used by services/system/host_executor.py to run the ONE whitelisted
+    # remote command (app/cli/openvpn_admin.py) over SSH for genuinely
+    # host-namespace operations -- see the migration plan's §2a. Unset by
+    # default: the web-triggered Install action (routes/openvpn_install.py)
+    # returns a clear 400 until these are configured, same fail-soft pattern
+    # SMTP_HOST already uses above. NOT used for cert/client/MAC operations,
+    # which stay in-process via cli_wrapper.py exactly as today.
+    HOST_SSH_KEY_PATH: str = os.environ.get("HOST_SSH_KEY_PATH", "")
+    HOST_SSH_TARGET: str = os.environ.get("HOST_SSH_TARGET", "")  # "user@host"
+    HOST_SSH_PORT: int = int(os.environ.get("HOST_SSH_PORT", 22))
+    HOST_SSH_REMOTE_SCRIPT_PATH: str = os.environ.get(
+        "HOST_SSH_REMOTE_SCRIPT_PATH", "/opt/openvpn-toolkit/app/cli/openvpn_admin.py"
+    )
+    HOST_SSH_USE_SUDO: bool = _env_bool("HOST_SSH_USE_SUDO", True)
+    HOST_SSH_TIMEOUT_SECONDS: int = int(os.environ.get("HOST_SSH_TIMEOUT_SECONDS", 180))
+
     # --- Server -----------------------------------------------------------
     HOST: str = os.environ.get("HOST", "0.0.0.0")
     PORT: int = int(os.environ.get("PORT", 8000))

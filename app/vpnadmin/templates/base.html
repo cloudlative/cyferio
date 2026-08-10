@@ -36,6 +36,9 @@
 			{% if can_manage_roles %}
 			<a href="/roles" class="{{ 'active' if request.url.path == '/roles' }}"><span class="nav-icon">⚿</span>Roles</a>
 			{% endif %}
+			{% if can_manage_openvpn_install %}
+			<a href="/openvpn-install" class="{{ 'active' if request.url.path == '/openvpn-install' }}"><span class="nav-icon">⚙</span>OpenVPN Install</a>
+			{% endif %}
 		</nav>
 	</aside>
 	{% endif %}

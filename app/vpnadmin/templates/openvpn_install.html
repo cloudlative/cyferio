@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}OpenVPN Install — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">OpenVPN Install</h1></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">
+	Installs or removes OpenVPN itself on this app's host machine (systemd service,
+	firewall rules, PKI) -- the Python service-layer preview of
+	<code>openvpn-install.sh</code>'s interactive installer. Runs over a scoped SSH
+	connection to the host, not inside this app's own container -- see
+	<code>services/system/host_executor.py</code>. This is a host-level, disruptive
+	action; use it only on a machine you intend to run OpenVPN on.
+</p>
+
+<div class="card">
+	<h2>Status</h2>
+	<div id="ovi-status"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card" id="ovi-install-card">
+	<h2>Install</h2>
+	<p class="muted" style="margin-top:0">Only usable when OpenVPN is not yet installed on the host.</p>
+	<form id="ovi-install-form" class="form-grid">
+		<div class="field">
+			<label for="ovi-port">Port</label>
+			<input type="number" id="ovi-port" value="1194" min="1" max="65535" required>
+		</div>
+		<div class="field">
+			<label for="ovi-protocol">Protocol</label>
+			<select id="ovi-protocol"><option value="udp" selected>UDP</option><option value="tcp">TCP</option></select>
+		</div>
+		<div class="field">
+			<label for="ovi-dns">DNS</label>
+			<select id="ovi-dns">
+				<option value="1" selected>Current system resolvers</option>
+				<option value="2">Google</option>
+				<option value="3">1.1.1.1</option>
+				<option value="4">OpenDNS</option>
+				<option value="5">Quad9</option>
+				<option value="6">AdGuard</option>
+			</select>
+		</div>
+		<div class="field">
+			<label for="ovi-client-name">First client name</label>
+			<input type="text" id="ovi-client-name" value="client" required>
+		</div>
+		<div class="field">
+			<label for="ovi-public-ip">Public IP/hostname (only if behind NAT)</label>
+			<input type="text" id="ovi-public-ip" placeholder="optional">
+		</div>
+	</form>
+	<button class="btn-primary" id="ovi-install-btn" style="margin-top:14px">Install OpenVPN</button>
+</div>
+
+<div class="card" id="ovi-uninstall-card">
+	<h2>Uninstall</h2>
+	<p class="muted" style="margin-top:0">Removes OpenVPN, its firewall rules, and all PKI/config from the host. Cannot be undone.</p>
+	<button class="btn-secondary" id="ovi-uninstall-btn" style="border-color:var(--danger, #c0392b);color:var(--danger, #c0392b)">Uninstall OpenVPN</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function ovLoadStatus() {
+	const el = document.getElementById("ovi-status");
+	try {
+		const data = await apiFetch("/api/openvpn/status");
+		if (!data.configured) {
+			el.innerHTML = '<p class="muted">Host executor is not configured (HOST_SSH_TARGET/HOST_SSH_KEY_PATH) -- install/uninstall are disabled until an admin sets that up in .env.</p>';
+			document.getElementById("ovi-install-btn").disabled = true;
+			document.getElementById("ovi-uninstall-btn").disabled = true;
+			return;
+		}
+		const active = data.active ? "running" : "not running";
+		el.innerHTML = `<p><strong>${escapeHtml(data.service || "")}</strong>: ${escapeHtml(active)} (${escapeHtml(data.raw || "")})</p>`;
+		document.getElementById("ovi-install-card").style.display = data.active ? "none" : "";
+		document.getElementById("ovi-uninstall-card").style.display = data.active ? "" : "none";
+	} catch (e) {
+		el.innerHTML = `<p class="muted">Could not load status: ${escapeHtml(e.message)}</p>`;
+	}
+}
+
+document.getElementById("refresh-btn").addEventListener("click", ovLoadStatus);
+
+document.getElementById("ovi-install-btn").addEventListener("click", async () => {
+	const ok = await confirmDialog(
+		"This installs OpenVPN on the host machine (real systemd service, real firewall rules). Continue?",
+		{ confirmLabel: "Install", danger: false }
+	);
+	if (!ok) return;
+	const params = new URLSearchParams({
+		port: document.getElementById("ovi-port").value,
+		protocol: document.getElementById("ovi-protocol").value,
+		dns: document.getElementById("ovi-dns").value,
+		client_name: document.getElementById("ovi-client-name").value,
+	});
+	const publicIp = document.getElementById("ovi-public-ip").value.trim();
+	if (publicIp) params.set("public_ip", publicIp);
+	try {
+		await apiFetch(`/api/openvpn/install?${params.toString()}`, { method: "POST" });
+		toast("OpenVPN installed.");
+		ovLoadStatus();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+document.getElementById("ovi-uninstall-btn").addEventListener("click", async () => {
+	const ok = await confirmDialog(
+		"This permanently removes OpenVPN, its firewall rules, and all PKI/config from the host. Continue?",
+		{ confirmLabel: "Uninstall", danger: true }
+	);
+	if (!ok) return;
+	try {
+		await apiFetch("/api/openvpn/uninstall", { method: "POST" });
+		toast("OpenVPN uninstalled.");
+		ovLoadStatus();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+ovLoadStatus();
+</script>
+{% endblock %}

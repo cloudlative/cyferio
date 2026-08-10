@@ -35,6 +35,12 @@ OBJECTS: dict[str, str] = {
     "audit_log": "Audit Logs",
     "settings": "Settings",
     "reports": "Reports",
+    # Phase 1 Python service layer's web-triggered install/uninstall (see
+    # routes/openvpn_install.py) -- deliberately its own object, not folded
+    # into "vpn_profiles", since it's a host-namespace action (SSH-executed,
+    # see host_executor.py) with much higher blast radius than a normal
+    # client add/revoke and should be grantable independently.
+    "openvpn_install": "OpenVPN Install/Uninstall",
 }
 
 ACTIONS = ("view", "create", "update", "delete", "execute", "manage")
@@ -66,7 +72,10 @@ _SYSTEM_ROLES: dict[str, dict] = {
         "name": "Viewer",
         "description": "Read-only: status/list/check, no add/revoke/user-management. "
         "Matches the pre-RBAC 'viewer' role exactly.",
-        "permissions": {obj: {"view": True} for obj in OBJECTS if obj not in ("settings", "roles")},
+        "permissions": {
+            obj: {"view": True} for obj in OBJECTS
+            if obj not in ("settings", "roles", "openvpn_install")
+        },
         "scopes": {},
     },
     "vpn_self_service": {
