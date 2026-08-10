@@ -128,28 +128,34 @@ though the file exists. Set `OVPN_OUTPUT_DIR=/etc/openvpn/client` (see
 
 ### First-time setup on a new machine
 
-[`setup-new-machine.sh`](../setup-new-machine.sh) (repo root) automates
-everything a fresh Ubuntu+Docker host needs *beyond* `docker compose up -d`
-itself to get the OpenVPN Install page's web-triggered install/uninstall
-working (see [Roles & Permissions](#roles--permissions) and
-`app/vpnadmin/routes/openvpn_install.py`): generating the scoped SSH
-"host executor" key + forced-command wrapper + sudoers grant, writing
-`.env`, enabling the deploy-key volume mount, and bringing the stack up
-(Let's Encrypt staging cert first if requested, then production).
+Two scripts, run in order, take a fresh box from nothing to a running,
+web-installable portal:
 
-Three things it does **not** do for you, since they need to happen before
-the script can run at all:
+**1. `add-machine.sh` (repo root) — run from YOUR OWN machine, not the
+target host.** Bootstraps the new box's read-only access to this private
+repo and clones it there:
+
+```bash
+./add-machine.sh --host 203.0.113.10 --user ubuntu
+```
+
+This needs the `gh` CLI authenticated locally (registering a GitHub deploy
+key needs *some* already-authenticated session, and that's yours, not a
+brand-new box's) and that you can already SSH to the target host as
+`--user` — it only bootstraps *repo* access, not your own login to the box.
+It generates an ed25519 keypair **on the target host** (the private half
+never leaves it), registers the public half as a read-only deploy key on
+`cloudlative/openvpn-toolkit` from here, wires up an SSH config alias on
+the host so git resolves it unambiguously, and clones (or `git fetch`s, if
+already cloned) into `/opt/openvpn-toolkit`. Idempotent — safe to re-run
+against a box that already has some or all of this done (as it will be, the
+next time you pull newer commits onto an existing box).
+
+**2. `setup-new-machine.sh` (repo root) — run ON the target host** (`ssh`
+in first). Prerequisites this one doesn't cover:
 
 1. Docker + the Compose plugin already installed on the host.
 2. A DNS A record for your domain already pointing at the host's public IP.
-3. This repo cloned there — it's a **private** repo, so that means adding a
-   read-only [GitHub deploy key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys)
-   first:
-   ```bash
-   ssh-keygen -t ed25519 -f ~/.ssh/openvpn-toolkit-deploy -N "" -C "<hostname>"
-   gh repo deploy-key add --repo cloudlative/openvpn-toolkit --title "<hostname>" ~/.ssh/openvpn-toolkit-deploy.pub
-   # then clone via that key, e.g. into /opt/openvpn-toolkit
-   ```
 
 Then:
 
@@ -159,6 +165,14 @@ sudo /opt/openvpn-toolkit/setup-new-machine.sh \
   --acme-email you@example.com \
   --use-staging-first    # first time on a genuinely new domain
 ```
+
+This automates everything else a fresh host needs to get the OpenVPN
+Install page's web-triggered install/uninstall working (see
+[Roles & Permissions](#roles--permissions) and
+`app/vpnadmin/routes/openvpn_install.py`): generating the scoped SSH
+"host executor" key + forced-command wrapper + sudoers grant, writing
+`.env`, enabling the deploy-key volume mount, and bringing the stack up
+(Let's Encrypt staging cert first if requested, then production).
 
 Re-running it (e.g. after changing `--deploy-user`, or just to pick up
 config-file changes from a newer commit) is safe — every phase checks its
