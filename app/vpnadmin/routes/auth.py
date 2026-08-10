@@ -46,15 +46,19 @@ def login_submit(
         # doesn't exist -- straight to the generic error.
         return generic_error
 
-    # Country/IP restriction checks run BEFORE password verification (see
-    # this task's own "Authentication Flow Requirements": a request from a
-    # blocked country/IP should never reach password-hashing at all) --
-    # but they still need this user's OWN row to know what to check against
-    # (restrictions are per-user, see models.py), so a lookup happens
-    # first. That is a plain SELECT, not "authentication logic" -- the
-    # actual sensitive/expensive step this ordering avoids is
-    # verify_password's bcrypt hash comparison, which only ever runs after
-    # both checks below pass.
+    # Country/City/ASN/IP restriction checks run BEFORE password
+    # verification (see this task's own "Authentication Flow Requirements":
+    # a request from a blocked country/city/network/IP should never reach
+    # password-hashing at all) -- but they still need this user's OWN row
+    # to know what to check against (restrictions are per-user, see
+    # models.py), so a lookup happens first. That is a plain SELECT, not
+    # "authentication logic" -- the actual sensitive/expensive step this
+    # ordering avoids is verify_password's bcrypt hash comparison, which
+    # only ever runs after all four checks below pass. Order (broadest to
+    # narrowest signal): country, then city, then ASN/network, then exact
+    # IP -- an admin restricting by IP already gets the most precise check
+    # last, after the cheaper/coarser GeoIP lookups have had a chance to
+    # reject first.
     client_ip = get_client_ip(request)
 
     if user.restrict_login_by_country:
@@ -71,6 +75,42 @@ def login_submit(
                 return templates.TemplateResponse(
                     request, "login.html",
                     {"error": "Login is not permitted from your current country."},
+                    status_code=403,
+                )
+
+    if user.restrict_login_by_city:
+        allowed_cities = json.loads(user.allowed_login_cities or "[]")
+        if allowed_cities:
+            city = geoip.lookup_city(client_ip)
+            allowed_lower = {c.lower() for c in allowed_cities}
+            if (city or "").lower() not in allowed_lower:
+                log_action(
+                    db, user, "login_blocked_city", target=user.username,
+                    detail=f"IP {client_ip or 'unknown'}; detected city {city or 'unknown'}; "
+                           f"allowed: {', '.join(allowed_cities)}",
+                    success=False,
+                )
+                return templates.TemplateResponse(
+                    request, "login.html",
+                    {"error": "Login is not permitted from your current city."},
+                    status_code=403,
+                )
+
+    if user.restrict_login_by_asn:
+        allowed_asns = json.loads(user.allowed_login_asns or "[]")
+        if allowed_asns:
+            asn = geoip.lookup_asn(client_ip)
+            asn_label = f"AS{asn}" if asn is not None else None
+            if asn_label not in allowed_asns:
+                log_action(
+                    db, user, "login_blocked_asn", target=user.username,
+                    detail=f"IP {client_ip or 'unknown'}; detected ASN {asn_label or 'unknown'}; "
+                           f"allowed: {', '.join(allowed_asns)}",
+                    success=False,
+                )
+                return templates.TemplateResponse(
+                    request, "login.html",
+                    {"error": "Login is not permitted from your current network."},
                     status_code=403,
                 )
 

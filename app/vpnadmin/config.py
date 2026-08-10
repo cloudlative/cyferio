@@ -148,6 +148,16 @@ class Settings:
     # requirements.txt entry for the geoip2 package.
     GEOIP_DB_PATH: str = os.environ.get("GEOIP_DB_PATH", "/etc/openvpn/server/GeoLite2-Country.mmdb")
 
+    # City and ASN (network operator) login-restriction lookups -- same
+    # /etc/openvpn/server bind mount as GEOIP_DB_PATH above, just the two
+    # other GeoLite2 database editions. Both optional independently of
+    # GEOIP_DB_PATH and of each other: a missing file just means that one
+    # restriction type fails soft to "can't determine, so block if the
+    # admin turned it on" the same way a missing GEOIP_DB_PATH already
+    # does for country (see geoip.py).
+    GEOIP_CITY_DB_PATH: str = os.environ.get("GEOIP_CITY_DB_PATH", "/etc/openvpn/server/GeoLite2-City.mmdb")
+    GEOIP_ASN_DB_PATH: str = os.environ.get("GEOIP_ASN_DB_PATH", "/etc/openvpn/server/GeoLite2-ASN.mmdb")
+
     # --- Health page -------------------------------------------------------
     # Read-only bind mounts of the Docker HOST's /proc, /sys, and root
     # filesystem (see docker-compose.yml) -- deliberately NOT the

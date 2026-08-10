@@ -127,6 +127,13 @@ class User(Base):
     allowed_login_countries = Column(Text, nullable=True)  # JSON list of ISO 3166-1 alpha-2 codes, e.g. ["PK","AE"]
     restrict_login_by_ip = Column(Boolean, nullable=False, default=False)
     allowed_login_ips = Column(Text, nullable=True)  # JSON list of IPs/CIDRs, e.g. ["203.0.113.5","10.0.0.0/24"]
+    # City and ASN follow the exact same optional/independent pattern as
+    # country/IP above -- see routes/users.py's _valid_city_list/
+    # _valid_asn_list for the format each list entry takes.
+    restrict_login_by_city = Column(Boolean, nullable=False, default=False)
+    allowed_login_cities = Column(Text, nullable=True)  # JSON list of city names, e.g. ["Karachi","Lahore"]
+    restrict_login_by_asn = Column(Boolean, nullable=False, default=False)
+    allowed_login_asns = Column(Text, nullable=True)  # JSON list of AS numbers, e.g. ["AS15169","AS8075"]
 
     @validates("username")
     def _normalize_username(self, key, value):

@@ -63,6 +63,22 @@
 			</div>
 			<div class="field" style="margin-top:14px">
 				<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+					<input type="checkbox" id="u-restrict-city">
+					Restrict login by city
+				</label>
+				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these cities (detected via GeoIP), one per line -- exact name match, e.g. Karachi. GeoIP city detection is approximate, not precise. Leave unchecked, or the list empty, to allow any city.</p>
+				<textarea id="u-allowed-cities" rows="3" placeholder="Karachi&#10;Lahore"></textarea>
+			</div>
+			<div class="field" style="margin-top:14px">
+				<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+					<input type="checkbox" id="u-restrict-asn">
+					Restrict login by network (ASN)
+				</label>
+				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these networks/ISPs, one per line (e.g. AS15169 or just 15169) -- identifies the network a connection came from, regardless of which country it geolocates to. Leave unchecked, or the list empty, to allow any network.</p>
+				<textarea id="u-allowed-asns" rows="3" class="mono" placeholder="AS15169&#10;AS8075"></textarea>
+			</div>
+			<div class="field" style="margin-top:14px">
+				<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
 					<input type="checkbox" id="u-restrict-ip">
 					Restrict login by IP address
 				</label>
@@ -143,6 +159,22 @@
 					</label>
 					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from the selected countries (detected via GeoIP on the sign-in request's IP). Leave unchecked, or the list empty, to allow any country.</p>
 					<div id="e-countries-ms"></div>
+				</div>
+				<div class="field" style="margin-top:14px">
+					<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+						<input type="checkbox" id="e-restrict-city">
+						Restrict login by city
+					</label>
+					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these cities (detected via GeoIP), one per line -- exact name match, e.g. Karachi. GeoIP city detection is approximate, not precise. Leave unchecked, or the list empty, to allow any city.</p>
+					<textarea id="e-allowed-cities" rows="3" placeholder="Karachi&#10;Lahore"></textarea>
+				</div>
+				<div class="field" style="margin-top:14px">
+					<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+						<input type="checkbox" id="e-restrict-asn">
+						Restrict login by network (ASN)
+					</label>
+					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these networks/ISPs, one per line (e.g. AS15169 or just 15169) -- identifies the network a connection came from, regardless of which country it geolocates to. Leave unchecked, or the list empty, to allow any network.</p>
+					<textarea id="e-allowed-asns" rows="3" class="mono" placeholder="AS15169&#10;AS8075"></textarea>
 				</div>
 				<div class="field" style="margin-top:14px;margin-bottom:0">
 					<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
@@ -233,7 +265,12 @@ function phoneError(combined) {
 // Splits the Allowed IPs textarea (one entry per line, blank lines and
 // stray commas both tolerated) into a clean array -- shared by both the
 // Add and Edit forms' submit handlers below.
-function parseAllowedIps(text) {
+// Generic line/comma-separated list parser -- used for every "one entry
+// per line" restriction textarea (allowed IPs, cities, ASNs). Server-side
+// validators (_valid_ip_list/_valid_city_list/_valid_asn_list in
+// routes/users.py) are the real check; this just turns free text into an
+// array before it's sent.
+function parseLineList(text) {
 	return text.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
 }
 
@@ -404,6 +441,10 @@ function openEdit(u) {
 	document.getElementById("e-created").value = fmtDate(u.created_at);
 	document.getElementById("e-restrict-country").checked = !!u.restrict_login_by_country;
 	editCountriesMs.setSelected(u.allowed_login_countries || []);
+	document.getElementById("e-restrict-city").checked = !!u.restrict_login_by_city;
+	document.getElementById("e-allowed-cities").value = (u.allowed_login_cities || []).join("\n");
+	document.getElementById("e-restrict-asn").checked = !!u.restrict_login_by_asn;
+	document.getElementById("e-allowed-asns").value = (u.allowed_login_asns || []).join("\n");
 	document.getElementById("e-restrict-ip").checked = !!u.restrict_login_by_ip;
 	document.getElementById("e-allowed-ips").value = (u.allowed_login_ips || []).join("\n");
 	document.getElementById("edit-dialog").showModal();
@@ -427,8 +468,12 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		team_ids: editTeamMs.getSelected(),
 		restrict_login_by_country: document.getElementById("e-restrict-country").checked,
 		allowed_login_countries: editCountriesMs.getSelected(),
+		restrict_login_by_city: document.getElementById("e-restrict-city").checked,
+		allowed_login_cities: parseLineList(document.getElementById("e-allowed-cities").value),
+		restrict_login_by_asn: document.getElementById("e-restrict-asn").checked,
+		allowed_login_asns: parseLineList(document.getElementById("e-allowed-asns").value),
 		restrict_login_by_ip: document.getElementById("e-restrict-ip").checked,
-		allowed_login_ips: parseAllowedIps(document.getElementById("e-allowed-ips").value),
+		allowed_login_ips: parseLineList(document.getElementById("e-allowed-ips").value),
 	};
 	if (!editingUserIsBootstrapAdmin) {
 		body.role = document.getElementById("e-role").value;
@@ -473,8 +518,12 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				team_ids: addTeamMs.getSelected(),
 				restrict_login_by_country: document.getElementById("u-restrict-country").checked,
 				allowed_login_countries: addCountriesMs.getSelected(),
+				restrict_login_by_city: document.getElementById("u-restrict-city").checked,
+				allowed_login_cities: parseLineList(document.getElementById("u-allowed-cities").value),
+				restrict_login_by_asn: document.getElementById("u-restrict-asn").checked,
+				allowed_login_asns: parseLineList(document.getElementById("u-allowed-asns").value),
 				restrict_login_by_ip: document.getElementById("u-restrict-ip").checked,
-				allowed_login_ips: parseAllowedIps(document.getElementById("u-allowed-ips").value),
+				allowed_login_ips: parseLineList(document.getElementById("u-allowed-ips").value),
 			},
 		});
 		toast(`User '${username}' created.`);

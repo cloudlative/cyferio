@@ -161,6 +161,47 @@ def _valid_ip_list(v: list[str]) -> list[str]:
     return seen
 
 
+def _valid_city_list(v: list[str]) -> list[str]:
+    """Each entry is a free-text city name, matched case-insensitively
+    (exact match, not substring) against geoip.lookup_city()'s result at
+    login time -- there's no fixed enumerable list of world cities to
+    validate against the way there is for ISO country codes, so this only
+    trims/length-checks and dedupes case-insensitively, preserving the
+    admin's original casing for display."""
+    seen_lower = set()
+    result = []
+    for name in v:
+        name = (name or "").strip()
+        if not name:
+            continue
+        if len(name) > 100:
+            raise ValueError(f"City name too long (max 100 characters): '{name[:40]}...'")
+        key = name.lower()
+        if key not in seen_lower:
+            seen_lower.add(key)
+            result.append(name)
+    return result
+
+
+def _valid_asn_list(v: list[str]) -> list[str]:
+    """Each entry identifies an Autonomous System (network/ISP), e.g.
+    "AS15169" or plain "15169" -- normalized to the "ASxxxx" form (matches
+    geoip.lookup_asn()'s int -> f"AS{n}" comparison at login time) and
+    deduped, preserving first-seen order."""
+    seen = []
+    for entry in v:
+        entry = (entry or "").strip().upper()
+        if not entry:
+            continue
+        digits = entry[2:] if entry.startswith("AS") else entry
+        if not digits.isdigit():
+            raise ValueError(f"'{entry}' isn't a valid AS number -- expected e.g. AS15169 or 15169.")
+        normalized = f"AS{int(digits)}"
+        if normalized not in seen:
+            seen.append(normalized)
+    return seen
+
+
 def _resolve_teams(db: Session, team_ids: list[int]) -> list[Team]:
     """Validates every id in team_ids references an existing Team, and
     returns the Team rows themselves (for assigning to User.teams). Used by
@@ -192,6 +233,10 @@ class CreateUserRequest(BaseModel):
     allowed_login_countries: list[str] = []
     restrict_login_by_ip: bool = False
     allowed_login_ips: list[str] = []
+    restrict_login_by_city: bool = False
+    allowed_login_cities: list[str] = []
+    restrict_login_by_asn: bool = False
+    allowed_login_asns: list[str] = []
 
     @field_validator("allowed_login_countries")
     @classmethod
@@ -202,6 +247,16 @@ class CreateUserRequest(BaseModel):
     @classmethod
     def _ips(cls, v: list[str]) -> list[str]:
         return _valid_ip_list(v)
+
+    @field_validator("allowed_login_cities")
+    @classmethod
+    def _cities(cls, v: list[str]) -> list[str]:
+        return _valid_city_list(v)
+
+    @field_validator("allowed_login_asns")
+    @classmethod
+    def _asns(cls, v: list[str]) -> list[str]:
+        return _valid_asn_list(v)
 
     @field_validator("username")
     @classmethod
@@ -254,6 +309,10 @@ class UpdateUserRequest(BaseModel):
     allowed_login_countries: list[str] | None = None  # explicit [] = clear the list
     restrict_login_by_ip: bool | None = None
     allowed_login_ips: list[str] | None = None  # explicit [] = clear the list
+    restrict_login_by_city: bool | None = None
+    allowed_login_cities: list[str] | None = None  # explicit [] = clear the list
+    restrict_login_by_asn: bool | None = None
+    allowed_login_asns: list[str] | None = None  # explicit [] = clear the list
 
     @field_validator("allowed_login_countries")
     @classmethod
@@ -264,6 +323,16 @@ class UpdateUserRequest(BaseModel):
     @classmethod
     def _ips(cls, v: list[str] | None) -> list[str] | None:
         return _valid_ip_list(v) if v is not None else v
+
+    @field_validator("allowed_login_cities")
+    @classmethod
+    def _cities(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_city_list(v) if v is not None else v
+
+    @field_validator("allowed_login_asns")
+    @classmethod
+    def _asns(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_asn_list(v) if v is not None else v
 
     @field_validator("password")
     @classmethod
@@ -342,6 +411,10 @@ def _serialize(u: User) -> dict:
         "allowed_login_countries": json.loads(u.allowed_login_countries or "[]"),
         "restrict_login_by_ip": u.restrict_login_by_ip,
         "allowed_login_ips": json.loads(u.allowed_login_ips or "[]"),
+        "restrict_login_by_city": u.restrict_login_by_city,
+        "allowed_login_cities": json.loads(u.allowed_login_cities or "[]"),
+        "restrict_login_by_asn": u.restrict_login_by_asn,
+        "allowed_login_asns": json.loads(u.allowed_login_asns or "[]"),
     }
 
 
@@ -446,6 +519,10 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         allowed_login_countries=json.dumps(body.allowed_login_countries) if body.allowed_login_countries else None,
         restrict_login_by_ip=body.restrict_login_by_ip,
         allowed_login_ips=json.dumps(body.allowed_login_ips) if body.allowed_login_ips else None,
+        restrict_login_by_city=body.restrict_login_by_city,
+        allowed_login_cities=json.dumps(body.allowed_login_cities) if body.allowed_login_cities else None,
+        restrict_login_by_asn=body.restrict_login_by_asn,
+        allowed_login_asns=json.dumps(body.allowed_login_asns) if body.allowed_login_asns else None,
     )
     db.add(user)
     db.commit()
@@ -539,6 +616,22 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         if new_value != target.allowed_login_ips:
             target.allowed_login_ips = new_value
             changes.append("allowed_login_ips")
+    if "restrict_login_by_city" in body.model_fields_set and body.restrict_login_by_city != target.restrict_login_by_city:
+        target.restrict_login_by_city = body.restrict_login_by_city
+        changes.append(f"restrict_login_by_city {target.restrict_login_by_city}")
+    if "allowed_login_cities" in body.model_fields_set:
+        new_value = json.dumps(body.allowed_login_cities) if body.allowed_login_cities else None
+        if new_value != target.allowed_login_cities:
+            target.allowed_login_cities = new_value
+            changes.append("allowed_login_cities")
+    if "restrict_login_by_asn" in body.model_fields_set and body.restrict_login_by_asn != target.restrict_login_by_asn:
+        target.restrict_login_by_asn = body.restrict_login_by_asn
+        changes.append(f"restrict_login_by_asn {target.restrict_login_by_asn}")
+    if "allowed_login_asns" in body.model_fields_set:
+        new_value = json.dumps(body.allowed_login_asns) if body.allowed_login_asns else None
+        if new_value != target.allowed_login_asns:
+            target.allowed_login_asns = new_value
+            changes.append("allowed_login_asns")
     # created_at is intentionally immutable here -- it's a factual record of
     # account creation, not admin-editable through this endpoint (unlike the
     # other profile fields above).
