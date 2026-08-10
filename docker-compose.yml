@@ -176,15 +176,25 @@ services:
 
       # --- Phase 1 host_executor.py (web-triggered install/uninstall,
       #     vpnadmin/routes/openvpn_install.py): a scoped SSH deploy key,
-      #     read-only, mounted at the path HOST_SSH_KEY_PATH in .env points
-      #     at. Deliberately NOT the same privilege as the mounts above --
-      #     this key should be restricted host-side (authorized_keys
-      #     `command=` or a narrow sudoers rule) to running exactly
-      #     app/cli/openvpn_admin.py, nothing else. Commented out by
+      #     read-only, always mounted at the fixed in-container path
+      #     /run/secrets/openvpn-toolkit-deploy-key (matches config.py's
+      #     HOST_SSH_KEY_PATH default). HOST_SSH_KEY_SOURCE_PATH below picks
+      #     WHERE ON THE HOST that key actually lives -- deliberately a
+      #     different env var than HOST_SSH_KEY_PATH, even though both
+      #     default to conceptually "the same key": this line's
+      #     interpolation runs on the HOST at `docker compose up` time, but
+      #     env_file: .env ALSO passes every var in .env straight into the
+      #     container's own environment -- reusing one name for both the
+      #     host-side source and the in-container path this app reads from
+      #     would mean whichever one .env sets silently overrides the other.
+      #     Deliberately NOT the same privilege as the mounts above -- this
+      #     key should be restricted host-side (authorized_keys `command=`
+      #     forced-command wrapper, see the migration plan's §2a) to running
+      #     exactly app/cli/openvpn_admin.py, nothing else. Commented out by
       #     default: the Install/Uninstall admin action fails soft with a
-      #     clear 400 (see openvpn_install.py's _host_executor_config)
-      #     until this is set up, same fail-soft pattern SMTP already uses.
-      # - ${HOST_SSH_KEY_PATH:-./secrets/openvpn-toolkit-deploy-key}:/run/secrets/openvpn-toolkit-deploy-key:ro
+      #     clear 400 (see openvpn_install.py's _host_executor_config) until
+      #     this is set up, same fail-soft pattern SMTP already uses.
+      # - ${HOST_SSH_KEY_SOURCE_PATH:-./secrets/openvpn-toolkit-deploy-key}:/run/secrets/openvpn-toolkit-deploy-key:ro
     # This app manipulates root-owned files under /etc/openvpn and runs
     # easyrsa, so it runs as root inside the container (the image's
     # default user). USE_SUDO=false in .env reflects that no privilege

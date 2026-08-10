@@ -67,12 +67,25 @@ class Settings:
     # --- Host executor (Phase 1 Python service layer, install/uninstall only) --
     # Used by services/system/host_executor.py to run the ONE whitelisted
     # remote command (app/cli/openvpn_admin.py) over SSH for genuinely
-    # host-namespace operations -- see the migration plan's §2a. Unset by
-    # default: the web-triggered Install action (routes/openvpn_install.py)
-    # returns a clear 400 until these are configured, same fail-soft pattern
-    # SMTP_HOST already uses above. NOT used for cert/client/MAC operations,
-    # which stay in-process via cli_wrapper.py exactly as today.
-    HOST_SSH_KEY_PATH: str = os.environ.get("HOST_SSH_KEY_PATH", "")
+    # host-namespace operations -- see the migration plan's §2a. HOST_SSH_TARGET
+    # unset by default: the web-triggered Install action (routes/
+    # openvpn_install.py) returns a clear 400 until it's configured, same
+    # fail-soft pattern SMTP_HOST already uses above. NOT used for
+    # cert/client/MAC operations, which stay in-process via cli_wrapper.py
+    # exactly as today.
+    #
+    # HOST_SSH_KEY_PATH is the path *inside this container* -- defaults to
+    # docker-compose.yml's bind-mount target, which is a fixed path
+    # regardless of where the key actually lives on the host. Deliberately
+    # a DIFFERENT env var name than the one docker-compose.yml's volume line
+    # uses to pick the key's *host-side* source path
+    # (HOST_SSH_KEY_SOURCE_PATH) -- reusing one name for both would mean
+    # whatever value configures the host-side bind-mount source also leaks
+    # into this container's own environment (env_file: .env passes
+    # everything through) and silently overrides the in-container path this
+    # app actually reads from, pointing it at a path that only exists on the
+    # host, not in here.
+    HOST_SSH_KEY_PATH: str = os.environ.get("HOST_SSH_KEY_PATH", "/run/secrets/openvpn-toolkit-deploy-key")
     HOST_SSH_TARGET: str = os.environ.get("HOST_SSH_TARGET", "")  # "user@host"
     HOST_SSH_PORT: int = int(os.environ.get("HOST_SSH_PORT", 22))
     HOST_SSH_REMOTE_SCRIPT_PATH: str = os.environ.get(
