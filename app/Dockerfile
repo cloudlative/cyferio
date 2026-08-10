@@ -65,6 +65,7 @@ RUN pip install --no-cache-dir --upgrade pip \
              /usr/local/lib/python3.12/site-packages/pip/_vendor/bom.cdx.json
 
 COPY main.py .
+COPY migrate_vpn_profiles.py .
 COPY vpnadmin ./vpnadmin
 COPY scripts ./scripts
 

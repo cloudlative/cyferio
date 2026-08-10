@@ -24,7 +24,8 @@ Everything the CLI can do, plus more:
 - Live connection status: who's online now, bandwidth, rejected (MAC-mismatch) connection attempts with expected-vs-presented MAC and repeat-attempt counts
 - A donut chart of rejected-connection attempts broken down by claimed client name, on the Diagnostics page
 - Clickable dashboard stat cards (plus a second row of MAC/rejection stats) linking straight to the filtered table behind each number
-- Multi-user accounts with two roles: **admin** (full control) and **viewer** (read-only); the bootstrap admin (the very first admin account a deployment ever creates) can never be demoted, deactivated, or deleted by anyone -- every other admin account remains fully manageable by another admin
+- **Dynamic role-based access control**: 4 built-in roles (Admin, Editor, Viewer, VPN Self-Service User), plus admin-creatable custom roles with a per-module permission matrix (View/Create/Update/Delete/Execute/Manage, each with an Any-record/Own-record-only scope) editable from the Roles page (`/roles`) -- see [Roles & Permissions](#roles--permissions). The bootstrap admin (the very first admin account a deployment ever creates) can never be demoted, deactivated, or deleted by anyone -- every other admin account remains fully manageable by another admin
+- **VPN profile ↔ portal account identity linking**: every VPN client gets a linked portal account (auto-created if none matches), and a **My VPN Profile** self-service page (`/my-vpn-profile`) lets a VPN Self-Service User view their own profile, manage their own MAC addresses, and download their own `.ovpn` -- with no visibility into any other user's clients, users, teams, audit logs, or settings. See [Roles & Permissions](#roles--permissions)
 - First Name is required for every account (add-user and edit-user, both client- and server-side validated) -- it's also now the primary displayed identity (profile page heading), not the raw login username
 - Search box on the Users page filters the list by name, username, or team as you type
 - Soft-deleted accounts can be restored, or permanently (irreversibly) deleted as a distinct, separately-confirmed admin action -- audit history survives a permanent delete since it stores a username snapshot, not a foreign key
@@ -181,20 +182,83 @@ nothing in this app deletes it automatically.
 See `.env.example` for the full list with explanations. Nothing is
 hardcoded to any specific server — every path/setting is env-driven.
 
-## Roles
+## Roles & Permissions
 
-- **admin**: everything, including adding/revoking clients and managing app user accounts.
-- **viewer**: read-only — can see status/clients/diagnostics, cannot mutate anything.
+Role-based access control is fully dynamic, not a hardcoded enum: every
+role (built-in or custom) is a database row with a per-module permission
+matrix, editable from the **Roles** page (`/roles`, admin-only). Each
+module (Dashboard, VPN Profiles, User Management, Role Management, Teams,
+Audit Logs, Settings, Health Screen, Reports) can be granted View / Create
+/ Update / Delete / Execute / Manage independently, plus a scope of **Any
+record** or **Own record only** (the latter is what makes VPN Self-Service
+User possible -- see below). "Manage" is a superset that grants every
+action on that module, including on records that aren't the caller's own.
 
-Guardrails prevent an admin from locking everyone out: you can't deactivate,
-delete, or demote your own account, and you can't remove the last active
-admin. The bootstrap admin -- the very first admin account a deployment
-ever creates (tracked via `User.is_bootstrap_admin`, set once by
-`auth.bootstrap_admin()`) -- has a stricter rule on top of that: it can
-never be demoted, deactivated, or deleted (soft or permanent) by anyone,
-including another admin, full stop. Every *other* admin account remains
-fully demotable/deactivatable/deletable by another admin, same as any
-account, subject only to the last-admin/self-lockout guardrails above.
+### Built-in roles
+
+| Role | Summary |
+|---|---|
+| **Admin** | Full control of every module. |
+| **Editor** | Can add/revoke/edit VPN clients and manage their MAC addresses. No user management, teams, or settings access. |
+| **Viewer** | Read-only: status/list/check, no add/revoke/user-management. |
+| **VPN Self-Service User** | Access to only their own VPN profile and account -- no visibility into other users, teams, audit logs, or settings. |
+
+Custom roles work the same way: create one on the Roles page, name it,
+then check the boxes for whatever it should see/do per module. A custom
+role can't be assigned Any-scope on a module without being granted the
+matching permission first, and system roles can be renamed/described but
+never deleted.
+
+### VPN profile ↔ portal account identity
+
+Every VPN client certificate is linked 1:1 to a portal user account
+(`VpnProfileLink`). Adding a new client (`/clients`, or the CLI's
+`--add-user`) automatically links it to a matching existing portal
+username, or creates a brand-new **VPN Self-Service User** account for it
+if none matches -- the temp password is shown once, immediately, in the
+admin UI response; it is never stored or shown again after that, so relay
+it to the device's owner right away.
+
+That link then keeps both sides in sync going forward: suspending or
+soft-deleting the linked portal account revokes the VPN cert, and revoking
+the cert from the Clients page suspends the linked portal account.
+**Exception, permanent and by design**: any link created by the one-time
+migration below (`protected_from_auto_revoke=True`) is *never* auto-revoked
+by anything, in either direction -- a cert that was already live in
+production before this feature existed keeps running no matter what later
+happens to its linked portal account. An admin can always revoke it
+manually from the Clients page; nothing here does it automatically.
+
+### Migrating an existing deployment
+
+Deployments that predate this feature have VPN clients with no linked
+portal account yet. Align them once, after upgrading, with the standalone
+CLI script (not a web page -- this only ever needs to run once, so it
+doesn't earn a permanent page/nav item):
+
+```bash
+docker compose exec app python migrate_vpn_profiles.py preview   # read-only, changes nothing
+docker compose exec app python migrate_vpn_profiles.py run       # asks for confirmation, then applies it
+docker compose exec app python migrate_vpn_profiles.py last-report
+```
+
+`run` never revokes, restores, or purges any VPN certificate -- it only
+reads the current client list and creates/links portal accounts, every one
+of them permanently exempt from auto-revoke (see above). Temp passwords
+for newly-created accounts are printed once, to that terminal, at that
+moment -- `last-report` intentionally does not (and cannot) show them
+again afterward.
+
+### Guardrails
+
+You can't deactivate, delete, or demote your own account, and you can't
+remove the last active admin. The bootstrap admin -- the very first admin
+account a deployment ever creates (tracked via `User.is_bootstrap_admin`,
+set once by `auth.bootstrap_admin()`) -- has a stricter rule on top of
+that: it can never be demoted, deactivated, or deleted (soft or permanent)
+by anyone, including another admin, full stop. Every *other* admin account
+remains fully demotable/deactivatable/deletable by another admin, same as
+any account, subject only to the last-admin/self-lockout guardrails above.
 
 ## Testing
 
@@ -203,12 +267,14 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
-123 tests, none of which require a real OpenVPN install or root — the CLI
+159 tests, none of which require a real OpenVPN install or root — the CLI
 wrapper tests monkeypatch `subprocess.run` and assert on the exact argument
 lists constructed (including an explicit injection-safety test); the auth/
-role/DB tests run against an in-memory SQLite database; the .ovpn/email and
-Settings-page tests monkeypatch `cli_wrapper`/`mailer` directly (including a
-simulated SMTP failure for the test-email path).
+role/DB tests run against an in-memory SQLite database (the `db_session`
+fixture seeds the same dynamic-RBAC roles `db.init_db()` does in production
+-- see `tests/conftest.py`); the .ovpn/email and Settings-page tests
+monkeypatch `cli_wrapper`/`mailer` directly (including a simulated SMTP
+failure for the test-email path).
 
 ## What this app deliberately does NOT expose
 

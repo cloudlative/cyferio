@@ -19,7 +19,7 @@ from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db
 from vpnadmin import geo_lists
-from vpnadmin.routes import auth, clients, diagnostics, geo, health, pages, settings as settings_routes, status, teams, users
+from vpnadmin.routes import auth, clients, diagnostics, geo, health, me_vpn, pages, roles, settings as settings_routes, status, teams, users
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,8 @@ app.include_router(users.router)
 app.include_router(geo.router)
 app.include_router(teams.router)
 app.include_router(settings_routes.router)
+app.include_router(roles.router)
+app.include_router(me_vpn.router)
 
 
 @app.get("/healthz")

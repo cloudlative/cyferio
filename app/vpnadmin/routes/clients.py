@@ -7,12 +7,28 @@ from sqlalchemy.orm import Session
 from .. import cli_wrapper as cli
 from .. import mailer
 from .. import policy_store
+from .. import vpn_identity_sync
 from ..audit import log_action
-from ..auth import require_admin, require_client_manager, require_user
 from ..cli_wrapper import ScriptError
 from ..db import get_db
 from ..models import User
+from ..permissions import require_permission, require_permission_any_scope
 from ..policy_store import PolicyValidationError
+
+# Former require_client_manager (admin OR editor, viewer excluded) --
+# every mutating endpoint here, plus the two read-only policy endpoints
+# that were also require_client_manager-gated, uses this. See
+# permissions.py's seed data: editor's vpn_profiles ObjectPermission has
+# can_execute=True, viewer's doesn't -- so this reproduces the exact same
+# admin-or-editor-only gate as before, just via the dynamic role system.
+_require_client_manager = require_permission("vpn_profiles", "execute")
+
+# Bulk/other-clients' endpoints (the full list, MAC lookups, policies) --
+# any_scope so an "own"-scoped role (VPN Self-Service User) is blocked here
+# even though it does have view=True on "vpn_profiles" for its own record
+# via routes/me_vpn.py. See permissions.py's require_permission_any_scope
+# docstring for why require_permission alone isn't enough.
+_require_client_viewer = require_permission_any_scope("vpn_profiles", "view")
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 
@@ -66,7 +82,7 @@ class AddClientRequest(BaseModel):
 
 
 @router.get("")
-def get_clients(_: User = Depends(require_user)):
+def get_clients(_: User = Depends(_require_client_viewer)):
     # Served from the same background-refreshed snapshot that powers
     # /api/dashboard (see cli_wrapper.get_clients_snapshot) -- near-instant
     # on a warm snapshot, falls back to a direct call otherwise.
@@ -77,7 +93,7 @@ def get_clients(_: User = Depends(require_user)):
 
 
 @router.get("/revoked")
-def get_revoked_clients(_: User = Depends(require_user)):
+def get_revoked_clients(_: User = Depends(_require_client_viewer)):
     try:
         return cli.get_revoked_snapshot()
     except ScriptError as e:
@@ -85,7 +101,7 @@ def get_revoked_clients(_: User = Depends(require_user)):
 
 
 @router.get("/{name}/macs")
-def get_client_macs(name: str, _: User = Depends(require_user)):
+def get_client_macs(name: str, _: User = Depends(_require_client_viewer)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
     try:
@@ -108,7 +124,7 @@ class MacRequest(BaseModel):
 
 
 @router.post("/{name}/macs", status_code=201)
-def add_client_mac(name: str, body: MacRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+def add_client_mac(name: str, body: MacRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
     try:
@@ -121,7 +137,7 @@ def add_client_mac(name: str, body: MacRequest, user: User = Depends(require_cli
 
 
 @router.delete("/{name}/macs/{mac}")
-def remove_client_mac(name: str, mac: str, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+def remove_client_mac(name: str, mac: str, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
     try:
@@ -134,7 +150,7 @@ def remove_client_mac(name: str, mac: str, user: User = Depends(require_client_m
 
 
 @router.post("", status_code=201)
-def add_client(body: AddClientRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+def add_client(body: AddClientRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     try:
         result = cli.add_client(body.name, body.mac)
     except ScriptError as e:
@@ -145,11 +161,18 @@ def add_client(body: AddClientRequest, user: User = Depends(require_client_manag
     # see revoke_client below for why the raw CLI text is deliberately not
     # surfaced directly to a non-technical toast.
     log_action(db, user, "add_client", target=body.name, detail=result, success=True)
-    return {"message": f"Client '{body.name}' added successfully."}
+    # Identity lifecycle sync (Phase 3, see vpn_identity_sync.py): link this
+    # brand-new client to a portal account, creating one if none exists.
+    # Never allowed to fail add_client itself -- the cert already exists.
+    new_account = vpn_identity_sync.auto_link_new_client(db, body.name)
+    response = {"message": f"Client '{body.name}' added successfully."}
+    if new_account is not None:
+        response["portal_account_created"] = new_account  # {"username","temp_password"} -- shown once, see design doc §7
+    return response
 
 
 @router.delete("/{name}")
-def revoke_client(name: str, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+def revoke_client(name: str, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
     try:
@@ -163,11 +186,14 @@ def revoke_client(name: str, user: User = Depends(require_client_manager), db: S
     # a non-technical user in a toast, so the API response is a short, clean
     # sentence instead.
     log_action(db, user, "revoke_client", target=name, detail=result, success=True)
+    # A human revoked this on purpose -- unaffected by protected_from_auto_revoke,
+    # see vpn_identity_sync.py's module docstring.
+    vpn_identity_sync.sync_after_client_revoke(db, name)
     return {"message": f"Client '{name}' revoked successfully."}
 
 
 @router.get("/{name}/ovpn")
-def get_client_ovpn(name: str, _: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+def get_client_ovpn(name: str, _: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     """Returns an existing client's .ovpn config content on demand.
     Admin-only (unlike most GETs in this router) since this is genuinely
     sensitive key material -- deliberately never bulk-returned as part of
@@ -194,7 +220,7 @@ class EmailOvpnRequest(BaseModel):
 
 
 @router.post("/{name}/email-ovpn")
-def email_client_ovpn(name: str, body: EmailOvpnRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+def email_client_ovpn(name: str, body: EmailOvpnRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
     if not mailer.is_configured():
@@ -219,7 +245,7 @@ class PurgeRevokedRequest(BaseModel):
 
 
 @router.post("/revoked/purge")
-def purge_revoked_clients(body: PurgeRevokedRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+def purge_revoked_clients(body: PurgeRevokedRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     """Bulk permanent-delete of one or more revoked clients' leftover PKI/
     .ovpn files -- mirrors the MAC bulk-remove UI pattern (select several,
     one confirm, per-item results)."""
@@ -235,6 +261,7 @@ def purge_revoked_clients(body: PurgeRevokedRequest, user: User = Depends(requir
             results.append({"name": name, "ok": False, "message": e.message})
             continue
         log_action(db, user, "purge_revoked", target=name, detail=result, success=True)
+        vpn_identity_sync.sync_after_client_purge(db, name)
         results.append({"name": name, "ok": True, "message": f"'{name}' purged."})
     return {"results": results}
 
@@ -244,7 +271,7 @@ class CleanStaleDbRequest(BaseModel):
 
 
 @router.post("/revoked/clean-stale-db")
-def clean_stale_db_entries(body: CleanStaleDbRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+def clean_stale_db_entries(body: CleanStaleDbRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     """Bulk removal of revoked clients' leftover openvpn_db.txt entries --
     mirrors /revoked/purge's per-item bulk-result pattern. Distinct from
     purge: this only touches the MAC-binding db entry, not PKI/.ovpn files
@@ -279,7 +306,7 @@ class RestoreClientRequest(BaseModel):
 
 
 @router.post("/revoked/{name}/restore")
-def restore_revoked_client(name: str, body: RestoreClientRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+def restore_revoked_client(name: str, body: RestoreClientRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     """Reissues a brand-new certificate under a revoked client's name -- see
     cli_wrapper.restore_client / openvpn-install.sh's do_restore_client for
     why this is NOT the same as un-revoking the old certificate."""
@@ -291,6 +318,7 @@ def restore_revoked_client(name: str, body: RestoreClientRequest, user: User = D
         log_action(db, user, "restore_client", target=name, detail=e.message, success=False)
         raise HTTPException(status_code=400, detail=e.message)
     log_action(db, user, "restore_client", target=name, detail=result, success=True)
+    vpn_identity_sync.sync_after_client_restore(db, name)
     return {"message": f"Client '{name}' restored (reissued with a new certificate)."}
 
 
@@ -318,7 +346,7 @@ class PolicyRequest(BaseModel):
 
 
 @router.get("/policies")
-def get_all_client_policies(_: User = Depends(require_client_manager)):
+def get_all_client_policies(_: User = Depends(_require_client_manager)):
     """Bulk name -> policy dict for every client with a restriction set
     (clients with none simply don't appear in the result). Admin-only, same
     as the per-client GET below -- exists purely so the All Clients table
@@ -327,7 +355,7 @@ def get_all_client_policies(_: User = Depends(require_client_manager)):
 
 
 @router.get("/{name}/policy")
-def get_client_policy(name: str, _: User = Depends(require_client_manager)):
+def get_client_policy(name: str, _: User = Depends(_require_client_manager)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
     return {
@@ -337,7 +365,7 @@ def get_client_policy(name: str, _: User = Depends(require_client_manager)):
 
 
 @router.put("/{name}/policy")
-def update_client_policy(name: str, body: PolicyRequest, user: User = Depends(require_client_manager), db: Session = Depends(get_db)):
+def update_client_policy(name: str, body: PolicyRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
 

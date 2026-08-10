@@ -69,6 +69,22 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     _sync_missing_columns()
     _sync_enum_values()
+    _seed_rbac()
+
+
+def _seed_rbac():
+    """Phase 1 of the dynamic-RBAC rollout (see docs/rbac_identity_design.md
+    and the joyful-sauteeing-cookie plan): seed the 4 system roles so
+    role_id has something to point at. Split into its own function (rather
+    than inlined in init_db) so Phase 2's migrate_user_roles() backfill can
+    be added right after this call without further restructuring."""
+    from .permissions import migrate_user_roles, seed_system_roles
+    db = SessionLocal()
+    try:
+        seed_system_roles(db)
+        migrate_user_roles(db)  # Phase 2 backfill -- see permissions.py's docstring
+    finally:
+        db.close()
 
 
 def _sync_missing_columns():

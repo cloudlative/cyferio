@@ -46,10 +46,19 @@ def bootstrap_admin(db: Session) -> None:
         return
     if not settings.BOOTSTRAP_ADMIN_USERNAME or not settings.BOOTSTRAP_ADMIN_PASSWORD:
         return
+    # db.init_db() (which seeds the system RoleDef rows -- see permissions.py)
+    # always runs before this is called (see main.py's startup sequence), so
+    # the "admin" RoleDef is guaranteed to already exist here. Setting both
+    # role_id (dynamic RBAC, what require_permission actually checks) and
+    # the legacy `role` enum column keeps this account fully functional
+    # under both systems for the duration of the Phase 1/2 transition.
+    from .models import RoleDef
+    admin_role = db.query(RoleDef).filter(RoleDef.slug == "admin").first()
     admin = User(
         username=settings.BOOTSTRAP_ADMIN_USERNAME,
         password_hash=hash_password(settings.BOOTSTRAP_ADMIN_PASSWORD),
         role=Role.admin,
+        role_id=admin_role.id if admin_role is not None else None,
         is_bootstrap_admin=True,
     )
     db.add(admin)
@@ -120,22 +129,14 @@ def require_user(user: User | None = Depends(get_current_user)) -> User:
     return user
 
 
-def require_admin(user: User = Depends(require_user)) -> User:
-    """For API routes that mutate state: 403 unless the caller is an admin."""
-    if user.role != Role.admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
-    return user
-
-
-def require_client_manager(user: User = Depends(require_user)) -> User:
-    """For routes/clients.py's mutating endpoints (add/revoke/restore/purge
-    a client, add/remove a MAC, email a .ovpn profile): admin OR editor.
-    Editor is scoped to exactly this -- VPN client + MAC management -- and
-    nothing else; user management, teams, and settings all stay
-    require_admin-only."""
-    if user.role not in (Role.admin, Role.editor):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or Editor role required")
-    return user
+# require_admin / require_client_manager used to live here as hardcoded
+# Role-enum checks. Removed -- replaced by permissions.py's dynamic
+# require_permission(object_key, action), which every former call site now
+# uses (often via a module-local `require_admin = require_permission(...)`
+# alias, to avoid touching every Depends() at the call site -- see
+# routes/settings.py, routes/teams.py, routes/status.py, routes/users.py,
+# and routes/clients.py's `_require_client_manager`). See
+# docs/rbac_identity_design.md and the joyful-sauteeing-cookie plan.
 
 
 def login_user(request: Request, user: User, db: Session | None = None) -> None:

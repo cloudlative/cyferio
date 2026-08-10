@@ -5,7 +5,7 @@
 	<div class="avatar-circle" id="avatar-initials">{{ user.username[:2].upper() }}</div>
 	<div>
 		<h1 style="display:block" id="profile-heading">{{ user.display_name }}</h1>
-		<p class="page-subtitle" style="margin:0">{{ user.username }} · <span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span></p>
+		<p class="page-subtitle" style="margin:0">{{ user.username }} · <span class="role-badge role-{{ user.role_slug }}">{{ user.role_display_name }}</span></p>
 	</div>
 </div>
 
@@ -13,7 +13,7 @@
 	<div class="toolbar"><h2 style="margin:0">Account Details</h2><button class="btn-secondary" id="refresh-btn">Refresh</button></div>
 	<div class="form-grid" style="margin-bottom:18px">
 		<div><label>Username</label><div class="mono">{{ user.username }}</div></div>
-		<div><label>Role</label><div><span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span></div></div>
+		<div><label>Role</label><div><span class="role-badge role-{{ user.role_slug }}">{{ user.role_display_name }}</span></div></div>
 		<div><label>Created</label><div class="muted" id="p-created">—</div></div>
 		<div><label>Last Login</label><div class="muted" id="p-last-login">—</div></div>
 	</div>
@@ -46,7 +46,7 @@
 			<div class="field">
 				<label for="p-team-toggle">Teams <span class="muted">(select several)</span></label>
 				<div id="p-team-ms"></div>
-				{% if user.role.value == "viewer" %}
+				{% if user.role_slug == "viewer" %}
 				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Viewers can't change their own team -- ask an admin.</p>
 				{% endif %}
 			</div>
@@ -87,7 +87,7 @@
 {% block scripts %}
 <script>
 let myTeamIds = [];
-const isViewer = {{ "true" if user.role.value == "viewer" else "false" }};
+const isViewer = {{ "true" if user.role_slug == "viewer" else "false" }};
 const teamMs = createMultiselectDropdown(document.getElementById("p-team-ms"), { placeholder: "Unassigned", disabled: isViewer });
 const profilePhone = createPhoneInput(document.getElementById("p-phone-mount"));
 

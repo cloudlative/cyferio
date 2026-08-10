@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}Roles — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">Role Management</h1></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Create custom roles and edit exactly what each role can see and do, per module. The 4 built-in roles (Admin, Editor, Viewer, VPN Self-Service User) can be renamed/described but not deleted.</p>
+
+<div class="card">
+	<h2>Create a Custom Role</h2>
+	<form id="create-role-form" class="form-row">
+		<div class="field">
+			<label for="new-role-slug">Slug <span class="muted">(lowercase, no spaces — permanent)</span></label>
+			<input type="text" id="new-role-slug" required maxlength="64" placeholder="e.g. support_readonly">
+		</div>
+		<div class="field">
+			<label for="new-role-name">Display Name</label>
+			<input type="text" id="new-role-name" required maxlength="128" placeholder="e.g. Support (Read-only)">
+		</div>
+		<button type="submit" class="btn-primary">Create Role</button>
+	</form>
+</div>
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">All Roles</h2></div>
+	<div id="role-list"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card" id="role-detail-card" style="display:none">
+	<div class="toolbar">
+		<div class="toolbar-title"><h2 style="margin:0" id="role-detail-title">Role</h2><span class="count-badge" id="role-detail-users">— users</span></div>
+		<div>
+			<button class="btn-danger btn-sm" id="role-delete-btn">Delete Role</button>
+		</div>
+	</div>
+	<div class="form-row" style="margin-bottom:16px">
+		<div class="field">
+			<label for="edit-role-name">Display Name</label>
+			<input type="text" id="edit-role-name" maxlength="128">
+		</div>
+		<div class="field" style="flex:2">
+			<label for="edit-role-description">Description</label>
+			<input type="text" id="edit-role-description" maxlength="512">
+		</div>
+		<button class="btn-secondary" id="role-save-details-btn">Save Details</button>
+	</div>
+
+	<h3>Permissions</h3>
+	<p class="muted" style="margin-top:0">"Manage" grants every action on that module, including on records that aren't the caller's own. "Own only" restricts View/Update to the caller's own record (used by VPN Self-Service User for its own account and VPN profile).</p>
+	<div class="table-scroll">
+		<table id="matrix-table">
+			<thead>
+				<tr>
+					<th>Module</th><th>View</th><th>Create</th><th>Update</th><th>Delete</th><th>Execute</th><th>Manage</th><th>Scope</th>
+				</tr>
+			</thead>
+			<tbody id="matrix-body"></tbody>
+		</table>
+	</div>
+	<div class="toolbar" style="margin-top:16px">
+		<div></div>
+		<button class="btn-primary" id="matrix-save-btn">Save Permissions</button>
+	</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let roles = [];
+let currentRole = null;
+const ACTIONS = ["view", "create", "update", "delete", "execute", "manage"];
+
+function renderRoleList() {
+	const el = document.getElementById("role-list");
+	if (roles.length === 0) {
+		el.innerHTML = `<p class="muted">No roles yet.</p>`;
+		return;
+	}
+	el.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Name</th><th>Slug</th><th>Type</th><th>Users</th><th></th></tr></thead><tbody>
+		${roles.map((r) => `
+			<tr>
+				<td><strong>${escapeHtml(r.name)}</strong>${r.description ? `<div class="muted">${escapeHtml(r.description)}</div>` : ""}</td>
+				<td><code>${escapeHtml(r.slug)}</code></td>
+				<td>${r.is_system ? '<span class="status-pill status-online">System</span>' : '<span class="status-pill status-offline">Custom</span>'}</td>
+				<td>${r.user_count}</td>
+				<td><button class="btn-secondary btn-sm" data-open-role="${r.id}">Edit Permissions</button></td>
+			</tr>
+		`).join("")}
+	</tbody></table></div>`;
+	el.querySelectorAll("[data-open-role]").forEach((btn) => {
+		btn.addEventListener("click", () => openRole(parseInt(btn.dataset.openRole, 10)));
+	});
+}
+
+async function loadRoles() {
+	roles = await apiFetch("/api/roles");
+	renderRoleList();
+}
+
+function renderMatrix(role) {
+	const body = document.getElementById("matrix-body");
+	body.innerHTML = Object.entries(role.objects).map(([key, label]) => {
+		const row = role.matrix[key] || {};
+		const cells = ACTIONS.map((a) =>
+			`<td><input type="checkbox" data-obj="${key}" data-action="${a}" ${row[a] ? "checked" : ""}></td>`
+		).join("");
+		return `<tr>
+			<td>${escapeHtml(label)}</td>
+			${cells}
+			<td>
+				<select data-obj="${key}" data-scope>
+					<option value="any" ${row.scope === "any" ? "selected" : ""}>Any record</option>
+					<option value="own" ${row.scope === "own" ? "selected" : ""}>Own only</option>
+				</select>
+			</td>
+		</tr>`;
+	}).join("");
+}
+
+function openRole(id) {
+	const role = roles.find((r) => r.id === id);
+	if (!role) return;
+	apiFetch(`/api/roles/${id}`).then((full) => {
+		currentRole = full;
+		document.getElementById("role-detail-card").style.display = "";
+		document.getElementById("role-detail-title").textContent = full.name;
+		document.getElementById("role-detail-users").textContent = `${full.user_count} user(s)`;
+		document.getElementById("edit-role-name").value = full.name;
+		document.getElementById("edit-role-description").value = full.description || "";
+		document.getElementById("role-delete-btn").disabled = full.is_system;
+		document.getElementById("role-delete-btn").title = full.is_system ? "Built-in roles can't be deleted" : "";
+		renderMatrix(full);
+		document.getElementById("role-detail-card").scrollIntoView({ behavior: "smooth", block: "start" });
+	}).catch((e) => toast(e.message, "error"));
+}
+
+document.getElementById("create-role-form").addEventListener("submit", async (e) => {
+	e.preventDefault();
+	const slug = document.getElementById("new-role-slug").value.trim();
+	const name = document.getElementById("new-role-name").value.trim();
+	try {
+		await apiFetch("/api/roles", { method: "POST", body: { slug, name } });
+		toast(`Role '${name}' created.`, "success");
+		document.getElementById("create-role-form").reset();
+		await loadRoles();
+	} catch (e2) {
+		toast(e2.message, "error");
+	}
+});
+
+document.getElementById("role-save-details-btn").addEventListener("click", async () => {
+	if (!currentRole) return;
+	try {
+		await apiFetch(`/api/roles/${currentRole.id}`, {
+			method: "PATCH",
+			body: {
+				name: document.getElementById("edit-role-name").value.trim(),
+				description: document.getElementById("edit-role-description").value.trim() || null,
+			},
+		});
+		toast("Role details saved.", "success");
+		await loadRoles();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+document.getElementById("matrix-save-btn").addEventListener("click", async () => {
+	if (!currentRole) return;
+	const permissions = {};
+	const scopes = {};
+	for (const key of Object.keys(currentRole.objects)) {
+		permissions[key] = {};
+		for (const a of ACTIONS) {
+			const box = document.querySelector(`#matrix-body input[data-obj="${key}"][data-action="${a}"]`);
+			permissions[key][a] = !!(box && box.checked);
+		}
+		const sel = document.querySelector(`#matrix-body select[data-obj="${key}"][data-scope]`);
+		scopes[key] = sel ? sel.value : "any";
+	}
+	try {
+		await apiFetch(`/api/roles/${currentRole.id}/object-permissions`, { method: "PUT", body: { permissions } });
+		await apiFetch(`/api/roles/${currentRole.id}/api-scopes`, { method: "PUT", body: { scopes } });
+		toast("Permissions saved.", "success");
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+document.getElementById("role-delete-btn").addEventListener("click", async () => {
+	if (!currentRole || currentRole.is_system) return;
+	const ok = await confirmDialog(`Delete role '${currentRole.name}'? This can't be undone.`, { confirmLabel: "Delete", danger: true });
+	if (!ok) return;
+	try {
+		await apiFetch(`/api/roles/${currentRole.id}`, { method: "DELETE" });
+		toast("Role deleted.", "success");
+		document.getElementById("role-detail-card").style.display = "none";
+		currentRole = null;
+		await loadRoles();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+document.getElementById("refresh-btn").addEventListener("click", loadRoles);
+loadRoles();
+</script>
+{% endblock %}

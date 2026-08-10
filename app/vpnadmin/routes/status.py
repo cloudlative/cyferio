@@ -2,16 +2,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from .. import cli_wrapper as cli
-from ..auth import require_admin, require_user
 from ..cli_wrapper import ScriptError
 from ..db import get_db
 from ..models import AuditLog, User
+from ..permissions import require_permission, require_permission_any_scope
 
 router = APIRouter(prefix="/api/status", tags=["status"])
 
+require_admin = require_permission("audit_log", "manage")  # former auth.require_admin, see permissions.py
+# Every-client status/session data -- any_scope so VPN Self-Service User
+# (view=True on "vpn_profiles" but scoped "own") can't see other users'
+# connection activity through these. See clients.py's _require_client_viewer
+# for the same pattern.
+_require_status_viewer = require_permission_any_scope("vpn_profiles", "view")
+
 
 @router.get("")
-def get_connected(_: User = Depends(require_user)):
+def get_connected(_: User = Depends(_require_status_viewer)):
     try:
         return cli.get_status_connected_snapshot()
     except ScriptError as e:
@@ -19,7 +26,7 @@ def get_connected(_: User = Depends(require_user)):
 
 
 @router.get("/all")
-def get_all(_: User = Depends(require_user)):
+def get_all(_: User = Depends(_require_status_viewer)):
     try:
         return cli.get_status_all_snapshot()
     except ScriptError as e:
@@ -27,7 +34,7 @@ def get_all(_: User = Depends(require_user)):
 
 
 @router.get("/rejected")
-def get_rejected(limit: int = Query(20, ge=1, le=500), _: User = Depends(require_user)):
+def get_rejected(limit: int = Query(20, ge=1, le=500), _: User = Depends(_require_status_viewer)):
     try:
         return cli.get_status_rejected_snapshot(limit)
     except ScriptError as e:
@@ -35,7 +42,7 @@ def get_rejected(limit: int = Query(20, ge=1, le=500), _: User = Depends(require
 
 
 @router.get("/session-history")
-def get_session_history(limit: int = Query(20, ge=1, le=500), _: User = Depends(require_user)):
+def get_session_history(limit: int = Query(20, ge=1, le=500), _: User = Depends(_require_status_viewer)):
     """Connection History page. Same access level as /rejected (any
     logged-in user, admin or viewer) -- this is read-only historical data,
     not a mutating endpoint, matching Diagnostics' own require_user gate.
@@ -55,8 +62,11 @@ def get_session_history(limit: int = Query(20, ge=1, le=500), _: User = Depends(
 dashboard_router = APIRouter(prefix="/api", tags=["status"])
 
 
+_require_dashboard_viewer = require_permission_any_scope("dashboard", "view")
+
+
 @dashboard_router.get("/dashboard")
-def get_dashboard(_: User = Depends(require_user)):
+def get_dashboard(_: User = Depends(_require_dashboard_viewer)):
     """Everything the dashboard page needs in one round-trip, instead of 4
     separate fetches -- each underlying script call is still individually
     cached/serialized (see cli_wrapper), this just saves HTTP overhead and

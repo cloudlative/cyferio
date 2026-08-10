@@ -3,11 +3,14 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from ..audit import log_action
-from ..auth import require_admin, require_user
+from ..auth import require_user
 from ..db import get_db
 from ..models import Team, User
+from ..permissions import require_permission
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
+
+require_admin = require_permission("teams", "manage")  # former auth.require_admin, see permissions.py
 
 UNASSIGNED = "Unassigned"
 

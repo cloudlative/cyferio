@@ -90,6 +90,15 @@ def db_session():
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
     session = Session()
+    # Dynamic-RBAC role seeding (see permissions.py's seed_system_roles) --
+    # production gets this from db.init_db()'s _seed_rbac() on every
+    # startup, but this fixture builds its schema straight from
+    # Base.metadata rather than going through init_db(), so it has to be
+    # called explicitly here too. Without it, every require_permission
+    # check in the app fails closed (no RoleDef rows to match against),
+    # regardless of what any test user's role_id/legacy role is set to.
+    from vpnadmin.permissions import seed_system_roles
+    seed_system_roles(session)
     try:
         yield session
     finally:

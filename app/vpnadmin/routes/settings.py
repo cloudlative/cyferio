@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session
 from .. import mailer
 from ..app_settings import ACTIVE_THEME_IDS, SMTP_PASSWORD_PLACEHOLDER, THEME_CHOICES, get_settings_row, refresh_runtime_cache, runtime
 from ..audit import log_action
-from ..auth import require_admin
 from ..db import get_db
 from ..models import User
+from ..permissions import require_permission
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+require_admin = require_permission("settings", "manage")  # former auth.require_admin, see permissions.py
 
 
 def _valid_port(v: int | None) -> int | None:

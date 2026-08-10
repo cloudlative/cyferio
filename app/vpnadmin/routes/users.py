@@ -7,13 +7,29 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
-from .. import app_settings, geo_lists
+from .. import app_settings, geo_lists, vpn_identity_sync
 from ..audit import log_action
-from ..auth import hash_password, require_admin, require_user, verify_password
+from ..auth import hash_password, require_user, verify_password
 from ..db import get_db
-from ..models import Gender, Role, Team, User
+from ..models import Gender, Role, RoleDef, Team, User
+from ..permissions import require_permission
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+require_admin = require_permission("users", "manage")  # former auth.require_admin, see permissions.py
+
+
+def _resolve_role(db: Session, slug: str) -> RoleDef:
+    """Same validate-then-resolve pattern as _resolve_teams below, for the
+    role slug a CreateUserRequest/UpdateUserRequest carries -- kept as a
+    plain slug string (not a role_id int) so the existing users.html
+    <select> and any external API caller keeps working unchanged through
+    this migration; Roles Management (Phase 5) can still create/reference
+    custom roles by slug the same way."""
+    role = db.query(RoleDef).filter(RoleDef.slug == slug.strip().lower()).first()
+    if role is None:
+        raise HTTPException(status_code=400, detail=f"No such role: '{slug}'.")
+    return role
 
 
 def _valid_password(v: str) -> str:
@@ -234,7 +250,7 @@ def _resolve_teams(db: Session, team_ids: list[int]) -> list[Team]:
 class CreateUserRequest(BaseModel):
     username: str
     password: str
-    role: Role = Role.viewer
+    role: str = "viewer"  # a RoleDef slug -- resolved/validated in create_user() via _resolve_role
     first_name: str
     last_name: str | None = None
     gender: Gender = Gender.unspecified
@@ -307,7 +323,7 @@ class UpdateUserRequest(BaseModel):
     """Admin-only edits to another (or their own, for non-guardrailed
     fields) user's account. Password here is an unconditional admin reset --
     no current-password check, unlike the self-service /me endpoint below."""
-    role: Role | None = None
+    role: str | None = None  # a RoleDef slug -- resolved/validated in update_user() via _resolve_role
     is_active: bool | None = None
     deleted: bool | None = None  # True = soft-delete, False = restore
     password: str | None = None
@@ -401,11 +417,22 @@ class UpdateProfileRequest(BaseModel):
         return _valid_phone(v)
 
 
+def _role_slug(u: User) -> str:
+    """u.role_def is the dynamic-RBAC role (see permissions.py); it's set
+    for every user going forward (create_user always sets it, and
+    migrate_user_roles backfills every pre-existing row on startup -- see
+    db.py's _seed_rbac), but this falls back to the legacy `role` enum
+    column for the narrow in-flight-request window before that backfill
+    runs on a fresh deploy, rather than ever returning None."""
+    return u.role_def.slug if u.role_def is not None else u.role.value
+
+
 def _serialize(u: User) -> dict:
     return {
         "id": u.id,
         "username": u.username,
-        "role": u.role.value,
+        "role": _role_slug(u),
+        "role_name": u.role_def.name if u.role_def is not None else u.role.value.capitalize(),
         "is_active": u.is_active,
         "is_bootstrap_admin": u.is_bootstrap_admin,
         "deleted": u.deleted,
@@ -439,8 +466,8 @@ def _guard_against_self_lockout(db: Session, target: User, admin: User, *, remov
         return
     if target.id == admin.id:
         raise HTTPException(status_code=400, detail="You can't demote, deactivate, or delete your own account.")
-    remaining_admins = db.query(User).filter(
-        User.role == Role.admin, User.is_active.is_(True), User.deleted.is_(False), User.id != target.id
+    remaining_admins = db.query(User).join(RoleDef, User.role_id == RoleDef.id).filter(
+        RoleDef.slug == "admin", User.is_active.is_(True), User.deleted.is_(False), User.id != target.id
     ).count()
     if remaining_admins == 0:
         raise HTTPException(status_code=400, detail="Can't remove the last active admin account.")
@@ -493,7 +520,7 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
             # role to self-serve. Admins/editors still manage their own
             # teams here same as before; only an admin can change a
             # viewer's teams (via PATCH /api/users/{id}).
-            if user.role == Role.viewer:
+            if _role_slug(user) == "viewer":
                 raise HTTPException(
                     status_code=403,
                     detail="Viewers can't change their own team assignment -- ask an admin.",
@@ -518,10 +545,18 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     if db.query(User).filter(User.username == body.username).first() is not None:
         raise HTTPException(status_code=409, detail=f"Username '{body.username}' already exists.")
     teams = _resolve_teams(db, body.team_ids)
+    role_def = _resolve_role(db, body.role)
+    # The legacy `role` enum column (Role: admin/editor/viewer only) can't
+    # represent a custom or vpn_self_service role -- role_id (below) is what
+    # every permission check actually reads now, so this is just a
+    # best-effort placeholder for that column until it's removed in a later
+    # cleanup (see permissions.py's migrate_user_roles docstring).
+    legacy_role = Role(role_def.slug) if role_def.slug in Role._value2member_map_ else Role.viewer
     user = User(
         username=body.username,
         password_hash=hash_password(body.password),
-        role=body.role,
+        role=legacy_role,
+        role_id=role_def.id,
         first_name=body.first_name,
         last_name=body.last_name,
         gender=body.gender,
@@ -539,7 +574,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     )
     db.add(user)
     db.commit()
-    log_action(db, admin, "create_user", target=body.username, detail=f"role={body.role.value}")
+    log_action(db, admin, "create_user", target=body.username, detail=f"role={role_def.slug}")
     return _serialize(user)
 
 
@@ -561,7 +596,7 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     # by another admin, same as before this rule existed, subject only to
     # the last-admin-standing/self-lockout guardrails below.
     if target.is_bootstrap_admin:
-        if body.role is not None and body.role != Role.admin:
+        if body.role is not None and body.role.strip().lower() != "admin":
             raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be demoted.")
         if body.is_active is False:
             raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deactivated.")
@@ -576,19 +611,28 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     # not), including situations the unconditional bootstrap check above
     # doesn't cover (e.g. a non-bootstrap admin demoting/deactivating/
     # deleting themselves, or removing the last other active admin).
-    would_remove = target.role == Role.admin and (
-        (body.role is not None and body.role != Role.admin)
+    would_remove = _role_slug(target) == "admin" and (
+        (body.role is not None and body.role.strip().lower() != "admin")
         or body.is_active is False
         or body.deleted is True
     )
     _guard_against_self_lockout(db, target, admin, removing=would_remove)
 
     changes = []
-    if body.role is not None and body.role != target.role:
-        changes.append(f"role {target.role.value}->{body.role.value}")
-        target.role = body.role
+    if body.role is not None:
+        new_role_def = _resolve_role(db, body.role)
+        if new_role_def.id != target.role_id:
+            changes.append(f"role {_role_slug(target)}->{new_role_def.slug}")
+            target.role_id = new_role_def.id
+            # Keep the legacy enum column in sync where representable, same
+            # placeholder rule as create_user() above -- see that comment.
+            if new_role_def.slug in Role._value2member_map_:
+                target.role = Role(new_role_def.slug)
+    became_inactive = became_active = False
     if body.is_active is not None and body.is_active != target.is_active:
         changes.append(f"is_active {target.is_active}->{body.is_active}")
+        became_inactive = target.is_active and not body.is_active
+        became_active = not target.is_active and body.is_active
         target.is_active = body.is_active
     if body.deleted is not None and body.deleted != target.deleted:
         target.deleted = body.deleted
@@ -652,6 +696,13 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     db.commit()
     if changes:
         log_action(db, admin, "update_user", target=target.username, detail="; ".join(changes))
+    # Identity lifecycle sync (Phase 3, see vpn_identity_sync.py): mirror a
+    # suspend/reactivate onto this user's linked VPN cert, if any -- gated
+    # by protected_from_auto_revoke inside those functions.
+    if became_inactive:
+        vpn_identity_sync.sync_after_portal_suspend(db, target)
+    elif became_active:
+        vpn_identity_sync.sync_after_portal_reactivate(db, target)
     return _serialize(target)
 
 
@@ -666,12 +717,13 @@ def delete_user(user_id: int, admin: User = Depends(require_admin), db: Session 
         raise HTTPException(status_code=404, detail="User not found.")
     if target.is_bootstrap_admin:
         raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deleted.")
-    _guard_against_self_lockout(db, target, admin, removing=(target.role == Role.admin))
+    _guard_against_self_lockout(db, target, admin, removing=(_role_slug(target) == "admin"))
     target.deleted = True
     target.deleted_at = datetime.now(timezone.utc)
     target.is_active = False
     db.commit()
     log_action(db, admin, "delete_user", target=target.username)
+    vpn_identity_sync.sync_after_portal_delete(db, target)
     return {"message": f"User '{target.username}' deleted (recoverable from the Deleted users list)."}
 
 

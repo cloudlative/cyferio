@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}My VPN Profile — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">My VPN Profile</h1></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Your VPN device and connection details. New devices are provisioned by an admin -- this page lets you view your profile and manage the MAC addresses allowed to connect with it.</p>
+
+<div class="card">
+	<h2>Profile</h2>
+	<div class="form-grid" id="profile-summary">
+		<div><label>Client Name</label><div class="mono" id="vp-name">—</div></div>
+		<div><label>Status</label><div id="vp-status">—</div></div>
+		<div><label>Linked Since</label><div class="muted" id="vp-linked-at">—</div></div>
+	</div>
+</div>
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">Allowed Devices (MAC Addresses)</h2></div>
+	<p class="muted" style="margin-top:0">Only devices with a MAC address listed here can connect using your profile.</p>
+	<div id="vp-mac-list"><p class="muted">Loading…</p></div>
+	<form id="vp-add-mac-form" class="form-row" style="margin-top:14px">
+		<div class="field">
+			<label for="vp-new-mac">Add a MAC address</label>
+			<input type="text" id="vp-new-mac" placeholder="AA:BB:CC:DD:EE:FF" required>
+		</div>
+		<button type="submit" class="btn-primary">Add</button>
+	</form>
+</div>
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">Download Profile</h2></div>
+	<p class="muted" style="margin-top:0">Downloads your .ovpn configuration file, containing your private key -- keep it safe, don't share it.</p>
+	<button class="btn-secondary" id="vp-download-btn">Download .ovpn</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadMyProfile() {
+	try {
+		const p = await apiFetch("/api/me/vpn-profile");
+		document.getElementById("vp-name").textContent = p.vpn_client_name;
+		document.getElementById("vp-linked-at").textContent = p.linked_at ? fmtTimestamp(p.linked_at) : "—";
+		const statusEl = document.getElementById("vp-status");
+		if (p.client_info && p.client_info.in_db === false) {
+			statusEl.innerHTML = '<span class="status-pill status-revoked">Not registered</span>';
+		} else {
+			statusEl.innerHTML = '<span class="status-pill status-online">Active</span>';
+		}
+		const macList = document.getElementById("vp-mac-list");
+		const macs = p.macs || [];
+		if (macs.length === 0) {
+			macList.innerHTML = `<p class="muted">No MAC addresses registered yet.</p>`;
+		} else {
+			macList.innerHTML = `<div class="table-scroll"><table><tbody>${macs.map((m) => `
+				<tr><td class="mono">${escapeHtml(m)}</td><td style="text-align:right"><button class="btn-secondary btn-sm" data-remove-mac="${escapeHtml(m)}">Remove</button></td></tr>
+			`).join("")}</tbody></table></div>`;
+			macList.querySelectorAll("[data-remove-mac]").forEach((btn) => {
+				btn.addEventListener("click", async () => {
+					const ok = await confirmDialog(`Remove MAC ${btn.dataset.removeMac}? A device with this MAC will no longer be able to connect.`, { confirmLabel: "Remove", danger: true });
+					if (!ok) return;
+					try {
+						await apiFetch(`/api/me/vpn-profile/macs/${encodeURIComponent(btn.dataset.removeMac)}`, { method: "DELETE" });
+						toast("MAC address removed.", "success");
+						await loadMyProfile();
+					} catch (e) {
+						toast(e.message, "error");
+					}
+				});
+			});
+		}
+	} catch (e) {
+		document.getElementById("profile-summary").innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+document.getElementById("vp-add-mac-form").addEventListener("submit", async (e) => {
+	e.preventDefault();
+	const mac = document.getElementById("vp-new-mac").value.trim();
+	try {
+		await apiFetch("/api/me/vpn-profile/macs", { method: "POST", body: { mac } });
+		toast("MAC address added.", "success");
+		document.getElementById("vp-new-mac").value = "";
+		await loadMyProfile();
+	} catch (e2) {
+		toast(e2.message, "error");
+	}
+});
+
+document.getElementById("vp-download-btn").addEventListener("click", async () => {
+	try {
+		const r = await apiFetch("/api/me/vpn-profile/ovpn");
+		const blob = new Blob([r.ovpn], { type: "application/x-openvpn-profile" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = `${r.name}.ovpn`;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(url);
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+document.getElementById("refresh-btn").addEventListener("click", loadMyProfile);
+loadMyProfile();
+</script>
+{% endblock %}

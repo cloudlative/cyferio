@@ -12,17 +12,29 @@
 	<aside class="sidebar">
 		<a href="/" class="brand">{{ app_settings.app_name }}</a>
 		<nav>
+			{% if can_view_dashboard %}
 			<a href="/" class="{{ 'active' if request.url.path == '/' }}"><span class="nav-icon">◆</span>Dashboard</a>
+			{% endif %}
+			{% if can_view_clients %}
 			<a href="/clients" class="{{ 'active' if request.url.path == '/clients' }}"><span class="nav-icon">◇</span>VPN Clients</a>
 			<a href="/clients/revoked" class="{{ 'active' if request.url.path == '/clients/revoked' }}"><span class="nav-icon">⊘</span>Deleted / Revoked</a>
+			<a href="/connection-history" class="{{ 'active' if request.url.path == '/connection-history' }}"><span class="nav-icon">⏱</span>Connection History</a>
+			{% endif %}
+			{% if can_view_health %}
 			<a href="/diagnostics" class="{{ 'active' if request.url.path == '/diagnostics' }}"><span class="nav-icon">⚙</span>Diagnostics</a>
 			<a href="/health" class="{{ 'active' if request.url.path == '/health' }}"><span class="nav-icon">♥</span>Health</a>
-			<a href="/connection-history" class="{{ 'active' if request.url.path == '/connection-history' }}"><span class="nav-icon">⏱</span>Connection History</a>
+			{% endif %}
+			{% if has_own_vpn_profile %}
+			<a href="/my-vpn-profile" class="{{ 'active' if request.url.path == '/my-vpn-profile' }}"><span class="nav-icon">⚡</span>My VPN Profile</a>
+			{% endif %}
 			{% if is_admin %}
 			<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
 			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
 			<a href="/users/activity" class="{{ 'active' if request.url.path == '/users/activity' }}"><span class="nav-icon">☰</span>Users Activity</a>
 			<a href="/settings" class="{{ 'active' if request.url.path == '/settings' }}"><span class="nav-icon">⛭</span>Settings</a>
+			{% endif %}
+			{% if can_manage_roles %}
+			<a href="/roles" class="{{ 'active' if request.url.path == '/roles' }}"><span class="nav-icon">⚿</span>Roles</a>
 			{% endif %}
 		</nav>
 	</aside>
@@ -51,7 +63,7 @@
 				{% endif %}
 				<div class="who">
 					<a href="/profile" class="who-name">{{ user.first_name or user.username }}</a>
-					<span class="role-badge role-{{ user.role.value }}">{{ user.role.value }}</span>
+					<span class="role-badge role-{{ user.role_slug }}">{{ user.role_display_name }}</span>
 				</div>
 				<form action="/logout" method="post" style="margin:0">
 					<button type="submit" class="link-button">Log out</button>

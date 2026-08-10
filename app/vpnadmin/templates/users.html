@@ -18,11 +18,7 @@
 			</div>
 			<div class="field">
 				<label for="u-role">Role</label>
-				<select id="u-role">
-					<option value="viewer">Viewer (read-only)</option>
-					<option value="editor">Editor (manage VPN clients &amp; MACs)</option>
-					<option value="admin">Admin (full control)</option>
-				</select>
+				<select id="u-role"></select>
 			</div>
 		</div>
 		<div class="form-row" style="margin-top:16px">
@@ -149,7 +145,7 @@
 				<div class="form-row">
 					<div class="field">
 						<label for="e-role">Role</label>
-						<select id="e-role"><option value="viewer">Viewer</option><option value="editor">Editor</option><option value="admin">Admin</option></select>
+						<select id="e-role"></select>
 						<p class="muted" id="e-role-note" style="margin:6px 0 0;font-size:0.8rem;display:none">The bootstrap admin account can't be demoted, deactivated, or deleted.</p>
 					</div>
 					<div class="field">
@@ -384,6 +380,33 @@ const uEmailValidation = attachInlineValidation(document.getElementById("u-email
 const eEmailValidation = attachInlineValidation(document.getElementById("e-email"), emailError);
 const uPhoneValidation = attachInlineValidation(addPhone.getLocalInputEl(), () => phoneError(addPhone.getValue()));
 const ePhoneValidation = attachInlineValidation(editPhone.getLocalInputEl(), () => phoneError(editPhone.getValue()));
+
+async function loadRoleOptions() {
+	// Populates both the Add-User and Edit-User role <select>s from the
+	// live dynamic-RBAC role list (GET /api/roles) instead of a hardcoded
+	// admin/editor/viewer set -- picks up vpn_self_service and any custom
+	// role created via Roles Management with no code change needed here.
+	// GET /api/roles is roles-manage-gated; a non-admin viewing this page
+	// wouldn't reach users.html at all (server-side page guard), so no
+	// separate fallback is needed for that case.
+	try {
+		const roles = await apiFetch("/api/roles");
+		const optionsHtml = roles.map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
+		document.getElementById("u-role").innerHTML = optionsHtml;
+		document.getElementById("e-role").innerHTML = optionsHtml;
+		// The API orders roles is_system-desc-then-name, which puts "Admin"
+		// alphabetically before "Viewer" -- without this, a freshly-loaded
+		// Add User form would default to creating an ADMIN account. Default
+		// to the least-privileged role instead (viewer if present, else
+		// whatever the server listed first) -- same safe-default intent as
+		// the previous hardcoded <option>viewer</option> being listed first.
+		if (roles.some(r => r.slug === "viewer")) {
+			document.getElementById("u-role").value = "viewer";
+		}
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
 
 async function loadTeamOptions() {
 	try {
@@ -652,9 +675,10 @@ document.getElementById("add-user-clear").addEventListener("click", () => {
 	addAsnsMs.reset();
 });
 
-document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); loadTeamOptions(); });
+document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); loadTeamOptions(); loadRoleOptions(); });
 loadUsers();
 loadDeleted();
 loadTeamOptions();
+loadRoleOptions();
 </script>
 {% endblock %}

@@ -1,8 +1,8 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, ForeignKey, Table
-from sqlalchemy.orm import validates, relationship
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, ForeignKey, Table, UniqueConstraint, event
+from sqlalchemy.orm import backref, validates, relationship
 
 from .db import Base
 
@@ -12,11 +12,100 @@ def _utcnow():
 
 
 class Role(str, enum.Enum):
+    """Deprecated -- being replaced by the dynamic RoleDef/ObjectPermission
+    system below (see docs/rbac_identity_design.md and the
+    joyful-sauteeing-cookie plan). Kept, and User.role (the column it backs)
+    kept mapped, only until Phase 2's route migration + role_id backfill are
+    complete and verified in production; every *new* permission check should
+    use RoleDef/require_permission, not this enum. Do not add new members
+    here -- add a custom RoleDef row instead."""
     admin = "admin"
     editor = "editor"  # can add/revoke/edit VPN clients and manage their MAC
     # addresses (everything in routes/clients.py) -- but not user
     # management, teams, or settings, which stay admin-only
     viewer = "viewer"  # read-only: status/list/check/lint-db, no add/revoke/user-management
+
+
+class RoleKind(str, enum.Enum):
+    system = "system"  # the 4 seeded roles (admin/editor/viewer/vpn_self_service) --
+    # undeletable, slug is fixed, see permissions.py's seed_system_roles
+    custom = "custom"  # anything an admin creates via Roles Management
+
+
+class RoleDef(Base):
+    """Dynamic role, replacing the `Role` enum above. A role is just a name
+    plus a bag of ObjectPermission/RoleApiScope rows -- see
+    docs/rbac_identity_design.md §1.1 for the full design."""
+    __tablename__ = "roles"
+
+    id = Column(Integer, primary_key=True)
+    slug = Column(String(64), unique=True, nullable=False, index=True)  # "admin","editor","viewer",
+    # "vpn_self_service", or a custom admin-chosen slug
+    name = Column(String(128), nullable=False)  # display name -- editable even for system roles
+    description = Column(Text, nullable=True)
+    kind = Column(Enum(RoleKind), nullable=False, default=RoleKind.custom)
+    is_system = Column(Boolean, nullable=False, default=False)  # blocks delete + slug rename
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    created_by = Column(String(64), nullable=True)  # username snapshot, same pattern as AuditLog
+
+    object_permissions = relationship(
+        "ObjectPermission", back_populates="role", cascade="all, delete-orphan"
+    )
+    api_scopes = relationship(
+        "RoleApiScope", back_populates="role", cascade="all, delete-orphan"
+    )
+
+    @validates("slug")
+    def _normalize_slug(self, key, value):
+        return value.strip().lower()
+
+
+class ObjectPermission(Base):
+    """One row per (role, object) -- the CRUD-ish permission matrix from the
+    spec. `object_key` is a free string matched against the OBJECTS registry
+    in permissions.py (e.g. "dashboard", "vpn_profiles", "users", "roles",
+    "audit_log", "settings", "teams", "reports", "health") rather than its
+    own DB table -- adding a future module is one line in that registry, not
+    a migration."""
+    __tablename__ = "role_object_permissions"
+
+    id = Column(Integer, primary_key=True)
+    role_id = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False)
+    object_key = Column(String(64), nullable=False)
+    can_view = Column(Boolean, nullable=False, default=False)
+    can_create = Column(Boolean, nullable=False, default=False)
+    can_update = Column(Boolean, nullable=False, default=False)
+    can_delete = Column(Boolean, nullable=False, default=False)
+    can_execute = Column(Boolean, nullable=False, default=False)  # non-CRUD actions, e.g. "revoke client"
+    can_manage = Column(Boolean, nullable=False, default=False)  # superset: full control incl. delegation
+
+    role = relationship("RoleDef", back_populates="object_permissions")
+
+    __table_args__ = (UniqueConstraint("role_id", "object_key", name="uq_role_object_permission"),)
+
+
+class ApiScope(str, enum.Enum):
+    any = "any"   # operate on any record of this object type
+    own = "own"   # operate only on records the caller owns (self-service)
+
+
+class RoleApiScope(Base):
+    """Per (role, object): does this role's access apply to any record, or
+    only the caller's own? Holds the same can_view/can_update semantics as
+    ObjectPermission but adds the scope dial that makes VPN Self-Service
+    User work -- see require_own_or_permission in permissions.py. Absence of
+    a row for a given (role, object) defaults to scope="any" (i.e. this
+    table only needs a row when a role is deliberately restricted to "own")."""
+    __tablename__ = "role_api_scopes"
+
+    id = Column(Integer, primary_key=True)
+    role_id = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False)
+    object_key = Column(String(64), nullable=False)
+    scope = Column(Enum(ApiScope), nullable=False, default=ApiScope.any)
+
+    role = relationship("RoleDef", back_populates="api_scopes")
+
+    __table_args__ = (UniqueConstraint("role_id", "object_key", name="uq_role_api_scope"),)
 
 
 class Gender(str, enum.Enum):
@@ -69,8 +158,22 @@ class User(Base):
     username = Column(String(64), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     role = Column(Enum(Role), nullable=False, default=Role.viewer)
+    # Transitional dynamic-RBAC column, added alongside `role` above rather
+    # than replacing it -- see docs/rbac_identity_design.md and the
+    # joyful-sauteeing-cookie plan's Phase 1/2 split. Nullable and unused
+    # until Phase 2's migrate_user_roles() backfill runs and every
+    # permission check is confirmed moved onto it; only then does `role`
+    # (the enum column above) get removed and this becomes non-nullable.
+    role_id = Column(Integer, ForeignKey("roles.id"), nullable=True)
+    role_def = relationship("RoleDef")
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    # Forces a password change on next login -- set True for accounts this
+    # app auto-creates with a system-generated temp password (VPN profile
+    # auto-linking, migration-created accounts; see VpnProfileLink and
+    # routes/clients.py). Never set for accounts an admin creates with a
+    # password they chose deliberately.
+    must_reset_password = Column(Boolean, nullable=False, default=False)
 
     # Set once, only by auth.bootstrap_admin(), on the very first admin
     # account a fresh deployment creates. Used solely to make that specific
@@ -144,6 +247,47 @@ class User(Base):
         full = " ".join(p for p in (self.first_name, self.last_name) if p)
         return full or self.username
 
+    @property
+    def role_slug(self) -> str:
+        """Dynamic-RBAC role slug, with a fallback to the legacy `role`
+        enum for the narrow pre-backfill window -- see permissions.py's
+        migrate_user_roles docstring. Used by templates (base.html,
+        profile.html) so they never read the legacy enum column directly,
+        which can't represent a custom or vpn_self_service role."""
+        return self.role_def.slug if self.role_def is not None else self.role.value
+
+    @property
+    def role_display_name(self) -> str:
+        return self.role_def.name if self.role_def is not None else self.role.value.capitalize()
+
+
+@event.listens_for(User, "before_insert")
+def _default_role_id_from_legacy_role(mapper, connection, target: User) -> None:
+    """Safety net for the Phase 1/2 transition (see permissions.py's
+    migrate_user_roles docstring): if a User is being inserted with the
+    legacy `role` enum set but role_id left unset -- e.g. a test fixture,
+    or any other code path that still constructs `User(role=Role.admin)`
+    directly instead of going through create_user()/bootstrap_admin(),
+    both of which set role_id explicitly -- resolve it from the matching
+    seeded RoleDef automatically rather than silently inserting a user
+    every require_permission check will then reject. Uses the raw
+    `connection` (mapper-level before_insert only gets a Core Connection,
+    not an ORM Session) rather than a query, since the owning session may
+    not have flushed RoleDef rows yet either."""
+    if target.role_id is not None or target.role is None:
+        return
+    # target.role is normally a Role enum member, but SQLAlchemy's Enum
+    # column type accepts a plain matching string transparently too (some
+    # callers assign role="editor" directly rather than role=Role.editor)
+    # -- handle both rather than assuming .value always exists.
+    role_value = target.role.value if hasattr(target.role, "value") else target.role
+    roles_table = RoleDef.__table__
+    row = connection.execute(
+        roles_table.select().where(roles_table.c.slug == role_value)
+    ).first()
+    if row is not None:
+        target.role_id = row.id
+
 
 class AppSettings(Base):
     """Runtime-editable application settings, admin-managed via the
@@ -209,3 +353,64 @@ class AuditLog(Base):
     target = Column(String(128), nullable=True)  # e.g. the client name affected
     detail = Column(Text, nullable=True)  # short human-readable outcome/error
     success = Column(Boolean, nullable=False, default=True)
+
+
+class VpnProfileLink(Base):
+    """The only place the VPN-cert world (file/EasyRSA/CLI-based, see
+    cli_wrapper.py -- clients are never their own DB rows) and the portal-
+    user world (this DB) are tied together. Strictly 1:1 (both columns
+    unique) -- one portal user, one VPN profile, enforced at the DB level,
+    not just in application code. Deliberately its own table rather than a
+    column on User, since a VPN client can (transiently, before an admin
+    links or a migration runs) exist with no linked portal user at all."""
+    __tablename__ = "vpn_profile_links"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    vpn_client_name = Column(String(64), unique=True, nullable=False, index=True)  # == cli_wrapper client name
+
+    # "created_with_profile" (routes/clients.py add_client, born after this
+    # feature shipped) | "migration_exact_match" (migrate_vpn_profiles.py,
+    # via migration_engine.py) | "manual_admin_link" (an admin explicitly
+    # links an unmatched pair).
+    link_source = Column(String(32), nullable=False)
+
+    # Permanent guarantee, not a one-time migration skip: every cert that
+    # was already live in production before this feature shipped gets this
+    # set True at migration time and it is NEVER flipped back by any code
+    # path afterward. Every lifecycle-sync hook that would call
+    # cli.revoke_client/purge_revoked checks this first -- a real,
+    # currently-connected user's VPN access must never go down because of a
+    # portal-side action, full stop, no matter what later happens to the
+    # linked portal account. Only link_source="created_with_profile" (cert
+    # and account born together, going forward) gets the full bidirectional
+    # sync. See docs/rbac_identity_design.md §4.
+    protected_from_auto_revoke = Column(Boolean, nullable=False, default=False)
+
+    linked_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    linked_by = Column(String(64), nullable=True)  # username snapshot; NULL for system-performed migration link
+
+    # uselist=False must be on the backref, not this forward relationship
+    # (this side -- VpnProfileLink.user -- is already many-to-one/scalar by
+    # default; it's User.vpn_profile_link, the reverse side, that needs to
+    # be told not to be a collection).
+    user = relationship("User", backref=backref("vpn_profile_link", uselist=False))
+
+
+class MigrationReport(Base):
+    """A persisted snapshot of what migrate_vpn_profiles.py's `run` command
+    actually did -- so `last-report` can re-fetch it later rather than only
+    ever being available in that one terminal session. `report_json` holds
+    the exact shape documented in docs/rbac_identity_design.md §5
+    (linked_existing / created_new_accounts / unmatched_portal_users /
+    conflicts) -- MINUS any temp_password field, which is deliberately
+    stripped before this is ever written (see migration_engine.py's
+    apply_migration) so a plaintext temp password never sits at rest in
+    the DB, even redacted-on-read; it's stripped on write instead."""
+    __tablename__ = "migration_reports"
+
+    id = Column(Integer, primary_key=True)
+    run_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    run_by = Column(String(64), nullable=False)  # username snapshot, same pattern as AuditLog
+    is_preview = Column(Boolean, nullable=False, default=False)  # True = preview run, never wrote anything
+    report_json = Column(Text, nullable=False)
