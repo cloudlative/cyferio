@@ -492,18 +492,34 @@ const _DIAL_CODES_BY_LENGTH = [...DIAL_CODES].sort((a, b) => b[1].length - a[1].
  * it stays inside this app's existing dark-theme form-control styling for
  * free (see style.css's `select` rules) without reinventing that here.
  *
+ * Country name comes before the dial code in both the option's visible
+ * text and its sort order (e.g. "Pakistan +92", not "+92 Pakistan") --
+ * with a dial code first, every single option's visible text started with
+ * "+", so the native <select>'s built-in type-to-jump search (which
+ * matches against the FIRST character(s) of the visible text) had nothing
+ * to distinguish between; pressing "p" never reliably landed on Pakistan.
+ * Name-first fixes that for free, no custom keyboard handling needed.
+ *
  * Usage:
  *   const phone = createPhoneInput(document.getElementById("mount"));
  *   phone.setValue(u.phone);       // parses "+923001234567" -> ("+92", "3001234567")
  *   phone.getValue();              // -> "+923001234567", or "" if local number is blank
  *   phone.getLocalInputEl();       // the local-number <input>, for attaching blur/input validation
  */
+const _DIAL_CODES_BY_NAME = [...DIAL_CODES].sort((a, b) => a[0].localeCompare(b[0]));
+
+// Preselected on a brand-new (empty) phone input -- avoids everyone who
+// creates a user having to hunt for the same country every time on this
+// deployment. Not a hardcoded assumption anywhere else in the app (GeoIP
+// client restrictions, etc. all stay per-client/admin-chosen) -- purely a
+// default a self-hoster can change to their own country's dial code here.
+const DEFAULT_DIAL_CODE = "+92"; // Pakistan
+
 function createPhoneInput(root) {
 	root.classList.add("phone-input");
 	root.innerHTML = `
 		<select class="phone-dial-select" aria-label="Country code">
-			<option value="">+‎ —</option>
-			${DIAL_CODES.map(([name, dial]) => `<option value="${dial}">${dial} ${escapeHtml(name)}</option>`).join("")}
+			${_DIAL_CODES_BY_NAME.map(([name, dial]) => `<option value="${dial}"${dial === DEFAULT_DIAL_CODE ? " selected" : ""}>${escapeHtml(name)} ${dial}</option>`).join("")}
 		</select>
 		<input type="text" class="phone-local-input" inputmode="tel" placeholder="Local number">`;
 	const dialSelect = root.querySelector(".phone-dial-select");
@@ -513,7 +529,7 @@ function createPhoneInput(root) {
 		setValue(phone) {
 			phone = (phone || "").trim();
 			if (!phone) {
-				dialSelect.value = "";
+				dialSelect.value = DEFAULT_DIAL_CODE;
 				localInput.value = "";
 				return;
 			}
@@ -524,23 +540,25 @@ function createPhoneInput(root) {
 			} else {
 				// Doesn't cleanly match any known dial code (e.g. a legacy
 				// value entered before this UI existed) -- don't crash or
-				// guess, just show it raw with no dial code preselected, per
-				// the task's documented fallback.
-				dialSelect.value = "";
+				// guess, just show it raw with the default dial code
+				// preselected rather than blank (there's no more "no
+				// selection" option now that every <option> has a real
+				// dial code -- see the dropdown markup above).
+				dialSelect.value = DEFAULT_DIAL_CODE;
 				localInput.value = phone;
 			}
 		},
 		getValue() {
 			const local = localInput.value.trim().replace(/[^\d]/g, "");
 			if (!local) return "";
-			const dial = dialSelect.value || "";
+			const dial = dialSelect.value || DEFAULT_DIAL_CODE;
 			return dial + local;
 		},
 		getLocalInputEl() {
 			return localInput;
 		},
 		reset() {
-			dialSelect.value = "";
+			dialSelect.value = DEFAULT_DIAL_CODE;
 			localInput.value = "";
 		},
 	};

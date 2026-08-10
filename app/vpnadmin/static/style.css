@@ -545,8 +545,8 @@ fieldset legend { padding: 0 8px; color: var(--text-muted); font-weight: 700; fo
 
 /* --- Phone input (dial-code <select> + local-number field), see app.js's
    createPhoneInput -- used anywhere a User.phone is entered/edited. */
-.phone-input { display: flex; gap: 8px; }
-.phone-input .phone-dial-select { flex: 0 0 40%; min-width: 120px; }
+.phone-input { display: flex; gap: 8px; max-width: 320px; }
+.phone-input .phone-dial-select { flex: 0 0 auto; width: 130px; }
 .phone-input .phone-local-input { flex: 1; min-width: 0; }
 
 /* --- Inline field validation (email/phone), see app.js's
@@ -789,7 +789,26 @@ tr.team-row:hover .team-row-view, tr.team-row:focus-visible .team-row-view { opa
    (unlike the PKI-consistency/lint cards below them, which list a
    variable number of named issues and stay full-width table cards). */
 .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; margin-bottom: 22px; }
-.health-grid .card { margin-bottom: 0; }
+.health-grid .card { margin-bottom: 0; min-width: 0; }
+
+/* Wide/unbreakable content (e.g. Traefik's router-rule table below) inside
+   a narrow health-grid tile: a horizontal-scroll fallback for anything
+   still too wide after wrapping, so it can never push the card itself
+   wider than its grid track and overflow into a neighbor. min-width: 0 on
+   .health-grid .card above is required for this to work at all -- a grid
+   item's default min-width is auto (= its content's intrinsic width), which
+   silently overrides any child overflow-x rule and defeats the whole point. */
+/* A small bordered callout for a card's explanatory blurb -- distinct from
+   a bare .muted paragraph (which reads as unstyled/orphaned floating text)
+   without being as loud as a status pill or warning banner. Prefixed with
+   "Note:" in markup, not via a ::before/content trick, so it stays
+   selectable/copyable and reads correctly to a screen reader. */
+.note { background: var(--surface-alt); border: 1px solid var(--border-light); border-radius: 8px; padding: 10px 14px; margin: 0 0 16px; font-size: 0.85rem; color: var(--text-muted); }
+.note strong { color: var(--text); }
+
+.table-scroll { overflow-x: auto; }
+.traefik-router-table { table-layout: fixed; }
+.traefik-router-table .traefik-rule-cell { font-size: 0.82em; overflow-wrap: anywhere; }
 .metric-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
 .metric-row:last-child { border-bottom: none; }
 .metric-label { color: var(--text-muted); font-weight: 600; }

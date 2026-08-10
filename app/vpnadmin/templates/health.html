@@ -31,13 +31,13 @@
 
 <div class="card">
 	<div class="toolbar"><h2 style="margin:0">Database Consistency</h2><button class="btn-secondary" id="check-refresh">Refresh</button></div>
-	<p class="muted" style="margin-top:-6px">Cross-checks issued certificates against the MAC-binding database (openvpn_db.txt) for entries missing on either side.</p>
+	<p class="note"><strong>Note:</strong> Cross-checks issued certificates against the MAC-binding database (openvpn_db.txt) for entries missing on either side.</p>
 	<div id="check-result"><p class="muted">Loading…</p></div>
 </div>
 
 <div class="card">
 	<div class="toolbar"><h2 style="margin:0">MAC-DB Formatting Health</h2><button class="btn-secondary" id="lint-refresh">Refresh</button></div>
-	<p class="muted" style="margin-top:-6px">Validates openvpn_db.txt's own formatting -- malformed lines, duplicate MAC assignments, missing trailing newline.</p>
+	<p class="note"><strong>Note:</strong> Validates openvpn_db.txt's own formatting -- malformed lines, duplicate MAC assignments, missing trailing newline.</p>
 	<div id="lint-result"><p class="muted">Loading…</p></div>
 </div>
 {% endblock %}
@@ -173,14 +173,14 @@ async function loadTraefikHealth() {
 		okBadge(badge, d.ping_ok && routerIssues.length === 0, "Healthy", "Issues found");
 		let html = "";
 		if (d.routers.length) {
-			html += `<table style="margin-top:4px"><thead><tr><th>Router</th><th>Rule</th><th>Status</th></tr></thead><tbody>${d.routers.map(r => `
+			html += `<div class="table-scroll"><table class="traefik-router-table" style="margin-top:4px"><thead><tr><th>Router</th><th>Rule</th><th>Status</th></tr></thead><tbody>${d.routers.map(r => `
 				<tr>
 					<td>${escapeHtml(r.name || "—")}</td>
-					<td class="mono" style="font-size:0.82em">${escapeHtml(r.rule || "—")}</td>
+					<td class="mono traefik-rule-cell">${escapeHtml(r.rule || "—")}</td>
 					<td>${r.status === "enabled" && !(r.errors && r.errors.length)
 						? '<span class="status-pill status-online">enabled</span>'
 						: `<span class="status-pill status-revoked">${escapeHtml(r.status || "unknown")}</span>`}</td>
-				</tr>`).join("")}</tbody></table>`;
+				</tr>`).join("")}</tbody></table></div>`;
 		} else {
 			html += '<p class="muted">No routers reported.</p>';
 		}

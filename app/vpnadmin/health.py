@@ -196,7 +196,15 @@ def get_host_health() -> dict:
 
     result: dict = {"available": True, "error": None}
 
-    hostname = _read_file(os.path.join(proc, "sys/kernel/hostname"))
+    # NOT /hostproc/sys/kernel/hostname: unlike /proc/stat, /proc/meminfo,
+    # etc. (genuinely global, kernel-wide counters), /proc/sys/kernel/
+    # hostname is backed by the READING PROCESS's own UTS namespace, which
+    # bind-mounting the host's /proc does not change -- it reliably
+    # returns this container's own hostname (its container id) even
+    # through /hostproc, not the droplet's. /etc/hostname is a plain file,
+    # not namespace-aware, so read it from the bind-mounted host root
+    # filesystem instead (see config.py's HOST_ROOT_PATH).
+    hostname = _read_file(os.path.join(root, "etc/hostname"))
     result["hostname"] = hostname.strip() if hostname else None
 
     uptime_raw = _read_file(os.path.join(proc, "uptime"))
