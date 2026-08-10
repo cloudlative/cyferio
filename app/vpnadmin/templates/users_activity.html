@@ -80,6 +80,8 @@ const ACTION_LABELS = {
 	remove_team_member: "Removed team member",
 	update_settings: "Updated app settings",
 	test_smtp_settings: "Sent SMTP test email",
+	login_blocked_country: "Blocked login (country restriction)",
+	login_blocked_ip: "Blocked login (IP restriction)",
 };
 
 // Field-name tokens that show up in the semicolon/comma-joined "changes"
@@ -145,7 +147,7 @@ function humanizeDetail(action, detail) {
 	}).join(", ");
 }
 
-// Groups the 17 raw action strings into 4 categories for the Users
+// Groups the 19 raw action strings into 4 categories for the Users
 // Activity Breakdown donut -- a slice per raw action would be unreadable
 // (and several actions are single-digit rare events), so this is
 // deliberately coarser than ACTION_LABELS above. Every action from that
@@ -158,6 +160,7 @@ const ACTION_CATEGORIES = {
 	update_client_policy: "client",
 	create_user: "user", update_user: "user", update_own_profile: "user",
 	delete_user: "user", permanently_delete_user: "user",
+	login_blocked_country: "user", login_blocked_ip: "user",
 	create_team: "team", delete_team: "team", add_team_member: "team", remove_team_member: "team",
 	update_settings: "settings", test_smtp_settings: "settings",
 };

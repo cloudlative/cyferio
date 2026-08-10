@@ -205,8 +205,17 @@ function renderDonutChart(mountEl, entries, { size = 220, thickness = 34 } = {})
  *   ms.setOptions([{id: 1, label: "Infra"}, {id: 2, label: "Security"}]);
  *   ms.setSelected([1]);
  *   ms.getSelected(); // -> [1]
+ *
+ * `idType` ("number", the default, or "string") controls how option ids
+ * round-trip through setSelected/getSelected -- team ids are numeric
+ * (matching the API), but this same widget is also used for country-code
+ * multiselects (allowed-login-countries), where ids are ISO alpha-2
+ * strings like "PK" and `Number("PK")` would silently become NaN.
+ * `emptyLabel`/`unitLabel` customize the panel's zero-options message and
+ * the toggle's "N selected" text (default "teams", overridden by callers
+ * picking something else, e.g. "countries").
  */
-function createMultiselectDropdown(root, { placeholder = "Select…", disabled = false } = {}) {
+function createMultiselectDropdown(root, { placeholder = "Select…", disabled = false, idType = "number", emptyLabel = "No teams yet.", unitLabel = "teams" } = {}) {
 	root.classList.add("ms-dropdown");
 	root.innerHTML = `
 		<button type="button" class="ms-toggle"${disabled ? " disabled" : ""}>
@@ -219,6 +228,7 @@ function createMultiselectDropdown(root, { placeholder = "Select…", disabled =
 	const toggle = root.querySelector(".ms-toggle");
 	const toggleLabel = root.querySelector(".ms-toggle-label");
 	const panel = root.querySelector(".ms-panel");
+	const castId = idType === "string" ? String : Number;
 	let options = [];
 	let selected = new Set();
 
@@ -228,22 +238,22 @@ function createMultiselectDropdown(root, { placeholder = "Select…", disabled =
 			toggleLabel.classList.add("muted");
 		} else {
 			const names = options.filter(o => selected.has(o.id)).map(o => o.label);
-			toggleLabel.textContent = names.length <= 2 ? names.join(", ") : `${names.length} teams selected`;
+			toggleLabel.textContent = names.length <= 2 ? names.join(", ") : `${names.length} ${unitLabel} selected`;
 			toggleLabel.classList.remove("muted");
 		}
 	}
 
 	function renderPanel() {
 		panel.innerHTML = options.length === 0
-			? '<div class="ms-empty muted">No teams yet.</div>'
+			? `<div class="ms-empty muted">${escapeHtml(emptyLabel)}</div>`
 			: options.map(o => `
 				<label class="ms-option">
-					<input type="checkbox" value="${o.id}" ${selected.has(o.id) ? "checked" : ""}>
+					<input type="checkbox" value="${escapeHtml(String(o.id))}" ${selected.has(o.id) ? "checked" : ""}>
 					<span>${escapeHtml(o.label)}</span>
 				</label>`).join("");
 		panel.querySelectorAll('input[type="checkbox"]').forEach(cb => {
 			cb.addEventListener("change", () => {
-				const id = Number(cb.value);
+				const id = castId(cb.value);
 				if (cb.checked) selected.add(id); else selected.delete(id);
 				refreshLabel();
 			});
@@ -267,7 +277,7 @@ function createMultiselectDropdown(root, { placeholder = "Select…", disabled =
 			refreshLabel();
 		},
 		setSelected(ids) {
-			selected = new Set((ids || []).map(Number));
+			selected = new Set((ids || []).map(castId));
 			renderPanel();
 			refreshLabel();
 		},
@@ -500,10 +510,15 @@ const _DIAL_CODES_BY_LENGTH = [...DIAL_CODES].sort((a, b) => b[1].length - a[1].
  * to distinguish between; pressing "p" never reliably landed on Pakistan.
  * Name-first fixes that for free, no custom keyboard handling needed.
  *
+ * Stored/returned values are dash-grouped ("+92-333-1234567" for Pakistan,
+ * "+<dialcode>-<local digits>" everywhere else) -- see routes/users.py's
+ * _valid_phone for the server-side format this mirrors exactly and is the
+ * real source of truth for.
+ *
  * Usage:
  *   const phone = createPhoneInput(document.getElementById("mount"));
- *   phone.setValue(u.phone);       // parses "+923001234567" -> ("+92", "3001234567")
- *   phone.getValue();              // -> "+923001234567", or "" if local number is blank
+ *   phone.setValue(u.phone);       // parses "+92-333-1234567" -> ("+92", "3331234567")
+ *   phone.getValue();              // -> "+92-333-1234567", or "" if local number is blank
  *   phone.getLocalInputEl();       // the local-number <input>, for attaching blur/input validation
  */
 const _DIAL_CODES_BY_NAME = [...DIAL_CODES].sort((a, b) => a[0].localeCompare(b[0]));
@@ -515,15 +530,51 @@ const _DIAL_CODES_BY_NAME = [...DIAL_CODES].sort((a, b) => a[0].localeCompare(b[
 // default a self-hoster can change to their own country's dial code here.
 const DEFAULT_DIAL_CODE = "+92"; // Pakistan
 
+// Pakistan's mobile numbers are always a 3-digit prefix + 7-digit
+// subscriber number (+92-333-1234567) -- this is the one dial code this
+// widget actively reformats as-you-type (auto-inserting the dash after 3
+// digits) and shows a concrete example placeholder for, matching the
+// backend's own _PHONE_PK_RE strict check. Every other country keeps a
+// generic placeholder and a single dial-code/local-number dash, with no
+// further internal grouping assumed (see routes/users.py's
+// _PHONE_GENERAL_RE for why: there's no one grouping that fits 200+
+// countries' numbering plans).
+function _formatLocalDigits(dial, digits) {
+	if (dial === "+92" && digits.length > 3) {
+		return `${digits.slice(0, 3)}-${digits.slice(3, 10)}`;
+	}
+	return digits;
+}
+
 function createPhoneInput(root) {
 	root.classList.add("phone-input");
 	root.innerHTML = `
 		<select class="phone-dial-select" aria-label="Country code">
 			${_DIAL_CODES_BY_NAME.map(([name, dial]) => `<option value="${dial}"${dial === DEFAULT_DIAL_CODE ? " selected" : ""}>${escapeHtml(name)} ${dial}</option>`).join("")}
 		</select>
-		<input type="text" class="phone-local-input" inputmode="tel" placeholder="Local number">`;
+		<input type="text" class="phone-local-input" inputmode="tel" placeholder="333-1234567">`;
 	const dialSelect = root.querySelector(".phone-dial-select");
 	const localInput = root.querySelector(".phone-local-input");
+
+	function refreshPlaceholder() {
+		localInput.placeholder = dialSelect.value === "+92" ? "333-1234567" : "Local number";
+	}
+
+	// Live-format as the admin types: strip anything non-digit, cap at 10
+	// digits (3+7) for Pakistan specifically, re-insert the dash at the
+	// right position -- so what's on screen already looks like the
+	// required format instead of the admin needing to type dashes
+	// themselves or only finding out it's wrong after submitting.
+	localInput.addEventListener("input", () => {
+		const digits = localInput.value.replace(/\D/g, "").slice(0, dialSelect.value === "+92" ? 10 : 14);
+		localInput.value = _formatLocalDigits(dialSelect.value, digits);
+	});
+	dialSelect.addEventListener("change", () => {
+		refreshPlaceholder();
+		const digits = localInput.value.replace(/\D/g, "");
+		localInput.value = _formatLocalDigits(dialSelect.value, digits);
+	});
+	refreshPlaceholder();
 
 	return {
 		setValue(phone) {
@@ -531,12 +582,18 @@ function createPhoneInput(root) {
 			if (!phone) {
 				dialSelect.value = DEFAULT_DIAL_CODE;
 				localInput.value = "";
+				refreshPlaceholder();
 				return;
 			}
-			const match = _DIAL_CODES_BY_LENGTH.find(([, dial]) => phone.startsWith(dial));
+			// Strip dashes before matching against DIAL_CODES (which holds
+			// bare "+92" etc.) -- accepts both the new dash-grouped format
+			// and any older bare-digit value already sitting in the
+			// database from before this format existed.
+			const compact = phone.replace(/-/g, "");
+			const match = _DIAL_CODES_BY_LENGTH.find(([, dial]) => compact.startsWith(dial));
 			if (match) {
 				dialSelect.value = match[1];
-				localInput.value = phone.slice(match[1].length);
+				localInput.value = _formatLocalDigits(match[1], compact.slice(match[1].length));
 			} else {
 				// Doesn't cleanly match any known dial code (e.g. a legacy
 				// value entered before this UI existed) -- don't crash or
@@ -547,12 +604,16 @@ function createPhoneInput(root) {
 				dialSelect.value = DEFAULT_DIAL_CODE;
 				localInput.value = phone;
 			}
+			refreshPlaceholder();
 		},
 		getValue() {
-			const local = localInput.value.trim().replace(/[^\d]/g, "");
-			if (!local) return "";
+			const digits = localInput.value.replace(/\D/g, "");
+			if (!digits) return "";
 			const dial = dialSelect.value || DEFAULT_DIAL_CODE;
-			return dial + local;
+			if (dial === "+92") {
+				return digits.length === 10 ? `${dial}-${digits.slice(0, 3)}-${digits.slice(3)}` : `${dial}-${digits}`;
+			}
+			return `${dial}-${digits}`;
 		},
 		getLocalInputEl() {
 			return localInput;
@@ -560,6 +621,7 @@ function createPhoneInput(root) {
 		reset() {
 			dialSelect.value = DEFAULT_DIAL_CODE;
 			localInput.value = "";
+			refreshPlaceholder();
 		},
 	};
 }

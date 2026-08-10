@@ -49,6 +49,28 @@
 				<div id="u-phone-mount"></div>
 			</div>
 		</div>
+		<button type="button" class="restrictions-toggle" id="u-restrictions-toggle" aria-expanded="false">
+			<span class="chevron">▸</span> Login restrictions <span class="muted">(optional)</span>
+		</button>
+		<div class="restrictions-panel" id="u-restrictions-panel">
+			<div class="field">
+				<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+					<input type="checkbox" id="u-restrict-country">
+					Restrict login by country
+				</label>
+				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from the selected countries (detected via GeoIP on the sign-in request's IP). Leave unchecked, or the list empty, to allow any country.</p>
+				<div id="u-countries-ms"></div>
+			</div>
+			<div class="field" style="margin-top:14px">
+				<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+					<input type="checkbox" id="u-restrict-ip">
+					Restrict login by IP address
+				</label>
+				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these IPs or CIDR ranges, one per line (e.g. 203.0.113.5 or 10.0.0.0/24). Leave unchecked, or the list empty, to allow any IP.</p>
+				<textarea id="u-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
+			</div>
+		</div>
+
 		<div class="form-row" style="margin-top:16px">
 			<button type="submit" class="btn-primary">Add User</button>
 			<button type="button" class="btn-secondary" id="add-user-clear">Clear</button>
@@ -113,6 +135,25 @@
 				</div>
 			</fieldset>
 			<fieldset>
+				<legend>Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<div class="field">
+					<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+						<input type="checkbox" id="e-restrict-country">
+						Restrict login by country
+					</label>
+					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from the selected countries (detected via GeoIP on the sign-in request's IP). Leave unchecked, or the list empty, to allow any country.</p>
+					<div id="e-countries-ms"></div>
+				</div>
+				<div class="field" style="margin-top:14px;margin-bottom:0">
+					<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+						<input type="checkbox" id="e-restrict-ip">
+						Restrict login by IP address
+					</label>
+					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these IPs or CIDR ranges, one per line (e.g. 203.0.113.5 or 10.0.0.0/24). Leave unchecked, or the list empty, to allow any IP.</p>
+					<textarea id="e-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
+				</div>
+			</fieldset>
+			<fieldset>
 				<legend>Reset Password <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
 				<div class="field" style="margin-bottom:0">
 					<input type="password" id="e-password" minlength="8" placeholder="Leave blank to keep current password">
@@ -150,6 +191,16 @@ function fmtDate(iso) {
 const addTeamMs = createMultiselectDropdown(document.getElementById("u-team-ms"), { placeholder: "Unassigned" });
 const editTeamMs = createMultiselectDropdown(document.getElementById("e-team-ms"), { placeholder: "Unassigned" });
 
+const addCountriesMs = createMultiselectDropdown(document.getElementById("u-countries-ms"), {
+	placeholder: "Any country", idType: "string", emptyLabel: "No countries found.", unitLabel: "countries",
+});
+const editCountriesMs = createMultiselectDropdown(document.getElementById("e-countries-ms"), {
+	placeholder: "Any country", idType: "string", emptyLabel: "No countries found.", unitLabel: "countries",
+});
+const countryOptions = ISO_3166_COUNTRIES.map(([code, name]) => ({ id: code, label: `${name} (${code})` }));
+addCountriesMs.setOptions(countryOptions);
+editCountriesMs.setOptions(countryOptions);
+
 const addPhone = createPhoneInput(document.getElementById("u-phone-mount"));
 const editPhone = createPhoneInput(document.getElementById("e-phone-mount"));
 
@@ -164,10 +215,26 @@ function emailError(v) {
 	}
 	return null;
 }
+// Mirrors routes/users.py's _valid_phone: a strict 3-digit-prefix/7-digit
+// grouping for +92 (Pakistan) specifically, a looser single-dash-grouped
+// or legacy bare-digit shape for every other dial code.
 function phoneError(combined) {
 	if (!combined) return null;
-	if (!/^\+\d{7,15}$/.test(combined)) return "Enter a valid phone number: pick a country code and enter 7-15 digits.";
-	return null;
+	if (combined.startsWith("+92")) {
+		if (!/^\+92-\d{3}-\d{7}$/.test(combined)) {
+			return "Pakistani numbers must be in the format +92-333-1234567 (3-digit prefix, 7-digit number).";
+		}
+		return null;
+	}
+	if (/^\+\d{1,4}-\d{4,14}$/.test(combined) || /^\+\d{7,15}$/.test(combined)) return null;
+	return "Enter a valid phone number: pick a country code and enter the local number.";
+}
+
+// Splits the Allowed IPs textarea (one entry per line, blank lines and
+// stray commas both tolerated) into a clean array -- shared by both the
+// Add and Edit forms' submit handlers below.
+function parseAllowedIps(text) {
+	return text.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
 }
 
 const uEmailValidation = attachInlineValidation(document.getElementById("u-email"), emailError);
@@ -185,6 +252,14 @@ async function loadTeamOptions() {
 		toast(e.message, "error");
 	}
 }
+
+const uRestrictionsToggle = document.getElementById("u-restrictions-toggle");
+const uRestrictionsPanel = document.getElementById("u-restrictions-panel");
+uRestrictionsToggle.addEventListener("click", () => {
+	const willOpen = !uRestrictionsPanel.classList.contains("open");
+	uRestrictionsPanel.classList.toggle("open", willOpen);
+	uRestrictionsToggle.setAttribute("aria-expanded", String(willOpen));
+});
 
 function matchesSearch(u) {
 	if (!userSearchTerm) return true;
@@ -327,6 +402,10 @@ function openEdit(u) {
 	document.getElementById("e-role-note").style.display = editingUserIsBootstrapAdmin ? "" : "none";
 	document.getElementById("e-password").value = "";
 	document.getElementById("e-created").value = fmtDate(u.created_at);
+	document.getElementById("e-restrict-country").checked = !!u.restrict_login_by_country;
+	editCountriesMs.setSelected(u.allowed_login_countries || []);
+	document.getElementById("e-restrict-ip").checked = !!u.restrict_login_by_ip;
+	document.getElementById("e-allowed-ips").value = (u.allowed_login_ips || []).join("\n");
 	document.getElementById("edit-dialog").showModal();
 }
 document.getElementById("edit-cancel").addEventListener("click", () => document.getElementById("edit-dialog").close());
@@ -346,6 +425,10 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		email: document.getElementById("e-email").value.trim(),
 		phone: editPhone.getValue(),
 		team_ids: editTeamMs.getSelected(),
+		restrict_login_by_country: document.getElementById("e-restrict-country").checked,
+		allowed_login_countries: editCountriesMs.getSelected(),
+		restrict_login_by_ip: document.getElementById("e-restrict-ip").checked,
+		allowed_login_ips: parseAllowedIps(document.getElementById("e-allowed-ips").value),
 	};
 	if (!editingUserIsBootstrapAdmin) {
 		body.role = document.getElementById("e-role").value;
@@ -388,12 +471,17 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				email: document.getElementById("u-email").value.trim() || null,
 				phone: addPhone.getValue() || null,
 				team_ids: addTeamMs.getSelected(),
+				restrict_login_by_country: document.getElementById("u-restrict-country").checked,
+				allowed_login_countries: addCountriesMs.getSelected(),
+				restrict_login_by_ip: document.getElementById("u-restrict-ip").checked,
+				allowed_login_ips: parseAllowedIps(document.getElementById("u-allowed-ips").value),
 			},
 		});
 		toast(`User '${username}' created.`);
 		document.getElementById("add-user-form").reset();
 		addTeamMs.reset();
 		addPhone.reset();
+		addCountriesMs.reset();
 		loadUsers();
 	} catch (e) {
 		toast(e.message, "error");
@@ -404,6 +492,7 @@ document.getElementById("add-user-clear").addEventListener("click", () => {
 	document.getElementById("add-user-form").reset();
 	addTeamMs.reset();
 	addPhone.reset();
+	addCountriesMs.reset();
 });
 
 document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); loadTeamOptions(); });

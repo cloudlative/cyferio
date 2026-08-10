@@ -102,10 +102,19 @@ function emailError(v) {
 	}
 	return null;
 }
+// Mirrors routes/users.py's _valid_phone (see users.html's copy of this
+// same function for the full rationale): strict 3+7 grouping for +92
+// (Pakistan), looser dash-grouped or legacy shape for every other code.
 function phoneError(combined) {
 	if (!combined) return null;
-	if (!/^\+\d{7,15}$/.test(combined)) return "Enter a valid phone number: pick a country code and enter 7-15 digits.";
-	return null;
+	if (combined.startsWith("+92")) {
+		if (!/^\+92-\d{3}-\d{7}$/.test(combined)) {
+			return "Pakistani numbers must be in the format +92-333-1234567 (3-digit prefix, 7-digit number).";
+		}
+		return null;
+	}
+	if (/^\+\d{1,4}-\d{4,14}$/.test(combined) || /^\+\d{7,15}$/.test(combined)) return null;
+	return "Enter a valid phone number: pick a country code and enter the local number.";
 }
 const pEmailValidation = attachInlineValidation(document.getElementById("p-email"), emailError);
 const pPhoneValidation = attachInlineValidation(profilePhone.getLocalInputEl(), () => phoneError(profilePhone.getValue()));

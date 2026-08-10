@@ -215,6 +215,21 @@ Country restriction needs a MaxMind GeoLite2-Country database on the OpenVPN hos
 - **Why bandwidth is a soft cutoff:** no OpenVPN management-interface integration, no polling daemon — the simplest form that's still genuinely useful. An in-progress session is never killed; only the *next* connection attempt is gated.
 - **This is a self-hosted, open-source project** — nothing above hardcodes any specific country, deployment, or organization; every client independently picks its own restriction (or none) from the full ISO 3166-1 list.
 
+## Login restrictions (country / IP allowlisting)
+
+Separate from VPN client restrictions above, an **admin login** to this web app itself can also be restricted per user — to a set of countries, a set of IPs/CIDR ranges, both, or (the default) neither.
+
+- **Where:** Users page → Add User's "Login restrictions" section, or an existing user's Edit dialog → "Login Restrictions". Two independent toggles: "Restrict login by country" and "Restrict login by IP address"; each has its own list, editable regardless of whether the other is on.
+- **Countries:** picked from the same full ISO 3166-1 country list used elsewhere in the app (no API call at runtime). Detected via GeoIP on the sign-in request's IP — see below for the database this needs.
+- **IPs:** one per line, each either a single address (`203.0.113.5`) or a CIDR range (`10.0.0.0/24`), IPv4 or IPv6.
+- **Blank = unrestricted.** Leaving a toggle off, or its list empty, means that dimension is never checked for that user — a fresh account has no login restriction at all by default.
+- **Order of checks:** country, then IP, both *before* the password is ever verified — a request from a blocked country/IP is rejected without touching password-hashing, and without revealing whether the username/password would otherwise have been correct. A blocked attempt gets a specific message ("Login is not permitted from your current country/IP address"); a genuinely wrong username or password still gets the same generic "Invalid username or password" as before, so a blocked-vs-wrong-credentials response never leaks which case it was.
+- **Audit trail:** every blocked attempt is logged (Users Activity page → Recent User Activity, action `login_blocked_country` or `login_blocked_ip`) with the attempted username, source IP, detected country, and which restriction blocked it.
+
+**GeoIP setup:** the country check reuses the *same* GeoLite2-Country database as VPN client country restriction (see the setup steps above) — no separate MaxMind account needed. The one difference: this lookup happens **inside the app's own Docker container**, not on the bare host, so it needs the `geoip2` Python package (already in `app/requirements.txt`, nothing to install manually) and `GEOIP_DB_PATH` pointed at the mmdb file (defaults to the same path the host-side setup already produces, `/etc/openvpn/server/GeoLite2-Country.mmdb`, which the app already bind-mounts rw — see `.env.example`).
+
+**Fail-safe behavior:** identical stance to VPN client country restriction — a user with country restriction enabled whose country can't be determined (missing db, lookup error) is rejected (fail closed), not silently let through.
+
 ## Requirements
 
 - Ubuntu 18.04+, Debian 9+, AlmaLinux/Rocky/CentOS 7+, or Fedora

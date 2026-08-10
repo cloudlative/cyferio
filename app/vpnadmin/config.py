@@ -137,6 +137,17 @@ class Settings:
     CLIENT_POLICY_FILE: str = os.environ.get("CLIENT_POLICY_FILE", "/etc/openvpn/server/policy/client_policy.json")
     CLIENT_USAGE_FILE: str = os.environ.get("CLIENT_USAGE_FILE", "/etc/openvpn/server/policy/client_usage.json")
 
+    # Same GeoLite2-Country mmdb used by the VPN client country-restriction
+    # feature (see host-scripts/policy_lib.py's geoip_lookup_country and
+    # vpn-tools.conf.example's MAXMIND_DB_PATH) -- the default path matches
+    # that one exactly, and lives under /etc/openvpn, which this app
+    # already bind-mounts rw (see docker-compose.yml), so no extra mount is
+    # needed to let the web app's own login-country check read the same
+    # database. Used by vpnadmin/geoip.py; unrelated to the host-level
+    # scripts' own separate geoip2 install -- this app has its own
+    # requirements.txt entry for the geoip2 package.
+    GEOIP_DB_PATH: str = os.environ.get("GEOIP_DB_PATH", "/etc/openvpn/server/GeoLite2-Country.mmdb")
+
     # --- Health page -------------------------------------------------------
     # Read-only bind mounts of the Docker HOST's /proc, /sys, and root
     # filesystem (see docker-compose.yml) -- deliberately NOT the

@@ -1,3 +1,5 @@
+import ipaddress
+import json
 import re
 from datetime import datetime, timezone
 
@@ -67,19 +69,24 @@ def _valid_email(v: str | None) -> str | None:
     return v
 
 
-# E.164-shaped bounds check: a leading "+", then 7-15 digits and nothing
-# else. This is deliberately NOT a per-country length/prefix validator (that
-# is a well-known rabbit hole -- see e.g. libphonenumber) -- it just rejects
-# the obviously-wrong stuff a fat-fingered admin might submit (missing "+",
-# letters, stray spaces/dashes/parens the client-side phone input isn't
-# supposed to be producing in the first place, way too few/many digits).
-# The client-side phone-input component (dial-code dropdown + local-number
-# field, see users.html/profile.html + app.js's createPhoneInput) is
-# responsible for assembling a clean "+<dialcode><digits>" string before it
-# ever reaches here; this is the real source of truth behind that UX sugar,
-# same as every other validator in this file, and also runs for any request
-# built by hand (curl, an older client, etc.) that skips the UI entirely.
-_PHONE_RE = re.compile(r"^\+\d{7,15}$")
+# Pakistan (+92) gets a real, strict shape check -- 3-digit mobile prefix,
+# dash, 7-digit subscriber number, e.g. +92-333-1234567 -- because that's
+# this deployment's own explicitly-requested standard format. This is
+# deliberately NOT generalized to every dial code: a 3+7 split is specific
+# to Pakistan's own numbering plan and would reject plenty of legitimately-
+# formatted numbers from the 200+ other countries this app's phone-input
+# dropdown supports (see app.js's DIAL_CODES) -- most countries don't share
+# that grouping at all. Every other dial code keeps the older, deliberately
+# loose E.164-shaped bounds check below (a well-known rabbit hole to do
+# properly per-country -- see e.g. libphonenumber -- so this only rejects
+# the obviously-wrong stuff: missing "+", letters, wildly too few/many
+# digits), now also accepting one dash between the dial code and the local
+# number (matching the client-side phone-input's new default grouping)
+# alongside the older no-dash form already sitting in the database from
+# before this change, so existing rows don't need a migration.
+_PHONE_PK_RE = re.compile(r"^\+92-\d{3}-\d{7}$")
+_PHONE_GENERAL_RE = re.compile(r"^\+\d{1,4}-\d{4,14}$")  # dial code - local number, one dash
+_PHONE_LEGACY_RE = re.compile(r"^\+\d{7,15}$")  # pre-existing no-dash rows; still accepted, never produced fresh
 
 
 def _valid_phone(v: str | None) -> str | None:
@@ -88,12 +95,70 @@ def _valid_phone(v: str | None) -> str | None:
     v = v.strip()
     if not v:
         return None  # explicit "" from the form means "clear it", not an error
-    if not _PHONE_RE.match(v):
-        raise ValueError(
-            "Phone number must start with '+' followed by 7-15 digits "
-            "(country code + number), e.g. +923001234567."
-        )
-    return v
+
+    if v.startswith("+92"):
+        # A bare compact "+923001234567" (old format, or hand-typed without
+        # dashes) gets normalized into the standard +92-XXX-XXXXXXX shape
+        # rather than rejected outright, as long as it's genuinely 10 local
+        # digits (3+7) -- "always stored in a standardized format" per the
+        # task, without forcing a fresh round-trip through the UI just to
+        # fix formatting on an otherwise-valid number.
+        if _PHONE_LEGACY_RE.match(v) and not v.startswith("+92-"):
+            local = v[3:]
+            if len(local) == 10:
+                v = f"+92-{local[:3]}-{local[3:]}"
+        if not _PHONE_PK_RE.match(v):
+            raise ValueError(
+                "Pakistani phone numbers must be in the format +92-333-1234567 "
+                "(3-digit prefix, dash, 7-digit number)."
+            )
+        return v
+
+    if _PHONE_GENERAL_RE.match(v) or _PHONE_LEGACY_RE.match(v):
+        return v
+    raise ValueError(
+        "Phone number must be in the format +<country code>-<number>, e.g. +92-333-1234567."
+    )
+
+
+def _valid_country_list(v: list[str]) -> list[str]:
+    """Same lightweight "2-letter alpha shape" check as policy_store.py's
+    client-country validator -- not a fixed enum against a real ISO list,
+    for the same reason: less to maintain, and this app's own country
+    dropdown (app.js's ISO_3166_COUNTRIES) is already the real source of
+    truth for what a human picks from in the UI. Normalizes to uppercase
+    and dedupes, preserving first-seen order."""
+    seen = []
+    for code in v:
+        code = (code or "").strip().upper()
+        if not code:
+            continue
+        if len(code) != 2 or not code.isalpha():
+            raise ValueError(f"Invalid country code: '{code}' -- expected an ISO 3166-1 alpha-2 code (e.g. PK).")
+        if code not in seen:
+            seen.append(code)
+    return seen
+
+
+def _valid_ip_list(v: list[str]) -> list[str]:
+    """Each entry is either a single IP address or a CIDR range, dual-stack
+    (IPv4/IPv6) -- see client_ip.py's ip_matches_allowlist, the runtime
+    counterpart that checks a login attempt's IP against exactly this
+    list. Normalizes each entry to str(ipaddress...) form (consistent
+    formatting regardless of how the admin typed it, e.g. leading zeros)
+    and dedupes, preserving first-seen order."""
+    seen = []
+    for entry in v:
+        entry = (entry or "").strip()
+        if not entry:
+            continue
+        try:
+            normalized = str(ipaddress.ip_network(entry, strict=False)) if "/" in entry else str(ipaddress.ip_address(entry))
+        except ValueError:
+            raise ValueError(f"'{entry}' isn't a valid IP address or CIDR range (e.g. 203.0.113.5 or 10.0.0.0/24).")
+        if normalized not in seen:
+            seen.append(normalized)
+    return seen
 
 
 def _resolve_teams(db: Session, team_ids: list[int]) -> list[Team]:
@@ -122,6 +187,21 @@ class CreateUserRequest(BaseModel):
     email: str | None = None
     phone: str | None = None
     team_ids: list[int] = []
+
+    restrict_login_by_country: bool = False
+    allowed_login_countries: list[str] = []
+    restrict_login_by_ip: bool = False
+    allowed_login_ips: list[str] = []
+
+    @field_validator("allowed_login_countries")
+    @classmethod
+    def _countries(cls, v: list[str]) -> list[str]:
+        return _valid_country_list(v)
+
+    @field_validator("allowed_login_ips")
+    @classmethod
+    def _ips(cls, v: list[str]) -> list[str]:
+        return _valid_ip_list(v)
 
     @field_validator("username")
     @classmethod
@@ -169,6 +249,21 @@ class UpdateUserRequest(BaseModel):
     email: str | None = None
     phone: str | None = None
     team_ids: list[int] | None = None  # explicit [] = clear all teams; see model_fields_set usage below
+
+    restrict_login_by_country: bool | None = None
+    allowed_login_countries: list[str] | None = None  # explicit [] = clear the list
+    restrict_login_by_ip: bool | None = None
+    allowed_login_ips: list[str] | None = None  # explicit [] = clear the list
+
+    @field_validator("allowed_login_countries")
+    @classmethod
+    def _countries(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_country_list(v) if v is not None else v
+
+    @field_validator("allowed_login_ips")
+    @classmethod
+    def _ips(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_ip_list(v) if v is not None else v
 
     @field_validator("password")
     @classmethod
@@ -243,6 +338,10 @@ def _serialize(u: User) -> dict:
         "phone": u.phone,
         "team_ids": [t.id for t in u.teams],
         "teams": [t.name for t in u.teams],
+        "restrict_login_by_country": u.restrict_login_by_country,
+        "allowed_login_countries": json.loads(u.allowed_login_countries or "[]"),
+        "restrict_login_by_ip": u.restrict_login_by_ip,
+        "allowed_login_ips": json.loads(u.allowed_login_ips or "[]"),
     }
 
 
@@ -343,6 +442,10 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         email=body.email,
         phone=body.phone,
         teams=teams,
+        restrict_login_by_country=body.restrict_login_by_country,
+        allowed_login_countries=json.dumps(body.allowed_login_countries) if body.allowed_login_countries else None,
+        restrict_login_by_ip=body.restrict_login_by_ip,
+        allowed_login_ips=json.dumps(body.allowed_login_ips) if body.allowed_login_ips else None,
     )
     db.add(user)
     db.commit()
@@ -420,6 +523,22 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         if {t.id for t in new_teams} != {t.id for t in target.teams}:
             target.teams = new_teams
             changes.append("teams")
+    if "restrict_login_by_country" in body.model_fields_set and body.restrict_login_by_country != target.restrict_login_by_country:
+        target.restrict_login_by_country = body.restrict_login_by_country
+        changes.append(f"restrict_login_by_country {target.restrict_login_by_country}")
+    if "allowed_login_countries" in body.model_fields_set:
+        new_value = json.dumps(body.allowed_login_countries) if body.allowed_login_countries else None
+        if new_value != target.allowed_login_countries:
+            target.allowed_login_countries = new_value
+            changes.append("allowed_login_countries")
+    if "restrict_login_by_ip" in body.model_fields_set and body.restrict_login_by_ip != target.restrict_login_by_ip:
+        target.restrict_login_by_ip = body.restrict_login_by_ip
+        changes.append(f"restrict_login_by_ip {target.restrict_login_by_ip}")
+    if "allowed_login_ips" in body.model_fields_set:
+        new_value = json.dumps(body.allowed_login_ips) if body.allowed_login_ips else None
+        if new_value != target.allowed_login_ips:
+            target.allowed_login_ips = new_value
+            changes.append("allowed_login_ips")
     # created_at is intentionally immutable here -- it's a factual record of
     # account creation, not admin-editable through this endpoint (unlike the
     # other profile fields above).

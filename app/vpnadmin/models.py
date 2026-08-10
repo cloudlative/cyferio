@@ -114,6 +114,20 @@ class User(Base):
     deleted = Column(Boolean, nullable=False, default=False)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
 
+    # --- Login restrictions (country / IP allowlisting) --------------------
+    # Both independently toggleable and both optional -- an unset/False
+    # restrict_login_by_* or an empty allowed_login_* list means "no
+    # restriction of that kind", never a fail-closed lockout by default (see
+    # routes/auth.py's login_submit, which only enforces a restriction when
+    # BOTH the toggle is on AND the list is non-empty). Stored as JSON text
+    # rather than a separate child table -- these are short, admin-only-
+    # edited lists (a handful of country codes / IPs per user at most), not
+    # something ever queried/joined against independently.
+    restrict_login_by_country = Column(Boolean, nullable=False, default=False)
+    allowed_login_countries = Column(Text, nullable=True)  # JSON list of ISO 3166-1 alpha-2 codes, e.g. ["PK","AE"]
+    restrict_login_by_ip = Column(Boolean, nullable=False, default=False)
+    allowed_login_ips = Column(Text, nullable=True)  # JSON list of IPs/CIDRs, e.g. ["203.0.113.5","10.0.0.0/24"]
+
     @validates("username")
     def _normalize_username(self, key, value):
         return value.strip().lower()
