@@ -1,4 +1,4 @@
-# Static routing config for Traefik (see docker-compose.yml's `traefik`
+# Templated routing config for Traefik (see docker-compose.yml's `traefik`
 # service, --providers.file). Used instead of Traefik's Docker-socket
 # provider (the usual docker-compose-labels pattern) because Traefik's
 # bundled Docker client is incompatible with this host's Docker Engine
@@ -10,13 +10,25 @@
 # security win) since this app doesn't need dynamic service discovery: it's
 # one fixed backend.
 #
-# NOTE: unlike docker-compose.yml, Traefik's file provider does not expand
-# ${VAR} from .env -- the hostname below is hardcoded and must be kept in
-# sync with APP_DOMAIN in .env by hand if that ever changes.
+# This is a TEMPLATE, not the file Traefik actually reads: Traefik's file
+# provider does not expand variables on its own, so a hand-hardcoded
+# hostname here used to have to be kept in sync with APP_DOMAIN in .env by
+# hand -- it's now templated instead. The `traefik-config` one-shot service
+# in docker-compose.yml renders this into the `traefik-dynamic-config`
+# volume (substituting the placeholder below with APP_DOMAIN's value from
+# .env) before Traefik starts, so the domain is genuinely driven by .env,
+# not hardcoded anywhere in the repo. Re-running `docker compose up -d`
+# after changing APP_DOMAIN re-renders and Traefik's own
+# --providers.file.watch=true picks up the change without a restart.
+#
+# NOTE for anyone editing this file: the placeholder token below is matched
+# by a literal sed substitution (see docker-compose.yml's `traefik-config`
+# entrypoint) -- it's deliberately not repeated anywhere else in this
+# comment block so the rendered output doesn't corrupt this prose too.
 http:
   routers:
     openvpn-toolkit:
-      rule: "Host(`vpn-mgmt.cloudlative.com`)"
+      rule: "Host(`${APP_DOMAIN}`)"
       entryPoints:
         - websecure
       service: openvpn-toolkit

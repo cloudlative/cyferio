@@ -9,16 +9,54 @@
 name: app
 
 services:
+  # Renders app/traefik/dynamic.yml.tmpl -> the traefik-dynamic-config volume,
+  # substituting ${APP_DOMAIN} from .env -- so the routing hostname is
+  # genuinely driven by .env, not hardcoded in the repo (Traefik's file
+  # provider has no ${VAR} expansion of its own, unlike this compose file).
+  # Deliberately a plain shell `sed`, not full envsubst/gettext, since there's
+  # exactly one variable to substitute -- no extra package install needed on
+  # top of a bare alpine image. Runs once per `docker compose up`; changing
+  # APP_DOMAIN and re-running `up` re-renders and Traefik's own
+  # --providers.file.watch=true picks up the change without a restart.
+  traefik-config:
+    image: alpine:3.20
+    container_name: openvpn-toolkit-traefik-config
+    restart: "no"
+    env_file: .env
+    volumes:
+      - ./app/traefik/dynamic.yml.tmpl:/tmpl/dynamic.yml.tmpl:ro
+      - traefik-dynamic-config:/out
+    # Every $ meant to reach the container's own shell unevaluated is
+    # doubled ($$) -- Compose interpolates ${VAR}/$VAR anywhere in this
+    # file's text, including inside this embedded script, with no
+    # awareness of shell quoting/escaping conventions; $$ is Compose's own
+    # escape for "a literal $, don't touch it here" (see Compose's env
+    # interpolation docs). Verified with `docker compose config` that the
+    # container actually receives the literal search pattern "${APP_DOMAIN}"
+    # (matching the template's placeholder) and the real value on the
+    # replacement side.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        : "$${APP_DOMAIN:?APP_DOMAIN must be set in .env -- see .env.example}"
+        sed "s/\$${APP_DOMAIN}/$$APP_DOMAIN/g" /tmpl/dynamic.yml.tmpl > /out/dynamic.yml
+        echo "Rendered Traefik dynamic.yml for APP_DOMAIN=$$APP_DOMAIN"
+
   traefik:
     image: traefik:v3.5
     container_name: openvpn-toolkit-traefik
     restart: unless-stopped
+    depends_on:
+      traefik-config:
+        condition: service_completed_successfully
     command:
-      # File provider (see app/traefik/dynamic.yml), not the usual
+      # File provider (see app/traefik/dynamic.yml.tmpl), not the usual
       # Docker-socket provider -- this host's Docker Engine enforces a
       # MinAPIVersion that Traefik's bundled Docker client can't satisfy
-      # (see dynamic.yml's comment for the full story). One fixed backend,
-      # so static routing config is simpler here anyway, and avoids
+      # (see dynamic.yml.tmpl's comment for the full story). One fixed
+      # backend, so static routing config is simpler here anyway, and avoids
       # mounting docker.sock at all.
       - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
@@ -58,7 +96,7 @@ services:
       - "443:443"
     volumes:
       - traefik-acme:/letsencrypt
-      - ./app/traefik/dynamic.yml:/etc/traefik/dynamic/dynamic.yml:ro
+      - traefik-dynamic-config:/etc/traefik/dynamic:ro
     env_file: .env
 
   app:
@@ -177,4 +215,5 @@ services:
 
 volumes:
   traefik-acme:
+  traefik-dynamic-config:
   pgdata:
