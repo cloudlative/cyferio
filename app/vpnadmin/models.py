@@ -27,7 +27,7 @@ class Role(str, enum.Enum):
 
 
 class RoleKind(str, enum.Enum):
-    system = "system"  # the 4 seeded roles (admin/editor/viewer/vpn_self_service) --
+    system = "system"  # the 4 seeded roles (admin/editor/viewer/user) --
     # undeletable, slug is fixed, see permissions.py's seed_system_roles
     custom = "custom"  # anything an admin creates via Roles Management
 
@@ -40,7 +40,7 @@ class RoleDef(Base):
 
     id = Column(Integer, primary_key=True)
     slug = Column(String(64), unique=True, nullable=False, index=True)  # "admin","editor","viewer",
-    # "vpn_self_service", or a custom admin-chosen slug
+    # "user" (self-service role), or a custom admin-chosen slug
     name = Column(String(128), nullable=False)  # display name -- editable even for system roles
     description = Column(Text, nullable=True)
     kind = Column(Enum(RoleKind), nullable=False, default=RoleKind.custom)
@@ -253,7 +253,7 @@ class User(Base):
         enum for the narrow pre-backfill window -- see permissions.py's
         migrate_user_roles docstring. Used by templates (base.html,
         profile.html) so they never read the legacy enum column directly,
-        which can't represent a custom or vpn_self_service role."""
+        which can't represent a custom or "User" self-service role."""
         return self.role_def.slug if self.role_def is not None else self.role.value
 
     @property

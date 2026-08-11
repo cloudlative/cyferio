@@ -9,7 +9,7 @@ from ..permissions import require_permission_any_scope
 router = APIRouter(prefix="/api", tags=["diagnostics"])
 
 # System-administration data (PKI/MAC-db consistency, stale entries) --
-# any_scope so VPN Self-Service User is excluded, same as clients.py's
+# any_scope so "User" (self-service role) is excluded, same as clients.py's
 # _require_client_viewer / status.py's _require_status_viewer.
 _require_diagnostics_viewer = require_permission_any_scope("health", "view")
 

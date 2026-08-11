@@ -28,8 +28,8 @@
 		</button>
 		<div class="restrictions-panel" id="add-restrictions-panel">
 			<div class="field">
-				<label for="add-policy-country">Restrict Country <span class="muted">(GeoIP on the client's connecting IP; blank = any country)</span></label>
-				<select id="add-policy-country"></select>
+				<label>Restrict Country <span class="muted">(GeoIP on the client's connecting IP; blank = any country)</span></label>
+				<div id="add-policy-country-ms"></div>
 			</div>
 			<div class="field">
 				<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
@@ -118,8 +118,8 @@
 		<h2 id="policy-dialog-title">Manage Restrictions</h2>
 		<form id="policy-form">
 			<div class="field">
-				<label for="policy-country">Restrict Country <span class="muted">(GeoIP on the client's connecting IP; blank = any country)</span></label>
-				<select id="policy-country"></select>
+				<label>Restrict Country <span class="muted">(GeoIP on the client's connecting IP; blank = any country)</span></label>
+				<div id="policy-country-ms"></div>
 			</div>
 			<div class="field">
 				<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
@@ -154,6 +154,12 @@
 {% block scripts %}
 <script>
 const isAdmin = {{ "true" if can_manage_clients else "false" }};
+// Shared by both the Add form's and Manage Restrictions dialog's country
+// pickers (declared here, not inside either `if (isAdmin) {}` block below,
+// so both can see it -- those are separate block scopes). Same "Name
+// (CODE)" label format as the Users page's login-restriction country
+// picker (app.js's ISO_3166_COUNTRIES), for consistency.
+const clientCountryOptions = ISO_3166_COUNTRIES.map(([code, name]) => ({ id: code, label: `${name} (${code})` }));
 const _initialParams = new URLSearchParams(location.search);
 let currentFilter = _initialParams.get("online") === "1" ? "online"
 	: _initialParams.get("missing_mac") === "1" ? "missing_mac"
@@ -298,13 +304,14 @@ function restrictionChipsHtml(policy) {
 
 // Live "This client will be restricted to: ..." summary sentence, shared
 // between the Manage Restrictions dialog and the Add form's collapsible
-// restrictions panel -- pass the three field elements in, get back the
-// same human-readable sentence either way. Deliberately top-level (not
-// nested in either `if (isAdmin)` block below) so both call sites can
-// reach it regardless of function-hoisting quirks inside blocks.
-function restrictionsSummaryText(countryEl, osChecks, bandwidthEl) {
+// restrictions panel -- pass the current country code (or null) and the
+// other two field elements in, get back the same human-readable sentence
+// either way. Deliberately top-level (not nested in either `if (isAdmin)`
+// block below) so both call sites can reach it regardless of
+// function-hoisting quirks inside blocks.
+function restrictionsSummaryText(countryCode, osChecks, bandwidthEl) {
 	const bits = [];
-	if (countryEl.value) bits.push(countryName(countryEl.value));
+	if (countryCode) bits.push(countryName(countryCode));
 	const osVals = [...osChecks].filter(cb => cb.checked).map(cb => cb.value);
 	if (osVals.length) bits.push(osVals.map(o => OS_LABELS[o] || o).join("/"));
 	const bw = bandwidthEl.value.trim();
@@ -495,6 +502,12 @@ if (isAdmin) {
 		return i === 0 ? `${Math.round(v)}${units[i]}` : `${v.toFixed(1)}${units[i]}`;
 	}
 
+	const policyCountryMs = createMultiselectDropdown(document.getElementById("policy-country-ms"), {
+		placeholder: "Any country (unrestricted)", idType: "string", single: true, localFilter: true,
+		emptyLabel: "No countries found.", unitLabel: "country", searchPlaceholder: "Type to search countries…",
+	});
+	policyCountryMs.setOptions(clientCountryOptions);
+
 	let policyClientName = null;
 	async function openPolicyDialog(name) {
 		policyClientName = name;
@@ -505,7 +518,7 @@ if (isAdmin) {
 		dlg.showModal();
 		try {
 			const data = await apiFetch(`/api/clients/${encodeURIComponent(name)}/policy`);
-			populateCountrySelect(document.getElementById("policy-country"), data.policy.country);
+			policyCountryMs.setSelected(data.policy.country ? [data.policy.country] : []);
 			const allowedOs = data.policy.allowed_os || [];
 			document.querySelectorAll(".policy-os-check").forEach(cb => { cb.checked = allowedOs.includes(cb.value); });
 			document.getElementById("policy-bandwidth").value = data.policy.bandwidth_weekly_gb ?? "";
@@ -525,19 +538,21 @@ if (isAdmin) {
 
 	function updatePolicyDialogSummary() {
 		document.getElementById("policy-restrictions-summary").innerHTML = restrictionsSummaryText(
-			document.getElementById("policy-country"),
+			policyCountryMs.getSelected()[0] || null,
 			document.querySelectorAll(".policy-os-check"),
 			document.getElementById("policy-bandwidth"),
 		);
 	}
-	document.getElementById("policy-country").addEventListener("change", updatePolicyDialogSummary);
+	// "change" bubbles up from the multiselect's internal checkboxes to its
+	// mount div, same as any native form control -- no special event needed.
+	document.getElementById("policy-country-ms").addEventListener("change", updatePolicyDialogSummary);
 	document.querySelectorAll(".policy-os-check").forEach(cb => cb.addEventListener("change", updatePolicyDialogSummary));
 	document.getElementById("policy-bandwidth").addEventListener("input", updatePolicyDialogSummary);
 
 	document.getElementById("policy-dialog-cancel").addEventListener("click", () => document.getElementById("policy-dialog").close());
 	document.getElementById("policy-form").addEventListener("submit", async (ev) => {
 		ev.preventDefault();
-		const countryCode = document.getElementById("policy-country").value || null;
+		const countryCode = policyCountryMs.getSelected()[0] || null;
 		const allowedOs = [...document.querySelectorAll(".policy-os-check:checked")].map(cb => cb.value);
 		const bwRaw = document.getElementById("policy-bandwidth").value.trim();
 		const submitBtn = document.getElementById("policy-submit");
@@ -574,7 +589,11 @@ async function revokeClient(name) {
 }
 
 if (isAdmin) {
-	populateCountrySelect(document.getElementById("add-policy-country"));
+	const addPolicyCountryMs = createMultiselectDropdown(document.getElementById("add-policy-country-ms"), {
+		placeholder: "Any country (unrestricted)", idType: "string", single: true, localFilter: true,
+		emptyLabel: "No countries found.", unitLabel: "country", searchPlaceholder: "Type to search countries…",
+	});
+	addPolicyCountryMs.setOptions(clientCountryOptions);
 
 	const addRestrictionsToggle = document.getElementById("add-restrictions-toggle");
 	const addRestrictionsPanel = document.getElementById("add-restrictions-panel");
@@ -598,7 +617,7 @@ if (isAdmin) {
 	// whether the create flow needs a follow-up policy PUT at all, and to
 	// build that PUT's request body.
 	function readAddRestrictionFields() {
-		const country = document.getElementById("add-policy-country").value || null;
+		const country = addPolicyCountryMs.getSelected()[0] || null;
 		const allowedOs = [...document.querySelectorAll(".add-policy-os-check:checked")].map(cb => cb.value);
 		const bwRaw = document.getElementById("add-policy-bandwidth").value.trim();
 		return { country, allowedOs, bandwidthWeeklyGb: bwRaw ? Number(bwRaw) : null, anySet: !!(country || allowedOs.length || bwRaw) };
@@ -607,7 +626,7 @@ if (isAdmin) {
 	function updateAddRestrictionsUI() {
 		const { anySet, country, allowedOs, bandwidthWeeklyGb } = readAddRestrictionFields();
 		document.getElementById("add-restrictions-summary").innerHTML = restrictionsSummaryText(
-			document.getElementById("add-policy-country"),
+			country,
 			document.querySelectorAll(".add-policy-os-check"),
 			document.getElementById("add-policy-bandwidth"),
 		);
@@ -615,12 +634,13 @@ if (isAdmin) {
 		addRestrictionsCount.style.display = n ? "" : "none";
 		addRestrictionsCount.textContent = n ? `${n} set` : "";
 	}
-	document.getElementById("add-policy-country").addEventListener("change", updateAddRestrictionsUI);
+	document.getElementById("add-policy-country-ms").addEventListener("change", updateAddRestrictionsUI);
 	document.querySelectorAll(".add-policy-os-check").forEach(cb => cb.addEventListener("change", updateAddRestrictionsUI));
 	document.getElementById("add-policy-bandwidth").addEventListener("input", updateAddRestrictionsUI);
 
 	document.getElementById("add-clear").addEventListener("click", () => {
 		document.getElementById("add-form").reset();
+		addPolicyCountryMs.reset();  // not a form-associated control -- native reset() above doesn't touch it
 		collapseAddRestrictions();
 		updateAddRestrictionsUI();
 	});
@@ -658,6 +678,7 @@ if (isAdmin) {
 			}
 
 			document.getElementById("add-form").reset();
+			addPolicyCountryMs.reset();
 			collapseAddRestrictions();
 			updateAddRestrictionsUI();
 			loadClients();

@@ -24,7 +24,7 @@ from ..policy_store import PolicyValidationError
 _require_client_manager = require_permission("vpn_profiles", "execute")
 
 # Bulk/other-clients' endpoints (the full list, MAC lookups, policies) --
-# any_scope so an "own"-scoped role (VPN Self-Service User) is blocked here
+# any_scope so an "own"-scoped role (the "User" self-service role) is blocked here
 # even though it does have view=True on "vpn_profiles" for its own record
 # via routes/me_vpn.py. See permissions.py's require_permission_any_scope
 # docstring for why require_permission alone isn't enough.

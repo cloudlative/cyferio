@@ -78,8 +78,8 @@ _SYSTEM_ROLES: dict[str, dict] = {
         },
         "scopes": {},
     },
-    "vpn_self_service": {
-        "name": "VPN Self-Service User",
+    "user": {
+        "name": "User",
         "description": "Access to only their own VPN profile and account -- no visibility "
         "into other users, teams, audit logs, or settings.",
         "permissions": {
@@ -92,6 +92,34 @@ _SYSTEM_ROLES: dict[str, dict] = {
         },
     },
 }
+
+
+def rename_legacy_vpn_self_service_role(db: Session) -> None:
+    """One-time, idempotent fixup for deployments seeded before this role was
+    renamed from "VPN Self-Service User" (slug vpn_self_service) to "User"
+    (slug user) -- same self-healing-migration style as db.py's
+    _sync_missing_columns/_sync_enum_values, just for a data value instead
+    of a schema/enum change. seed_system_roles() below only ever CREATES a
+    missing RoleDef row, it never edits an existing one (by design -- an
+    admin may have since changed a system role's name), so shipping the
+    slug rename in _SYSTEM_ROLES alone would make seed_system_roles() seed
+    a brand-new "user" row on next startup while the old vpn_self_service
+    row (still referenced by every existing self-service User.role_id) sits
+    around orphaned -- two roles doing the same job. This renames that row
+    in place instead, preserving its id (so every existing role_id foreign
+    key keeps resolving) -- must run BEFORE seed_system_roles() (see
+    db.py's _seed_rbac) so it wins the race instead of a fresh seed. A
+    no-op once already renamed, or on a deployment that never had the old
+    slug (a genuinely fresh install seeds "user" directly) -- safe to leave
+    in permanently."""
+    if db.query(RoleDef).filter_by(slug="user").first() is not None:
+        return  # already renamed (or a fresh install that seeded "user" directly)
+    legacy = db.query(RoleDef).filter_by(slug="vpn_self_service").first()
+    if legacy is None:
+        return  # nothing to migrate
+    legacy.slug = "user"
+    legacy.name = "User"
+    db.commit()
 
 
 def seed_system_roles(db: Session) -> None:
@@ -174,7 +202,7 @@ def require_permission(object_key: str, action: str) -> Callable[..., User]:
     403. `object_key` must be a key in OBJECTS; `action` one of ACTIONS.
 
     Does NOT check scope -- a role scoped "own" for this object (e.g.
-    vpn_self_service on "vpn_profiles") still passes here, since it does
+    the "User" self-service role on "vpn_profiles") still passes here, since it does
     have the boolean permission, just restricted to its own record
     elsewhere (routes/me_vpn.py). Any endpoint that returns/acts on
     *every* record of a type (a bulk list, not a single "my own" lookup)
@@ -205,8 +233,8 @@ def require_permission_any_scope(object_key: str, action: str) -> Callable[..., 
     """Like require_permission, but additionally rejects a role scoped
     "own" for this object -- for bulk/list endpoints and "System
     Administration" pages that expose every record (or every user's
-    activity) rather than just the caller's own. This is what keeps
-    vpn_self_service off /api/clients, /api/status/*, /diagnostics,
+    activity) rather than just the caller's own. This is what keeps the
+    "User" self-service role off /api/clients, /api/status/*, /diagnostics,
     /health, etc: it has view=True on "vpn_profiles" (for its own linked
     profile via routes/me_vpn.py) but its scope for that object is "own",
     so it's blocked here even though require_permission alone would let it

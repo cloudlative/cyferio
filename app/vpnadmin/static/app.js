@@ -230,7 +230,24 @@ function createMultiselectDropdown(root, {
 	// multi-second). searchable:false (the default) preserves the exact
 	// prior behavior for every other caller (teams, the country picker).
 	searchable = false, onSearch = null, searchPlaceholder = "Type to search…",
+	// localFilter mode: like searchable, shows a search box in the panel,
+	// but filters the already-loaded `options` array in-browser on every
+	// keystroke instead of round-tripping to onSearch -- for lists small
+	// enough to ship whole (e.g. the ~196-entry country list) where a
+	// server round trip would be overkill, but scrolling an unfiltered
+	// flat list to find one entry is still real friction. Mutually
+	// exclusive with `searchable` (localFilter is ignored if searchable
+	// is also set -- searchable's server-driven mode wins).
+	localFilter = false,
+	// single mode: selecting an option clears any other selection and
+	// auto-closes the panel (combobox-style), for fields backed by a
+	// single-value model (e.g. a VPN client's one restricted country)
+	// rather than a genuine multi-select. getSelected()/setSelected() keep
+	// their existing array-shaped API (0 or 1 id) either way -- callers
+	// don't need to special-case anything beyond passing single:true.
+	single = false,
 } = {}) {
+	const hasSearchBox = searchable || localFilter;
 	root.classList.add("ms-dropdown");
 	root.innerHTML = `
 		<button type="button" class="ms-toggle"${disabled ? " disabled" : ""}>
@@ -238,7 +255,7 @@ function createMultiselectDropdown(root, {
 			<span class="ms-toggle-caret">▾</span>
 		</button>
 		<div class="ms-panel">
-			${searchable ? `<input type="text" class="ms-search" placeholder="${escapeHtml(searchPlaceholder)}">` : ""}
+			${hasSearchBox ? `<input type="text" class="ms-search" placeholder="${escapeHtml(searchPlaceholder)}">` : ""}
 			<div class="ms-options"></div>
 			${searchable ? `<div class="ms-hint muted"></div>` : ""}
 		</div>`;
@@ -248,10 +265,14 @@ function createMultiselectDropdown(root, {
 	const toggleLabel = root.querySelector(".ms-toggle-label");
 	const panel = root.querySelector(".ms-panel");
 	const optionsEl = root.querySelector(".ms-options");
-	const searchEl = searchable ? root.querySelector(".ms-search") : null;
+	const searchEl = hasSearchBox ? root.querySelector(".ms-search") : null;
 	const hintEl = searchable ? root.querySelector(".ms-hint") : null;
 	const castId = idType === "string" ? String : Number;
 	let options = [];
+	// Only populated/used in localFilter mode -- the unfiltered full list,
+	// so a keystroke can narrow `options` down and a cleared search box
+	// can restore the whole thing without re-fetching anything.
+	let fullOptions = [];
 	let selected = new Set();
 	let searchTimer = null;
 	// Accumulates label-by-id across every setOptions()/search result
@@ -285,7 +306,24 @@ function createMultiselectDropdown(root, {
 		optionsEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
 			cb.addEventListener("change", () => {
 				const id = castId(cb.value);
-				if (cb.checked) selected.add(id); else selected.delete(id);
+				if (cb.checked) {
+					if (single) {
+						// Clear any other selection first -- combobox
+						// semantics, not a real multiselect. Re-render so
+						// every other checkbox reflects the now-cleared
+						// state, then close the panel (picking a value is
+						// the terminal action in single mode; there's
+						// nothing else to do once you've chosen one).
+						selected.clear();
+						selected.add(id);
+						renderOptions();
+						panel.classList.remove("open");
+					} else {
+						selected.add(id);
+					}
+				} else {
+					selected.delete(id);
+				}
 				refreshLabel();
 			});
 		});
@@ -320,6 +358,15 @@ function createMultiselectDropdown(root, {
 			clearTimeout(searchTimer);
 			searchTimer = setTimeout(() => runSearch(searchEl.value.trim()), 250);
 		});
+	} else if (localFilter) {
+		// No debounce/round-trip needed -- this is a plain in-memory
+		// Array.filter over whatever setOptions() already loaded, cheap
+		// enough to run on every keystroke directly.
+		searchEl.addEventListener("input", () => {
+			const q = searchEl.value.trim().toLowerCase();
+			options = q ? fullOptions.filter(o => o.label.toLowerCase().includes(q)) : fullOptions;
+			renderOptions();
+		});
 	}
 
 	toggle.addEventListener("click", () => {
@@ -340,9 +387,10 @@ function createMultiselectDropdown(root, {
 
 	return {
 		setOptions(opts) {
-			// Non-searchable mode only -- searchable pickers manage their
-			// own `options` internally via runSearch().
+			// Non-searchable / localFilter mode only -- searchable pickers
+			// manage their own `options` internally via runSearch().
 			options = opts;
+			if (localFilter) fullOptions = opts;  // keep the unfiltered copy around
 			opts.forEach(o => labelCache.set(o.id, o.label));
 			renderOptions();
 			refreshLabel();
@@ -365,7 +413,11 @@ function createMultiselectDropdown(root, {
 			// `options` here left them permanently empty (showing
 			// emptyLabel forever) after any reset()/form-clear, until a
 			// full page reload re-ran that initial setOptions() call.
+			// localFilter pickers are the same "single setOptions() call at
+			// page load" shape as non-searchable ones -- just restore the
+			// unfiltered full list rather than wiping it.
 			if (searchable) options = [];
+			if (localFilter) options = fullOptions;
 			if (searchEl) searchEl.value = "";
 			if (hintEl) hintEl.textContent = "";
 			renderOptions();

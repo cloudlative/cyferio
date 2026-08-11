@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..audit import log_action
 from ..auth import require_user
@@ -50,7 +50,18 @@ def list_teams(_: User = Depends(require_user), db: Session = Depends(get_db)):
     open to any logged-in user (viewer or admin), unlike /api/users, since
     only non-sensitive fields are exposed here (no password/email/etc.)."""
     teams = db.query(Team).order_by(Team.name).all()
-    users = db.query(User).filter(User.deleted.is_(False)).order_by(User.username).all()
+    # selectinload(User.teams): without it, every `t in u.teams` check below
+    # lazy-fires its own SELECT the first time each user's `.teams` is
+    # touched -- one extra query per user (N+1), the actual cause of this
+    # page's slow load on any deployment with more than a handful of users.
+    # This batches it into a single extra query total, up front.
+    users = (
+        db.query(User)
+        .options(selectinload(User.teams))
+        .filter(User.deleted.is_(False))
+        .order_by(User.username)
+        .all()
+    )
 
     groups: list[dict] = []
     for t in teams:

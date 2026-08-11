@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .. import app_settings, geo_lists, vpn_identity_sync
 from ..audit import log_action
@@ -473,14 +473,30 @@ def _guard_against_self_lockout(db: Session, target: User, admin: User, *, remov
         raise HTTPException(status_code=400, detail="Can't remove the last active admin account.")
 
 
+# selectinload(role_def)/(teams): _serialize() (above) touches both per user
+# -- without eager-loading, each is a separate lazy-fired query the first
+# time it's touched, i.e. up to 2 extra queries per user (N+1) on every
+# call to either endpoint below. This batches each into one extra query
+# total, up front, regardless of how many users are returned.
+_USERS_LIST_OPTIONS = (selectinload(User.role_def), selectinload(User.teams))
+
+
 @router.get("")
 def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    return [_serialize(u) for u in db.query(User).filter(User.deleted.is_(False)).order_by(User.username).all()]
+    users = (
+        db.query(User).options(*_USERS_LIST_OPTIONS)
+        .filter(User.deleted.is_(False)).order_by(User.username).all()
+    )
+    return [_serialize(u) for u in users]
 
 
 @router.get("/deleted")
 def list_deleted_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    return [_serialize(u) for u in db.query(User).filter(User.deleted.is_(True)).order_by(User.deleted_at.desc()).all()]
+    users = (
+        db.query(User).options(*_USERS_LIST_OPTIONS)
+        .filter(User.deleted.is_(True)).order_by(User.deleted_at.desc()).all()
+    )
+    return [_serialize(u) for u in users]
 
 
 @router.get("/me")
@@ -547,7 +563,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     teams = _resolve_teams(db, body.team_ids)
     role_def = _resolve_role(db, body.role)
     # The legacy `role` enum column (Role: admin/editor/viewer only) can't
-    # represent a custom or vpn_self_service role -- role_id (below) is what
+    # represent a custom or "User" self-service role -- role_id (below) is what
     # every permission check actually reads now, so this is just a
     # best-effort placeholder for that column until it's removed in a later
     # cleanup (see permissions.py's migrate_user_roles docstring).

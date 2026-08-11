@@ -32,13 +32,13 @@ def _ctx(user: User, db: Session, **extra) -> dict:
         # now require_permission("vpn_profiles", "execute").
         "can_manage_clients": has_permission(db, user, "vpn_profiles", "execute"),
         # Nav visibility for "My VPN Profile" -- shown to any account with a
-        # linked profile, not just vpn_self_service (an editor/admin who
+        # linked profile, not just the "User" self-service role (an editor/admin who
         # happens to also own a personal device, e.g. from the migration,
         # benefits from it too), and hidden for everyone else rather than
         # gated by role alone.
         "has_own_vpn_profile": user.vpn_profile_link is not None,
         # Nav-visibility flags for the "System Administration"-flavored
-        # pages that a VPN Self-Service User must not see (own-scoped on
+        # pages that the "User" self-service role must not see (own-scoped on
         # vpn_profiles/dashboard/health doesn't grant these) -- server-side
         # routes above already enforce this via has_permission_any_scope;
         # these just keep the sidebar from showing dead links.
@@ -57,7 +57,7 @@ def _ctx(user: User, db: Session, **extra) -> dict:
 def dashboard(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
-    # "System Administration Page" from VPN Self-Service User's perspective
+    # "System Administration Page" from the "User" self-service role's perspective
     # (aggregate counts across every client) -- any_scope excludes it, same
     # as the /api/dashboard route it reads from.
     if not has_permission_any_scope(db, user, "dashboard", "view"):

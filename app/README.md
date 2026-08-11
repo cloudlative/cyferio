@@ -24,8 +24,8 @@ Everything the CLI can do, plus more:
 - Live connection status: who's online now, bandwidth, rejected (MAC-mismatch) connection attempts with expected-vs-presented MAC and repeat-attempt counts
 - A donut chart of rejected-connection attempts broken down by claimed client name, on the Diagnostics page
 - Clickable dashboard stat cards (plus a second row of MAC/rejection stats) linking straight to the filtered table behind each number
-- **Dynamic role-based access control**: 4 built-in roles (Admin, Editor, Viewer, VPN Self-Service User), plus admin-creatable custom roles with a per-module permission matrix (View/Create/Update/Delete/Execute/Manage, each with an Any-record/Own-record-only scope) editable from the Roles page (`/roles`) -- see [Roles & Permissions](#roles--permissions). The bootstrap admin (the very first admin account a deployment ever creates) can never be demoted, deactivated, or deleted by anyone -- every other admin account remains fully manageable by another admin
-- **VPN profile ↔ portal account identity linking**: every VPN client gets a linked portal account (auto-created if none matches), and a **My VPN Profile** self-service page (`/my-vpn-profile`) lets a VPN Self-Service User view their own profile, manage their own MAC addresses, and download their own `.ovpn` -- with no visibility into any other user's clients, users, teams, audit logs, or settings. See [Roles & Permissions](#roles--permissions)
+- **Dynamic role-based access control**: 4 built-in roles (Admin, Editor, Viewer, User), plus admin-creatable custom roles with a per-module permission matrix (View/Create/Update/Delete/Execute/Manage, each with an Any-record/Own-record-only scope) editable from the Roles page (`/roles`) -- see [Roles & Permissions](#roles--permissions). The bootstrap admin (the very first admin account a deployment ever creates) can never be demoted, deactivated, or deleted by anyone -- every other admin account remains fully manageable by another admin
+- **VPN profile ↔ portal account identity linking**: every VPN client gets a linked portal account (auto-created if none matches), and a **My VPN Profile** self-service page (`/my-vpn-profile`) lets a "User" (self-service role) account view their own profile, manage their own MAC addresses, and download their own `.ovpn` -- with no visibility into any other user's clients, users, teams, audit logs, or settings. See [Roles & Permissions](#roles--permissions)
 - First Name is required for every account (add-user and edit-user, both client- and server-side validated) -- it's also now the primary displayed identity (profile page heading), not the raw login username
 - Search box on the Users page filters the list by name, username, or team as you type
 - Soft-deleted accounts can be restored, or permanently (irreversibly) deleted as a distinct, separately-confirmed admin action -- audit history survives a permanent delete since it stores a username snapshot, not a foreign key
@@ -265,7 +265,7 @@ action on that module, including on records that aren't the caller's own.
 | **Admin** | Full control of every module. |
 | **Editor** | Can add/revoke/edit VPN clients and manage their MAC addresses. No user management, teams, or settings access. |
 | **Viewer** | Read-only: status/list/check, no add/revoke/user-management. |
-| **VPN Self-Service User** | Access to only their own VPN profile and account -- no visibility into other users, teams, audit logs, or settings. |
+| **User** | Access to only their own VPN profile and account -- no visibility into other users, teams, audit logs, or settings. |
 
 Custom roles work the same way: create one on the Roles page, name it,
 then check the boxes for whatever it should see/do per module. A custom
@@ -278,7 +278,7 @@ never deleted.
 Every VPN client certificate is linked 1:1 to a portal user account
 (`VpnProfileLink`). Adding a new client (`/clients`, or the CLI's
 `--add-user`) automatically links it to a matching existing portal
-username, or creates a brand-new **VPN Self-Service User** account for it
+username, or creates a brand-new **"User"** (self-service) account for it
 if none matches -- the temp password is shown once, immediately, in the
 admin UI response; it is never stored or shown again after that, so relay
 it to the device's owner right away.

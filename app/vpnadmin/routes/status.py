@@ -10,7 +10,7 @@ from ..permissions import require_permission, require_permission_any_scope
 router = APIRouter(prefix="/api/status", tags=["status"])
 
 require_admin = require_permission("audit_log", "manage")  # former auth.require_admin, see permissions.py
-# Every-client status/session data -- any_scope so VPN Self-Service User
+# Every-client status/session data -- any_scope so "User" (self-service role)
 # (view=True on "vpn_profiles" but scoped "own") can't see other users'
 # connection activity through these. See clients.py's _require_client_viewer
 # for the same pattern.

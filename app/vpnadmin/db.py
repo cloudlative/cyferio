@@ -78,9 +78,13 @@ def _seed_rbac():
     role_id has something to point at. Split into its own function (rather
     than inlined in init_db) so Phase 2's migrate_user_roles() backfill can
     be added right after this call without further restructuring."""
-    from .permissions import migrate_user_roles, seed_system_roles
+    from .permissions import migrate_user_roles, rename_legacy_vpn_self_service_role, seed_system_roles
     db = SessionLocal()
     try:
+        # Must run before seed_system_roles() -- see its own docstring for
+        # why (a renamed-in-code slug would otherwise get re-seeded as a
+        # duplicate row alongside the old one on an already-provisioned DB).
+        rename_legacy_vpn_self_service_role(db)
         seed_system_roles(db)
         migrate_user_roles(db)  # Phase 2 backfill -- see permissions.py's docstring
     finally:

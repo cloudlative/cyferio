@@ -156,45 +156,51 @@
 			</fieldset>
 			<fieldset>
 				<legend>Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
-				<div class="field">
-					<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-						<input type="checkbox" id="e-restrict-country">
-						Restrict login by country
-					</label>
-					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from the selected countries (detected via GeoIP on the sign-in request's IP). Leave unchecked, or the list empty, to allow any country.</p>
-					<div id="e-countries-ms"></div>
-				</div>
-				<div class="field" style="margin-top:14px">
-					<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-						<input type="checkbox" id="e-restrict-city">
-						Restrict login by city
-					</label>
-					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these cities (detected via GeoIP). Pick a country to browse its cities, then select any number -- picks accumulate across countries. GeoIP city detection is approximate, not precise. Leave unchecked, or the list empty, to allow any city.</p>
-					<p class="muted" id="e-cities-building" style="display:none;font-size:0.82rem">City list is still building (first-time setup takes a couple of minutes) -- try again shortly.</p>
-					<div class="geo-picker-row">
-						<select id="e-city-country"><option value="">Loading countries…</option></select>
-						<div id="e-cities-ms"></div>
+				<button type="button" class="restrictions-toggle" id="e-restrictions-toggle" aria-expanded="false">
+					<span class="chevron">▸</span> Edit login restrictions <span class="muted">(optional)</span>
+					<span class="count-badge" id="e-restrictions-count" style="display:none"></span>
+				</button>
+				<div class="restrictions-panel" id="e-restrictions-panel">
+					<div class="field">
+						<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+							<input type="checkbox" id="e-restrict-country">
+							Restrict login by country
+						</label>
+						<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from the selected countries (detected via GeoIP on the sign-in request's IP). Leave unchecked, or the list empty, to allow any country.</p>
+						<div id="e-countries-ms"></div>
 					</div>
-				</div>
-				<div class="field" style="margin-top:14px">
-					<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-						<input type="checkbox" id="e-restrict-asn">
-						Restrict login by network (ASN)
-					</label>
-					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these networks/ISPs -- identifies the network a connection came from, regardless of which country it geolocates to. "Any country" searches every known network by name (needed for global operators like Google or Cloudflare, which don't confidently belong to one country). Leave unchecked, or the list empty, to allow any network.</p>
-					<p class="muted" id="e-asns-building" style="display:none;font-size:0.82rem">Network list is still building (first-time setup takes a moment) -- try again shortly.</p>
-					<div class="geo-picker-row">
-						<select id="e-asn-country"><option value="">Any country (search all networks)</option></select>
-						<div id="e-asns-ms"></div>
+					<div class="field" style="margin-top:14px">
+						<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+							<input type="checkbox" id="e-restrict-city">
+							Restrict login by city
+						</label>
+						<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these cities (detected via GeoIP). Pick a country to browse its cities, then select any number -- picks accumulate across countries. GeoIP city detection is approximate, not precise. Leave unchecked, or the list empty, to allow any city.</p>
+						<p class="muted" id="e-cities-building" style="display:none;font-size:0.82rem">City list is still building (first-time setup takes a couple of minutes) -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="e-city-country"><option value="">Loading countries…</option></select>
+							<div id="e-cities-ms"></div>
+						</div>
 					</div>
-				</div>
-				<div class="field" style="margin-top:14px;margin-bottom:0">
-					<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-						<input type="checkbox" id="e-restrict-ip">
-						Restrict login by IP address
-					</label>
-					<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these IPs or CIDR ranges, one per line (e.g. 203.0.113.5 or 10.0.0.0/24). Leave unchecked, or the list empty, to allow any IP.</p>
-					<textarea id="e-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
+					<div class="field" style="margin-top:14px">
+						<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+							<input type="checkbox" id="e-restrict-asn">
+							Restrict login by network (ASN)
+						</label>
+						<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these networks/ISPs -- identifies the network a connection came from, regardless of which country it geolocates to. "Any country" searches every known network by name (needed for global operators like Google or Cloudflare, which don't confidently belong to one country). Leave unchecked, or the list empty, to allow any network.</p>
+						<p class="muted" id="e-asns-building" style="display:none;font-size:0.82rem">Network list is still building (first-time setup takes a moment) -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="e-asn-country"><option value="">Any country (search all networks)</option></select>
+							<div id="e-asns-ms"></div>
+						</div>
+					</div>
+					<div class="field" style="margin-top:14px;margin-bottom:0">
+						<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+							<input type="checkbox" id="e-restrict-ip">
+							Restrict login by IP address
+						</label>
+						<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these IPs or CIDR ranges, one per line (e.g. 203.0.113.5 or 10.0.0.0/24). Leave unchecked, or the list empty, to allow any IP.</p>
+						<textarea id="e-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
+					</div>
 				</div>
 			</fieldset>
 			<fieldset>
@@ -237,9 +243,11 @@ const editTeamMs = createMultiselectDropdown(document.getElementById("e-team-ms"
 
 const addCountriesMs = createMultiselectDropdown(document.getElementById("u-countries-ms"), {
 	placeholder: "Any country", idType: "string", emptyLabel: "No countries found.", unitLabel: "countries",
+	localFilter: true, searchPlaceholder: "Type to search countries…",
 });
 const editCountriesMs = createMultiselectDropdown(document.getElementById("e-countries-ms"), {
 	placeholder: "Any country", idType: "string", emptyLabel: "No countries found.", unitLabel: "countries",
+	localFilter: true, searchPlaceholder: "Type to search countries…",
 });
 const countryOptions = ISO_3166_COUNTRIES.map(([code, name]) => ({ id: code, label: `${name} (${code})` }));
 addCountriesMs.setOptions(countryOptions);
@@ -384,8 +392,8 @@ const ePhoneValidation = attachInlineValidation(editPhone.getLocalInputEl(), () 
 async function loadRoleOptions() {
 	// Populates both the Add-User and Edit-User role <select>s from the
 	// live dynamic-RBAC role list (GET /api/roles) instead of a hardcoded
-	// admin/editor/viewer set -- picks up vpn_self_service and any custom
-	// role created via Roles Management with no code change needed here.
+	// admin/editor/viewer set -- picks up the "User" self-service role and any
+	// custom role created via Roles Management with no code change needed here.
 	// GET /api/roles is roles-manage-gated; a non-admin viewing this page
 	// wouldn't reach users.html at all (server-side page guard), so no
 	// separate fallback is needed for that case.
@@ -427,6 +435,31 @@ uRestrictionsToggle.addEventListener("click", () => {
 	uRestrictionsToggle.setAttribute("aria-expanded", String(willOpen));
 });
 
+// Same collapsible pattern in the Edit dialog -- previously always fully
+// expanded there, adding real scroll length to the modal even for the
+// common case of a user with no login restrictions set at all.
+const eRestrictionsToggle = document.getElementById("e-restrictions-toggle");
+const eRestrictionsPanel = document.getElementById("e-restrictions-panel");
+const eRestrictionsCount = document.getElementById("e-restrictions-count");
+eRestrictionsToggle.addEventListener("click", () => {
+	const willOpen = !eRestrictionsPanel.classList.contains("open");
+	eRestrictionsPanel.classList.toggle("open", willOpen);
+	eRestrictionsToggle.setAttribute("aria-expanded", String(willOpen));
+});
+// Reflects however many of the 4 restriction types are currently active --
+// called after populating the checkboxes on dialog open, and again on any
+// change while it's open, so the badge (and the auto-expand below) always
+// matches the actual on-screen state, not just what was loaded.
+function updateEditRestrictionsCount() {
+	const n = ["e-restrict-country", "e-restrict-city", "e-restrict-asn", "e-restrict-ip"]
+		.filter(id => document.getElementById(id).checked).length;
+	eRestrictionsCount.style.display = n ? "" : "none";
+	eRestrictionsCount.textContent = n ? `${n} active` : "";
+}
+["e-restrict-country", "e-restrict-city", "e-restrict-asn", "e-restrict-ip"].forEach(id => {
+	document.getElementById(id).addEventListener("change", updateEditRestrictionsCount);
+});
+
 function matchesSearch(u) {
 	if (!userSearchTerm) return true;
 	const haystack = `${u.display_name} ${u.username} ${(u.teams || []).join(" ")}`.toLowerCase();
@@ -443,6 +476,29 @@ async function loadUsers() {
 	}
 }
 
+// At-a-glance login-restriction summary for the Users table, same
+// chip-badge vocabulary the Clients page already uses for per-client
+// restrictions (see clients.html's restrictionChipsHtml) -- previously the
+// only way to see a user's restrictions was to open Edit.
+function userRestrictionChipsHtml(u) {
+	const chips = [];
+	if (u.restrict_login_by_country && u.allowed_login_countries && u.allowed_login_countries.length) {
+		const names = u.allowed_login_countries.map(c => countryName(c));
+		chips.push(`<span class="restriction-chip chip-country" title="Login restricted to: ${escapeHtml(names.join(", "))}">${names.length === 1 ? escapeHtml(names[0]) : `${names.length} countries`}</span>`);
+	}
+	if (u.restrict_login_by_city && u.allowed_login_cities && u.allowed_login_cities.length) {
+		chips.push(`<span class="restriction-chip chip-city" title="Login restricted to: ${escapeHtml(u.allowed_login_cities.join(", "))}">${u.allowed_login_cities.length === 1 ? escapeHtml(u.allowed_login_cities[0]) : `${u.allowed_login_cities.length} cities`}</span>`);
+	}
+	if (u.restrict_login_by_asn && u.allowed_login_asns && u.allowed_login_asns.length) {
+		chips.push(`<span class="restriction-chip chip-asn" title="Login restricted to: ${escapeHtml(u.allowed_login_asns.join(", "))}">${u.allowed_login_asns.length === 1 ? escapeHtml(u.allowed_login_asns[0]) : `${u.allowed_login_asns.length} networks`}</span>`);
+	}
+	if (u.restrict_login_by_ip && u.allowed_login_ips && u.allowed_login_ips.length) {
+		chips.push(`<span class="restriction-chip chip-ip" title="Login restricted to: ${escapeHtml(u.allowed_login_ips.join(", "))}">${u.allowed_login_ips.length === 1 ? escapeHtml(u.allowed_login_ips[0]) : `${u.allowed_login_ips.length} IPs`}</span>`);
+	}
+	if (!chips.length) return "—";
+	return `<div class="restriction-chips">${chips.join("")}</div>`;
+}
+
 function renderUsers() {
 	const el = document.getElementById("users-table");
 	const filtered = lastUsers.filter(matchesSearch);
@@ -456,7 +512,7 @@ function renderUsers() {
 		return;
 	}
 	el.innerHTML = `<table>
-		<thead><tr><th>User</th><th>Teams</th><th>Role</th><th>Status</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
+		<thead><tr><th>User</th><th>Teams</th><th>Role</th><th>Status</th><th>Restrictions</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
 		<tbody>${filtered.map(u => `
 			<tr data-id="${u.id}">
 				<td>
@@ -466,6 +522,7 @@ function renderUsers() {
 				<td class="muted">${u.teams && u.teams.length ? escapeHtml(u.teams.join(", ")) : "—"}</td>
 				<td><span class="role-badge role-${u.role}">${u.role}</span>${u.is_bootstrap_admin ? ' <span class="muted" style="font-size:0.78em">(bootstrap)</span>' : ""}</td>
 				<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
+				<td>${userRestrictionChipsHtml(u)}</td>
 				<td class="muted">${fmtDate(u.created_at)}</td>
 				<td class="muted">${fmtDate(u.last_login_at)}</td>
 				<td class="text-right">
@@ -576,6 +633,16 @@ function openEdit(u) {
 	editAsnsMs.setSelected(u.allowed_login_asns || []);
 	document.getElementById("e-restrict-ip").checked = !!u.restrict_login_by_ip;
 	document.getElementById("e-allowed-ips").value = (u.allowed_login_ips || []).join("\n");
+	// Auto-expand the restrictions panel if this user already has any
+	// active -- collapsed-by-default is right for the common "no
+	// restrictions" case, but hiding EXISTING restrictions on open would
+	// make them easy to miss/silently leave in place. Stays collapsed
+	// (matching Add's default) when none are set.
+	const hasAnyRestriction = u.restrict_login_by_country || u.restrict_login_by_city
+		|| u.restrict_login_by_asn || u.restrict_login_by_ip;
+	eRestrictionsPanel.classList.toggle("open", hasAnyRestriction);
+	eRestrictionsToggle.setAttribute("aria-expanded", String(hasAnyRestriction));
+	updateEditRestrictionsCount();
 	document.getElementById("edit-dialog").showModal();
 }
 document.getElementById("edit-cancel").addEventListener("click", () => document.getElementById("edit-dialog").close());

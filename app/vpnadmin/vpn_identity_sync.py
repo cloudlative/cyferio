@@ -70,7 +70,7 @@ def auto_link_new_client(db: Session, client_name: str) -> dict | None:
       - an existing, unlinked portal user with that exact username gets
         linked to it (no new account -- matches the migration's own
         exact-match behavior, see docs/rbac_identity_design.md §5), or
-      - a brand-new vpn_self_service portal account is created and linked.
+      - a brand-new "User" (self-service) portal account is created and linked.
     Returns {"username", "temp_password"} when a new account was created (so
     the caller can show the temp password once), or None otherwise (already
     linked, linked an existing account, or RBAC not seeded yet -- this never
@@ -91,7 +91,7 @@ def auto_link_new_client(db: Session, client_name: str) -> dict | None:
         db.commit()
         return None
 
-    vss_role = db.query(RoleDef).filter_by(slug="vpn_self_service").first()
+    vss_role = db.query(RoleDef).filter_by(slug="user").first()
     if vss_role is None:
         return None  # RBAC not seeded yet somehow -- fail soft
 
@@ -99,7 +99,7 @@ def auto_link_new_client(db: Session, client_name: str) -> dict | None:
     user = User(
         username=normalized,
         password_hash=hash_password(temp_password),
-        role=Role.viewer,  # legacy enum column has no vpn_self_service member -- see users.py's _resolve_role comment
+        role=Role.viewer,  # legacy enum column has no "user"/self-service member -- see users.py's _resolve_role comment
         role_id=vss_role.id,
         first_name=client_name,
         must_reset_password=True,

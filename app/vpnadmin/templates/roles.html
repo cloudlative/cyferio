@@ -5,7 +5,7 @@
 	<div class="toolbar-title"><h1 style="margin:0">Role Management</h1></div>
 	<button class="btn-secondary" id="refresh-btn">Refresh</button>
 </div>
-<p class="page-subtitle" style="margin-top:-10px">Create custom roles and edit exactly what each role can see and do, per module. The 4 built-in roles (Admin, Editor, Viewer, VPN Self-Service User) can be renamed/described but not deleted.</p>
+<p class="page-subtitle" style="margin-top:-10px">Create custom roles and edit exactly what each role can see and do, per module. The 4 built-in roles (Admin, Editor, Viewer, User) can be renamed/described but not deleted.</p>
 
 <div class="card">
 	<h2>Create a Custom Role</h2>
@@ -47,7 +47,7 @@
 	</div>
 
 	<h3>Permissions</h3>
-	<p class="muted" style="margin-top:0">"Manage" grants every action on that module, including on records that aren't the caller's own. "Own only" restricts View/Update to the caller's own record (used by VPN Self-Service User for its own account and VPN profile).</p>
+	<p class="muted" style="margin-top:0">"Manage" grants every action on that module, including on records that aren't the caller's own. "Own only" restricts View/Update to the caller's own record (used by the "User" self-service role for its own account and VPN profile).</p>
 	<div class="table-scroll">
 		<table id="matrix-table">
 			<thead>

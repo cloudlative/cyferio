@@ -92,7 +92,7 @@ def compute_report(db: Session) -> dict:
 def apply_migration(db: Session, *, run_by: str) -> dict:
     """Writes: creates VpnProfileLink rows (protected_from_auto_revoke=True,
     no exceptions -- see this module's docstring) for both buckets, creates
-    new vpn_self_service User rows for unmatched clients, and persists the
+    new "User" (self-service) rows for unmatched clients, and persists the
     resulting report to MigrationReport. `run_by` is a free-text actor
     label (a portal username if run on behalf of one, or an operator
     identifier like "cli:<unix-username>" -- see migrate_vpn_profiles.py) --
@@ -100,14 +100,14 @@ def apply_migration(db: Session, *, run_by: str) -> dict:
     not a foreign key."""
     report = compute_report(db)
 
-    vss_role = db.query(RoleDef).filter_by(slug="vpn_self_service").first()
+    vss_role = db.query(RoleDef).filter_by(slug="user").first()
     created_accounts_out = []
     for entry in report["created_new_accounts"]:
         temp_password = generate_temp_password()
         user = User(
             username=entry["username"],
             password_hash=hash_password(temp_password),
-            role=Role.viewer,  # legacy enum has no vpn_self_service member -- see users.py's _resolve_role comment
+            role=Role.viewer,  # legacy enum has no "user"/self-service member -- see users.py's _resolve_role comment
             role_id=vss_role.id if vss_role is not None else None,
             first_name=entry["vpn_client_name"],
             must_reset_password=True,

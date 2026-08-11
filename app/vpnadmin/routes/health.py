@@ -6,7 +6,7 @@ from ..permissions import require_permission_any_scope
 
 router = APIRouter(prefix="/api/health", tags=["health"])
 
-# System-administration page -- any_scope excludes VPN Self-Service User,
+# System-administration page -- any_scope excludes "User" (self-service role),
 # same reasoning as diagnostics.py's _require_diagnostics_viewer.
 _require_health_viewer = require_permission_any_scope("health", "view")
 
