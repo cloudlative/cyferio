@@ -556,6 +556,46 @@ _sync_host_ssh_target_user() {
 	fi
 }
 
+# --- Phase 3b: vpn-tools.conf OVPN_OUTPUT_DIR (Docker-visible delivery) --
+#
+# openvpn-install.sh's default OVPN_OUTPUT_DIR (whoever ran sudo's home
+# dir, see openvpn-install.sh:124-141) is NOT visible inside the app
+# container -- only /etc/openvpn (rw) and /var/log/openvpn (ro) are
+# bind-mounted (see docker-compose.yml). Without this override, every
+# --show-ovpn/--add-client call the containerized app makes reports "no
+# .ovpn file found" even though the file genuinely exists on the host,
+# just outside the container's view -- reproduced and root-caused on the
+# 34.182.51.24 test box on 2026-08-11 (vpn-tools.conf.example has long
+# documented this gotcha; nothing previously acted on it automatically).
+# Idempotent: only appends if OVPN_OUTPUT_DIR isn't already set in the
+# file (commented or not) -- never touches an operator's own override.
+configure_vpn_tools_conf() {
+	log "Phase 3b: vpn-tools.conf OVPN_OUTPUT_DIR (Docker-visible delivery path)"
+	local conf_file="/etc/openvpn/vpn-tools.conf"
+	mkdir -p /etc/openvpn
+
+	if [[ -f "$conf_file" ]] && grep -qE '^OVPN_OUTPUT_DIR=' "$conf_file"; then
+		log "  OVPN_OUTPUT_DIR already set in $conf_file -- left as-is."
+		return
+	fi
+
+	{
+		echo ""
+		echo "# Docker-visible delivery path for generated .ovpn files -- the"
+		echo "# containerized app only bind-mounts /etc/openvpn, so the default"
+		echo "# (whoever ran sudo's home dir) is invisible to it. Added by"
+		echo "# setup-new-machine.sh; see vpn-tools.conf.example for the full"
+		echo "# explanation. Safe to change if you have a different path in mind,"
+		echo "# as long as it's under /etc/openvpn."
+		echo "OVPN_OUTPUT_DIR=/etc/openvpn/client"
+		echo "OVPN_OUTPUT_OWNER=root:root"
+	} >> "$conf_file"
+	chmod 640 "$conf_file"
+	chown root:root "$conf_file"
+	mkdir -p /etc/openvpn/client
+	log "  set OVPN_OUTPUT_DIR=/etc/openvpn/client in $conf_file."
+}
+
 # --- Phase 4: enable the deploy-key volume mount -------------------------
 enable_deploy_key_mount() {
 	log "Phase 4: enable deploy-key volume mount in docker-compose.yml"
@@ -647,6 +687,7 @@ else
 fi
 setup_host_executor
 write_env
+configure_vpn_tools_conf
 enable_deploy_key_mount
 if [[ "$SKIP_STACK" -eq 0 ]]; then
 	bring_up_stack

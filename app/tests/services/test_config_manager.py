@@ -18,6 +18,23 @@ def test_render_server_conf_udp_no_ip6():
     assert "crl-verify crl.pem" in conf
 
 
+def test_render_server_conf_omits_legacy_cipher_directive():
+    """No hardcoded `cipher AES-256-CBC` -- see the long comment in
+    render_server_conf: that legacy directive breaks NCP data-channel
+    negotiation entirely when the server's kernel DCO fast-path is active
+    (reproduced live on the 34.182.51.24 test box on 2026-08-11)."""
+    from services.openvpn.paths import OpenVPNPaths
+    opts = InstallOptions(ip="203.0.113.10", port=1194, protocol="udp", dns=1, group_name="nogroup")
+    conf = config_manager.render_server_conf(OpenVPNPaths(), opts)
+    assert "cipher AES-256-CBC" not in conf
+
+
+def test_render_client_common_omits_legacy_cipher_directive():
+    opts = InstallOptions(ip="203.0.113.10", port=1194, protocol="udp")
+    content = config_manager.render_client_common(opts)
+    assert "cipher AES-256-CBC" not in content
+
+
 def test_render_server_conf_tcp_has_no_explicit_exit_notify():
     from services.openvpn.paths import OpenVPNPaths
     opts = InstallOptions(ip="203.0.113.10", port=443, protocol="tcp", dns=2, group_name="nogroup")

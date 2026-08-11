@@ -87,7 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("install", help="Fresh install (mirrors openvpn-install.sh's interactive install)")
     p.add_argument("--ip", default=None, help="Local IPv4 (auto-detected if there's exactly one)")
-    p.add_argument("--public-ip", default=None, help="Public IP/hostname if behind NAT")
+    p.add_argument(
+        "--public-ip", default=None,
+        help="Public IP/hostname if behind NAT. Auto-detected when omitted and the "
+        "resolved local IP is itself private (see network_manager.detect_public_ip).",
+    )
     p.add_argument("--port", type=int, default=1194)
     p.add_argument("--protocol", default="udp", choices=["udp", "tcp"])
     p.add_argument("--dns", type=int, default=1, choices=[1, 2, 3, 4, 5, 6])
@@ -154,13 +158,28 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.action == "install":
             ip = network_manager.resolve_install_ip(args.ip)
+            public_ip = args.public_ip
+            # Auto-detect the real public IP when the caller didn't supply
+            # one and the resolved local address is itself private (NAT'd
+            # cloud VM -- GCP/AWS/etc. never expose the public IP on the
+            # NIC itself). Mirrors openvpn-install.sh:1090-1103's own
+            # detection, but applied automatically rather than just shown
+            # as an interactive-prompt suggestion, since this entrypoint is
+            # non-interactive (run over SSH by host_executor.py). Without
+            # this, client-common.txt's `remote` line silently gets the
+            # private IP, producing an .ovpn no client outside the VM's own
+            # network can ever connect with -- reproduced and root-caused
+            # on the 34.182.51.24 test box on 2026-08-11 (a public_ip
+            # left blank on install resulted in `remote 10.138.0.2 1194`).
+            if not public_ip and network_manager.is_private_ipv4(ip):
+                public_ip = network_manager.detect_public_ip()
             opts = InstallOptions(
                 ip=ip, port=args.port, protocol=args.protocol, dns=args.dns,
-                public_ip=args.public_ip, group_name=paths.group_name,
+                public_ip=public_ip, group_name=paths.group_name,
             )
             result = installer.install(paths, opts, args.client_name, install_packages=not args.no_packages)
             mac = client_manager.add_mac(paths, result.client_name, args.client_mac)
-            return _ok({**_to_jsonable(result), "mac": mac})
+            return _ok({**_to_jsonable(result), "mac": mac, "public_ip": public_ip})
         elif args.action == "uninstall":
             installer.uninstall(paths)
             return _ok({"uninstalled": True})

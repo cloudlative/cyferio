@@ -80,7 +80,22 @@ def render_server_conf(paths: OpenVPNPaths, opts: InstallOptions) -> str:
 
     lines += [
         "keepalive 10 120",
-        "cipher AES-256-CBC",
+        # Deliberately NOT "cipher AES-256-CBC" here, unlike
+        # openvpn-install.sh:1289 (which this module otherwise mirrors
+        # faithfully) -- that legacy single-cipher directive is a pre-NCP
+        # (OpenVPN <2.4) relic; on any modern OpenVPN server (2.5+), the
+        # actual data-channel cipher is negotiated from `data-ciphers`
+        # (defaults to AES-256-GCM/AES-128-GCM/CHACHA20-POLY1305 when
+        # unset, as here) regardless of this line. Worse, when the kernel
+        # DCO fast-path is active (common on modern distros -- confirmed
+        # live on the 34.182.51.24 test box), `data-ciphers-fallback` to a
+        # legacy CBC cipher is silently unusable (DCO is AEAD-only), so a
+        # client whose own config still carries a matching legacy `cipher`
+        # line hard-fails NCP with "no shared cipher" instead of falling
+        # back -- reproduced and root-caused on that box on 2026-08-11.
+        # Omitting the line here (and in render_client_common below) lets
+        # both sides negotiate a shared AEAD cipher normally; this is the
+        # one deliberate deviation from bash-script parity in this module.
         "user nobody",
         f"group {opts.group_name}",
         "persist-key",
@@ -110,7 +125,9 @@ def render_client_common(opts: InstallOptions) -> str:
         "persist-tun",
         "remote-cert-tls server",
         "auth SHA512",
-        "cipher AES-256-CBC",
+        # See render_server_conf's comment above -- no legacy `cipher` line
+        # here either, for the same reason (lets the client negotiate a
+        # shared AEAD cipher with the server instead of hard-failing NCP).
         "ignore-unknown-option block-outside-dns",
         "push-peer-info",
         "verb 3",
