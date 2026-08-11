@@ -92,6 +92,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--protocol", default="udp", choices=["udp", "tcp"])
     p.add_argument("--dns", type=int, default=1, choices=[1, 2, 3, 4, 5, 6])
     p.add_argument("--client-name", default="client")
+    p.add_argument(
+        "--client-mac", required=True,
+        help="MAC address to register the first client's cert under -- required. "
+        "installer.install() deliberately mirrors the bash script's own gap of "
+        "generating the first client's cert without registering it in DB_FILE "
+        "(see installer.py); this CLI layer closes that gap immediately after "
+        "install by calling the same add_mac() do_add_client/do_add_mac use, so "
+        "the first client can actually pass the MAC check like every other one.",
+    )
     p.add_argument("--no-packages", action="store_true", help="Skip OS package install (test/dev only)")
 
     sub.add_parser("uninstall", help="Remove OpenVPN and all its config")
@@ -150,7 +159,8 @@ def main(argv: list[str] | None = None) -> int:
                 public_ip=args.public_ip, group_name=paths.group_name,
             )
             result = installer.install(paths, opts, args.client_name, install_packages=not args.no_packages)
-            return _ok(result)
+            mac = client_manager.add_mac(paths, result.client_name, args.client_mac)
+            return _ok({**_to_jsonable(result), "mac": mac})
         elif args.action == "uninstall":
             installer.uninstall(paths)
             return _ok({"uninstalled": True})
