@@ -81,9 +81,21 @@ NOTE_OS_MAC = (
 # --------------------------------------------------------------------------
 
 def read_privileged_file(path):
-    """Read a file that may be root-only (status log, PKI index/private dir),
-    escalating via `sudo cat` if a direct read isn't permitted. Returns None
-    if the file genuinely doesn't exist (vs. just being unreadable)."""
+    """Read a file that may be root-only (status log, PKI index/private dir,
+    session-history log), escalating via `sudo cat` if a direct read isn't
+    permitted. Returns None if the file genuinely doesn't exist (vs. just
+    being unreadable) -- e.g. session_history.jsonl before any client has
+    ever connected/disconnected once, which is a normal, expected state on
+    a fresh install, not an error.
+
+    Checked before the os.access() readability check below, not folded into
+    it: os.access() on a nonexistent path also just returns False (same as
+    "exists but not readable"), so without this early return a missing file
+    would fall through to attempting `sudo cat` on a path that will never
+    succeed -- pure wasted work at best, and see the FileNotFoundError note
+    below for what it does at worst in a container with no sudo binary."""
+    if not os.path.exists(path):
+        return None
     if os.access(path, os.R_OK):
         with open(path) as f:
             return f.read()
@@ -91,6 +103,16 @@ def read_privileged_file(path):
         out = subprocess.run(["sudo", "cat", path], capture_output=True, text=True, check=True)
         return out.stdout
     except subprocess.CalledProcessError:
+        return None
+    except FileNotFoundError:
+        # `sudo` itself isn't installed -- true in this project's own
+        # Alpine-based app container (see app/Dockerfile), which always
+        # already runs as root there anyway (see docker-compose.yml's own
+        # comment on why USE_SUDO=false in that deployment), so escalation
+        # was never actually reachable in practice for a root caller; only
+        # a non-root caller on a sudo-less host hits this. Fail soft (None)
+        # rather than crashing the whole script over a file that was
+        # already known to need escalation to read.
         return None
 
 
