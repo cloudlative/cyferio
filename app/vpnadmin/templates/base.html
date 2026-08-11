@@ -12,8 +12,23 @@
 	<aside class="sidebar">
 		<a href="/" class="brand">{{ app_settings.app_name }}</a>
 		<nav>
+			<!--
+				Deliberate ordering (not just insertion order -- see git
+				history for the RBAC-era build-up that left it as one):
+				Overview -> Personal -> core VPN resource ops ->
+				observability -> identity/access -> configuration ->
+				host-level/destructive actions last. Same shape most
+				enterprise admin consoles converge on (AWS/GCP/Cloudflare-
+				style: general-purpose first, IAM/settings lower, anything
+				host-level or hard-to-reverse isolated at the very bottom).
+				Every permission gate below is unchanged from before this
+				reorder -- only position moved, not visibility logic.
+			-->
 			{% if can_view_dashboard %}
 			<a href="/" class="{{ 'active' if request.url.path == '/' }}"><span class="nav-icon">◆</span>Dashboard</a>
+			{% endif %}
+			{% if has_own_vpn_profile %}
+			<a href="/my-vpn-profile" class="{{ 'active' if request.url.path == '/my-vpn-profile' }}"><span class="nav-icon">⚡</span>My VPN Profile</a>
 			{% endif %}
 			{% if can_view_clients %}
 			<a href="/clients" class="{{ 'active' if request.url.path == '/clients' }}"><span class="nav-icon">◇</span>VPN Clients</a>
@@ -24,17 +39,16 @@
 			<a href="/diagnostics" class="{{ 'active' if request.url.path == '/diagnostics' }}"><span class="nav-icon">⚙</span>Diagnostics</a>
 			<a href="/health" class="{{ 'active' if request.url.path == '/health' }}"><span class="nav-icon">♥</span>Health</a>
 			{% endif %}
-			{% if has_own_vpn_profile %}
-			<a href="/my-vpn-profile" class="{{ 'active' if request.url.path == '/my-vpn-profile' }}"><span class="nav-icon">⚡</span>My VPN Profile</a>
-			{% endif %}
 			{% if is_admin %}
 			<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
 			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
 			<a href="/users/activity" class="{{ 'active' if request.url.path == '/users/activity' }}"><span class="nav-icon">☰</span>Users Activity</a>
-			<a href="/settings" class="{{ 'active' if request.url.path == '/settings' }}"><span class="nav-icon">⛭</span>Settings</a>
 			{% endif %}
 			{% if can_manage_roles %}
 			<a href="/roles" class="{{ 'active' if request.url.path == '/roles' }}"><span class="nav-icon">⚿</span>Roles</a>
+			{% endif %}
+			{% if is_admin %}
+			<a href="/settings" class="{{ 'active' if request.url.path == '/settings' }}"><span class="nav-icon">⛭</span>Settings</a>
 			{% endif %}
 			{% if can_manage_openvpn_install %}
 			<a href="/openvpn-install" class="{{ 'active' if request.url.path == '/openvpn-install' }}"><span class="nav-icon">⚙</span>OpenVPN Install</a>
