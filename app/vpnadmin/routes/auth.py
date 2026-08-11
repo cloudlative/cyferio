@@ -74,7 +74,8 @@ def login_submit(
                 )
                 return templates.TemplateResponse(
                     request, "login.html",
-                    {"error": "Login is not permitted from your current country."},
+                    {"error": f"Login is not permitted from your current country "
+                              f"({country or 'unknown'}, IP {client_ip or 'unknown'})."},
                     status_code=403,
                 )
 
@@ -92,7 +93,8 @@ def login_submit(
                 )
                 return templates.TemplateResponse(
                     request, "login.html",
-                    {"error": "Login is not permitted from your current city."},
+                    {"error": f"Login is not permitted from your current city "
+                              f"({city or 'unknown'}, IP {client_ip or 'unknown'})."},
                     status_code=403,
                 )
 
@@ -110,7 +112,8 @@ def login_submit(
                 )
                 return templates.TemplateResponse(
                     request, "login.html",
-                    {"error": "Login is not permitted from your current network."},
+                    {"error": f"Login is not permitted from your current network "
+                              f"({asn_label or 'unknown'}, IP {client_ip or 'unknown'})."},
                     status_code=403,
                 )
 
@@ -125,7 +128,8 @@ def login_submit(
                 )
                 return templates.TemplateResponse(
                     request, "login.html",
-                    {"error": "Login is not permitted from your current IP address."},
+                    {"error": f"Login is not permitted from your current IP address "
+                              f"({client_ip or 'unknown'})."},
                     status_code=403,
                 )
 
