@@ -107,7 +107,7 @@
 			</div>
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="email-dialog-cancel">Cancel</button>
-				<button type="submit" class="btn-primary" id="email-submit">Send</button>
+				<button type="submit" class="btn-primary" id="email-submit" disabled>Send</button>
 			</div>
 		</form>
 	</div>
@@ -143,7 +143,7 @@
 			</p>
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="policy-dialog-cancel">Cancel</button>
-				<button type="submit" class="btn-primary" id="policy-submit">Save Restrictions</button>
+				<button type="submit" class="btn-primary" id="policy-submit" disabled>Save Restrictions</button>
 			</div>
 		</form>
 	</div>
@@ -421,8 +421,19 @@ async function refreshMacsDialog(name) {
 	}
 }
 document.getElementById("macs-dialog-close").addEventListener("click", () => document.getElementById("macs-dialog").close());
+closeOnBackdropClick(document.getElementById("macs-dialog"));
 
 if (isAdmin) {
+	closeOnBackdropClick(document.getElementById("ovpn-dialog"));
+	closeOnBackdropClick(document.getElementById("email-dialog"));
+	closeOnBackdropClick(document.getElementById("policy-dialog"));
+	const emailSaveBtn = document.getElementById("email-submit");
+	const emailDirty = bindDirtyTracking(document.getElementById("email-form"), emailSaveBtn);
+	document.getElementById("email-dialog").addEventListener("close", () => emailDirty.disarm());
+	const policySaveBtn = document.getElementById("policy-submit");
+	const policyDirty = bindDirtyTracking(document.getElementById("policy-form"), policySaveBtn);
+	document.getElementById("policy-dialog").addEventListener("close", () => policyDirty.disarm());
+
 	async function showOvpn(name) {
 		const dlg = document.getElementById("ovpn-dialog");
 		document.getElementById("ovpn-dialog-title").textContent = `.ovpn Profile — ${name}`;
@@ -466,6 +477,7 @@ if (isAdmin) {
 		document.getElementById("email-client-name").textContent = name;
 		document.getElementById("email-address").value = "";
 		document.getElementById("email-dialog").showModal();
+		emailDirty.arm();
 	}
 	window.openEmailDialog = openEmailDialog;
 	document.getElementById("email-dialog-cancel").addEventListener("click", () => document.getElementById("email-dialog").close());
@@ -529,6 +541,7 @@ if (isAdmin) {
 					`Used this week (as of last disconnect, not live): ${humanBytes(used)} / ${quota} GB`;
 			}
 			updatePolicyDialogSummary();
+			policyDirty.arm();
 		} catch (e) {
 			toast(e.message, "error");
 			dlg.close();

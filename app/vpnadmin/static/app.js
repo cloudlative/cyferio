@@ -884,6 +884,144 @@ function attachInlineValidation(inputEl, validateFn) {
 	return { check: run };
 }
 
+/**
+ * Backdrop-click-to-close for a native <dialog>. Clicking anywhere inside
+ * the dialog's own rendered box (its .dialog-body content, or padding
+ * around it) never reaches here since it's inside the element's border
+ * box; a click that lands on the <dialog> element itself but outside that
+ * box can only be the ::backdrop (the browser routes backdrop clicks to
+ * the dialog element, not a separate node) -- checked geometrically via
+ * getBoundingClientRect rather than event.target, since the dialog element
+ * IS the click target either way. Idempotent to call more than once isn't
+ * needed here -- every call site below wires each dialog exactly once, at
+ * page load.
+ */
+function closeOnBackdropClick(dialogEl) {
+	dialogEl.addEventListener("click", (ev) => {
+		const r = dialogEl.getBoundingClientRect();
+		const insideBox = ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+		if (!insideBox) dialogEl.close();
+	});
+}
+
+/**
+ * Latches "dirty" the first time `container`'s contents change after
+ * arm() -- used to keep an edit form's Save button disabled until the
+ * admin has actually changed something. Relies on bubbling input/change
+ * events, which every widget in this app already fires on a real value
+ * change: plain inputs/selects/textareas natively, and this app's custom
+ * widgets (createMultiselectDropdown's checkbox panel, createPhoneInput's
+ * compound field, the geo-picker multiselects) via the real
+ * checkboxes/inputs they're built from internally -- deliberately NOT a
+ * MutationObserver-based catch-all on top of that, since this app also has
+ * pure-presentation DOM mutations inside these same containers that aren't
+ * a field change at all (e.g. the collapsible Login Restrictions panel's
+ * open/close class toggle) -- a mutation-based latch would misfire dirty
+ * on those.
+ *
+ * arm() takes a snapshot moment: call it right after populating a form for
+ * editing (or on page load for an inline, always-editable section like
+ * Roles/Teams). disarm() stops tracking -- call on cancel/close and again
+ * right after a successful save (so the now-current values don't
+ * immediately read as "dirty" against themselves next time the form
+ * opens).
+ */
+function bindDirtyTracking(container, saveBtn) {
+	let dirty = false;
+	let tracking = false;
+	function markDirty() {
+		if (!tracking || dirty) return;
+		dirty = true;
+		saveBtn.disabled = false;
+	}
+	container.addEventListener("input", markDirty);
+	container.addEventListener("change", markDirty);
+	function arm() {
+		dirty = false;
+		tracking = false;
+		saveBtn.disabled = true;
+		// Populating the form's fields (right before/after this call) is
+		// itself a burst of input/change events -- defer arming the latch
+		// to the next frame so that populate step doesn't immediately mark
+		// the form dirty against itself.
+		requestAnimationFrame(() => { tracking = true; });
+	}
+	function disarm() {
+		tracking = false;
+	}
+	return { arm, disarm, isDirty: () => dirty };
+}
+
+// Character classes kept disjoint and each guaranteed at least one
+// occurrence below -- avoids the visually-ambiguous glyphs (l/1/I/O/0)
+// that make a freshly-generated password error-prone to retype/read back,
+// since it's shown once and never stored in the clear anywhere after.
+const _PW_CHAR_CLASSES = [
+	"abcdefghjkmnpqrstuvwxyz",
+	"ABCDEFGHJKMNPQRSTUVWXYZ",
+	"23456789",
+	"!@#$%^&*-_=+?",
+];
+const _PW_ALL_CHARS = _PW_CHAR_CLASSES.join("");
+
+/**
+ * Generates a strong random password using the Web Crypto RNG (not
+ * Math.random -- that's not cryptographically secure and this value gets
+ * handed to real accounts). Rejection-sampled per character so every
+ * character class is equally likely regardless of its length (a naive
+ * `charset[randomByte % charset.length]` would slightly favor shorter
+ * classes' characters), then one character from each of the 4 classes
+ * above is guaranteed present by construction, and the whole thing is
+ * shuffled (Fisher-Yates, same crypto RNG) so those guaranteed characters
+ * aren't predictably clustered at the front.
+ */
+function generateStrongPassword(length = 16) {
+	const bytes = new Uint32Array(1);
+	function randomChar(charset) {
+		const max = Math.floor(0xFFFFFFFF / charset.length) * charset.length;
+		let x;
+		do { crypto.getRandomValues(bytes); x = bytes[0]; } while (x >= max);
+		return charset[x % charset.length];
+	}
+	const chars = _PW_CHAR_CLASSES.map(randomChar);
+	while (chars.length < length) chars.push(randomChar(_PW_ALL_CHARS));
+	for (let i = chars.length - 1; i > 0; i--) {
+		const j = Math.floor((crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF) * (i + 1));
+		[chars[i], chars[j]] = [chars[j], chars[i]];
+	}
+	return chars.join("");
+}
+
+/**
+ * Wires a New Password + Confirm Password pair, plus an optional Generate
+ * button, with a shared match-check -- used by both users.html's Add User
+ * form (password required) and its Edit User dialog (password optional,
+ * "leave blank to keep current"). Generate fills both fields with the same
+ * freshly-generated value and flips them to type="text" so the value is
+ * actually readable/copyable the one time it's shown (never re-shown, and
+ * never sent anywhere except in the form's own submit body).
+ */
+function wirePasswordConfirm(pwEl, confirmEl, generateBtnEl, { required = false } = {}) {
+	if (generateBtnEl) {
+		generateBtnEl.addEventListener("click", () => {
+			const pw = generateStrongPassword();
+			pwEl.type = "text";
+			confirmEl.type = "text";
+			pwEl.value = pw;
+			confirmEl.value = pw;
+			toast("Password generated -- copy it now, it won't be shown again.");
+		});
+	}
+	function check() {
+		const pw = pwEl.value;
+		const confirm = confirmEl.value;
+		if (!pw && !confirm) return required ? "Password is required." : null;
+		if (pw !== confirm) return "Passwords don't match.";
+		return null;
+	}
+	return { check };
+}
+
 // Human-formatted session duration for display -- e.g. "2h 14m", "45m",
 // "12s". Mirrors vpn-status.py's fmt_duration() in spirit (both take
 // seconds), but a shorter/denser format tuned for a table column rather

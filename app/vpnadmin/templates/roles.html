@@ -43,7 +43,7 @@
 			<label for="edit-role-description">Description</label>
 			<input type="text" id="edit-role-description" maxlength="512">
 		</div>
-		<button class="btn-secondary" id="role-save-details-btn">Save Details</button>
+		<button class="btn-secondary" id="role-save-details-btn" disabled>Save Details</button>
 	</div>
 
 	<h3>Permissions</h3>
@@ -60,7 +60,7 @@
 	</div>
 	<div class="toolbar" style="margin-top:16px">
 		<div></div>
-		<button class="btn-primary" id="matrix-save-btn">Save Permissions</button>
+		<button class="btn-primary" id="matrix-save-btn" disabled>Save Permissions</button>
 	</div>
 </div>
 {% endblock %}
@@ -70,6 +70,16 @@
 let roles = [];
 let currentRole = null;
 const ACTIONS = ["view", "create", "update", "delete", "execute", "manage"];
+
+// Inline edit surfaces (no dialog here -- this whole card is always
+// "open"), so there's no backdrop-close to wire, just the Save-disabled-
+// until-changed half of the app-wide edit-form pattern (see app.js's
+// bindDirtyTracking).
+const roleDetailsDirty = bindDirtyTracking(
+	document.getElementById("edit-role-name").closest(".form-row"),
+	document.getElementById("role-save-details-btn"),
+);
+const matrixDirty = bindDirtyTracking(document.getElementById("matrix-body"), document.getElementById("matrix-save-btn"));
 
 function renderRoleList() {
 	const el = document.getElementById("role-list");
@@ -132,6 +142,8 @@ function openRole(id) {
 		document.getElementById("role-delete-btn").title = full.is_system ? "Built-in roles can't be deleted" : "";
 		renderMatrix(full);
 		document.getElementById("role-detail-card").scrollIntoView({ behavior: "smooth", block: "start" });
+		roleDetailsDirty.arm();
+		matrixDirty.arm();
 	}).catch((e) => toast(e.message, "error"));
 }
 
@@ -160,6 +172,7 @@ document.getElementById("role-save-details-btn").addEventListener("click", async
 			},
 		});
 		toast("Role details saved.", "success");
+		roleDetailsDirty.arm();
 		await loadRoles();
 	} catch (e) {
 		toast(e.message, "error");
@@ -183,6 +196,7 @@ document.getElementById("matrix-save-btn").addEventListener("click", async () =>
 		await apiFetch(`/api/roles/${currentRole.id}/object-permissions`, { method: "PUT", body: { permissions } });
 		await apiFetch(`/api/roles/${currentRole.id}/api-scopes`, { method: "PUT", body: { scopes } });
 		toast("Permissions saved.", "success");
+		matrixDirty.arm();
 	} catch (e) {
 		toast(e.message, "error");
 	}

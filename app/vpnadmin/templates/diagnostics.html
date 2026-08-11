@@ -22,7 +22,7 @@
 </div>
 
 <div class="card" id="rejected">
-	<div class="toolbar"><h2 style="margin:0">Recent Rejected Connection Attempts</h2><button class="btn-secondary" id="rejected-refresh">Refresh</button></div>
+	<div class="toolbar"><h2 style="margin:0">Recent Rejected Connection Attempts</h2></div>
 	<div class="form-row" style="margin-bottom:16px;gap:12px">
 		<div class="field" style="flex:1;min-width:180px">
 			<label for="rejected-filter-name">VPN Profile</label>
@@ -140,14 +140,28 @@ function renderRejectedTable() {
 			<th>OS</th><th>Source IP:Port</th><th>Attempts (This Profile)</th>
 		</tr></thead>
 		<tbody>${pageRows.map(r => {
-			const mismatch = r.mac_registered !== "not registered" && r.mac_registered !== r.mac_presented;
+			// "MAC Registered" is always a LIVE lookup against the current
+			// MAC-DB (see routes/status.py -> vpn-status.py's cmd_rejected),
+			// while `reason` is frozen at the moment this attempt was
+			// actually rejected. Once an admin registers the MAC that was
+			// already being presented, a plain live comparison silently
+			// stops flagging a row whose `reason` still (correctly) says
+			// "mac_mismatch" -- two contradictory-looking signals on the
+			// same row. Key the flag off the frozen `reason` instead, so a
+			// historical mismatch never quietly looks like nothing
+			// happened; when it's since been corrected, say so explicitly
+			// rather than just going plain.
+			const wasMismatch = r.reason === "mac_mismatch";
+			const liveMismatch = r.mac_registered !== "not registered" && r.mac_registered !== r.mac_presented;
+			const resolvedSince = wasMismatch && !liveMismatch;
+			const flagged = wasMismatch || liveMismatch;
 			const repeat = r.total_attempts_this_name > 5;
 			return `<tr>
 				<td class="mono">${escapeHtml(fmtTimestamp(r.timestamp))}</td>
 				<td>${escapeHtml(r.claimed_name)}</td>
 				<td><span class="status-pill status-revoked">${escapeHtml(reasonLabel(r.reason))}</span></td>
 				<td class="mono">${escapeHtml(r.mac_presented)}</td>
-				<td class="mono">${mismatch ? `<span style="color:var(--warning-text)">${escapeHtml(r.mac_registered)}</span>` : escapeHtml(r.mac_registered)}</td>
+				<td class="mono">${flagged ? `<span style="color:var(--warning-text)">${escapeHtml(r.mac_registered)}</span>` : escapeHtml(r.mac_registered)}${resolvedSince ? ` <span class="muted" style="font-size:0.78em">(now matches — likely fixed since)</span>` : ""}</td>
 				<td>${escapeHtml(r.os)}</td>
 				<td class="mono">${escapeHtml(r.source_ip)}:${escapeHtml(String(r.source_port))}</td>
 				<td>${repeat ? `<span class="status-pill status-revoked">${r.total_attempts_this_name}×</span>` : `${r.total_attempts_this_name}×`}</td>
@@ -162,7 +176,7 @@ function renderRejectedTable() {
 			<button type="button" class="btn-secondary btn-sm" id="rejected-next-page" ${rejectedPage >= totalPages ? "disabled" : ""}>Next →</button>
 		</div>
 	</div>
-	<p class="muted" style="margin-top:12px">"MAC registered" is what's on file for that name in <span class="mono">openvpn_db.txt</span> — compare against "MAC presented" to see if it's a wrong/unregistered device, a stale entry, or a name that was never registered at all. "Attempts (this name)" counts the full rejection history, not just what's shown here. Repeated entries for the same name/IP are usually a client-side device/network issue, not necessarily an attack.</p>`;
+	<p class="muted" style="margin-top:12px">"MAC registered" is a live lookup against what's currently on file for that name in <span class="mono">openvpn_db.txt</span> — it can change after the fact (e.g. an admin later registers the device), so it may no longer match what "MAC presented" shows for an older row. Rows are still flagged amber whenever the original rejection <em>was</em> a MAC mismatch, even if it's since been fixed (labeled "now matches — likely fixed since") — so a resolved mismatch stays visible as history, not silently indistinguishable from a row that was never mismatched. "Attempts (this name)" counts the full rejection history, not just what's shown here. Repeated entries for the same name/IP are usually a client-side device/network issue, not necessarily an attack.</p>`;
 
 	const prevBtn = document.getElementById("rejected-prev-page");
 	const nextBtn = document.getElementById("rejected-next-page");
@@ -188,7 +202,6 @@ async function loadRejected() {
 document.getElementById("rejected-filter-name").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
 document.getElementById("rejected-filter-os").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
 document.getElementById("rejected-filter-reason").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
-document.getElementById("rejected-refresh").addEventListener("click", loadRejected);
 document.getElementById("refresh-btn").addEventListener("click", loadRejected);
 loadRejected();
 </script>

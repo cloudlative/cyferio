@@ -307,13 +307,16 @@ class TestPermanentDelete:
 class TestFirstNameRequired:
     def test_create_user_without_first_name_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/users", json={"username": "nofirstname", "password": "somepass123"})
+        r = app_client.post("/api/users", json={
+            "username": "nofirstname", "password": "somepass123", "email": "nofirstname@example.com",
+        })
         assert r.status_code == 422
 
     def test_create_user_with_blank_first_name_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "blankfirstname", "password": "somepass123", "first_name": "   ",
+            "email": "blankfirstname@example.com",
         })
         assert r.status_code == 422
 
@@ -321,9 +324,24 @@ class TestFirstNameRequired:
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "hasfirstname", "password": "somepass123", "first_name": "Alex",
+            "email": "hasfirstname@example.com",
         })
         assert r.status_code == 201
         assert r.json()["first_name"] == "Alex"
+
+    def test_create_user_without_email_rejected(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/users", json={
+            "username": "noemail", "password": "somepass123", "first_name": "Noel",
+        })
+        assert r.status_code == 422
+
+    def test_create_user_with_blank_email_rejected(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/users", json={
+            "username": "blankemail", "password": "somepass123", "first_name": "Blank", "email": "   ",
+        })
+        assert r.status_code == 422
 
     def test_admin_edit_cannot_blank_out_first_name(self, app_client, db_session):
         login(app_client, "admin", "adminpass123")

@@ -48,62 +48,92 @@
 <script>
 const isAdmin = {{ "true" if can_manage_clients else "false" }};
 let lastRevoked = [];
+// Same page-size/Prev-Next pattern as connection_history.html's Session
+// History table -- see that page's SESSION_HISTORY_PAGE_SIZE.
+const REVOKED_PAGE_SIZE = 20;
+let revokedPage = 1;
+
+function renderRevokedTable() {
+	const el = document.getElementById("revoked-table");
+	document.getElementById("revoked-count").textContent = `${lastRevoked.length} entr${lastRevoked.length === 1 ? "y" : "ies"}`;
+	if (lastRevoked.length === 0) {
+		el.innerHTML = '<div class="empty-state">No deleted or revoked clients.</div>';
+		return;
+	}
+	const sorted = [...lastRevoked].sort((a, b) => (b.revoked_at || "").localeCompare(a.revoked_at || ""));
+
+	const totalPages = Math.max(1, Math.ceil(sorted.length / REVOKED_PAGE_SIZE));
+	if (revokedPage > totalPages) revokedPage = totalPages;
+	if (revokedPage < 1) revokedPage = 1;
+	const start = (revokedPage - 1) * REVOKED_PAGE_SIZE;
+	const pageRows = sorted.slice(start, start + REVOKED_PAGE_SIZE);
+
+	el.innerHTML = `
+		<table>
+		<thead><tr>
+			<th>Name</th>
+			<th>Revoked On</th>
+			<th title="Whether this client still has a leftover entry in the MAC-binding database (openvpn_db.txt) that should be cleaned up.">MAC DB Entry</th>
+			<th title="Whether the old certificate/key files are still on disk. &quot;Purged&quot; clients have nothing left to delete, but the revocation record itself is never removed either way.">Certificate Files</th>
+			${isAdmin ? '<th>Action</th>' : ""}
+		</tr></thead>
+		<tbody>${pageRows.map(r => `
+			<tr class="row-dim" data-name="${escapeHtml(r.name)}">
+				<td>${escapeHtml(r.name)}</td>
+				<td class="mono">${escapeHtml(r.revoked_at)}</td>
+				<td>${r.stale_db_entry
+					? '<span class="status-pill status-revoked" title="This name still has a MAC-binding entry in openvpn_db.txt even though the certificate is revoked.">Stale — needs cleanup</span>'
+					: '<span class="status-pill status-online">Clean</span>'}</td>
+				<td>${r.files_present
+					? '<span class="status-pill status-offline">Present</span>'
+					: '<span class="status-pill status-online">Purged</span>'}</td>
+				${isAdmin ? `<td class="text-right">
+					${r.files_present ? '<button class="btn-secondary btn-sm restore-btn" title="Issue a brand-new certificate under this same name -- not a reactivation of the old one.">Restore</button>' : ''}
+					${r.files_present ? '<button class="btn-danger btn-sm purge-btn" style="margin-left:8px" title="Permanently delete this revoked client\'s leftover certificate/key files. The revocation record itself is never removed.">Purge</button>' : ''}
+					${r.stale_db_entry ? '<button class="btn-secondary btn-sm clean-db-btn" style="margin-left:8px" title="Remove this name\'s leftover MAC-binding entry from openvpn_db.txt. Safe even after the certificate files are already purged.">Clean up</button>' : ''}
+					${(!r.files_present && !r.stale_db_entry) ? '<span class="muted">—</span>' : ''}
+				</td>` : ""}
+			</tr>`).join("")}</tbody>
+	</table>
+	<div class="toolbar" style="margin-top:14px">
+		<span class="muted" style="font-size:0.85rem">Showing ${start + 1}–${Math.min(start + REVOKED_PAGE_SIZE, sorted.length)} of ${sorted.length}</span>
+		<div class="form-row" style="gap:8px">
+			<button type="button" class="btn-secondary btn-sm" id="revoked-prev-page" ${revokedPage <= 1 ? "disabled" : ""}>← Prev</button>
+			<span class="muted" style="font-size:0.85rem;align-self:center">Page ${revokedPage} of ${totalPages}</span>
+			<button type="button" class="btn-secondary btn-sm" id="revoked-next-page" ${revokedPage >= totalPages ? "disabled" : ""}>Next →</button>
+		</div>
+	</div>`;
+
+	const prevBtn = document.getElementById("revoked-prev-page");
+	const nextBtn = document.getElementById("revoked-next-page");
+	if (prevBtn) prevBtn.addEventListener("click", () => { revokedPage -= 1; renderRevokedTable(); });
+	if (nextBtn) nextBtn.addEventListener("click", () => { revokedPage += 1; renderRevokedTable(); });
+
+	if (isAdmin) {
+		el.querySelectorAll(".restore-btn").forEach(btn => {
+			btn.addEventListener("click", () => openRestoreDialog(btn.closest("tr").dataset.name));
+		});
+		el.querySelectorAll(".purge-btn").forEach(btn => {
+			btn.addEventListener("click", () => purgeClient(btn.closest("tr").dataset.name));
+		});
+		el.querySelectorAll(".clean-db-btn").forEach(btn => {
+			btn.addEventListener("click", () => cleanStaleDbEntry(btn.closest("tr").dataset.name));
+		});
+	}
+}
 
 async function loadRevoked() {
-	const el = document.getElementById("revoked-table");
 	try {
 		lastRevoked = await apiFetch("/api/clients/revoked");
-		document.getElementById("revoked-count").textContent = `${lastRevoked.length} entr${lastRevoked.length === 1 ? "y" : "ies"}`;
-		if (lastRevoked.length === 0) {
-			el.innerHTML = '<div class="empty-state">No deleted or revoked clients.</div>';
-			return;
-		}
-		const sorted = [...lastRevoked].sort((a, b) => (b.revoked_at || "").localeCompare(a.revoked_at || ""));
-		el.innerHTML = `
-			<table>
-			<thead><tr>
-				<th>Name</th>
-				<th>Revoked On</th>
-				<th title="Whether this client still has a leftover entry in the MAC-binding database (openvpn_db.txt) that should be cleaned up.">MAC DB Entry</th>
-				<th title="Whether the old certificate/key files are still on disk. &quot;Purged&quot; clients have nothing left to delete, but the revocation record itself is never removed either way.">Certificate Files</th>
-				${isAdmin ? '<th>Action</th>' : ""}
-			</tr></thead>
-			<tbody>${sorted.map(r => `
-				<tr class="row-dim" data-name="${escapeHtml(r.name)}">
-					<td>${escapeHtml(r.name)}</td>
-					<td class="mono">${escapeHtml(r.revoked_at)}</td>
-					<td>${r.stale_db_entry
-						? '<span class="status-pill status-revoked" title="This name still has a MAC-binding entry in openvpn_db.txt even though the certificate is revoked.">Stale — needs cleanup</span>'
-						: '<span class="status-pill status-online">Clean</span>'}</td>
-					<td>${r.files_present
-						? '<span class="status-pill status-offline">Present</span>'
-						: '<span class="status-pill status-online">Purged</span>'}</td>
-					${isAdmin ? `<td class="text-right">
-						${r.files_present ? '<button class="btn-secondary btn-sm restore-btn" title="Issue a brand-new certificate under this same name -- not a reactivation of the old one.">Restore</button>' : ''}
-						${r.files_present ? '<button class="btn-danger btn-sm purge-btn" style="margin-left:8px" title="Permanently delete this revoked client\'s leftover certificate/key files. The revocation record itself is never removed.">Purge</button>' : ''}
-						${r.stale_db_entry ? '<button class="btn-secondary btn-sm clean-db-btn" style="margin-left:8px" title="Remove this name\'s leftover MAC-binding entry from openvpn_db.txt. Safe even after the certificate files are already purged.">Clean up</button>' : ''}
-						${(!r.files_present && !r.stale_db_entry) ? '<span class="muted">—</span>' : ''}
-					</td>` : ""}
-				</tr>`).join("")}</tbody>
-		</table>`;
-
-		if (isAdmin) {
-			el.querySelectorAll(".restore-btn").forEach(btn => {
-				btn.addEventListener("click", () => openRestoreDialog(btn.closest("tr").dataset.name));
-			});
-			el.querySelectorAll(".purge-btn").forEach(btn => {
-				btn.addEventListener("click", () => purgeClient(btn.closest("tr").dataset.name));
-			});
-			el.querySelectorAll(".clean-db-btn").forEach(btn => {
-				btn.addEventListener("click", () => cleanStaleDbEntry(btn.closest("tr").dataset.name));
-			});
-		}
+		revokedPage = 1;
+		renderRevokedTable();
 	} catch (e) {
 		toast(e.message, "error");
 	}
 }
 
 if (isAdmin) {
+	closeOnBackdropClick(document.getElementById("restore-dialog"));
 	let restoringClientName = null;
 	function openRestoreDialog(name) {
 		restoringClientName = name;

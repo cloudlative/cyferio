@@ -69,12 +69,7 @@ def _valid_first_name(v: str | None) -> str | None:
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-def _valid_email(v: str | None) -> str | None:
-    if v is None:
-        return None
-    v = v.strip()
-    if not v:
-        return None  # explicit "" from the form means "clear it", not an error
+def _check_email_shape(v: str) -> None:
     if not _EMAIL_RE.match(v):
         raise ValueError("That doesn't look like a valid email address.")
     if ".." in v:
@@ -82,6 +77,31 @@ def _valid_email(v: str | None) -> str | None:
     local = v.split("@", 1)[0]
     if local.startswith(".") or local.endswith("."):
         raise ValueError("That doesn't look like a valid email address.")
+
+
+def _valid_email(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        return None  # explicit "" from the form means "clear it", not an error
+    _check_email_shape(v)
+    return v
+
+
+# Email is required at account creation time (task feedback: "users should
+# not be created without a valid email address") -- unlike _valid_email
+# above, blank/None isn't a valid "skip it" value here. Existing rows
+# created before this requirement can still carry a null email (untouched
+# by this), and admin edits to an existing user still go through
+# _valid_email's looser "blank clears it" rule, since retroactively forcing
+# an email onto every pre-existing account is a separate, bigger migration
+# this feedback didn't ask for.
+def _valid_email_required(v: str) -> str:
+    v = (v or "").strip()
+    if not v:
+        raise ValueError("Email is required.")
+    _check_email_shape(v)
     return v
 
 
@@ -254,7 +274,7 @@ class CreateUserRequest(BaseModel):
     first_name: str
     last_name: str | None = None
     gender: Gender = Gender.unspecified
-    email: str | None = None
+    email: str
     phone: str | None = None
     team_ids: list[int] = []
 
@@ -310,8 +330,8 @@ class CreateUserRequest(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def _email(cls, v: str | None) -> str | None:
-        return _valid_email(v)
+    def _email(cls, v: str) -> str:
+        return _valid_email_required(v)
 
     @field_validator("phone")
     @classmethod

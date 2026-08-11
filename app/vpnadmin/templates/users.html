@@ -14,7 +14,14 @@
 			</div>
 			<div class="field">
 				<label for="u-password">Password</label>
-				<input type="password" id="u-password" required minlength="8">
+				<div class="password-field-row">
+					<input type="password" id="u-password" required minlength="8">
+					<button type="button" class="btn-secondary btn-sm" id="u-password-generate">Generate</button>
+				</div>
+			</div>
+			<div class="field">
+				<label for="u-password-confirm">Confirm Password</label>
+				<input type="password" id="u-password-confirm" required minlength="8">
 			</div>
 			<div class="field">
 				<label for="u-role">Role</label>
@@ -37,8 +44,8 @@
 		</div>
 		<div class="form-row" style="margin-top:16px">
 			<div class="field">
-				<label for="u-email">Email <span class="muted">(optional)</span></label>
-				<input type="email" id="u-email" placeholder="e.g. asif@example.com">
+				<label for="u-email">Email</label>
+				<input type="email" id="u-email" required placeholder="e.g. asif@example.com">
 			</div>
 			<div class="field">
 				<label for="u-phone-mount">Phone <span class="muted">(optional)</span></label>
@@ -205,20 +212,23 @@
 			</fieldset>
 			<fieldset>
 				<legend>Reset Password <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
-				<div class="field" style="margin-bottom:0">
-					<input type="password" id="e-password" minlength="8" placeholder="Leave blank to keep current password">
-				</div>
-			</fieldset>
-			<fieldset>
-				<legend>Created At</legend>
-				<div class="field" style="margin-bottom:0">
-					<input type="text" id="e-created" disabled>
-					<p class="muted" style="margin:6px 0 0;font-size:0.8rem">Immutable — set once when the account was created.</p>
+				<div class="form-row">
+					<div class="field">
+						<label for="e-password">New Password</label>
+						<div class="password-field-row">
+							<input type="password" id="e-password" minlength="8" placeholder="Leave blank to keep current password">
+							<button type="button" class="btn-secondary btn-sm" id="e-password-generate">Generate</button>
+						</div>
+					</div>
+					<div class="field">
+						<label for="e-password-confirm">Confirm Password</label>
+						<input type="password" id="e-password-confirm" minlength="8" placeholder="Leave blank to keep current password">
+					</div>
 				</div>
 			</fieldset>
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="edit-cancel">Cancel</button>
-				<button type="submit" class="btn-primary">Save Changes</button>
+				<button type="submit" class="btn-primary" id="edit-save-btn" disabled>Save Changes</button>
 			</div>
 		</form>
 	</div>
@@ -349,9 +359,9 @@ const editPhone = createPhoneInput(document.getElementById("e-phone-mount"));
 // Server-side validators are the real check (see routes/users.py's
 // _valid_email/_valid_phone) -- these mirror the same rules purely for
 // real-time UX feedback.
-function emailError(v) {
+function emailError(v, { required = false } = {}) {
 	v = (v || "").trim();
-	if (!v) return null;
+	if (!v) return required ? "Email is required." : null;
 	if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) || v.includes("..") || v.split("@")[0].startsWith(".") || v.split("@")[0].endsWith(".")) {
 		return "That doesn't look like a valid email address.";
 	}
@@ -384,10 +394,22 @@ function parseLineList(text) {
 	return text.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
 }
 
-const uEmailValidation = attachInlineValidation(document.getElementById("u-email"), emailError);
+const uEmailValidation = attachInlineValidation(document.getElementById("u-email"), (v) => emailError(v, { required: true }));
 const eEmailValidation = attachInlineValidation(document.getElementById("e-email"), emailError);
 const uPhoneValidation = attachInlineValidation(addPhone.getLocalInputEl(), () => phoneError(addPhone.getValue()));
 const ePhoneValidation = attachInlineValidation(editPhone.getLocalInputEl(), () => phoneError(editPhone.getValue()));
+
+const uPasswordConfirm = wirePasswordConfirm(
+	document.getElementById("u-password"), document.getElementById("u-password-confirm"),
+	document.getElementById("u-password-generate"), { required: true },
+);
+const ePasswordConfirm = wirePasswordConfirm(
+	document.getElementById("e-password"), document.getElementById("e-password-confirm"),
+	document.getElementById("e-password-generate"), { required: false },
+);
+const editSaveBtn = document.getElementById("edit-save-btn");
+const editDirty = bindDirtyTracking(document.getElementById("edit-form"), editSaveBtn);
+closeOnBackdropClick(document.getElementById("edit-dialog"));
 
 async function loadRoleOptions() {
 	// Populates both the Add-User and Edit-User role <select>s from the
@@ -624,7 +646,9 @@ function openEdit(u) {
 	document.getElementById("e-active").disabled = editingUserIsBootstrapAdmin;
 	document.getElementById("e-role-note").style.display = editingUserIsBootstrapAdmin ? "" : "none";
 	document.getElementById("e-password").value = "";
-	document.getElementById("e-created").value = fmtDate(u.created_at);
+	document.getElementById("e-password").type = "password";
+	document.getElementById("e-password-confirm").value = "";
+	document.getElementById("e-password-confirm").type = "password";
 	document.getElementById("e-restrict-country").checked = !!u.restrict_login_by_country;
 	editCountriesMs.setSelected(u.allowed_login_countries || []);
 	document.getElementById("e-restrict-city").checked = !!u.restrict_login_by_city;
@@ -644,7 +668,9 @@ function openEdit(u) {
 	eRestrictionsToggle.setAttribute("aria-expanded", String(hasAnyRestriction));
 	updateEditRestrictionsCount();
 	document.getElementById("edit-dialog").showModal();
+	editDirty.arm();
 }
+document.getElementById("edit-dialog").addEventListener("close", () => editDirty.disarm());
 document.getElementById("edit-cancel").addEventListener("click", () => document.getElementById("edit-dialog").close());
 
 document.getElementById("edit-form").addEventListener("submit", async (ev) => {
@@ -655,6 +681,8 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		toast("Please fix the highlighted field(s) before saving.", "error");
 		return;
 	}
+	const pwCheckError = ePasswordConfirm.check();
+	if (pwCheckError) { toast(pwCheckError, "error"); return; }
 	const body = {
 		first_name: firstName,
 		last_name: document.getElementById("e-last").value.trim() || null,
@@ -702,6 +730,8 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 		toast("Please fix the highlighted field(s) before submitting.", "error");
 		return;
 	}
+	const pwCheckError = uPasswordConfirm.check();
+	if (pwCheckError) { toast(pwCheckError, "error"); return; }
 	try {
 		await apiFetch("/api/users", {
 			method: "POST",
@@ -709,7 +739,7 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				username, password, role,
 				first_name: firstName,
 				last_name: document.getElementById("u-last").value.trim() || null,
-				email: document.getElementById("u-email").value.trim() || null,
+				email: document.getElementById("u-email").value.trim(),
 				phone: addPhone.getValue() || null,
 				team_ids: addTeamMs.getSelected(),
 				restrict_login_by_country: document.getElementById("u-restrict-country").checked,
@@ -724,6 +754,8 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 		});
 		toast(`User '${username}' created.`);
 		document.getElementById("add-user-form").reset();
+		document.getElementById("u-password").type = "password";
+		document.getElementById("u-password-confirm").type = "password";
 		addTeamMs.reset();
 		addPhone.reset();
 		addCountriesMs.reset();
@@ -735,6 +767,8 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 
 document.getElementById("add-user-clear").addEventListener("click", () => {
 	document.getElementById("add-user-form").reset();
+	document.getElementById("u-password").type = "password";
+	document.getElementById("u-password-confirm").type = "password";
 	addTeamMs.reset();
 	addPhone.reset();
 	addCountriesMs.reset();

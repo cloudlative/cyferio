@@ -104,11 +104,13 @@ class TestUpdateSettings:
 
         r = app_client.post("/api/users", json={
             "username": "shortpw", "password": "short123", "first_name": "Short",
+            "email": "shortpw@example.com",
         })
         assert r.status_code == 422
 
         r = app_client.post("/api/users", json={
             "username": "longenough", "password": "longenoughpassword", "first_name": "Long",
+            "email": "longenough@example.com",
         })
         assert r.status_code == 201
 

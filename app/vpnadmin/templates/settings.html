@@ -264,6 +264,7 @@ document.getElementById("smtp-test-btn").addEventListener("click", () => {
 	document.getElementById("test-email-dialog").showModal();
 });
 document.getElementById("test-email-cancel").addEventListener("click", () => document.getElementById("test-email-dialog").close());
+closeOnBackdropClick(document.getElementById("test-email-dialog"));
 document.getElementById("test-email-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
 	const submitBtn = document.getElementById("test-email-submit");

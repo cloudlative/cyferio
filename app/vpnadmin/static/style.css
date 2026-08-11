@@ -561,10 +561,19 @@ fieldset { border: 1px solid var(--border); border-radius: var(--radius); paddin
 fieldset legend { padding: 0 8px; color: var(--text-muted); font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
 
 /* --- Phone input (dial-code <select> + local-number field), see app.js's
-   createPhoneInput -- used anywhere a User.phone is entered/edited. */
-.phone-input { display: flex; gap: 8px; max-width: 320px; }
-.phone-input .phone-dial-select { flex: 0 0 auto; width: 130px; }
+   createPhoneInput -- used anywhere a User.phone is entered/edited. Country
+   select width was a fixed 130px, truncating longer names ("United Arab
+   Emirates +971") -- now a wider, still-bounded flex value, with the
+   overall row's max-width raised to match so the local-number field isn't
+   squeezed out. */
+.phone-input { display: flex; gap: 8px; max-width: 400px; }
+.phone-input .phone-dial-select { flex: 0 1 220px; min-width: 170px; }
 .phone-input .phone-local-input { flex: 1; min-width: 0; }
+
+/* --- Password field + its "Generate" button (Add/Edit User forms). */
+.password-field-row { display: flex; gap: 8px; align-items: center; }
+.password-field-row input { flex: 1; min-width: 0; }
+.password-field-row button { flex: 0 0 auto; white-space: nowrap; }
 
 /* --- Inline field validation (email/phone), see app.js's
    attachInlineValidation -- this app's first use of this pattern, so it's

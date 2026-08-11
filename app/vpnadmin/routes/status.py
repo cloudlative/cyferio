@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from .. import cli_wrapper as cli
 from ..cli_wrapper import ScriptError
 from ..db import get_db
-from ..models import AuditLog, User
+from ..models import AuditLog, User, VpnProfileLink
 from ..permissions import require_permission, require_permission_any_scope
 
 router = APIRouter(prefix="/api/status", tags=["status"])
@@ -42,18 +42,45 @@ def get_rejected(limit: int = Query(20, ge=1, le=500), _: User = Depends(_requir
 
 
 @router.get("/session-history")
-def get_session_history(limit: int = Query(20, ge=1, le=500), _: User = Depends(_require_status_viewer)):
+def get_session_history(
+    limit: int = Query(20, ge=1, le=500),
+    _: User = Depends(_require_status_viewer),
+    db: Session = Depends(get_db),
+):
     """Connection History page. Same access level as /rejected (any
     logged-in user, admin or viewer) -- this is read-only historical data,
     not a mutating endpoint, matching Diagnostics' own require_user gate.
     Filtering by client name is done client-side against this same window,
     same as Diagnostics' rejected-connections filters (see that page's
     populateRejectedFilters/renderRejectedTable for the pattern this
-    mirrors)."""
+    mirrors).
+
+    Each row is enriched here with the linked portal user's identity
+    (`portal_username`/`portal_display_name`, both null if this VPN client
+    was never linked to a portal account) so the page's search box can match
+    against a portal user's name/username, not just the raw VPN profile
+    name -- this doesn't widen this endpoint's own access level, since
+    any_scope vpn_profiles/view already exposes every client's session
+    history here, just not who it's linked to."""
     try:
-        return cli.status_session_history(limit)
+        rows = cli.status_session_history(limit)
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
+
+    links = (
+        db.query(VpnProfileLink.vpn_client_name, User.username, User.first_name, User.last_name)
+        .join(User, User.id == VpnProfileLink.user_id)
+        .all()
+    )
+    by_client = {
+        client_name: {"portal_username": username, "portal_display_name": f"{first} {last}".strip() if last else first}
+        for client_name, username, first, last in links
+    }
+    for row in rows:
+        link = by_client.get(row.get("client"))
+        row["portal_username"] = link["portal_username"] if link else None
+        row["portal_display_name"] = link["portal_display_name"] if link else None
+    return rows
 
 
 # Deliberately outside the /api/status prefix -- this is a cross-cutting
