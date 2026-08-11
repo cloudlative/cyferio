@@ -10,14 +10,16 @@ name: app
 
 services:
   # Renders app/traefik/dynamic.yml.tmpl -> the traefik-dynamic-config volume,
-  # substituting ${APP_DOMAIN} from .env -- so the routing hostname is
-  # genuinely driven by .env, not hardcoded in the repo (Traefik's file
-  # provider has no ${VAR} expansion of its own, unlike this compose file).
-  # Deliberately a plain shell `sed`, not full envsubst/gettext, since there's
-  # exactly one variable to substitute -- no extra package install needed on
-  # top of a bare alpine image. Runs once per `docker compose up`; changing
-  # APP_DOMAIN and re-running `up` re-renders and Traefik's own
-  # --providers.file.watch=true picks up the change without a restart.
+  # substituting ${APP_DOMAIN} and ${CLIENT_IP_TRUST_MIDDLEWARE} from .env --
+  # so the routing hostname and Cloudflare-enforcement choice are genuinely
+  # driven by .env, not hardcoded in the repo (Traefik's file provider has no
+  # ${VAR} expansion of its own, unlike this compose file). Deliberately a
+  # plain shell `sed`, not full envsubst/gettext, since there's only a
+  # handful of plain-scalar variables to substitute -- no extra package
+  # install needed on top of a bare alpine image. Runs once per `docker
+  # compose up`; changing APP_DOMAIN/CLIENT_IP_TRUST_MIDDLEWARE and
+  # re-running `up` re-renders and Traefik's own --providers.file.watch=true
+  # picks up the change without a restart.
   traefik-config:
     image: alpine:3.20
     container_name: openvpn-toolkit-traefik-config
@@ -32,17 +34,25 @@ services:
     # awareness of shell quoting/escaping conventions; $$ is Compose's own
     # escape for "a literal $, don't touch it here" (see Compose's env
     # interpolation docs). Verified with `docker compose config` that the
-    # container actually receives the literal search pattern "${APP_DOMAIN}"
-    # (matching the template's placeholder) and the real value on the
-    # replacement side.
+    # container actually receives the literal search patterns
+    # "${APP_DOMAIN}"/"${CLIENT_IP_TRUST_MIDDLEWARE}" (matching the
+    # template's placeholders) and the real values on the replacement side.
+    # CLIENT_IP_TRUST_MIDDLEWARE defaults to "allow-all" (no enforcement) so
+    # an existing deployment's .env -- which won't have this var until
+    # setup-new-machine.sh is re-run -- keeps rendering exactly as it always
+    # has, never silently starts enforcing an IP allowlist on redeploy.
     entrypoint:
       - sh
       - -c
       - |
         set -e
         : "$${APP_DOMAIN:?APP_DOMAIN must be set in .env -- see .env.example}"
-        sed "s/\$${APP_DOMAIN}/$$APP_DOMAIN/g" /tmpl/dynamic.yml.tmpl > /out/dynamic.yml
-        echo "Rendered Traefik dynamic.yml for APP_DOMAIN=$$APP_DOMAIN"
+        CLIENT_IP_TRUST_MIDDLEWARE="$${CLIENT_IP_TRUST_MIDDLEWARE:-allow-all}"
+        sed \
+          -e "s/\$${APP_DOMAIN}/$$APP_DOMAIN/g" \
+          -e "s/\$${CLIENT_IP_TRUST_MIDDLEWARE}/$$CLIENT_IP_TRUST_MIDDLEWARE/g" \
+          /tmpl/dynamic.yml.tmpl > /out/dynamic.yml
+        echo "Rendered Traefik dynamic.yml for APP_DOMAIN=$$APP_DOMAIN CLIENT_IP_TRUST_MIDDLEWARE=$$CLIENT_IP_TRUST_MIDDLEWARE"
 
   traefik:
     image: traefik:v3.5
