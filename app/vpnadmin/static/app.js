@@ -18,9 +18,13 @@ function _progressDone() {
 }
 
 /**
- * Shows a toast notification. Auto-dismisses after 3s, or immediately via
- * its "×" close button. Multiple toasts stack (newest at the bottom,
- * pushing older ones up) rather than replacing each other.
+ * Shows a toast notification. Auto-dismisses after
+ * window.NOTIFICATION_DURATION_MS (admin-configurable via Settings ->
+ * Notifications, set on `window` by base.html from the cached `runtime`
+ * settings value -- see app_settings.py; defaults to 1000ms/1s if that
+ * global is somehow unset, e.g. a page that doesn't extend base.html), or
+ * immediately via its "×" close button. Multiple toasts stack (newest at
+ * the bottom, pushing older ones up) rather than replacing each other.
  *
  * If a native <dialog> is currently open, the toast is appended inside that
  * dialog instead of document.body: a <dialog> creates its own top-layer
@@ -53,7 +57,8 @@ function toast(message, kind = "success") {
 	el.appendChild(closeBtn);
 
 	container.appendChild(el);
-	setTimeout(() => el.remove(), 3000);
+	const duration = Number(window.NOTIFICATION_DURATION_MS) || 1000;
+	setTimeout(() => el.remove(), duration);
 }
 
 /**

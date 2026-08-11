@@ -2,7 +2,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .. import cli_wrapper as cli
 from .. import mailer
@@ -119,6 +119,24 @@ def get_unassigned_clients(_: User = Depends(_require_client_manager), db: Sessi
         raise HTTPException(status_code=502, detail=e.message)
     linked_names = {link.vpn_client_name for link in db.query(VpnProfileLink).all()}
     return [c for c in clients if c.get("name") not in linked_names]
+
+
+@router.get("/user-links")
+def get_client_user_links(_: User = Depends(_require_client_viewer), db: Session = Depends(get_db)):
+    """name -> {username, display_name} for every VPN profile that's linked
+    to a portal user -- powers the All Clients table's "Portal User" column
+    (a client with no entry here shows "-" client-side). Same viewer-level
+    gate as the rest of the bulk client-list endpoints (get_clients,
+    get_revoked_clients) -- this only exposes the username/display name of
+    accounts already visible to anyone who can see the Clients page at all,
+    not the full user list, so it doesn't need the admin-only
+    "unassigned"/policy gate. Registered before /{name}/... below, same
+    static-before-dynamic ordering as /revoked and /unassigned."""
+    links = db.query(VpnProfileLink).options(selectinload(VpnProfileLink.user)).all()
+    return {
+        link.vpn_client_name: {"username": link.user.username, "display_name": link.user.display_name}
+        for link in links
+    }
 
 
 @router.get("/{name}/macs")

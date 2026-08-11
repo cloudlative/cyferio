@@ -111,6 +111,10 @@
 		// setting: every timestamp this app stores/emits stays UTC.
 		window.APP_TIMEZONE = {{ app_settings.timezone | tojson }};
 		window.APP_TIME_FORMAT = {{ app_settings.time_format | tojson }};
+		// Read by static/app.js's toast() -- admin-configurable in Settings ->
+		// Notifications, defaults to 1000ms. Same "cached `runtime` value read
+		// at render time" pattern as the timezone globals above.
+		window.NOTIFICATION_DURATION_MS = {{ app_settings.notification_duration_ms | tojson }};
 	</script>
 	<script src="/static/app.js?v={{ static_version }}"></script>
 	{% block scripts %}{% endblock %}

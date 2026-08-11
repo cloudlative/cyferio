@@ -338,6 +338,14 @@ class AppSettings(Base):
     # Audit log retention -- NULL/0 means "keep forever" (no pruning).
     audit_retention_days = Column(Integer, nullable=True)
 
+    # Toast/notification popup display duration, in milliseconds -- NULL
+    # falls back to app_settings.py's 1000ms (1 second) default. Read
+    # client-side by static/app.js's toast() via window.NOTIFICATION_DURATION_MS
+    # (see base.html), not fetched per-toast -- see refresh_runtime_cache's
+    # docstring for why templates/JS read the cached `runtime` value instead
+    # of hitting the DB/API on every render.
+    notification_duration_ms = Column(Integer, nullable=True)
+
     # Theming (see config.py's LOGIN_THEME) -- NULL/"auto" rotates through
     # all 6 named themes on a fixed 2-hour schedule (see app_settings.py's
     # resolve_active_theme); any other value pins that one theme.

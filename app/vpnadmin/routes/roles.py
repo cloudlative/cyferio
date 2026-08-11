@@ -50,9 +50,21 @@ def _serialize(db: Session, role: RoleDef, *, with_matrix: bool = False) -> dict
     return out
 
 
+# Fixed display order for the 5 system roles (task feedback: "Roles
+# sorting - order: 1. Super Admin ... 2. admin 3. Editor 4. Viewer 5. User
+# 6. Any other Custom role"). Every slug not listed here (i.e. every custom
+# role) sorts after all of these, alphabetically by name -- see
+# _role_sort_key below.
+_SYSTEM_ROLE_ORDER = {"super_admin": 0, "admin": 1, "editor": 2, "viewer": 3, "user": 4}
+
+
+def _role_sort_key(role: RoleDef):
+    return (_SYSTEM_ROLE_ORDER.get(role.slug, len(_SYSTEM_ROLE_ORDER)), role.name)
+
+
 @router.get("")
 def list_roles(_: User = Depends(require_roles_admin), db: Session = Depends(get_db)):
-    return [_serialize(db, r) for r in db.query(RoleDef).order_by(RoleDef.is_system.desc(), RoleDef.name).all()]
+    return [_serialize(db, r) for r in sorted(db.query(RoleDef).all(), key=_role_sort_key)]
 
 
 class CreateRoleRequest(BaseModel):
@@ -108,11 +120,21 @@ class UpdateRoleRequest(BaseModel):
     description: str | None = None
 
 
+def _block_super_admin_edit(role: RoleDef) -> None:
+    """Super Admin (task feedback: "not modifiable") is the one system role
+    that can't even be renamed/re-described/re-permissioned -- unlike
+    admin/editor/viewer/user, which stay editable (just not deletable, see
+    delete_role's own is_system check) same as before this role existed."""
+    if role.slug == "super_admin":
+        raise HTTPException(status_code=409, detail="'Super Admin' is a protected system role and cannot be modified.")
+
+
 @router.patch("/{role_id}")
 def update_role(role_id: int, body: UpdateRoleRequest, admin: User = Depends(require_roles_admin), db: Session = Depends(get_db)):
     role = db.get(RoleDef, role_id)
     if role is None:
         raise HTTPException(status_code=404, detail="Role not found.")
+    _block_super_admin_edit(role)
     changes = []
     if body.name is not None and body.name.strip() and body.name != role.name:
         role.name = body.name.strip()
@@ -175,6 +197,7 @@ def update_object_permissions(
     role = db.get(RoleDef, role_id)
     if role is None:
         raise HTTPException(status_code=404, detail="Role not found.")
+    _block_super_admin_edit(role)
     existing = {p.object_key: p for p in db.query(ObjectPermission).filter_by(role_id=role.id).all()}
     for object_key, entry in body.permissions.items():
         row = existing.get(object_key)
@@ -209,6 +232,7 @@ def update_api_scopes(
     role = db.get(RoleDef, role_id)
     if role is None:
         raise HTTPException(status_code=404, detail="Role not found.")
+    _block_super_admin_edit(role)
     existing = {s.object_key: s for s in db.query(RoleApiScope).filter_by(role_id=role.id).all()}
     for object_key, scope in body.scopes.items():
         row = existing.get(object_key)

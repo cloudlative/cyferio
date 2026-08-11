@@ -86,8 +86,8 @@
 				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Leaving all three unchecked means <strong>no restriction</strong> (any OS can connect) -- it does NOT block every OS.</p>
 			</div>
 			<div class="field">
-				<label for="policy-bandwidth">Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited)</span></label>
-				<input type="text" id="policy-bandwidth" inputmode="decimal" placeholder="Unlimited">
+				<label for="policy-bandwidth">Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited, decimals allowed, min 0.1)</span></label>
+				<input type="text" id="policy-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)">
 				<p class="muted" style="margin:6px 0 0;font-size:0.82rem" id="policy-usage-note"></p>
 			</div>
 			<p class="muted restrictions-summary" id="policy-restrictions-summary"></p>
@@ -119,7 +119,7 @@ const _initialParams = new URLSearchParams(location.search);
 let currentFilter = _initialParams.get("online") === "1" ? "online"
 	: _initialParams.get("missing_mac") === "1" ? "missing_mac"
 	: "all";
-let lastClients = [], lastStatusByName = {}, lastPoliciesByName = {}, lastUsageByName = {};
+let lastClients = [], lastStatusByName = {}, lastPoliciesByName = {}, lastUsageByName = {}, lastUserLinksByName = {};
 
 function applyFilterUI() {
 	document.querySelectorAll(".filter-chip").forEach(c => c.classList.toggle("active", c.dataset.filter === currentFilter));
@@ -128,18 +128,20 @@ function applyFilterUI() {
 async function loadClients() {
 	const el = document.getElementById("clients-table");
 	try {
-		const [clients, statusAll, policies] = await Promise.all([
+		const [clients, statusAll, policies, userLinks] = await Promise.all([
 			apiFetch("/api/clients"),
 			apiFetch("/api/status/all"),
 			// Restriction badges + bandwidth usage are an admin-only feature
 			// (same gating as "Manage Restrictions" itself) -- viewers skip
 			// this fetch entirely rather than hitting a 403 on every page load.
 			isAdmin ? apiFetch("/api/clients/policies") : Promise.resolve({ policies: {}, usage: {} }),
+			apiFetch("/api/clients/user-links"),
 		]);
 		lastClients = clients;
 		lastStatusByName = Object.fromEntries(statusAll.map(s => [s.name, s]));
 		lastPoliciesByName = policies.policies || {};
 		lastUsageByName = policies.usage || {};
+		lastUserLinksByName = userLinks || {};
 		const onlineCount = clients.filter(c => lastStatusByName[c.name]?.status === "online").length;
 		document.getElementById("client-count").innerHTML =
 			`${clients.length} client${clients.length === 1 ? "" : "s"} — ` +
@@ -195,15 +197,17 @@ function renderClients() {
 
 	el.innerHTML = `<table>
 		<thead><tr>
-			<th>Name</th><th>Status</th><th>In MAC DB</th><th>MAC Addresses</th><th>Last Seen</th><th>Restrictions</th>
+			<th>Name</th><th>Status</th><th>Portal User</th><th>In MAC DB</th><th>MAC Addresses</th><th>Last Seen</th><th>Restrictions</th>
 			${isAdmin ? "<th>Bandwidth (this month)</th>" : ""}
 			<th></th>${isAdmin ? "<th></th><th></th><th></th><th></th>" : ""}
 		</tr></thead>
 		<tbody>${filtered.map(({ c, s, online }) => {
 			const policy = lastPoliciesByName[c.name];
+			const linkedUser = lastUserLinksByName[c.name];
 			return `<tr data-name="${escapeHtml(c.name)}" class="${online ? "row-online" : ""}">
 				<td>${escapeHtml(c.name)}</td>
 				<td><span class="status-pill status-${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span></td>
+				<td>${linkedUser ? escapeHtml(linkedUser.display_name || linkedUser.username) : '<span class="muted">-</span>'}</td>
 				<td>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</td>
 				<td><span class="count-badge">${c.mac_count ?? 0}</span></td>
 				<td>${escapeHtml(s ? s.last_seen : "—")}</td>

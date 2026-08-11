@@ -42,6 +42,7 @@ class UpdateSettingsRequest(BaseModel):
     min_password_length: int | None = None
     session_timeout_minutes: int | None = None
     audit_retention_days: int | None = None
+    notification_duration_ms: int | None = None
 
     login_theme: str | None = None
 
@@ -79,6 +80,17 @@ class UpdateSettingsRequest(BaseModel):
     def _retention(cls, v):
         if v is not None and v < 0:
             raise ValueError("Audit log retention can't be negative.")
+        return v
+
+    @field_validator("notification_duration_ms")
+    @classmethod
+    def _notification_duration(cls, v):
+        # Lower bound keeps a toast from flashing by too fast to read;
+        # upper bound is a sanity cap, not a real design limit -- 30s is
+        # already far longer than anyone would reasonably want a popup to
+        # sit on screen.
+        if v is not None and not (200 <= v <= 30000):
+            raise ValueError("Notification duration must be between 200 and 30000 milliseconds.")
         return v
 
     @field_validator("login_theme")
@@ -134,6 +146,7 @@ def _serialize() -> dict:
         "min_password_length": s.min_password_length,
         "session_timeout_minutes": s.session_timeout_minutes,
         "audit_retention_days": s.audit_retention_days,
+        "notification_duration_ms": s.notification_duration_ms,
         "login_theme": s.login_theme or "auto",
         "timezone": s.timezone,
         "time_format": s.time_format,
@@ -155,8 +168,8 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
 
     for field in ("app_name", "app_tagline", "app_footer_credit", "smtp_host", "smtp_port",
                    "smtp_username", "smtp_from", "smtp_use_tls", "min_password_length",
-                   "session_timeout_minutes", "audit_retention_days", "login_theme",
-                   "timezone", "time_format"):
+                   "session_timeout_minutes", "audit_retention_days", "notification_duration_ms",
+                   "login_theme", "timezone", "time_format"):
         if field in fields_set:
             value = getattr(body, field)
             if value != getattr(row, field):

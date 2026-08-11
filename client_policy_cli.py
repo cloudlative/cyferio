@@ -220,10 +220,10 @@ def cmd_set_bandwidth(name, gb):
     else:
         try:
             value = float(gb)
-            if value <= 0:
+            if value < 0.1:
                 raise ValueError
         except ValueError:
-            print("Invalid bandwidth quota: '{0}' -- expected a positive number of GB, or '-' to clear.".format(gb), file=sys.stderr)
+            print("Invalid bandwidth quota: '{0}' -- expected a number >= 0.1 (GB), or '-' to clear.".format(gb), file=sys.stderr)
             sys.exit(1)
     print(json.dumps(_set_field(name, "bandwidth_monthly_gb", value)))
 

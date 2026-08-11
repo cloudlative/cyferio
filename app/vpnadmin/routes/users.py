@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session, selectinload
 
-from .. import app_settings, geo_lists, vpn_identity_sync
+from .. import app_settings, geo_lists, policy_store, vpn_identity_sync
 from .. import cli_wrapper as cli
 from ..audit import log_action
 from ..auth import hash_password, require_user, verify_password
@@ -15,6 +15,7 @@ from ..cli_wrapper import ScriptError
 from ..db import get_db
 from ..models import Gender, Role, RoleDef, Team, User, VpnProfileLink
 from ..permissions import require_permission
+from ..policy_store import PolicyValidationError
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -31,6 +32,18 @@ def _resolve_role(db: Session, slug: str) -> RoleDef:
     role = db.query(RoleDef).filter(RoleDef.slug == slug.strip().lower()).first()
     if role is None:
         raise HTTPException(status_code=400, detail=f"No such role: '{slug}'.")
+    return role
+
+
+def _resolve_creatable_role(db: Session, slug: str) -> RoleDef:
+    """Same as _resolve_role, but additionally rejects "super_admin" --
+    reserved exclusively for the bootstrap admin account (see
+    db.py's _promote_bootstrap_admin_to_super_admin), never assignable via
+    Add User or an admin edit. Server-side backstop behind the Add-User
+    dropdown already excluding it client-side (see users.html)."""
+    role = _resolve_role(db, slug)
+    if role.slug == "super_admin":
+        raise HTTPException(status_code=400, detail="The Super Admin role can't be assigned -- it's reserved for the bootstrap admin account.")
     return role
 
 
@@ -253,6 +266,31 @@ def _valid_asn_list(v: list[str]) -> list[str]:
     return seen
 
 
+# Mirrors policy_store.set_policy's own validation (that module is the
+# real enforcement point, since it's the one writing client_policy.json --
+# see its docstring) -- validating here too gives a clean 422 with a field
+# name attached, rather than only discovering a bad value later when
+# create_user/update_user calls policy_store and gets a PolicyValidationError.
+def _valid_allowed_os(v: list[str]) -> list[str]:
+    normalized = sorted({o.strip().lower() for o in v if o.strip()})
+    bad = [o for o in normalized if o not in policy_store.VALID_OS]
+    if bad:
+        raise ValueError(f"Invalid OS name(s): {', '.join(bad)} -- expected any of: {', '.join(sorted(policy_store.VALID_OS))}.")
+    return normalized
+
+
+def _valid_bandwidth_gb(v: float | None) -> float | None:
+    if v is None:
+        return None
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        raise ValueError("Bandwidth quota must be a number.")
+    if v < 0.1:
+        raise ValueError("Bandwidth quota must be at least 0.1 GB (100 MB) -- leave blank for unlimited.")
+    return v
+
+
 def _resolve_teams(db: Session, team_ids: list[int]) -> list[Team]:
     """Validates every id in team_ids references an existing Team, and
     returns the Team rows themselves (for assigning to User.teams). Used by
@@ -286,6 +324,24 @@ class CreateUserRequest(BaseModel):
     # MAC/name conflict fails closed with no user created at all.
     mac: str
     team_ids: list[int] = []
+
+    # VPN-profile-level restrictions, applied to the just-created client
+    # (see create_user() below) the same way Manage Restrictions on the
+    # Clients page would -- these were previously only settable AFTER
+    # creation, via a separate trip to the Clients page. Both optional,
+    # same "empty/blank = unrestricted" convention as policy_store.set_policy.
+    allowed_os: list[str] = []
+    bandwidth_monthly_gb: float | None = None
+
+    @field_validator("allowed_os")
+    @classmethod
+    def _os(cls, v: list[str]) -> list[str]:
+        return _valid_allowed_os(v)
+
+    @field_validator("bandwidth_monthly_gb")
+    @classmethod
+    def _bandwidth(cls, v: float | None) -> float | None:
+        return _valid_bandwidth_gb(v)
 
     @field_validator("mac")
     @classmethod
@@ -370,6 +426,26 @@ class UpdateUserRequest(BaseModel):
     email: str | None = None
     phone: str | None = None
     team_ids: list[int] | None = None  # explicit [] = clear all teams; see model_fields_set usage below
+
+    # Same VPN-profile restrictions as CreateUserRequest, editable after the
+    # fact too -- see update_user() below, which syncs these onto the
+    # linked VPN profile's policy (a no-op if this user has no linked
+    # profile yet, e.g. the rare cert-created-but-DB-failed edge case).
+    # None means "not provided in this PATCH" (model_fields_set decides,
+    # same convention as team_ids/allowed_login_* above); an explicit []/null
+    # clears the restriction.
+    allowed_os: list[str] | None = None
+    bandwidth_monthly_gb: float | None = None
+
+    @field_validator("allowed_os")
+    @classmethod
+    def _os(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_allowed_os(v) if v is not None else v
+
+    @field_validator("bandwidth_monthly_gb")
+    @classmethod
+    def _bandwidth(cls, v: float | None) -> float | None:
+        return _valid_bandwidth_gb(v)
 
     restrict_login_by_country: bool | None = None
     allowed_login_countries: list[str] | None = None  # explicit [] = clear the list
@@ -471,7 +547,15 @@ def _role_slug(u: User) -> str:
     return u.role_def.slug if u.role_def is not None else u.role.value
 
 
-def _serialize(u: User) -> dict:
+def _serialize(u: User, policies: dict | None = None) -> dict:
+    # `policies` is an optional pre-fetched {vpn_client_name: policy_dict}
+    # map (see _USERS_LIST_OPTIONS callers below) -- avoids an extra
+    # policy_store file-lock/read per user on the list endpoints (N+1-ish,
+    # even though it's a JSON file rather than a DB query). Single-user
+    # callers (create_user/update_user/link_vpn_profile) just pass a
+    # one-entry dict for the user they're already touching.
+    client_name = u.vpn_profile_link.vpn_client_name if u.vpn_profile_link else None
+    policy = (policies or {}).get(client_name) or {} if client_name else {}
     return {
         "id": u.id,
         "username": u.username,
@@ -499,7 +583,9 @@ def _serialize(u: User) -> dict:
         "allowed_login_cities": json.loads(u.allowed_login_cities or "[]"),
         "restrict_login_by_asn": u.restrict_login_by_asn,
         "allowed_login_asns": json.loads(u.allowed_login_asns or "[]"),
-        "vpn_client_name": u.vpn_profile_link.vpn_client_name if u.vpn_profile_link else None,
+        "vpn_client_name": client_name,
+        "allowed_os": policy.get("allowed_os") or [],
+        "bandwidth_monthly_gb": policy.get("bandwidth_monthly_gb"),
     }
 
 
@@ -532,7 +618,10 @@ def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_d
         db.query(User).options(*_USERS_LIST_OPTIONS)
         .filter(User.deleted.is_(False)).order_by(User.username).all()
     )
-    return [_serialize(u) for u in users]
+    # One bulk policy_store read for the whole list, not one per user -- see
+    # _serialize's docstring.
+    policies = policy_store.get_all_policies()
+    return [_serialize(u, policies) for u in users]
 
 
 @router.get("/deleted")
@@ -541,14 +630,17 @@ def list_deleted_users(admin: User = Depends(require_admin), db: Session = Depen
         db.query(User).options(*_USERS_LIST_OPTIONS)
         .filter(User.deleted.is_(True)).order_by(User.deleted_at.desc()).all()
     )
-    return [_serialize(u) for u in users]
+    policies = policy_store.get_all_policies()
+    return [_serialize(u, policies) for u in users]
 
 
 @router.get("/me")
 def whoami(user: User = Depends(require_user)):
     # Any logged-in user can see their own profile (unlike the admin-only
     # routes above) -- this is what the self-service /profile page reads.
-    return _serialize(user)
+    client_name = user.vpn_profile_link.vpn_client_name if user.vpn_profile_link else None
+    policies = {client_name: policy_store.get_policy(client_name)} if client_name else {}
+    return _serialize(user, policies)
 
 
 @router.patch("/me")
@@ -606,7 +698,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     if db.query(User).filter(User.username == body.username).first() is not None:
         raise HTTPException(status_code=409, detail=f"Username '{body.username}' already exists.")
     teams = _resolve_teams(db, body.team_ids)
-    role_def = _resolve_role(db, body.role)
+    role_def = _resolve_creatable_role(db, body.role)
 
     # VPN cert is created FIRST, before any DB write -- a MAC/name conflict
     # (or any other cli.add_client failure) means no user is created at
@@ -670,7 +762,26 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
                    f"to an account manually.",
         )
     log_action(db, admin, "create_user", target=body.username, detail=f"role={role_def.slug}")
-    return _serialize(user)
+
+    # Sync VPN-profile-level restrictions onto the just-created client, same
+    # write path as Manage Restrictions on the Clients page. Best-effort:
+    # both fields are already validated at the Pydantic level above, so
+    # this should never actually raise -- but the user/link/cert all
+    # already exist at this point, so a failure here (e.g. a filesystem
+    # hiccup writing client_policy.json) must not undo any of that. Skipped
+    # entirely (no file write at all) when neither restriction was set --
+    # matches policy_store's own "no policy entry = fully unrestricted"
+    # default, avoids touching client_policy.json for the common case.
+    policy = {}
+    if body.allowed_os or body.bandwidth_monthly_gb:
+        try:
+            policy = policy_store.set_policy(
+                body.username, allowed_os=body.allowed_os or None, bandwidth_monthly_gb=body.bandwidth_monthly_gb,
+            )
+        except (PolicyValidationError, OSError) as e:
+            log_action(db, admin, "create_user", target=body.username,
+                       detail=f"VPN profile restrictions could not be applied: {e}", success=False)
+    return _serialize(user, {body.username: policy})
 
 
 @router.patch("/{user_id}")
@@ -691,7 +802,7 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     # by another admin, same as before this rule existed, subject only to
     # the last-admin-standing/self-lockout guardrails below.
     if target.is_bootstrap_admin:
-        if body.role is not None and body.role.strip().lower() != "admin":
+        if body.role is not None and body.role.strip().lower() != "super_admin":
             raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be demoted.")
         if body.is_active is False:
             raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deactivated.")
@@ -715,7 +826,13 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
 
     changes = []
     if body.role is not None:
-        new_role_def = _resolve_role(db, body.role)
+        # Non-bootstrap targets go through the same "super_admin isn't
+        # assignable" guard as create_user -- the bootstrap-admin block
+        # above already enforces the opposite direction (that account's
+        # role can ONLY ever be set to "super_admin", never anything else),
+        # so by the time a bootstrap target reaches here body.role is
+        # necessarily already "super_admin" and the plain resolver is fine.
+        new_role_def = _resolve_role(db, body.role) if target.is_bootstrap_admin else _resolve_creatable_role(db, body.role)
         if new_role_def.id != target.role_id:
             changes.append(f"role {_role_slug(target)}->{new_role_def.slug}")
             target.role_id = new_role_def.id
@@ -798,7 +915,27 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         vpn_identity_sync.sync_after_portal_suspend(db, target)
     elif became_active:
         vpn_identity_sync.sync_after_portal_reactivate(db, target)
-    return _serialize(target)
+
+    # Sync VPN-profile-level restrictions onto the linked client's policy --
+    # a no-op if this user has no linked profile yet (the rare
+    # cert-created-but-DB-failed edge case; there's nothing to sync onto
+    # until an admin attaches one via the vpn-link endpoint below). Only
+    # touches fields actually present in this PATCH, same partial-update
+    # convention as everything else in this endpoint.
+    client_name = target.vpn_profile_link.vpn_client_name if target.vpn_profile_link else None
+    policy = policy_store.get_policy(client_name) if client_name else {}
+    if client_name and ("allowed_os" in body.model_fields_set or "bandwidth_monthly_gb" in body.model_fields_set):
+        try:
+            policy = policy_store.set_policy(
+                client_name,
+                allowed_os=body.allowed_os if "allowed_os" in body.model_fields_set else ...,
+                bandwidth_monthly_gb=body.bandwidth_monthly_gb if "bandwidth_monthly_gb" in body.model_fields_set else ...,
+            )
+            log_action(db, admin, "update_user", target=target.username, detail="synced VPN profile restrictions")
+        except (PolicyValidationError, OSError) as e:
+            log_action(db, admin, "update_user", target=target.username,
+                       detail=f"VPN profile restrictions could not be applied: {e}", success=False)
+    return _serialize(target, {client_name: policy} if client_name else {})
 
 
 class VpnLinkRequest(BaseModel):

@@ -109,6 +109,17 @@
 	</div>
 
 	<div class="card">
+		<h2>Notifications</h2>
+		<p class="muted" style="margin-top:0">Controls how long toast/notification popups stay on screen across the whole app.</p>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-notification-duration">Notification Duration <span class="muted">(seconds)</span></label>
+				<input type="text" id="s-notification-duration" inputmode="decimal" placeholder="1">
+			</div>
+		</div>
+	</div>
+
+	<div class="card">
 		<h2>Audit Log Retention</h2>
 		<div class="form-grid">
 			<div class="field">
@@ -210,6 +221,7 @@ async function loadSettings() {
 		setVal("s-min-pw-len", s.min_password_length);
 		setVal("s-session-timeout", s.session_timeout_minutes);
 		setVal("s-audit-retention", s.audit_retention_days);
+		setVal("s-notification-duration", s.notification_duration_ms != null ? (s.notification_duration_ms / 1000) : 1);
 		document.getElementById("smtp-status").textContent = s.smtp_configured ? "Currently configured." : "Not configured -- email features are disabled.";
 
 		_themeChoices = s.theme_choices || [];
@@ -242,6 +254,10 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		min_password_length: intOrNull(val("s-min-pw-len")),
 		session_timeout_minutes: intOrNull(val("s-session-timeout")),
 		audit_retention_days: intOrNull(val("s-audit-retention")),
+		notification_duration_ms: (() => {
+			const secs = Number(val("s-notification-duration"));
+			return Number.isFinite(secs) && secs > 0 ? Math.round(secs * 1000) : null;
+		})(),
 		login_theme: document.getElementById("s-login-theme").value,
 		timezone: document.getElementById("s-timezone").value,
 		time_format: document.getElementById("s-time-format").value,

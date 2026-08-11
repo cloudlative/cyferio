@@ -5,7 +5,7 @@
 	<div class="toolbar-title"><h1 style="margin:0">Role Management</h1></div>
 	<button class="btn-secondary" id="refresh-btn">Refresh</button>
 </div>
-<p class="page-subtitle" style="margin-top:-10px">Create custom roles and edit exactly what each role can see and do, per module. The 4 built-in roles (Admin, Editor, Viewer, User) can be renamed/described but not deleted.</p>
+<p class="page-subtitle" style="margin-top:-10px">Create custom roles and edit exactly what each role can see and do, per module. Admin, Editor, Viewer, and User can be renamed/described but not deleted. Super Admin (the bootstrap account's role) can't be modified at all.</p>
 
 <div class="card">
 	<h2>Create a Custom Role</h2>
@@ -94,7 +94,9 @@ function renderRoleList() {
 				<td><code>${escapeHtml(r.slug)}</code></td>
 				<td>${r.is_system ? '<span class="status-pill status-online">System</span>' : '<span class="status-pill status-offline">Custom</span>'}</td>
 				<td>${r.user_count}</td>
-				<td><button class="btn-secondary btn-sm" data-open-role="${r.id}">Edit Permissions</button></td>
+				<td>${r.slug === "super_admin"
+					? '<button class="btn-secondary btn-sm" disabled title="Super Admin is a protected system role and cannot be modified.">Not modifiable</button>'
+					: `<button class="btn-secondary btn-sm" data-open-role="${r.id}">Edit Permissions</button>`}</td>
 			</tr>
 		`).join("")}
 	</tbody></table></div>`;

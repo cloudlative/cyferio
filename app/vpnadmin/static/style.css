@@ -309,6 +309,12 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	font-weight: 800;
 	letter-spacing: 0.04em;
 }
+/* Super Admin (the bootstrap admin's exclusive role, see permissions.py's
+   _SYSTEM_ROLES) gets its own gold/amber gradient -- distinct from admin's
+   indigo-purple-cyan so the one account that's permanently un-demotable/
+   un-modifiable reads as visibly a tier above regular admins, not just a
+   same-colored badge with different text. */
+.role-super_admin { background: linear-gradient(90deg, #f59e0b, #eab308); color: #1a1305; }
 .role-admin { background: var(--accent-gradient); color: #fff; }
 /* Previously #22d3ee -> #6366f1 -- the exact same two hues as
    --accent-gradient (admin's badge), just reversed, so admin and editor

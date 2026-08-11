@@ -88,8 +88,43 @@ def _seed_rbac():
         rename_legacy_vpn_self_service_role(db)
         seed_system_roles(db)
         migrate_user_roles(db)  # Phase 2 backfill -- see permissions.py's docstring
+        promote_bootstrap_admin_to_super_admin(db)
     finally:
         db.close()
+
+
+def promote_bootstrap_admin_to_super_admin(db) -> None:
+    """Idempotent promotion of the bootstrap admin account onto the
+    "super_admin" system role -- needs both the super_admin RoleDef row and
+    the bootstrap account itself to already exist, so it's a no-op (safe,
+    just does nothing) if either doesn't yet.
+
+    Called from two places, deliberately: once from _seed_rbac() above
+    (covers every startup on an already-provisioned database, where the
+    bootstrap account already exists by the time init_db() runs), and again
+    from main.py's lifespan(), AFTER auth.bootstrap_admin()/
+    ensure_bootstrap_admin_flag() -- covers a genuinely fresh install, where
+    init_db() (and therefore this function's first call) runs before that
+    very first account has even been created yet, so that first call is
+    necessarily a no-op there and the second call is what actually promotes
+    it. auth.bootstrap_admin() itself still creates the account on the
+    plain "admin" role (unchanged) -- this is what actually makes it
+    "Super Admin" afterward: excluded from the Add User role dropdown, and
+    permanently un-modifiable (see routes/roles.py's update_role/
+    update_object_permissions/update_api_scopes). Only ever touches the one
+    row where User.is_bootstrap_admin is True -- every other admin account
+    stays on the plain "admin" role, demotable/deletable by another admin
+    same as before."""
+    from .models import RoleDef, User
+
+    super_admin_role = db.query(RoleDef).filter_by(slug="super_admin").first()
+    if super_admin_role is None:
+        return  # seed_system_roles somehow didn't run -- nothing to promote onto yet
+    bootstrap = db.query(User).filter_by(is_bootstrap_admin=True).first()
+    if bootstrap is None or bootstrap.role_id == super_admin_role.id:
+        return
+    bootstrap.role_id = super_admin_role.id
+    db.commit()
 
 
 def _backfill_team_slugs():

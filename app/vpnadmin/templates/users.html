@@ -59,6 +59,20 @@
 				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Creating a user also provisions their VPN profile -- MAC can be entered in any common format (colons, dashes, or none — any case) and will be normalized automatically. To attach an already-existing VPN profile instead, use Edit User after creating the account.</p>
 			</div>
 		</div>
+		<div class="form-row" style="margin-top:16px">
+			<div class="field">
+				<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
+				<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:4px">
+					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="u-os-check" value="windows"> Windows</label>
+					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="u-os-check" value="linux"> Linux</label>
+					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="u-os-check" value="mac"> macOS</label>
+				</div>
+			</div>
+			<div class="field">
+				<label for="u-bandwidth">Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited, min 0.1)</span></label>
+				<input type="text" id="u-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)">
+			</div>
+		</div>
 		<button type="button" class="restrictions-toggle" id="u-restrictions-toggle" aria-expanded="false">
 			<span class="chevron">▸</span> Login restrictions <span class="muted">(optional)</span>
 		</button>
@@ -185,6 +199,20 @@
 						<button type="button" class="btn-secondary" id="e-vpn-attach-btn" disabled>Attach</button>
 					</div>
 				</div>
+				<div id="e-vpn-policy" style="display:none;margin-top:14px">
+					<div class="field">
+						<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
+						<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:4px">
+							<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="e-os-check" value="windows"> Windows</label>
+							<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="e-os-check" value="linux"> Linux</label>
+							<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="e-os-check" value="mac"> macOS</label>
+						</div>
+					</div>
+					<div class="field" style="margin-top:10px">
+						<label for="e-bandwidth">Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited, min 0.1)</span></label>
+						<input type="text" id="e-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)">
+					</div>
+				</div>
 			</fieldset>
 			<fieldset>
 				<legend>Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
@@ -254,6 +282,32 @@
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="edit-cancel">Cancel</button>
 				<button type="submit" class="btn-primary" id="edit-save-btn" disabled>Save Changes</button>
+			</div>
+		</form>
+	</div>
+</dialog>
+
+<dialog id="reset-pw-dialog">
+	<div class="dialog-body">
+		<h2>Reset Password</h2>
+		<p class="muted" id="reset-pw-username" style="margin-top:0"></p>
+		<form id="reset-pw-form">
+			<div class="form-row">
+				<div class="field">
+					<label for="rp-password">New Password</label>
+					<div class="password-field-row">
+						<input type="password" id="rp-password" required minlength="8">
+						<button type="button" class="btn-secondary btn-sm" id="rp-password-generate">Generate</button>
+					</div>
+				</div>
+				<div class="field">
+					<label for="rp-password-confirm">Confirm Password</label>
+					<input type="password" id="rp-password-confirm" required minlength="8">
+				</div>
+			</div>
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" id="reset-pw-cancel">Cancel</button>
+				<button type="submit" class="btn-primary" id="reset-pw-save-btn" disabled>Save Password</button>
 			</div>
 		</form>
 	</div>
@@ -436,6 +490,57 @@ const editSaveBtn = document.getElementById("edit-save-btn");
 const editDirty = bindDirtyTracking(document.getElementById("edit-form"), editSaveBtn);
 closeOnBackdropClick(document.getElementById("edit-dialog"));
 
+// Reset Password (Actions column) -- a dedicated, single-purpose popup
+// (New Password / Confirm / Generate only, no other edit fields), separate
+// from the Edit User dialog's own optional password section. Reuses the
+// same PATCH /api/users/{id} endpoint (password is an unconditional admin
+// reset there already -- see routes/users.py's UpdateUserRequest/_valid_password)
+// with just {password: ...} in the body.
+let resetPwUserId = null;
+const rpPasswordEl = document.getElementById("rp-password");
+const rpPasswordConfirmEl = document.getElementById("rp-password-confirm");
+const resetPwSaveBtn = document.getElementById("reset-pw-save-btn");
+const rpPasswordConfirm = wirePasswordConfirm(
+	rpPasswordEl, rpPasswordConfirmEl, document.getElementById("rp-password-generate"), { required: true },
+);
+closeOnBackdropClick(document.getElementById("reset-pw-dialog"));
+// Deliberately NOT bindDirtyTracking here -- Save must stay disabled until
+// the two fields actually match (not just "something was typed"), per the
+// task's own "Passwords can only be saved when both password fields match"
+// requirement.
+function updateResetPwSaveState() {
+	const pw = rpPasswordEl.value;
+	resetPwSaveBtn.disabled = !(pw && pw === rpPasswordConfirmEl.value);
+}
+rpPasswordEl.addEventListener("input", updateResetPwSaveState);
+rpPasswordConfirmEl.addEventListener("input", updateResetPwSaveState);
+
+function openResetPassword(u) {
+	resetPwUserId = u.id;
+	document.getElementById("reset-pw-username").textContent = `${u.display_name} (${u.username})`;
+	rpPasswordEl.value = "";
+	rpPasswordEl.type = "password";
+	rpPasswordConfirmEl.value = "";
+	rpPasswordConfirmEl.type = "password";
+	resetPwSaveBtn.disabled = true;
+	document.getElementById("reset-pw-dialog").showModal();
+	rpPasswordEl.focus();
+}
+document.getElementById("reset-pw-cancel").addEventListener("click", () => document.getElementById("reset-pw-dialog").close());
+document.getElementById("reset-pw-form").addEventListener("submit", async (ev) => {
+	ev.preventDefault();
+	const pwCheckError = rpPasswordConfirm.check();
+	if (pwCheckError) { toast(pwCheckError, "error"); return; }
+	try {
+		await apiFetch(`/api/users/${resetPwUserId}`, { method: "PATCH", body: { password: rpPasswordEl.value } });
+		document.getElementById("reset-pw-dialog").close();
+		toast("Password reset.");
+		loadUsers();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
 async function loadRoleOptions() {
 	// Populates both the Add-User and Edit-User role <select>s from the
 	// live dynamic-RBAC role list (GET /api/roles) instead of a hardcoded
@@ -446,9 +551,16 @@ async function loadRoleOptions() {
 	// separate fallback is needed for that case.
 	try {
 		const roles = await apiFetch("/api/roles");
-		const optionsHtml = roles.map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
-		document.getElementById("u-role").innerHTML = optionsHtml;
-		document.getElementById("e-role").innerHTML = optionsHtml;
+		// Super Admin is reserved for the bootstrap admin account only (see
+		// permissions.py's _SYSTEM_ROLES) -- never offered as a choice when
+		// creating a new user. The Edit dialog's own <select> DOES still get
+		// the full list (including super_admin): it needs to correctly
+		// display the bootstrap admin's current role when editing that
+		// account, even though that control is disabled for bootstrap admin
+		// either way (see openEdit's editingUserIsBootstrapAdmin handling).
+		const creatableRoles = roles.filter(r => r.slug !== "super_admin");
+		document.getElementById("u-role").innerHTML = creatableRoles.map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
+		document.getElementById("e-role").innerHTML = roles.map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
 		// The API orders roles is_system-desc-then-name, which puts "Admin"
 		// alphabetically before "Viewer" -- without this, a freshly-loaded
 		// Add User form would default to creating an ADMIN account. Default
@@ -583,7 +695,7 @@ function renderUsers() {
 		btn.addEventListener("click", () => openEdit(JSON.parse(btn.dataset.user.replace(/&apos;/g, "'"))));
 	});
 	el.querySelectorAll(".reset-pw-btn").forEach(btn => {
-		btn.addEventListener("click", () => openEdit(JSON.parse(btn.dataset.user.replace(/&apos;/g, "'")), { focusPassword: true }));
+		btn.addEventListener("click", () => openResetPassword(JSON.parse(btn.dataset.user.replace(/&apos;/g, "'"))));
 	});
 	el.querySelectorAll(".delete-btn").forEach(btn => {
 		btn.addEventListener("click", async () => {
@@ -664,13 +776,22 @@ async function loadDeleted() {
 async function refreshVpnLinkSection(u) {
 	const linkedEl = document.getElementById("e-vpn-linked");
 	const unlinkedEl = document.getElementById("e-vpn-unlinked");
+	const policyEl = document.getElementById("e-vpn-policy");
+	// Allowed OS / bandwidth restrictions only make sense for a user that
+	// actually has a linked VPN profile to apply them to -- populated from
+	// `u` directly (already included in every /api/users response, see
+	// routes/users.py's _serialize), no extra fetch needed.
+	document.querySelectorAll(".e-os-check").forEach(cb => { cb.checked = (u.allowed_os || []).includes(cb.value); });
+	document.getElementById("e-bandwidth").value = u.bandwidth_monthly_gb ?? "";
 	if (u.vpn_client_name) {
 		linkedEl.style.display = "";
 		unlinkedEl.style.display = "none";
+		policyEl.style.display = "";
 		document.getElementById("e-vpn-linked-name").textContent = u.vpn_client_name;
 		return;
 	}
 	linkedEl.style.display = "none";
+	policyEl.style.display = "none";
 	unlinkedEl.style.display = "";
 	const select = document.getElementById("e-vpn-attach-select");
 	const attachBtn = document.getElementById("e-vpn-attach-btn");
@@ -703,7 +824,7 @@ document.getElementById("e-vpn-attach-btn").addEventListener("click", async () =
 	}
 });
 
-function openEdit(u, { focusPassword = false } = {}) {
+function openEdit(u) {
 	editingUserId = u.id;
 	editingUserIsBootstrapAdmin = !!u.is_bootstrap_admin;
 	refreshVpnLinkSection(u);
@@ -746,13 +867,6 @@ function openEdit(u, { focusPassword = false } = {}) {
 	updateEditRestrictionsCount();
 	document.getElementById("edit-dialog").showModal();
 	editDirty.arm();
-	// Reset Password (Actions column) opens this same dialog -- jump
-	// straight to the password fields instead of making the admin scroll
-	// past everything else to find them.
-	if (focusPassword) {
-		document.getElementById("e-password").scrollIntoView({ behavior: "smooth", block: "center" });
-		document.getElementById("e-password").focus();
-	}
 }
 document.getElementById("edit-dialog").addEventListener("close", () => editDirty.disarm());
 document.getElementById("edit-cancel").addEventListener("click", () => document.getElementById("edit-dialog").close());
@@ -782,6 +896,11 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		allowed_login_asns: editAsnsMs.getSelected(),
 		restrict_login_by_ip: document.getElementById("e-restrict-ip").checked,
 		allowed_login_ips: parseLineList(document.getElementById("e-allowed-ips").value),
+		allowed_os: [...document.querySelectorAll(".e-os-check:checked")].map(cb => cb.value),
+		bandwidth_monthly_gb: (() => {
+			const raw = document.getElementById("e-bandwidth").value.trim();
+			return raw ? Number(raw) : null;
+		})(),
 	};
 	if (!editingUserIsBootstrapAdmin) {
 		body.role = document.getElementById("e-role").value;
@@ -836,6 +955,11 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				allowed_login_asns: addAsnsMs.getSelected(),
 				restrict_login_by_ip: document.getElementById("u-restrict-ip").checked,
 				allowed_login_ips: parseLineList(document.getElementById("u-allowed-ips").value),
+				allowed_os: [...document.querySelectorAll(".u-os-check:checked")].map(cb => cb.value),
+				bandwidth_monthly_gb: (() => {
+					const raw = document.getElementById("u-bandwidth").value.trim();
+					return raw ? Number(raw) : null;
+				})(),
 			},
 		});
 		toast(`User '${username}' created.`);

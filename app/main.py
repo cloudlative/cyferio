@@ -17,7 +17,7 @@ from vpnadmin import cli_wrapper
 from vpnadmin.app_settings import prune_audit_log, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
-from vpnadmin.db import SessionLocal, init_db
+from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_admin
 from vpnadmin import geo_lists
 from vpnadmin.routes import auth, clients, diagnostics, geo, health, me_vpn, openvpn_install, pages, roles, settings as settings_routes, status, teams, users
 
@@ -59,6 +59,12 @@ async def lifespan(_app: FastAPI):
     try:
         bootstrap_admin(db)
         ensure_bootstrap_admin_flag(db)
+        # Covers the fresh-install case: init_db() (above) already ran
+        # this once as part of its own RBAC seeding, but on a brand-new
+        # database that first call was necessarily a no-op -- the bootstrap
+        # account didn't exist yet until bootstrap_admin() just created it.
+        # See db.py's promote_bootstrap_admin_to_super_admin docstring.
+        promote_bootstrap_admin_to_super_admin(db)
         # Load the DB-backed settings override (Settings page) into the
         # in-process cache templates/mailer.py/auth.py actually read, then
         # prune the audit log per whatever retention that config specifies.

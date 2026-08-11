@@ -136,15 +136,33 @@ def _atomic_write_json(path: str, data: dict) -> None:
 
 
 def get_policy(name: str) -> dict:
-    """Returns the policy dict for one client ({} if unrestricted)."""
-    with _locked(settings.CLIENT_POLICY_FILE):
-        all_policies = _read_json(settings.CLIENT_POLICY_FILE)
+    """Returns the policy dict for one client ({} if unrestricted).
+
+    Read paths (this, get_all_policies, get_usage, get_all_usage below) all
+    fail OPEN on an OSError acquiring the lock/reading the file (e.g. the
+    bind-mounted /etc/openvpn directory not existing/writable in this
+    environment) -- same fail-open rationale as
+    openvpn-mac-addr-check.py's own policy lookup: these are now called
+    from routes/users.py's list_users/create_user/update_user too (not just
+    the Clients page), so a filesystem hiccup here must never be able to
+    break loading the Users page or saving an otherwise-valid user edit,
+    only degrade "show/apply this restriction" down to "treat as
+    unrestricted for this read", surfaced by returning empty results rather
+    than raising."""
+    try:
+        with _locked(settings.CLIENT_POLICY_FILE):
+            all_policies = _read_json(settings.CLIENT_POLICY_FILE)
+    except OSError:
+        return {}
     return all_policies.get(name, {}) or {}
 
 
 def get_all_policies() -> dict:
-    with _locked(settings.CLIENT_POLICY_FILE):
-        return _read_json(settings.CLIENT_POLICY_FILE)
+    try:
+        with _locked(settings.CLIENT_POLICY_FILE):
+            return _read_json(settings.CLIENT_POLICY_FILE)
+    except OSError:
+        return {}
 
 
 class PolicyValidationError(ValueError):
@@ -188,8 +206,10 @@ def set_policy(name: str, *, country: str | None | object = ..., allowed_os: lis
                 bandwidth_monthly_gb = float(bandwidth_monthly_gb)
             except (TypeError, ValueError):
                 raise PolicyValidationError("Bandwidth quota must be a number.")
-            if bandwidth_monthly_gb <= 0:
-                raise PolicyValidationError("Bandwidth quota must be greater than zero (leave blank to clear it).")
+            if bandwidth_monthly_gb < 0.1:
+                raise PolicyValidationError(
+                    "Bandwidth quota must be at least 0.1 GB (100 MB) -- leave blank to clear it."
+                )
 
     with _locked(settings.CLIENT_POLICY_FILE):
         all_policies = _read_json(settings.CLIENT_POLICY_FILE)
@@ -252,8 +272,11 @@ def get_usage(name: str) -> dict:
     for the UI ("X / Y GB this month") -- it reflects usage as of the last
     disconnect, not a live mid-session total (see the soft-cutoff design
     in README.md)."""
-    with _locked(settings.CLIENT_USAGE_FILE):
-        all_usage = _read_json(settings.CLIENT_USAGE_FILE)
+    try:
+        with _locked(settings.CLIENT_USAGE_FILE):
+            all_usage = _read_json(settings.CLIENT_USAGE_FILE)
+    except OSError:
+        all_usage = {}
     entry = all_usage.get(name) or {}
     period_start = _current_month_start()
     if entry.get("period_start") != period_start:
@@ -267,8 +290,11 @@ def get_all_usage() -> dict:
     that need the rollover applied should use get_usage() per-name, or
     apply the same period_start check themselves; this bulk accessor exists
     for the Clients page's table, which wants one fetch instead of N)."""
-    with _locked(settings.CLIENT_USAGE_FILE):
-        all_usage = _read_json(settings.CLIENT_USAGE_FILE)
+    try:
+        with _locked(settings.CLIENT_USAGE_FILE):
+            all_usage = _read_json(settings.CLIENT_USAGE_FILE)
+    except OSError:
+        all_usage = {}
     period_start = _current_month_start()
     result = {}
     for name, entry in all_usage.items():

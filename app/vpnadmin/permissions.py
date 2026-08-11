@@ -50,6 +50,26 @@ ACTIONS = ("view", "create", "update", "delete", "execute", "manage")
 # roles -- see docs/rbac_identity_design.md §3. Every object not mentioned
 # for a role defaults to no access at all (fail-closed).
 _SYSTEM_ROLES: dict[str, dict] = {
+    # Highest-privilege role, reserved exclusively for the bootstrap admin
+    # account -- see db.py's _promote_bootstrap_admin_to_super_admin, which
+    # moves the very first admin account onto this role_id right after it's
+    # seeded (a fresh deployment's bootstrap_admin() itself still creates
+    # that account on the plain "admin" role, same as ever; this is a
+    # one-time promotion step, not a change to account creation). Distinct
+    # from "admin" mainly by policy, not by permission bits (both currently
+    # get manage=True on every object) -- what actually makes it "super" is
+    # everything OUTSIDE the permission matrix: it's excluded from the Add
+    # User role dropdown (nobody can create a second one), and both
+    # update_role/update_object_permissions/update_api_scopes in routes/
+    # roles.py hard-block any edit to it (unlike every other system role,
+    # which admins CAN rename/re-describe/re-permission, just not delete).
+    "super_admin": {
+        "name": "Super Admin",
+        "description": "Reserved for the bootstrap admin account only -- full control of every "
+        "module, permanently un-modifiable and never offered when creating a new user.",
+        "permissions": {obj: {"manage": True} for obj in OBJECTS},
+        "scopes": {},
+    },
     "admin": {
         "name": "Admin",
         "description": "Full control of every module.",
