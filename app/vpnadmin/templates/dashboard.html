@@ -50,6 +50,48 @@
 	</div>
 	<div id="connected-table"><p class="muted">Loading…</p></div>
 </div>
+
+{% if can_view_clients %}
+<div class="card" id="usage-analytics">
+	<div class="toolbar">
+		<h2 style="margin:0">Usage Analytics</h2>
+		<div class="form-row" style="gap:10px;align-items:center">
+			<select id="ua-range" style="width:auto">
+				<option value="7">Last 7 days</option>
+				<option value="30" selected>Last 30 days</option>
+				<option value="90">Last 90 days</option>
+				<option value="all">All history</option>
+			</select>
+			<a class="btn-secondary btn-sm" href="/connection-history">View full history →</a>
+			<button class="btn-secondary" id="ua-refresh">Refresh</button>
+		</div>
+	</div>
+	<p class="page-subtitle" style="margin:-6px 0 18px">Built from past connection sessions -- see Connection History for the raw per-session table.</p>
+
+	<div class="ua-grid">
+		<div class="ua-chart-card">
+			<h3>Bandwidth Trend</h3>
+			<div id="ua-bandwidth"><p class="muted">Loading…</p></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Sessions Per Day</h3>
+			<div id="ua-sessions-per-day"><p class="muted">Loading…</p></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Top Clients by Data Usage</h3>
+			<div id="ua-top-clients"><p class="muted">Loading…</p></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Peak Usage Hours</h3>
+			<div id="ua-peak-hours"><p class="muted">Loading…</p></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Session Duration</h3>
+			<div id="ua-duration"><p class="muted">Loading…</p></div>
+		</div>
+	</div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -116,5 +158,138 @@ setInterval(() => {
 	if (document.hidden) return;
 	loadConnectedStats();
 }, 12000);
+
+// --- Usage Analytics (see renderBarChart/fmtBytes in app.js) -------------
+// Only wired up when the section actually rendered (can_view_clients --
+// see dashboard.html's own conditional block above it); historical data,
+// so no auto-refresh timer like Connected Now above, just load-once + manual.
+const uaSection = document.getElementById("usage-analytics");
+if (uaSection) {
+	let uaEntries = [];
+	const UA_CHART_IDS = ["ua-bandwidth", "ua-sessions-per-day", "ua-top-clients", "ua-peak-hours", "ua-duration"];
+
+	// Local (app-timezone-aware) date-key + hour-of-day for one ISO
+	// timestamp -- mirrors fmtTimestamp's own use of window.APP_TIMEZONE,
+	// so "day"/"hour" bucketing here means the same calendar day/hour an
+	// admin sees everywhere else in this app, not a raw UTC slice.
+	function uaLocalParts(iso) {
+		const d = new Date(iso);
+		if (isNaN(d)) return null;
+		const opts = { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false };
+		if (window.APP_TIMEZONE) opts.timeZone = window.APP_TIMEZONE;
+		const parts = new Intl.DateTimeFormat("en-US", opts).formatToParts(d);
+		const get = (t) => (parts.find(p => p.type === t) || {}).value;
+		let hour = parseInt(get("hour"), 10);
+		if (hour === 24) hour = 0; // some engines render midnight as "24" under hour12:false
+		return { dateKey: `${get("year")}-${get("month")}-${get("day")}`, hour };
+	}
+
+	function uaShortDateLabel(dateKey) {
+		const [y, m, d] = dateKey.split("-").map(Number);
+		return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+	}
+
+	function uaSessionCountLabel(v) {
+		return `${v} session${v === 1 ? "" : "s"}`;
+	}
+
+	function renderUsageAnalytics() {
+		const range = document.getElementById("ua-range").value;
+		let rows = uaEntries.filter(r => r.connected_at);
+		if (range !== "all") {
+			const cutoff = Date.now() - parseInt(range, 10) * 86400000;
+			rows = rows.filter(r => new Date(r.connected_at).getTime() >= cutoff);
+		}
+
+		if (rows.length === 0) {
+			UA_CHART_IDS.forEach(id => {
+				document.getElementById(id).innerHTML = '<p class="muted">No sessions in this range yet.</p>';
+			});
+			return;
+		}
+
+		// Bandwidth Trend + Sessions Per Day share the same per-day grouping.
+		const byDate = new Map(); // dateKey -> {rx, tx, count}
+		for (const r of rows) {
+			const parts = uaLocalParts(r.connected_at);
+			if (!parts) continue;
+			const e = byDate.get(parts.dateKey) || { rx: 0, tx: 0, count: 0 };
+			e.rx += r.bytes_received || 0;
+			e.tx += r.bytes_sent || 0;
+			e.count += 1;
+			byDate.set(parts.dateKey, e);
+		}
+		const sortedDates = [...byDate.keys()].sort();
+		renderBarChart(
+			document.getElementById("ua-bandwidth"),
+			sortedDates.map(k => ({ label: uaShortDateLabel(k), values: [byDate.get(k).rx, byDate.get(k).tx] })),
+			{ seriesLabels: ["Received", "Sent"], valueFormatter: fmtBytes },
+		);
+		renderBarChart(
+			document.getElementById("ua-sessions-per-day"),
+			sortedDates.map(k => ({ label: uaShortDateLabel(k), value: byDate.get(k).count })),
+			{ valueFormatter: uaSessionCountLabel },
+		);
+
+		// Top Clients by Data Usage.
+		const byClient = new Map();
+		for (const r of rows) {
+			const total = (r.bytes_received || 0) + (r.bytes_sent || 0);
+			byClient.set(r.client, (byClient.get(r.client) || 0) + total);
+		}
+		const topClients = [...byClient.entries()]
+			.sort((a, b) => b[1] - a[1])
+			.slice(0, 8)
+			.map(([label, value]) => ({ label, value }));
+		renderBarChart(document.getElementById("ua-top-clients"), topClients, { horizontal: true, valueFormatter: fmtBytes });
+
+		// Peak Usage Hours (0-23, summed across every day in range).
+		const byHour = new Array(24).fill(0);
+		for (const r of rows) {
+			const parts = uaLocalParts(r.connected_at);
+			if (parts) byHour[parts.hour] += 1;
+		}
+		renderBarChart(
+			document.getElementById("ua-peak-hours"),
+			byHour.map((count, h) => ({ label: String(h), value: count })),
+			{ valueFormatter: uaSessionCountLabel },
+		);
+
+		// Session Duration Distribution.
+		const buckets = [
+			{ label: "<5m", max: 5 * 60 },
+			{ label: "5-30m", max: 30 * 60 },
+			{ label: "30m-2h", max: 2 * 3600 },
+			{ label: "2h-8h", max: 8 * 3600 },
+			{ label: "8h+", max: Infinity },
+		];
+		const durCounts = buckets.map(() => 0);
+		for (const r of rows) {
+			const d = r.duration_seconds || 0;
+			const idx = buckets.findIndex(b => d < b.max);
+			durCounts[idx === -1 ? buckets.length - 1 : idx] += 1;
+		}
+		renderBarChart(
+			document.getElementById("ua-duration"),
+			buckets.map((b, i) => ({ label: b.label, value: durCounts[i] })),
+			{ valueFormatter: uaSessionCountLabel },
+		);
+	}
+
+	async function loadUsageAnalytics() {
+		try {
+			uaEntries = await apiFetch("/api/status/session-history?limit=500");
+			renderUsageAnalytics();
+		} catch (e) {
+			UA_CHART_IDS.forEach(id => {
+				document.getElementById(id).innerHTML = `<p class="muted">Could not load: ${escapeHtml(e.message)}</p>`;
+			});
+		}
+	}
+
+	document.getElementById("ua-range").addEventListener("change", renderUsageAnalytics);
+	document.getElementById("ua-refresh").addEventListener("click", loadUsageAnalytics);
+	loadUsageAnalytics();
+}
 </script>
 {% endblock %}

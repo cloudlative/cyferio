@@ -193,6 +193,84 @@ function renderDonutChart(mountEl, entries, { size = 220, thickness = 34 } = {})
 }
 
 /**
+ * Dependency-free bar chart, built from plain divs (not SVG -- unlike the
+ * donut chart above, bars need no curve geometry, and percentage-height/
+ * width flex children are simpler and less error-prone here). Two shapes:
+ *
+ *   renderBarChart(mount, [{label, value}, ...])
+ *     Vertical bars (day/hour x-axis charts, e.g. Sessions Per Day).
+ *
+ *   renderBarChart(mount, [{label, value}, ...], {horizontal: true})
+ *     Ranked horizontal bars (e.g. Top Clients by Data Usage) -- reads
+ *     better than vertical bars when comparing a handful of named values.
+ *
+ *   renderBarChart(mount, [{label, values: [rx, tx]}, ...], {seriesLabels: ["Received", "Sent"]})
+ *     Vertical STACKED bars (e.g. Bandwidth Trend's RX+TX per day) -- one
+ *     CHART_COLORS slot per series index, stacked bottom-to-top within
+ *     each bar, plus a legend row (same visual language as the donut
+ *     chart's own legend).
+ *
+ * `valueFormatter` controls how values are displayed in tooltips/labels
+ * (e.g. fmtBytes for byte totals, plain integers for counts).
+ */
+function renderBarChart(mountEl, entries, {
+	horizontal = false, seriesLabels = null, valueFormatter = (v) => String(v), barHeight = 200,
+} = {}) {
+	const stacked = !!seriesLabels;
+	const totals = entries.map(e => stacked ? e.values.reduce((s, v) => s + v, 0) : e.value);
+	const max = Math.max(0, ...totals);
+	if (entries.length === 0 || max === 0) {
+		mountEl.innerHTML = '<p class="muted">Not enough data yet.</p>';
+		return;
+	}
+
+	const legend = stacked ? `<div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap">${
+		seriesLabels.map((s, i) => `
+			<div style="display:flex;align-items:center;gap:8px;font-size:0.85rem">
+				<span style="width:10px;height:10px;border-radius:3px;background:${CHART_COLORS[i % CHART_COLORS.length]};flex:none"></span>
+				<span class="muted">${escapeHtml(s)}</span>
+			</div>`).join("")
+	}</div>` : "";
+
+	if (horizontal) {
+		const rows = entries.map((e, i) => {
+			const pct = Math.max(2, Math.round((e.value / max) * 100)); // 2% floor so a nonzero value is never invisible
+			return `
+				<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+					<span style="width:110px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.85rem" title="${escapeHtml(e.label)}">${escapeHtml(e.label)}</span>
+					<div style="flex:1;background:var(--surface-alt);border-radius:5px;height:20px;overflow:hidden">
+						<div style="width:${pct}%;height:100%;background:${CHART_COLORS[i % CHART_COLORS.length]};border-radius:5px"></div>
+					</div>
+					<span class="muted mono" style="width:70px;flex:none;text-align:right;font-size:0.82rem">${escapeHtml(valueFormatter(e.value))}</span>
+				</div>`;
+		}).join("");
+		mountEl.innerHTML = rows;
+		return;
+	}
+
+	const bars = entries.map(e => {
+		const total = stacked ? e.values.reduce((s, v) => s + v, 0) : e.value;
+		const totalPx = max > 0 ? Math.max(total > 0 ? 2 : 0, Math.round((total / max) * barHeight)) : 0;
+		const segmentsHtml = stacked
+			? e.values.map((v, i) => {
+				const segPx = total > 0 ? Math.round((v / total) * totalPx) : 0;
+				return `<div style="width:100%;height:${segPx}px;background:${CHART_COLORS[i % CHART_COLORS.length]}"><title>${escapeHtml(seriesLabels[i])}: ${escapeHtml(valueFormatter(v))}</title></div>`;
+			}).join("")
+			: `<div style="width:100%;height:${totalPx}px;background:${CHART_COLORS[0]}"></div>`;
+		return `
+			<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0">
+				<div title="${escapeHtml(e.label)}: ${escapeHtml(valueFormatter(total))}"
+					style="width:100%;max-width:34px;height:${barHeight}px;display:flex;flex-direction:column-reverse;border-radius:3px 3px 0 0;overflow:hidden;background:${total === 0 ? "var(--surface-alt)" : "transparent"}">
+					${segmentsHtml}
+				</div>
+				<span class="muted" style="font-size:0.72rem;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" title="${escapeHtml(e.label)}">${escapeHtml(e.label)}</span>
+			</div>`;
+	}).join("");
+
+	mountEl.innerHTML = `${legend}<div style="display:flex;align-items:flex-end;gap:6px;overflow-x:auto;padding-bottom:2px">${bars}</div>`;
+}
+
+/**
  * A dependency-free "closed by default, expands into checkable options"
  * multiselect dropdown -- used everywhere this app lets someone pick
  * several teams (add-user, edit-user, profile). A native `<select
@@ -812,6 +890,22 @@ function attachInlineValidation(inputEl, validateFn) {
 // than that script's terminal-table "0d 2h 14m" style: omits leading
 // zero units instead of always showing all three, and drops down to
 // seconds-only for sub-minute sessions rather than showing "0m".
+// Human-formatted byte count -- e.g. "2.4GB", "512.0KB". Mirrors
+// vpn-status.py's human_bytes() (same 1024-based steps/rounding), needed
+// client-side here since session-history rows only carry the raw integer
+// byte counts, unlike the live "connected" snapshot which already comes
+// pre-formatted (bytes_received_h) from that same script.
+function fmtBytes(n) {
+	n = Number(n) || 0;
+	const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+	let i = 0;
+	while (n >= 1024 && i < units.length - 1) {
+		n /= 1024;
+		i++;
+	}
+	return i === 0 ? `${Math.trunc(n)}${units[i]}` : `${n.toFixed(1)}${units[i]}`;
+}
+
 function fmtDuration(totalSeconds) {
 	const seconds = Math.max(0, Math.trunc(Number(totalSeconds) || 0));
 	const d = Math.floor(seconds / 86400);

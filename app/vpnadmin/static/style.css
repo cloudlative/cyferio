@@ -823,6 +823,15 @@ tr.team-row:hover .team-row-view, tr.team-row:focus-visible .team-row-view { opa
 .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; margin-bottom: 22px; }
 .health-grid .card { margin-bottom: 0; min-width: 0; }
 
+/* --- Dashboard's Usage Analytics section (see dashboard.html) -- one
+   tile per chart, same responsive-grid-of-cards shape as .health-grid
+   above but nested inside a single outer .card rather than being the
+   page's own top-level grid (this section is one card among several on
+   the Dashboard, not the whole page). */
+.ua-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 18px; }
+.ua-chart-card { background: var(--surface-alt); border: 1px solid var(--border-light); border-radius: var(--radius-lg); padding: 16px 18px; min-width: 0; }
+.ua-chart-card h3 { margin: 0 0 14px; font-size: 0.92rem; font-weight: 700; color: var(--text); }
+
 /* Wide/unbreakable content (e.g. Traefik's router-rule table below) inside
    a narrow health-grid tile: a horizontal-scroll fallback for anything
    still too wide after wrapping, so it can never push the card itself
