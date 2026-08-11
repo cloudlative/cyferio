@@ -127,6 +127,17 @@ class Team(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(64), unique=True, nullable=False, index=True)
+    # slug/description/tags added for future reporting (bandwidth/usage/
+    # connection-stats by team) -- schema only for now, no reporting UI yet.
+    # slug is nullable at the DB level (unlike RoleDef.slug) even though
+    # it's required going forward at the API layer: existing rows predate
+    # this column and db.py's generic column-sync migration can't backfill
+    # a per-row-unique value on its own, so a small one-time slug backfill
+    # runs at startup instead (see db.py's _backfill_team_slugs) -- nullable
+    # here just means "not yet backfilled on an old row", not "optional."
+    slug = Column(String(64), unique=True, nullable=True, index=True)
+    description = Column(Text, nullable=True)
+    tags = Column(Text, nullable=True)  # JSON list of strings, same convention as User.allowed_login_countries etc.
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     members = relationship("User", secondary="user_teams", back_populates="teams", order_by="User.username")
@@ -134,6 +145,10 @@ class Team(Base):
     @validates("name")
     def _normalize_name(self, key, value):
         return value.strip()
+
+    @validates("slug")
+    def _normalize_slug(self, key, value):
+        return value.strip().lower() if value else value
 
 
 # Pure association table for the many-to-many User<->Team membership
@@ -369,10 +384,15 @@ class VpnProfileLink(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
     vpn_client_name = Column(String(64), unique=True, nullable=False, index=True)  # == cli_wrapper client name
 
-    # "created_with_profile" (routes/clients.py add_client, born after this
-    # feature shipped) | "migration_exact_match" (migrate_vpn_profiles.py,
-    # via migration_engine.py) | "manual_admin_link" (an admin explicitly
-    # links an unmatched pair).
+    # "created_with_profile" (either routes/users.py's create_user -- the
+    # standard path since the User<->VPN Profile lifecycle unification, a
+    # cert created as a side effect of creating the portal user -- or
+    # routes/clients.py's add_client, which still exists server-side for
+    # API completeness even though its own UI form was removed) |
+    # "migration_exact_match" (migrate_vpn_profiles.py, via
+    # migration_engine.py) | "manual_admin_link" (an admin explicitly
+    # attaches an existing, unassigned profile via Edit User, or links an
+    # unmatched pair the old way).
     link_source = Column(String(32), nullable=False)
 
     # Permanent guarantee, not a one-time migration skip: every cert that

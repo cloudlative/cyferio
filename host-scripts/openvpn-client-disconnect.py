@@ -2,9 +2,9 @@
 #
 # openvpn-client-disconnect.py -- client-disconnect script: persists the
 # just-ended session's bandwidth (bytes_received + bytes_sent) into
-# client_usage.json, for the NEXT connect attempt's weekly-quota check
+# client_usage.json, for the NEXT connect attempt's monthly-quota check
 # (see openvpn-mac-addr-check.py stage 4, and policy_lib.add_usage's lazy
-# weekly-rollover handling).
+# monthly-rollover handling).
 #
 # This is deliberately the ONLY place usage is written -- soft cutoff by
 # design: a session that goes over quota mid-connection is allowed to keep

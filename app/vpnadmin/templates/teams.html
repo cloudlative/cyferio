@@ -22,6 +22,23 @@
 				<label for="new-team-name">Team Name</label>
 				<input type="text" id="new-team-name" required maxlength="64" placeholder="e.g. Infrastructure">
 			</div>
+			<div class="field">
+				<label for="new-team-slug">Slug <span class="muted">(auto-filled, editable — permanent)</span></label>
+				<input type="text" id="new-team-slug" maxlength="64" placeholder="e.g. infrastructure">
+			</div>
+		</div>
+		<div class="form-row" style="margin-top:14px">
+			<div class="field" style="flex:2">
+				<label for="new-team-description">Description <span class="muted">(optional)</span></label>
+				<input type="text" id="new-team-description" maxlength="512" placeholder="e.g. Networking, servers, and cloud infra">
+			</div>
+			<div class="field">
+				<label for="new-team-tags">Tags <span class="muted">(optional, comma-separated)</span></label>
+				<input type="text" id="new-team-tags" placeholder="e.g. infra, on-call">
+			</div>
+		</div>
+		<p class="muted" style="margin:8px 0 0;font-size:0.82rem">Slug/description/tags are stored now for future reporting (bandwidth, active users, connection stats by team) -- no reporting views use them yet.</p>
+		<div class="form-row" style="margin-top:14px">
 			<button type="submit" class="btn-primary">Create Team</button>
 			<button type="button" class="btn-secondary" id="create-team-clear">Clear</button>
 		</div>
@@ -37,10 +54,35 @@
 <div class="card" id="team-detail-card" style="display:none">
 	<div class="toolbar">
 		<div class="toolbar-title"><h2 style="margin:0" id="team-detail-title">Team</h2><span class="count-badge" id="team-detail-count">— members</span></div>
-		{% if is_admin %}
-		<button class="btn-danger btn-sm" id="team-delete-btn">Delete Team</button>
-		{% endif %}
+		<div>
+			{% if is_admin %}
+			<button class="btn-secondary btn-sm" id="team-edit-toggle-btn">Edit Details</button>
+			<button class="btn-danger btn-sm" id="team-delete-btn">Delete Team</button>
+			{% endif %}
+		</div>
 	</div>
+	<div id="team-detail-meta" style="margin-bottom:14px"></div>
+	{% if is_admin %}
+	<div class="form-row" id="team-edit-panel" style="display:none;margin-bottom:16px">
+		<div class="field">
+			<label for="edit-team-name">Team Name</label>
+			<input type="text" id="edit-team-name" maxlength="64">
+		</div>
+		<div class="field">
+			<label for="edit-team-slug">Slug</label>
+			<input type="text" id="edit-team-slug" maxlength="64">
+		</div>
+		<div class="field" style="flex:2">
+			<label for="edit-team-description">Description</label>
+			<input type="text" id="edit-team-description" maxlength="512">
+		</div>
+		<div class="field">
+			<label for="edit-team-tags">Tags <span class="muted">(comma-separated)</span></label>
+			<input type="text" id="edit-team-tags">
+		</div>
+		<button class="btn-primary" id="team-edit-save-btn" disabled>Save Details</button>
+	</div>
+	{% endif %}
 	{% if is_admin %}
 	<form id="add-member-form" class="form-row" style="margin-bottom:16px">
 		<div class="field" style="flex:2">
@@ -61,6 +103,18 @@ let lastTeams = [];
 let allUsers = [];
 let currentTeamId = "unassigned";
 let teamDetailOpen = false; // tracks whether the detail card is actually showing, so clicking the already-open team's row again toggles it closed
+let teamEditDirty; // assigned below, admin-only -- the edit panel doesn't exist in the DOM for non-admins
+
+// Mirrors routes/teams.py's _valid_slug (lowercase letters/numbers/hyphens
+// only, no leading/trailing/doubled hyphens) -- used both to auto-fill the
+// Create form's slug from the team name, and to keep that suggestion
+// editable rather than locked to the name.
+function slugify(name) {
+	return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function parseTagsInput(v) {
+	return v.split(",").map(t => t.trim()).filter(Boolean);
+}
 
 function renderSummary() {
 	const namedTeams = lastTeams.filter(t => t.id != null);
@@ -155,6 +209,28 @@ function showTeam(id) {
 	const deleteBtn = document.getElementById("team-delete-btn");
 	const addForm = document.getElementById("add-member-form");
 	const isRealTeam = team.id != null;
+	const metaEl = document.getElementById("team-detail-meta");
+	if (isRealTeam) {
+		const bits = [`<span class="mono muted">${escapeHtml(team.slug || "—")}</span>`];
+		if (team.description) bits.push(escapeHtml(team.description));
+		metaEl.innerHTML = `<p class="muted" style="margin:0">${bits.join(" — ")}</p>` +
+			(team.tags && team.tags.length ? `<div class="restriction-chips" style="margin-top:6px">${team.tags.map(t => `<span class="restriction-chip">${escapeHtml(t)}</span>`).join("")}</div>` : "");
+	} else {
+		metaEl.innerHTML = "";
+	}
+	const editToggleBtn = document.getElementById("team-edit-toggle-btn");
+	const editPanel = document.getElementById("team-edit-panel");
+	if (editToggleBtn) {
+		editToggleBtn.style.display = isRealTeam ? "" : "none";
+		editPanel.style.display = "none"; // always collapsed on switching teams
+		if (isRealTeam) {
+			document.getElementById("edit-team-name").value = team.team;
+			document.getElementById("edit-team-slug").value = team.slug || "";
+			document.getElementById("edit-team-description").value = team.description || "";
+			document.getElementById("edit-team-tags").value = (team.tags || []).join(", ");
+			teamEditDirty.arm();
+		}
+	}
 	if (deleteBtn) {
 		deleteBtn.style.display = isRealTeam ? "" : "none";
 		deleteBtn.disabled = team.count > 0;
@@ -207,17 +283,55 @@ function showTeam(id) {
 }
 
 if (isAdmin) {
+	// Auto-fills the slug from the name as the admin types (slugify), but
+	// only until the slug field is edited by hand -- same "suggest, don't
+	// force" pattern as e.g. GitHub's repo-name -> URL-slug field.
+	let slugTouched = false;
+	document.getElementById("new-team-slug").addEventListener("input", () => { slugTouched = true; });
+	document.getElementById("new-team-name").addEventListener("input", (ev) => {
+		if (!slugTouched) document.getElementById("new-team-slug").value = slugify(ev.target.value);
+	});
+
 	document.getElementById("create-team-clear").addEventListener("click", () => {
 		document.getElementById("create-team-form").reset();
+		slugTouched = false;
 	});
 	document.getElementById("create-team-form").addEventListener("submit", async (ev) => {
 		ev.preventDefault();
 		const name = document.getElementById("new-team-name").value.trim();
+		const slug = document.getElementById("new-team-slug").value.trim();
+		const description = document.getElementById("new-team-description").value.trim();
+		const tags = parseTagsInput(document.getElementById("new-team-tags").value);
 		try {
-			await apiFetch("/api/teams", { method: "POST", body: { name } });
+			await apiFetch("/api/teams", { method: "POST", body: { name, slug, description: description || null, tags } });
 			toast(`Team '${name}' created.`);
 			document.getElementById("create-team-form").reset();
+			slugTouched = false;
 			loadTeams();
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+
+	teamEditDirty = bindDirtyTracking(document.getElementById("team-edit-panel"), document.getElementById("team-edit-save-btn"));
+	document.getElementById("team-edit-toggle-btn").addEventListener("click", () => {
+		const panel = document.getElementById("team-edit-panel");
+		panel.style.display = panel.style.display === "none" ? "" : "none";
+	});
+	document.getElementById("team-edit-save-btn").addEventListener("click", async () => {
+		const team = lastTeams.find(t => String(t.id) === String(currentTeamId));
+		if (!team || team.id == null) return;
+		const body = {
+			name: document.getElementById("edit-team-name").value.trim(),
+			slug: document.getElementById("edit-team-slug").value.trim(),
+			description: document.getElementById("edit-team-description").value.trim() || null,
+			tags: parseTagsInput(document.getElementById("edit-team-tags").value),
+		};
+		try {
+			await apiFetch(`/api/teams/${team.id}`, { method: "PATCH", body });
+			toast("Team details saved.");
+			await loadTeams();
+			showTeam(currentTeamId);
 		} catch (e) {
 			toast(e.message, "error");
 		}

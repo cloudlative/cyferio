@@ -161,7 +161,7 @@ function renderRejectedTable() {
 				<td>${escapeHtml(r.claimed_name)}</td>
 				<td><span class="status-pill status-revoked">${escapeHtml(reasonLabel(r.reason))}</span></td>
 				<td class="mono">${escapeHtml(r.mac_presented)}</td>
-				<td class="mono">${flagged ? `<span style="color:var(--warning-text)">${escapeHtml(r.mac_registered)}</span>` : escapeHtml(r.mac_registered)}${resolvedSince ? ` <span class="muted" style="font-size:0.78em">(now matches — likely fixed since)</span>` : ""}</td>
+				<td class="mono">${flagged ? `<span style="color:var(--warning-text)">${escapeHtml(r.mac_registered)}</span>` : escapeHtml(r.mac_registered)}${resolvedSince ? ` <span class="muted" style="font-size:0.78em">(now matches — likely fixed)</span>` : ""}</td>
 				<td>${escapeHtml(r.os)}</td>
 				<td class="mono">${escapeHtml(r.source_ip)}:${escapeHtml(String(r.source_port))}</td>
 				<td>${repeat ? `<span class="status-pill status-revoked">${r.total_attempts_this_name}×</span>` : `${r.total_attempts_this_name}×`}</td>
@@ -176,7 +176,7 @@ function renderRejectedTable() {
 			<button type="button" class="btn-secondary btn-sm" id="rejected-next-page" ${rejectedPage >= totalPages ? "disabled" : ""}>Next →</button>
 		</div>
 	</div>
-	<p class="muted" style="margin-top:12px">"MAC registered" is a live lookup against what's currently on file for that name in <span class="mono">openvpn_db.txt</span> — it can change after the fact (e.g. an admin later registers the device), so it may no longer match what "MAC presented" shows for an older row. Rows are still flagged amber whenever the original rejection <em>was</em> a MAC mismatch, even if it's since been fixed (labeled "now matches — likely fixed since") — so a resolved mismatch stays visible as history, not silently indistinguishable from a row that was never mismatched. "Attempts (this name)" counts the full rejection history, not just what's shown here. Repeated entries for the same name/IP are usually a client-side device/network issue, not necessarily an attack.</p>`;
+	<p class="muted" style="margin-top:12px">"MAC registered" is a live lookup against what's currently on file for that name in <span class="mono">openvpn_db.txt</span> — it can change after the fact (e.g. an admin later registers the device), so it may no longer match what "MAC presented" shows for an older row. Rows are still flagged amber whenever the original rejection <em>was</em> a MAC mismatch, even if it's since been fixed (labeled "now matches — likely fixed") — so a resolved mismatch stays visible as history, not silently indistinguishable from a row that was never mismatched. "Attempts (this name)" counts the full rejection history, not just what's shown here. Repeated entries for the same name/IP are usually a client-side device/network issue, not necessarily an attack.</p>`;
 
 	const prevBtn = document.getElementById("rejected-prev-page");
 	const nextBtn = document.getElementById("rejected-next-page");

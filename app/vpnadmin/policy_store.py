@@ -27,7 +27,7 @@ import json
 import os
 import tempfile
 from contextlib import contextmanager
-from datetime import date, timedelta
+from datetime import date
 
 from .config import settings
 
@@ -152,7 +152,7 @@ class PolicyValidationError(ValueError):
 
 
 def set_policy(name: str, *, country: str | None | object = ..., allowed_os: list[str] | None | object = ...,
-               bandwidth_weekly_gb: float | None | object = ...) -> dict:
+               bandwidth_monthly_gb: float | None | object = ...) -> dict:
     """Partial update of one client's policy -- any parameter left at its
     `...` sentinel default is untouched; pass an explicit `None` to clear
     that field. A resulting policy with no meaningful fields left removes
@@ -182,13 +182,13 @@ def set_policy(name: str, *, country: str | None | object = ..., allowed_os: lis
                 )
             if not allowed_os:
                 allowed_os = None
-    if bandwidth_weekly_gb is not ...:
-        if bandwidth_weekly_gb is not None:
+    if bandwidth_monthly_gb is not ...:
+        if bandwidth_monthly_gb is not None:
             try:
-                bandwidth_weekly_gb = float(bandwidth_weekly_gb)
+                bandwidth_monthly_gb = float(bandwidth_monthly_gb)
             except (TypeError, ValueError):
                 raise PolicyValidationError("Bandwidth quota must be a number.")
-            if bandwidth_weekly_gb <= 0:
+            if bandwidth_monthly_gb <= 0:
                 raise PolicyValidationError("Bandwidth quota must be greater than zero (leave blank to clear it).")
 
     with _locked(settings.CLIENT_POLICY_FILE):
@@ -205,11 +205,11 @@ def set_policy(name: str, *, country: str | None | object = ..., allowed_os: lis
                 entry.pop("allowed_os", None)
             else:
                 entry["allowed_os"] = allowed_os
-        if bandwidth_weekly_gb is not ...:
-            if bandwidth_weekly_gb is None:
-                entry.pop("bandwidth_weekly_gb", None)
+        if bandwidth_monthly_gb is not ...:
+            if bandwidth_monthly_gb is None:
+                entry.pop("bandwidth_monthly_gb", None)
             else:
-                entry["bandwidth_weekly_gb"] = bandwidth_weekly_gb
+                entry["bandwidth_monthly_gb"] = bandwidth_monthly_gb
 
         if entry:
             all_policies[name] = entry
@@ -221,7 +221,7 @@ def set_policy(name: str, *, country: str | None | object = ..., allowed_os: lis
 
 def remove_policy(name: str) -> None:
     """Fully clears every restriction for `name` (equivalent to setting
-    country/allowed_os/bandwidth_weekly_gb all to None at once)."""
+    country/allowed_os/bandwidth_monthly_gb all to None at once)."""
     with _locked(settings.CLIENT_POLICY_FILE):
         all_policies = _read_json(settings.CLIENT_POLICY_FILE)
         if name in all_policies:
@@ -229,43 +229,51 @@ def remove_policy(name: str) -> None:
             _atomic_write_json(settings.CLIENT_POLICY_FILE, all_policies)
 
 
-def _current_week_start() -> str:
+def _current_month_start() -> str:
+    """Renamed from _current_week_start (Monday-anchored) -- the reset
+    cadence is now the 1st of the calendar month, not a calendar week. The
+    on-disk key also changed (week_start -> period_start, see get_usage
+    below): an old row with a stale week_start key simply won't match on
+    read and reads back as 0, the same "unrecognized period -> reset"
+    behavior the old weekly logic already had for a stale week_start --
+    a one-time, expected usage-counter reset on the deploy that ships this,
+    not a bug."""
     today = date.today()
-    return (today - timedelta(days=today.weekday())).isoformat()
+    return today.replace(day=1).isoformat()
 
 
 def get_usage(name: str) -> dict:
-    """Returns {"week_start": ..., "bytes_used": ...} for `name`'s CURRENT
-    week -- applying the same lazy rollover the connect/disconnect scripts
+    """Returns {"period_start": ..., "bytes_used": ...} for `name`'s CURRENT
+    month -- applying the same lazy rollover the connect/disconnect scripts
     use (see host-scripts/policy_lib.py's get_usage docstring): a stored
-    row from a previous week reads as zero rather than being rewritten
+    row from a previous month reads as zero rather than being rewritten
     here (this is a read path; only the disconnect script's write path
     actually persists a rollover). This is a best-effort, read-only view
-    for the UI ("X / Y GB this week") -- it reflects usage as of the last
+    for the UI ("X / Y GB this month") -- it reflects usage as of the last
     disconnect, not a live mid-session total (see the soft-cutoff design
     in README.md)."""
     with _locked(settings.CLIENT_USAGE_FILE):
         all_usage = _read_json(settings.CLIENT_USAGE_FILE)
     entry = all_usage.get(name) or {}
-    week_start = _current_week_start()
-    if entry.get("week_start") != week_start:
-        return {"week_start": week_start, "bytes_used": 0}
-    return {"week_start": week_start, "bytes_used": int(entry.get("bytes_used", 0))}
+    period_start = _current_month_start()
+    if entry.get("period_start") != period_start:
+        return {"period_start": period_start, "bytes_used": 0}
+    return {"period_start": period_start, "bytes_used": int(entry.get("bytes_used", 0))}
 
 
 def get_all_usage() -> dict:
-    """name -> current-week usage dict, for every name with a usage row on
-    disk (regardless of whether that row is still current-week -- callers
+    """name -> current-month usage dict, for every name with a usage row on
+    disk (regardless of whether that row is still current-month -- callers
     that need the rollover applied should use get_usage() per-name, or
-    apply the same week_start check themselves; this bulk accessor exists
+    apply the same period_start check themselves; this bulk accessor exists
     for the Clients page's table, which wants one fetch instead of N)."""
     with _locked(settings.CLIENT_USAGE_FILE):
         all_usage = _read_json(settings.CLIENT_USAGE_FILE)
-    week_start = _current_week_start()
+    period_start = _current_month_start()
     result = {}
     for name, entry in all_usage.items():
-        if entry.get("week_start") == week_start:
-            result[name] = {"week_start": week_start, "bytes_used": int(entry.get("bytes_used", 0))}
+        if entry.get("period_start") == period_start:
+            result[name] = {"period_start": period_start, "bytes_used": int(entry.get("bytes_used", 0))}
         else:
-            result[name] = {"week_start": week_start, "bytes_used": 0}
+            result[name] = {"period_start": period_start, "bytes_used": 0}
     return result

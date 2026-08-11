@@ -1009,6 +1009,14 @@ function wirePasswordConfirm(pwEl, confirmEl, generateBtnEl, { required = false 
 			confirmEl.type = "text";
 			pwEl.value = pw;
 			confirmEl.value = pw;
+			// Setting .value via JS is a plain property assignment -- unlike
+			// real typing, it does NOT fire input/change, so a listener like
+			// bindDirtyTracking's (container-level input/change) never sees
+			// it. Dispatch both manually so a generated password is treated
+			// exactly like a typed one -- including marking the Edit dialog
+			// dirty/Save-enabled immediately.
+			pwEl.dispatchEvent(new Event("input", { bubbles: true }));
+			confirmEl.dispatchEvent(new Event("input", { bubbles: true }));
 			toast("Password generated -- copy it now, it won't be shown again.");
 		});
 	}
@@ -1042,6 +1050,20 @@ function fmtBytes(n) {
 		i++;
 	}
 	return i === 0 ? `${Math.trunc(n)}${units[i]}` : `${n.toFixed(1)}${units[i]}`;
+}
+
+/**
+ * A small horizontal usage-percentage bar -- promoted here from
+ * health.html's original `usageBar()` (same markup/CSS, `.usage-bar`/
+ * `.usage-bar-fill` in style.css) since it's now also used for per-client
+ * bandwidth-quota visibility (clients.html, my_vpn_profile.html), not just
+ * host resource usage. `pct` null/undefined renders nothing (e.g. no quota
+ * set -- "Unlimited" is rendered by the caller instead, not this helper).
+ */
+function usageBar(pct) {
+	if (pct == null) return "";
+	const level = pct >= 90 ? "usage-bar-critical" : pct >= 75 ? "usage-bar-warning" : "usage-bar-ok";
+	return `<span class="usage-bar"><span class="usage-bar-fill ${level}" style="width:${Math.min(100, pct)}%"></span></span>`;
 }
 
 function fmtDuration(totalSeconds) {

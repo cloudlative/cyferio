@@ -70,6 +70,7 @@ def init_db():
     _sync_missing_columns()
     _sync_enum_values()
     _seed_rbac()
+    _backfill_team_slugs()
 
 
 def _seed_rbac():
@@ -87,6 +88,36 @@ def _seed_rbac():
         rename_legacy_vpn_self_service_role(db)
         seed_system_roles(db)
         migrate_user_roles(db)  # Phase 2 backfill -- see permissions.py's docstring
+    finally:
+        db.close()
+
+
+def _backfill_team_slugs():
+    """One-time backfill for Team.slug on rows that predate the column
+    (added for future team-based reporting -- see models.py's Team
+    docstring). _sync_missing_columns() above only fills a single static
+    default across every row of a new column, which would violate this
+    column's uniqueness constraint here -- a per-row derived value needs
+    its own pass, same reasoning as _seed_rbac()'s role/user backfills.
+    Idempotent: only touches rows where slug IS NULL, so it's a no-op on
+    every run after the first for a given team."""
+    import re
+
+    from .models import Team
+
+    db = SessionLocal()
+    try:
+        existing_slugs = {t.slug for t in db.query(Team).filter(Team.slug.isnot(None)).all()}
+        for team in db.query(Team).filter(Team.slug.is_(None)).order_by(Team.id).all():
+            base = re.sub(r"[^a-z0-9]+", "-", team.name.strip().lower()).strip("-") or "team"
+            slug = base
+            n = 2
+            while slug in existing_slugs:
+                slug = f"{base}-{n}"
+                n += 1
+            team.slug = slug
+            existing_slugs.add(slug)
+        db.commit()
     finally:
         db.close()
 

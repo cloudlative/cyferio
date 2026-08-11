@@ -23,7 +23,7 @@
 #       sheraz-ahmed=ff:f2:a7:f4:b2:7b
 #
 #  8) (optional) Set per-client restrictions (allowed OS, restricted
-#     country, weekly bandwidth quota) via client_policy.json -- see the
+#     country, monthly bandwidth quota) via client_policy.json -- see the
 #     web app's "Manage Restrictions" dialog, or openvpn-install.sh's
 #     --set-country/--set-os/--set-bandwidth CLI subcommands. A client with
 #     no policy entry at all is fully unrestricted (only the MAC check
@@ -54,8 +54,8 @@
 #      (reason: country_not_allowed, or country_lookup_failed if the
 #      restriction can't be verified -- see policy_lib.geoip_lookup_country
 #      docstring for the fail-closed rationale)
-#   4. client_usage.json's current-week bytes_used against
-#      client_policy.json's bandwidth_weekly_gb (reason: bandwidth_exceeded
+#   4. client_usage.json's current-month bytes_used against
+#      client_policy.json's bandwidth_monthly_gb (reason: bandwidth_exceeded
 #      -- soft cutoff, connect-time only: an already-connected session
 #      that goes over quota mid-session is NOT killed, see
 #      openvpn-client-disconnect.py)
@@ -182,8 +182,8 @@ with open(log_file, 'a') as LogFile:
                    "OpenVPN connection rejected: client country '{0}' does not match {1}'s required country '{2}'".format(
                        country or "unknown", env_user, restricted_country))
 
-    # 4) Weekly bandwidth quota (soft cutoff, connect-time only) ------------
-    quota_gb = policy.get("bandwidth_weekly_gb")
+    # 4) Monthly bandwidth quota (soft cutoff, connect-time only) -----------
+    quota_gb = policy.get("bandwidth_monthly_gb")
     if quota_gb:
         # Same fail-open rationale as the policy lookup above: a quota IS
         # configured here (we know that much), but if the usage file can't
@@ -193,12 +193,12 @@ with open(log_file, 'a') as LogFile:
             used_bytes = policy_lib.get_usage(env_user)
         except Exception as e:
             used_bytes = 0
-            print("usage lookup failed for {0}: {1} -- treating this week's usage as 0".format(env_user, e))
-            LogFile.write("usage lookup failed for {0}: {1} -- treating this week's usage as 0\n".format(env_user, e))
+            print("usage lookup failed for {0}: {1} -- treating this month's usage as 0".format(env_user, e))
+            LogFile.write("usage lookup failed for {0}: {1} -- treating this month's usage as 0\n".format(env_user, e))
         quota_bytes = float(quota_gb) * (1024 ** 3)
         if used_bytes >= quota_bytes:
             reject(LogFile, "bandwidth_exceeded",
-                   "OpenVPN connection rejected: {0}'s weekly bandwidth quota exceeded ({1:.2f} / {2} GB used this week)".format(
+                   "OpenVPN connection rejected: {0}'s monthly bandwidth quota exceeded ({1:.2f} / {2} GB used this month)".format(
                        env_user, used_bytes / (1024 ** 3), quota_gb))
 
     print("The MAC address of the client machine has been successfully matched to the database")

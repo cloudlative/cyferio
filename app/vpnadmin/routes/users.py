@@ -8,10 +8,12 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session, selectinload
 
 from .. import app_settings, geo_lists, vpn_identity_sync
+from .. import cli_wrapper as cli
 from ..audit import log_action
 from ..auth import hash_password, require_user, verify_password
+from ..cli_wrapper import ScriptError
 from ..db import get_db
-from ..models import Gender, Role, RoleDef, Team, User
+from ..models import Gender, Role, RoleDef, Team, User, VpnProfileLink
 from ..permissions import require_permission
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -89,14 +91,14 @@ def _valid_email(v: str | None) -> str | None:
     return v
 
 
-# Email is required at account creation time (task feedback: "users should
-# not be created without a valid email address") -- unlike _valid_email
-# above, blank/None isn't a valid "skip it" value here. Existing rows
-# created before this requirement can still carry a null email (untouched
-# by this), and admin edits to an existing user still go through
-# _valid_email's looser "blank clears it" rule, since retroactively forcing
-# an email onto every pre-existing account is a separate, bigger migration
-# this feedback didn't ask for.
+# Email is required both at account creation and on every subsequent admin
+# edit (task feedback: "a user record should not be saved without a valid
+# email address") -- unlike _valid_email above, blank/None isn't a valid
+# "skip it" value here. Note: rows created before this requirement existed
+# can still carry a null email today (nothing backfills it) -- the first
+# time such an account is next edited, this now forces an email to be
+# supplied before the save succeeds. That's the intended behavior per this
+# feedback, not a bug.
 def _valid_email_required(v: str) -> str:
     v = (v or "").strip()
     if not v:
@@ -276,7 +278,22 @@ class CreateUserRequest(BaseModel):
     gender: Gender = Gender.unspecified
     email: str
     phone: str | None = None
+    # User creation is now the single VPN-profile provisioning entry point
+    # (task feedback: "Remove Add a New Client... User creation should
+    # become the primary onboarding workflow") -- required, same as the
+    # old standalone Add Client form's MAC field. See create_user() below:
+    # this creates the VPN cert (cli.add_client) BEFORE the User row, so a
+    # MAC/name conflict fails closed with no user created at all.
+    mac: str
     team_ids: list[int] = []
+
+    @field_validator("mac")
+    @classmethod
+    def _valid_mac(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Device MAC Address is required.")
+        return v
 
     restrict_login_by_country: bool = False
     allowed_login_countries: list[str] = []
@@ -395,8 +412,15 @@ class UpdateUserRequest(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def _email(cls, v: str | None) -> str | None:
-        return _valid_email(v)
+    def _email(cls, v: str | None) -> str:
+        # Required on every admin edit, same as at creation -- see
+        # _valid_email_required's docstring above for the "existing
+        # null-email accounts" behavior this implies. Only runs when the
+        # field is actually present in the request body (Pydantic skips
+        # unset-default fields), so a partial PATCH that never touches
+        # email (e.g. the restore-from-deleted button's {deleted, is_active}
+        # body) is unaffected.
+        return _valid_email_required(v)
 
     @field_validator("phone")
     @classmethod
@@ -475,6 +499,7 @@ def _serialize(u: User) -> dict:
         "allowed_login_cities": json.loads(u.allowed_login_cities or "[]"),
         "restrict_login_by_asn": u.restrict_login_by_asn,
         "allowed_login_asns": json.loads(u.allowed_login_asns or "[]"),
+        "vpn_client_name": u.vpn_profile_link.vpn_client_name if u.vpn_profile_link else None,
     }
 
 
@@ -498,7 +523,7 @@ def _guard_against_self_lockout(db: Session, target: User, admin: User, *, remov
 # time it's touched, i.e. up to 2 extra queries per user (N+1) on every
 # call to either endpoint below. This batches each into one extra query
 # total, up front, regardless of how many users are returned.
-_USERS_LIST_OPTIONS = (selectinload(User.role_def), selectinload(User.teams))
+_USERS_LIST_OPTIONS = (selectinload(User.role_def), selectinload(User.teams), selectinload(User.vpn_profile_link))
 
 
 @router.get("")
@@ -582,6 +607,20 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         raise HTTPException(status_code=409, detail=f"Username '{body.username}' already exists.")
     teams = _resolve_teams(db, body.team_ids)
     role_def = _resolve_role(db, body.role)
+
+    # VPN cert is created FIRST, before any DB write -- a MAC/name conflict
+    # (or any other cli.add_client failure) means no user is created at
+    # all, matching the approved failure-recovery design (see
+    # vpn_identity_sync.py's module comment, plan §7): a partial "user
+    # exists, cert doesn't" state should never happen. The reverse ("cert
+    # exists, user creation then fails") is the one accepted rare edge
+    # case -- see the except block below for the recovery path.
+    try:
+        cli.add_client(body.username, body.mac)
+    except ScriptError as e:
+        log_action(db, admin, "create_user", target=body.username, detail=e.message, success=False)
+        raise HTTPException(status_code=400, detail=e.message)
+
     # The legacy `role` enum column (Role: admin/editor/viewer only) can't
     # represent a custom or "User" self-service role -- role_id (below) is what
     # every permission check actually reads now, so this is just a
@@ -608,8 +647,28 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         restrict_login_by_asn=body.restrict_login_by_asn,
         allowed_login_asns=json.dumps(body.allowed_login_asns) if body.allowed_login_asns else None,
     )
-    db.add(user)
-    db.commit()
+    try:
+        db.add(user)
+        db.flush()
+        db.add(VpnProfileLink(user_id=user.id, vpn_client_name=body.username, link_source="created_with_profile"))
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Accepted rare edge case (per approved failure-recovery design):
+        # the VPN cert now exists but no portal user/link was created for
+        # it. Surface a clear, actionable error rather than a generic 500 --
+        # the admin's recovery path is Edit User -> "Attach existing VPN
+        # profile" on whatever user this was meant for (or a fresh Add
+        # User with the same MAC, since the name is now taken by the
+        # orphaned cert -- pick a different username, then attach).
+        log_action(db, admin, "create_user", target=body.username,
+                   detail=f"VPN profile '{body.username}' was created but the user record failed to save", success=False)
+        raise HTTPException(
+            status_code=500,
+            detail=f"A VPN profile named '{body.username}' was created, but saving the user account failed. "
+                   f"The VPN profile was NOT rolled back -- use Edit User's \"Attach existing VPN profile\" to link it "
+                   f"to an account manually.",
+        )
     log_action(db, admin, "create_user", target=body.username, detail=f"role={role_def.slug}")
     return _serialize(user)
 
@@ -742,6 +801,44 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     return _serialize(target)
 
 
+class VpnLinkRequest(BaseModel):
+    vpn_client_name: str
+
+
+@router.post("/{user_id}/vpn-link", status_code=201)
+def link_vpn_profile(user_id: int, body: VpnLinkRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Attaches an existing, unlinked VPN profile to a user that doesn't
+    have one yet (task feedback: "For existing VPN profiles... Edit a
+    User. Select an existing VPN profile from a dropdown."). Mirrors
+    vpn_identity_sync.auto_link_new_client's "link an existing user"
+    branch, but for the inverse trigger (an admin picking the profile from
+    Edit User, not a cert being created) -- link_source records that
+    distinction (manual_admin_link vs. created_with_profile).
+
+    VpnProfileLink.vpn_client_name is unique at the DB level, so a race
+    between two admins attaching the same just-unassigned profile to two
+    different users can't both succeed -- the loser gets a clean 409 from
+    the IntegrityError below, never a silent double-link."""
+    target = db.get(User, user_id)
+    if target is None or target.deleted:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if target.vpn_profile_link is not None:
+        raise HTTPException(status_code=400, detail=f"'{target.username}' already has a linked VPN profile ('{target.vpn_profile_link.vpn_client_name}').")
+    name = body.vpn_client_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="VPN profile name is required.")
+    if db.query(VpnProfileLink).filter(VpnProfileLink.vpn_client_name == name).first() is not None:
+        raise HTTPException(status_code=409, detail=f"'{name}' is already linked to another user.")
+    db.add(VpnProfileLink(user_id=target.id, vpn_client_name=name, link_source="manual_admin_link", linked_by=admin.username))
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"'{name}' was just linked to another user -- pick a different profile.")
+    log_action(db, admin, "link_vpn_profile", target=target.username, detail=name)
+    return _serialize(target)
+
+
 @router.delete("/{user_id}")
 def delete_user(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     """Soft delete: the account is deactivated, hidden from the main user
@@ -784,6 +881,20 @@ def permanently_delete_user(user_id: int, admin: User = Depends(require_admin), 
         # relying solely on that earlier check never being bypassed.
         raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deleted.")
     username = target.username
+    # Before the row is gone -- closes the "cert stays live with no owning
+    # user" gap a failed earlier revoke could otherwise leave behind. See
+    # its own docstring.
+    vpn_identity_sync.sync_before_portal_permanent_delete(db, target)
+    # VpnProfileLink.user_id has ondelete="CASCADE" at the DB level, but
+    # that's only actually enforced by Postgres -- SQLite requires
+    # `PRAGMA foreign_keys=ON` (not set here) to honor it, and without it
+    # SQLAlchemy's default ORM behavior on `db.delete(target)` is to try
+    # nulling out the dependent row's FK instead of cascading, which then
+    # violates vpn_profile_links.user_id's NOT NULL constraint. Delete the
+    # link explicitly first so this works the same on both dialects,
+    # rather than relying on cascade semantics that differ between them.
+    if target.vpn_profile_link is not None:
+        db.delete(target.vpn_profile_link)
     log_action(db, admin, "permanently_delete_user", target=username,
                detail="hard-deleted from the deleted-users list -- irreversible")
     db.delete(target)

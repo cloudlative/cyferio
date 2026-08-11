@@ -204,3 +204,36 @@ def sync_after_portal_delete(db: Session, user: User) -> None:
         cli.revoke_client(link.vpn_client_name)
     except ScriptError as e:
         _log_sync_failure(db, "delete->revoke_client", link.vpn_client_name, e)
+
+
+def sync_before_portal_permanent_delete(db: Session, user: User) -> None:
+    """Called from routes/users.py's permanently_delete_user, before the
+    User row (and its cascade-deleted VpnProfileLink) is removed.
+
+    By the time a permanent delete is reachable, the soft-delete step
+    already called sync_after_portal_delete above -- so in the common case
+    the linked cert is already revoked and this is a safety-net no-op
+    (revoking an already-revoked cert is a harmless ScriptError, caught and
+    ignored here, not surfaced). The gap this actually closes: if that
+    earlier revoke attempt failed (e.g. a transient error) and was never
+    retried, permanent delete would otherwise silently cascade-delete the
+    VpnProfileLink row and leave the cert itself untouched -- live, but
+    with no owning portal user, a real orphaned-access gap. Best-effort
+    revoke + purge here closes it without blocking the delete itself on
+    any failure (same log-and-continue pattern as every other hook in this
+    module -- this is cleanup, not a precondition for the delete to
+    proceed). Still fully skipped for a protected link, same as every
+    other hook -- see this module's docstring."""
+    link = user.vpn_profile_link
+    if link is None or link.protected_from_auto_revoke:
+        if link is not None:
+            _log_sync_skipped_protected(db, "permanent_delete", link.vpn_client_name)
+        return
+    try:
+        cli.revoke_client(link.vpn_client_name)
+    except ScriptError:
+        pass  # most likely already revoked by the earlier soft-delete -- not an error worth logging
+    try:
+        cli.purge_revoked(link.vpn_client_name)
+    except ScriptError as e:
+        _log_sync_failure(db, "permanent_delete->purge_revoked", link.vpn_client_name, e)

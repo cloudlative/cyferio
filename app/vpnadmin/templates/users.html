@@ -2,7 +2,7 @@
 {% block title %}Users — {{ app_settings.app_name }}{% endblock %}
 {% block content %}
 <h1>Users</h1>
-<p class="page-subtitle">Accounts that can log into this admin app (separate from VPN clients).</p>
+<p class="page-subtitle">Accounts that can log into this admin app -- each is tied to a VPN profile, created together below (or linked to an existing one via Edit User).</p>
 
 <div class="card">
 	<h2>Add a User</h2>
@@ -50,6 +50,13 @@
 			<div class="field">
 				<label for="u-phone-mount">Phone <span class="muted">(optional)</span></label>
 				<div id="u-phone-mount"></div>
+			</div>
+		</div>
+		<div class="form-row" style="margin-top:16px">
+			<div class="field">
+				<label for="u-mac">Device MAC Address</label>
+				<input type="text" id="u-mac" required placeholder="aa:bb:cc:dd:ee:ff">
+				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Creating a user also provisions their VPN profile -- MAC can be entered in any common format (colons, dashes, or none — any case) and will be normalized automatically. To attach an already-existing VPN profile instead, use Edit User after creating the account.</p>
 			</div>
 		</div>
 		<button type="button" class="restrictions-toggle" id="u-restrictions-toggle" aria-expanded="false">
@@ -144,7 +151,9 @@
 				<div class="field"><label for="e-team-toggle">Teams <span class="muted">(select several)</span></label><div id="e-team-ms"></div></div>
 			</div>
 			<div class="form-row" style="margin-top:14px">
-				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email"></div>
+				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email" required></div>
+			</div>
+			<div class="form-row" style="margin-top:14px">
 				<div class="field"><label for="e-phone-mount">Phone</label><div id="e-phone-mount"></div></div>
 			</div>
 			<fieldset style="margin-top:16px">
@@ -158,6 +167,22 @@
 					<div class="field">
 						<label for="e-active">Status</label>
 						<select id="e-active"><option value="true">Active</option><option value="false">Disabled</option></select>
+					</div>
+				</div>
+			</fieldset>
+			<fieldset id="e-vpn-fieldset">
+				<legend>VPN Profile</legend>
+				<div id="e-vpn-linked" style="display:none">
+					<p class="muted" style="margin:0">Linked to VPN profile <strong id="e-vpn-linked-name" class="mono"></strong>.</p>
+				</div>
+				<div id="e-vpn-unlinked" style="display:none">
+					<p class="muted" style="margin:0 0 8px">No VPN profile is linked to this account yet -- attach an existing, unassigned one below.</p>
+					<div class="form-row" style="align-items:flex-end">
+						<div class="field" style="margin-bottom:0">
+							<label for="e-vpn-attach-select">Unassigned VPN Profiles</label>
+							<select id="e-vpn-attach-select"><option value="">Loading…</option></select>
+						</div>
+						<button type="button" class="btn-secondary" id="e-vpn-attach-btn" disabled>Attach</button>
 					</div>
 				</div>
 			</fieldset>
@@ -395,7 +420,7 @@ function parseLineList(text) {
 }
 
 const uEmailValidation = attachInlineValidation(document.getElementById("u-email"), (v) => emailError(v, { required: true }));
-const eEmailValidation = attachInlineValidation(document.getElementById("e-email"), emailError);
+const eEmailValidation = attachInlineValidation(document.getElementById("e-email"), (v) => emailError(v, { required: true }));
 const uPhoneValidation = attachInlineValidation(addPhone.getLocalInputEl(), () => phoneError(addPhone.getValue()));
 const ePhoneValidation = attachInlineValidation(editPhone.getLocalInputEl(), () => phoneError(editPhone.getValue()));
 
@@ -549,12 +574,16 @@ function renderUsers() {
 				<td class="muted">${fmtDate(u.last_login_at)}</td>
 				<td class="text-right">
 					<button class="btn-secondary btn-sm edit-btn" data-user='${JSON.stringify(u).replace(/'/g, "&apos;")}'>Edit</button>
+					<button class="btn-secondary btn-sm reset-pw-btn" data-user='${JSON.stringify(u).replace(/'/g, "&apos;")}'>Reset Password</button>
 					<button class="btn-danger btn-sm delete-btn">Delete</button>
 				</td>
 			</tr>`).join("")}</tbody>
 	</table>`;
 	el.querySelectorAll(".edit-btn").forEach(btn => {
 		btn.addEventListener("click", () => openEdit(JSON.parse(btn.dataset.user.replace(/&apos;/g, "'"))));
+	});
+	el.querySelectorAll(".reset-pw-btn").forEach(btn => {
+		btn.addEventListener("click", () => openEdit(JSON.parse(btn.dataset.user.replace(/&apos;/g, "'")), { focusPassword: true }));
 	});
 	el.querySelectorAll(".delete-btn").forEach(btn => {
 		btn.addEventListener("click", async () => {
@@ -627,9 +656,57 @@ async function loadDeleted() {
 	}
 }
 
-function openEdit(u) {
+// Shows the linked VPN profile name, or (if unlinked) an "attach an
+// existing, unassigned profile" dropdown -- fetched fresh every time the
+// Edit dialog opens for an unlinked user, since the unassigned set can
+// change between page loads (another admin attaching one, or a new
+// profile getting created elsewhere).
+async function refreshVpnLinkSection(u) {
+	const linkedEl = document.getElementById("e-vpn-linked");
+	const unlinkedEl = document.getElementById("e-vpn-unlinked");
+	if (u.vpn_client_name) {
+		linkedEl.style.display = "";
+		unlinkedEl.style.display = "none";
+		document.getElementById("e-vpn-linked-name").textContent = u.vpn_client_name;
+		return;
+	}
+	linkedEl.style.display = "none";
+	unlinkedEl.style.display = "";
+	const select = document.getElementById("e-vpn-attach-select");
+	const attachBtn = document.getElementById("e-vpn-attach-btn");
+	select.innerHTML = '<option value="">Loading…</option>';
+	attachBtn.disabled = true;
+	try {
+		const unassigned = await apiFetch("/api/clients/unassigned");
+		select.innerHTML = unassigned.length
+			? '<option value="">Select a profile…</option>' + unassigned.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("")
+			: '<option value="">No unassigned profiles</option>';
+		select.disabled = unassigned.length === 0;
+	} catch (e) {
+		select.innerHTML = '<option value="">Couldn\'t load</option>';
+		toast(e.message, "error");
+	}
+}
+document.getElementById("e-vpn-attach-select").addEventListener("change", (ev) => {
+	document.getElementById("e-vpn-attach-btn").disabled = !ev.target.value;
+});
+document.getElementById("e-vpn-attach-btn").addEventListener("click", async () => {
+	const vpnClientName = document.getElementById("e-vpn-attach-select").value;
+	if (!vpnClientName || !editingUserId) return;
+	try {
+		const updated = await apiFetch(`/api/users/${editingUserId}/vpn-link`, { method: "POST", body: { vpn_client_name: vpnClientName } });
+		toast(`VPN profile '${vpnClientName}' attached.`);
+		await refreshVpnLinkSection(updated);
+		loadUsers();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+function openEdit(u, { focusPassword = false } = {}) {
 	editingUserId = u.id;
 	editingUserIsBootstrapAdmin = !!u.is_bootstrap_admin;
+	refreshVpnLinkSection(u);
 	document.getElementById("e-first").value = u.first_name || "";
 	document.getElementById("e-last").value = u.last_name || "";
 	document.getElementById("e-gender").value = u.gender || "unspecified";
@@ -669,6 +746,13 @@ function openEdit(u) {
 	updateEditRestrictionsCount();
 	document.getElementById("edit-dialog").showModal();
 	editDirty.arm();
+	// Reset Password (Actions column) opens this same dialog -- jump
+	// straight to the password fields instead of making the admin scroll
+	// past everything else to find them.
+	if (focusPassword) {
+		document.getElementById("e-password").scrollIntoView({ behavior: "smooth", block: "center" });
+		document.getElementById("e-password").focus();
+	}
 }
 document.getElementById("edit-dialog").addEventListener("close", () => editDirty.disarm());
 document.getElementById("edit-cancel").addEventListener("click", () => document.getElementById("edit-dialog").close());
@@ -725,7 +809,9 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 	const password = document.getElementById("u-password").value;
 	const role = document.getElementById("u-role").value;
 	const firstName = document.getElementById("u-first").value.trim();
+	const mac = document.getElementById("u-mac").value.trim();
 	if (!firstName) { toast("First Name is required.", "error"); return; }
+	if (!mac) { toast("Device MAC Address is required.", "error"); return; }
 	if (!uEmailValidation.check() || !uPhoneValidation.check()) {
 		toast("Please fix the highlighted field(s) before submitting.", "error");
 		return;
@@ -736,7 +822,7 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 		await apiFetch("/api/users", {
 			method: "POST",
 			body: {
-				username, password, role,
+				username, password, role, mac,
 				first_name: firstName,
 				last_name: document.getElementById("u-last").value.trim() || null,
 				email: document.getElementById("u-email").value.trim(),

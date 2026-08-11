@@ -29,7 +29,7 @@ class TestBulkPolicies:
         login(app_client, "admin", "adminpass123")
         r = app_client.get("/api/clients/policies")
         assert r.status_code == 200
-        assert r.json() == {"policies": {}}
+        assert r.json() == {"policies": {}, "usage": {}}
 
     def test_viewer_forbidden(self, app_client):
         login(app_client, "viewer", "viewerpass123")
@@ -46,7 +46,7 @@ class TestBulkPolicies:
 
     def test_only_clients_with_a_restriction_appear(self, app_client):
         login(app_client, "admin", "adminpass123")
-        app_client.put("/api/clients/zz-restricted/policy", json={"bandwidth_weekly_gb": 5})
+        app_client.put("/api/clients/zz-restricted/policy", json={"bandwidth_monthly_gb": 5})
         r = app_client.get("/api/clients/policies")
         assert list(r.json()["policies"].keys()) == ["zz-restricted"]
 
@@ -65,13 +65,13 @@ class TestCreateThenPolicySequencing:
 
         r2 = app_client.put(
             "/api/clients/zz-newclient/policy",
-            json={"country": "PK", "allowed_os": ["windows", "linux"], "bandwidth_weekly_gb": 5},
+            json={"country": "PK", "allowed_os": ["windows", "linux"], "bandwidth_monthly_gb": 5},
         )
         assert r2.status_code == 200
         assert r2.json()["policy"] == {
             "country": "PK",
             "allowed_os": ["linux", "windows"],
-            "bandwidth_weekly_gb": 5.0,
+            "bandwidth_monthly_gb": 5.0,
         }
 
         r3 = app_client.get("/api/clients/zz-newclient/policy")

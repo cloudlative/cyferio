@@ -15,7 +15,7 @@ Two JSON files this module deals with:
                           docstring for why this isn't shared code across
                           the two different install locations). Read-only
                           from here.
-  client_usage.json   -- weekly bandwidth usage. Read here (by the
+  client_usage.json   -- monthly bandwidth usage. Read here (by the
                           connect script, to check quota) AND written here
                           (by the disconnect script, after each session).
   session_history.jsonl -- one JSON object per ended session, one per
@@ -37,7 +37,7 @@ import os
 import json
 import tempfile
 from contextlib import contextmanager
-from datetime import date, timedelta
+from datetime import date
 
 CONFIG_FILE = "/etc/openvpn/vpn-tools.conf"
 
@@ -204,16 +204,21 @@ def get_policy(name):
     return all_policies.get(name, {}) or {}
 
 
-def current_week_start(today=None):
-    """Monday 00:00 server-local time of the current calendar week."""
+def current_month_start(today=None):
+    """1st of the current calendar month, server-local time. Renamed from
+    current_week_start (Monday-anchored) -- see client_usage.json's
+    period_start key (renamed from week_start) for the on-disk side of
+    this change. An old row's stale week_start key simply won't match
+    period_start on the next read/write and resets to 0 -- a one-time,
+    expected usage-counter reset on the deploy that ships this, not a bug."""
     today = today or date.today()
-    return today - timedelta(days=today.weekday())
+    return today.replace(day=1)
 
 
 def get_usage(name):
-    """Returns bytes_used for `name` THIS week, applying the lazy weekly
-    rollover on read (if the stored week_start isn't this week's Monday,
-    usage reads as 0 -- the stale row itself is only rewritten by
+    """Returns bytes_used for `name` THIS month, applying the lazy monthly
+    rollover on read (if the stored period_start isn't the 1st of this
+    month, usage reads as 0 -- the stale row itself is only rewritten by
     add_usage()'s write path, see its own docstring for why a read-only
     quota check shouldn't take the write lock)."""
     with _locked(CLIENT_USAGE_FILE):
@@ -221,25 +226,25 @@ def get_usage(name):
     entry = all_usage.get(name)
     if not entry:
         return 0
-    if entry.get("week_start") != current_week_start().isoformat():
+    if entry.get("period_start") != current_month_start().isoformat():
         return 0
     return int(entry.get("bytes_used", 0))
 
 
 def add_usage(name, bytes_delta):
-    """Adds `bytes_delta` to `name`'s usage for the current week,
-    resetting first if the stored week has rolled over since the last
+    """Adds `bytes_delta` to `name`'s usage for the current month,
+    resetting first if the stored period has rolled over since the last
     write (lazy reset -- see client_usage.json's schema notes). Read-
     modify-write under lock; this is the only place client_usage.json is
     written (by the disconnect script, once per ended session)."""
-    week_start = current_week_start().isoformat()
+    period_start = current_month_start().isoformat()
     with _locked(CLIENT_USAGE_FILE):
         all_usage = read_json(CLIENT_USAGE_FILE, {})
         entry = all_usage.get(name) or {}
-        if entry.get("week_start") != week_start:
-            entry = {"week_start": week_start, "bytes_used": 0}
+        if entry.get("period_start") != period_start:
+            entry = {"period_start": period_start, "bytes_used": 0}
         entry["bytes_used"] = int(entry.get("bytes_used", 0)) + int(bytes_delta)
-        entry["week_start"] = week_start
+        entry["period_start"] = period_start
         all_usage[name] = entry
         atomic_write_json(CLIENT_USAGE_FILE, all_usage)
     return all_usage[name]

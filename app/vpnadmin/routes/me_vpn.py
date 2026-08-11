@@ -12,14 +12,18 @@ already "my own record" by construction.
 
 No self-enrollment (see docs/rbac_identity_design.md §7 item 4, an explicit
 open assumption confirmed by proceeding): a VPN profile is always admin-
-provisioned first via routes/clients.py's add_client; this router only
-ever views/updates a profile that's already linked.
-"""
+provisioned -- either automatically as part of creating the portal user
+(routes/users.py's create_user, the standard path since the User<->VPN
+Profile lifecycle unification) or by attaching an existing, unassigned
+profile via routes/users.py's link_vpn_profile. This router only ever
+views/updates a profile that's already linked, regardless of which of
+those two ways it got linked."""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from .. import cli_wrapper as cli
+from .. import policy_store
 from ..audit import log_action
 from ..cli_wrapper import ScriptError
 from ..db import get_db
@@ -59,6 +63,15 @@ def get_my_vpn_profile(user: User = Depends(require_permission("vpn_profiles", "
         "linked_at": link.linked_at.isoformat() if link.linked_at else None,
         "macs": (macs or {}).get("macs", []),
         "client_info": client_info,
+        # View-only bandwidth visibility (task feedback: "VPN users with
+        # standard User permissions should also be able to see current
+        # usage, allocated bandwidth, remaining bandwidth" from their
+        # self-service portal) -- same policy_store calls the admin-side
+        # GET /api/clients/{name}/policy makes, just scoped to the caller's
+        # own linked client rather than an admin-chosen name. No edit
+        # controls here -- this router doesn't expose a policy PUT.
+        "policy": policy_store.get_policy(link.vpn_client_name),
+        "usage": policy_store.get_usage(link.vpn_client_name),
     }
 
 

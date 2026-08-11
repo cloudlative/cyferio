@@ -320,11 +320,13 @@ class TestFirstNameRequired:
         })
         assert r.status_code == 422
 
-    def test_create_user_with_first_name_succeeds(self, app_client):
+    def test_create_user_with_first_name_succeeds(self, app_client, monkeypatch):
+        from vpnadmin.routes import users as users_mod
+        monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "hasfirstname", "password": "somepass123", "first_name": "Alex",
-            "email": "hasfirstname@example.com",
+            "email": "hasfirstname@example.com", "mac": "aa:bb:cc:dd:ee:ff",
         })
         assert r.status_code == 201
         assert r.json()["first_name"] == "Alex"

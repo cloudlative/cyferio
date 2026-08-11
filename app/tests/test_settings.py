@@ -97,20 +97,22 @@ class TestUpdateSettings:
         app_client.patch("/api/settings", json={"smtp_password": ""})
         assert runtime_settings.smtp_password == ""
 
-    def test_password_length_setting_affects_new_user_validation(self, app_client, db_session):
+    def test_password_length_setting_affects_new_user_validation(self, app_client, db_session, monkeypatch):
+        from vpnadmin.routes import users as users_mod
+        monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
         r = app_client.patch("/api/settings", json={"min_password_length": 12})
         assert r.status_code == 200
 
         r = app_client.post("/api/users", json={
             "username": "shortpw", "password": "short123", "first_name": "Short",
-            "email": "shortpw@example.com",
+            "email": "shortpw@example.com", "mac": "aa:bb:cc:dd:ee:ff",
         })
         assert r.status_code == 422
 
         r = app_client.post("/api/users", json={
             "username": "longenough", "password": "longenoughpassword", "first_name": "Long",
-            "email": "longenough@example.com",
+            "email": "longenough@example.com", "mac": "aa:bb:cc:dd:ee:ff",
         })
         assert r.status_code == 201
 

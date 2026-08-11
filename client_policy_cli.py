@@ -17,11 +17,11 @@ depending on an import path across those two different install locations.
 Usage:
   client_policy_cli.py get NAME                  Print NAME's policy as JSON ({} if unrestricted)
   client_policy_cli.py get-all                    Print every client's policy as JSON
-  client_policy_cli.py usage NAME                 Print NAME's current-week usage as JSON
+  client_policy_cli.py usage NAME                 Print NAME's current-month usage as JSON
   client_policy_cli.py set-country NAME CODE|-    Set (or "-" to clear) the country restriction
                                                    (CODE is an ISO 3166-1 alpha-2 code, e.g. PK)
   client_policy_cli.py set-os NAME LIST|-         Set (comma list from windows,linux,mac; "-" clears)
-  client_policy_cli.py set-bandwidth NAME GB|-    Set (or "-" to clear) the weekly GB quota
+  client_policy_cli.py set-bandwidth NAME GB|-    Set (or "-" to clear) the monthly GB quota
 
 Exit 0 on success (prints the affected client's resulting policy/usage
 entry as JSON on stdout), 1 on error (message on stderr).
@@ -36,7 +36,7 @@ import json
 import os
 import sys
 import tempfile
-from datetime import date, timedelta
+from datetime import date
 
 CONFIG_FILE = "/etc/openvpn/vpn-tools.conf"
 DEFAULTS = {
@@ -170,11 +170,10 @@ def cmd_get_all():
 
 def cmd_usage(name):
     data = _read_only(USAGE_FILE)
-    entry = data.get(name) or {"week_start": None, "bytes_used": 0}
-    today = date.today()
-    week_start = (today - timedelta(days=today.weekday())).isoformat()
-    if entry.get("week_start") != week_start:
-        entry = {"week_start": week_start, "bytes_used": 0}
+    entry = data.get(name) or {"period_start": None, "bytes_used": 0}
+    period_start = date.today().replace(day=1).isoformat()
+    if entry.get("period_start") != period_start:
+        entry = {"period_start": period_start, "bytes_used": 0}
     print(json.dumps(entry))
 
 
@@ -226,7 +225,7 @@ def cmd_set_bandwidth(name, gb):
         except ValueError:
             print("Invalid bandwidth quota: '{0}' -- expected a positive number of GB, or '-' to clear.".format(gb), file=sys.stderr)
             sys.exit(1)
-    print(json.dumps(_set_field(name, "bandwidth_weekly_gb", value)))
+    print(json.dumps(_set_field(name, "bandwidth_monthly_gb", value)))
 
 
 def main():

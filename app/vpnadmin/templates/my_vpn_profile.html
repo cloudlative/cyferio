@@ -17,6 +17,11 @@
 </div>
 
 <div class="card">
+	<div class="toolbar"><h2 style="margin:0">Bandwidth Usage</h2></div>
+	<div id="vp-bandwidth"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card">
 	<div class="toolbar"><h2 style="margin:0">Allowed Devices (MAC Addresses)</h2></div>
 	<p class="muted" style="margin-top:0">Only devices with a MAC address listed here can connect using your profile.</p>
 	<div id="vp-mac-list"><p class="muted">Loading…</p></div>
@@ -48,6 +53,30 @@ async function loadMyProfile() {
 			statusEl.innerHTML = '<span class="status-pill status-revoked">Not registered</span>';
 		} else {
 			statusEl.innerHTML = '<span class="status-pill status-online">Active</span>';
+		}
+		// View-only -- no edit controls here, same read-only posture as the
+		// rest of this self-service page (an admin sets the quota via
+		// Clients' Manage Restrictions dialog).
+		const bwEl = document.getElementById("vp-bandwidth");
+		const quotaGb = p.policy && p.policy.bandwidth_monthly_gb;
+		if (!quotaGb) {
+			bwEl.innerHTML = '<p class="muted">No monthly bandwidth quota is set on your profile -- usage is unlimited.</p>';
+		} else {
+			const usedBytes = (p.usage && p.usage.bytes_used) || 0;
+			const quotaBytes = quotaGb * 1024 ** 3;
+			const remainingBytes = Math.max(0, quotaBytes - usedBytes);
+			const pct = Math.round((usedBytes / quotaBytes) * 100);
+			bwEl.innerHTML = `
+				<div class="form-grid" style="margin-bottom:14px">
+					<div><label>Current Usage</label><div class="mono">${fmtBytes(usedBytes)}</div></div>
+					<div><label>Allocated</label><div class="mono">${quotaGb}GB</div></div>
+					<div><label>Remaining</label><div class="mono">${fmtBytes(remainingBytes)}</div></div>
+				</div>
+				<div style="display:flex;align-items:center;gap:10px">
+					${usageBar(pct)}
+					<span class="muted mono" style="font-size:0.85rem">${pct}%</span>
+				</div>
+				<p class="muted" style="margin:10px 0 0;font-size:0.82rem">Reflects usage as of your last disconnect, not a live mid-session total. Resets on the 1st of each month.</p>`;
 		}
 		const macList = document.getElementById("vp-mac-list");
 		const macs = p.macs || [];

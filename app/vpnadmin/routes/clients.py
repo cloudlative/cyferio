@@ -11,7 +11,7 @@ from .. import vpn_identity_sync
 from ..audit import log_action
 from ..cli_wrapper import ScriptError
 from ..db import get_db
-from ..models import User
+from ..models import User, VpnProfileLink
 from ..permissions import require_permission, require_permission_any_scope
 from ..policy_store import PolicyValidationError
 
@@ -98,6 +98,27 @@ def get_revoked_clients(_: User = Depends(_require_client_viewer)):
         return cli.get_revoked_snapshot()
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
+
+
+@router.get("/unassigned")
+def get_unassigned_clients(_: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
+    """VPN profiles (certs) that exist but aren't linked to any portal
+    user -- powers Edit User's "Attach existing VPN profile" dropdown
+    (only unassigned profiles should ever be offered there; a profile
+    already linked to another user must never appear). Registered before
+    the /{name}/... routes below so "unassigned" itself is never captured
+    as a `name` path param -- same static-before-dynamic ordering as
+    /revoked above.
+
+    Admin-only (same gate as every other bulk client-list endpoint here) --
+    this is a superset view across every user's profile, not a self-service
+    endpoint."""
+    try:
+        clients = cli.get_clients_snapshot()
+    except ScriptError as e:
+        raise HTTPException(status_code=502, detail=e.message)
+    linked_names = {link.vpn_client_name for link in db.query(VpnProfileLink).all()}
+    return [c for c in clients if c.get("name") not in linked_names]
 
 
 @router.get("/{name}/macs")
@@ -342,16 +363,19 @@ class PolicyRequest(BaseModel):
     can be restricted to a different country, or none at all."""
     country: str | None = None
     allowed_os: list[str] | None = None
-    bandwidth_weekly_gb: float | None = None
+    bandwidth_monthly_gb: float | None = None
 
 
 @router.get("/policies")
 def get_all_client_policies(_: User = Depends(_require_client_manager)):
     """Bulk name -> policy dict for every client with a restriction set
-    (clients with none simply don't appear in the result). Admin-only, same
-    as the per-client GET below -- exists purely so the All Clients table
-    can render restriction-summary badges per row without an N+1 fetch."""
-    return {"policies": policy_store.get_all_policies()}
+    (clients with none simply don't appear in the result), plus bulk
+    name -> current-month usage for every client with a usage row on disk
+    (policy_store.get_all_usage(), already bulk -- no N+1 needed to add
+    this). Admin-only, same as the per-client GET below -- exists purely so
+    the All Clients table can render restriction-summary badges AND a
+    bandwidth usage bar per row without per-row fetches."""
+    return {"policies": policy_store.get_all_policies(), "usage": policy_store.get_all_usage()}
 
 
 @router.get("/{name}/policy")
@@ -376,7 +400,7 @@ def update_client_policy(name: str, body: PolicyRequest, user: User = Depends(_r
             name,
             country=body.country if "country" in fields_set else ...,
             allowed_os=body.allowed_os if "allowed_os" in fields_set else ...,
-            bandwidth_weekly_gb=body.bandwidth_weekly_gb if "bandwidth_weekly_gb" in fields_set else ...,
+            bandwidth_monthly_gb=body.bandwidth_monthly_gb if "bandwidth_monthly_gb" in fields_set else ...,
         )
     except PolicyValidationError as e:
         log_action(db, user, "update_client_policy", target=name, detail=str(e), success=False)
@@ -387,7 +411,7 @@ def update_client_policy(name: str, body: PolicyRequest, user: User = Depends(_r
         detail_bits.append(f"country={body.country or 'ANY'}")
     if "allowed_os" in fields_set:
         detail_bits.append(f"allowed_os={','.join(body.allowed_os) if body.allowed_os else 'ANY'}")
-    if "bandwidth_weekly_gb" in fields_set:
-        detail_bits.append(f"bandwidth_weekly_gb={body.bandwidth_weekly_gb or 'ANY'}")
+    if "bandwidth_monthly_gb" in fields_set:
+        detail_bits.append(f"bandwidth_monthly_gb={body.bandwidth_monthly_gb or 'ANY'}")
     log_action(db, user, "update_client_policy", target=name, detail="; ".join(detail_bits) or "no changes", success=True)
     return {"policy": result}
