@@ -18,11 +18,40 @@ def _env_bool(name: str, default: bool) -> bool:
     return val.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _default_database_url() -> str:
+    """Postgres is the default DB for any real (docker-compose) deployment;
+    SQLite is only used when nothing else is configured at all (bare local/
+    dev runs) -- explicitly setting DATABASE_URL (to a sqlite:// URL or
+    anything else) always wins over both.
+
+    Reuses the SAME POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB env vars
+    docker-compose.yml's `postgres` service already requires (and which
+    env_file: .env already passes into this container too) -- no new env
+    var needed, and no credential hardcoded here: docker-compose.yml's
+    postgres service refuses to even start without POSTGRES_PASSWORD set
+    (`:?Set POSTGRES_PASSWORD in .env`), so its presence in this process's
+    environment is itself the signal that a real Postgres instance is
+    genuinely configured and reachable at the "postgres" service name.
+    setup-new-machine.sh's fresh .env generation relies on exactly this --
+    it writes POSTGRES_PASSWORD unconditionally but no longer writes
+    DATABASE_URL at all, letting this function supply Postgres
+    automatically (pass --sqlite to that script for the explicit opt-out)."""
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
+    if os.environ.get("POSTGRES_PASSWORD"):
+        user = os.environ.get("POSTGRES_USER", "vpnadmin")
+        db = os.environ.get("POSTGRES_DB", "vpnadmin")
+        return f"postgresql://{user}:{os.environ['POSTGRES_PASSWORD']}@postgres:5432/{db}"
+    return "sqlite:///./data/app.db"
+
+
 class Settings:
     # --- Database -------------------------------------------------------
-    # Either sqlite:///./data/app.db (default) or a postgresql:// URL.
-    # SQLAlchemy handles both transparently through the same models.
-    DATABASE_URL: str = os.environ.get("DATABASE_URL", "sqlite:///./data/app.db")
+    # Postgres by default (see _default_database_url() above); SQLite only
+    # as a zero-config local/dev fallback, or when DATABASE_URL is set
+    # explicitly. SQLAlchemy handles both transparently through the same
+    # models either way.
+    DATABASE_URL: str = _default_database_url()
 
     # --- Sessions / auth --------------------------------------------------
     # MUST be overridden in production via env var -- a random one is
@@ -187,6 +216,34 @@ class Settings:
     # does for country (see geoip.py).
     GEOIP_CITY_DB_PATH: str = os.environ.get("GEOIP_CITY_DB_PATH", "/etc/openvpn/server/GeoLite2-City.mmdb")
     GEOIP_ASN_DB_PATH: str = os.environ.get("GEOIP_ASN_DB_PATH", "/etc/openvpn/server/GeoLite2-ASN.mmdb")
+
+    # --- Real client IP source (proxy/CDN detection) -------------------------
+    # Which header client_ip.py::get_client_ip() trusts for the visitor's real
+    # IP (used by the GeoIP/country/city/ASN/IP login restrictions above, and
+    # everything downstream of get_client_ip()). Auto-detected and written
+    # here by setup-new-machine.sh, based on whether APP_DOMAIN resolves into
+    # Cloudflare's published ranges (proxied) or straight to this host's own
+    # public IP (direct -- also covers Cloudflare DNS-only and any other DNS
+    # provider, since Traefik is the sole hop in front of the app either way).
+    # Safe to hand-edit for a setup auto-detection can't infer (e.g. your own
+    # reverse proxy in front of Traefik). Accepted values:
+    #   ""                (default) auto: CF-Connecting-IP, else
+    #                      X-Forwarded-For's rightmost/Traefik-appended hop,
+    #                      else the raw socket peer.
+    #   "CF-Connecting-IP" Cloudflare-proxied deployments. Pair with
+    #                      CLIENT_IP_TRUST_MIDDLEWARE=cloudflare-only in
+    #                      docker-compose.yml's traefik-config rendering (see
+    #                      app/traefik/dynamic.yml.tmpl) so Traefik itself
+    #                      only accepts inbound connections from Cloudflare's
+    #                      ranges -- otherwise this header is just a claim.
+    #   "X-Forwarded-For"  Direct deployments (no CDN in front of Traefik).
+    #                      Always takes the LAST (rightmost) hop -- the one
+    #                      Traefik itself appended -- never the first, which
+    #                      is attacker-controlled.
+    #   "X-Real-IP"        Set by some reverse proxies (not Traefik itself) --
+    #                      for an operator's own extra proxy layer.
+    #   "Forwarded"        RFC 7239 -- same rightmost-hop handling as XFF.
+    CLIENT_IP_HEADER: str = os.environ.get("CLIENT_IP_HEADER", "")
 
     # --- Health page -------------------------------------------------------
     # Read-only bind mounts of the Docker HOST's /proc, /sys, and root

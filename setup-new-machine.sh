@@ -8,32 +8,41 @@
 # automates -- an SSH connection, scoped to one exact command, rather than
 # widening the app container's own Docker privileges).
 #
-# This is everything a fresh machine needs BEYOND `docker compose up -d`
-# itself -- generating the host-executor SSH key + forced-command wrapper +
-# sudoers grant, writing .env, enabling the deploy-key volume mount, and
-# bringing the stack up (staging cert first, then production).
+# This is everything a fresh machine needs BEYOND a bare OS install --
+# installing Docker Engine itself (Docker's official apt repo for Ubuntu, see
+# install_docker() below), generating the host-executor SSH key +
+# forced-command wrapper + sudoers grant, writing .env, enabling the
+# deploy-key volume mount, and bringing the stack up (staging cert first,
+# then production).
+#
+# UBUNTU ONLY: this script installs Docker via Docker's official Ubuntu apt
+# repository (docs.docker.com/engine/install/ubuntu) and uses apt-get
+# elsewhere -- it refuses to run (see the os-release check below) on any
+# other distro. This matches every other install-time assumption already
+# baked into this repo (see e.g. the migration plan's target-machine facts).
 #
 # Prereqs this script does NOT do for you:
-#   1. Docker + the Compose plugin already installed on this host.
-#   2. A DNS A record for --domain already pointing at this host's public IP
+#   1. A DNS A record for --domain already pointing at this host's public IP
 #      (needed for Let's Encrypt's HTTP-01 challenge to succeed).
-#   3. This repo already cloned here (private repo -- add a read-only GitHub
+#   2. This repo already cloned here (private repo -- add a read-only GitHub
 #      deploy key first: `ssh-keygen -t ed25519 -f ~/.ssh/openvpn-toolkit-deploy`,
 #      then `gh repo deploy-key add --repo cloudlative/openvpn-toolkit
-#      ~/.ssh/openvpn-toolkit-deploy.pub`, then clone via that key).
+#      ~/.ssh/openvpn-toolkit-deploy.pub`, then clone via that key -- or just
+#      use add-machine.sh, which does exactly this).
 #
 # Idempotent: every phase checks its own current state before acting, so
 # re-running this (e.g. after changing --deploy-user, or just to pick up a
-# newer .env.example) is safe and won't duplicate keys/sudoers
-# entries/authorized_keys lines, re-issue a cert that's already valid, or
-# clobber an .env you've since hand-edited (see --force-env).
+# newer .env.example) is safe and won't reinstall Docker if it's already
+# present, won't duplicate keys/sudoers entries/authorized_keys lines,
+# won't re-issue a cert that's already valid, and won't clobber an .env
+# you've since hand-edited (see --force-env).
 #
 # Usage (run as root, or via sudo):
 #   sudo ./setup-new-machine.sh \
 #     --domain vpn-project.cloudlative.com \
 #     --acme-email you@example.com \
 #     [--deploy-user ubuntu] [--image-tag 1.0.36] [--repo-dir /opt/openvpn-toolkit] \
-#     [--use-staging-first] [--force-env] [--skip-stack]
+#     [--use-staging-first] [--force-env] [--skip-stack] [--skip-docker]
 #
 # Flags:
 #   --domain DOMAIN         Required. Public hostname Traefik requests a
@@ -60,9 +69,34 @@
 #   --force-env              Overwrite an existing .env instead of leaving it
 #                            untouched (secrets are re-generated -- existing
 #                            sessions/logins will be invalidated).
+#   --proxy-mode MODE        auto (default) | cloudflare | direct. Controls
+#                            CLIENT_IP_HEADER/CLIENT_IP_TRUST_MIDDLEWARE in
+#                            .env (see config.py and dynamic.yml.tmpl) --
+#                            which header the app trusts for the visitor's
+#                            real IP, and whether Traefik itself enforces
+#                            that only Cloudflare's published ranges may
+#                            reach it. "auto" resolves --domain and compares
+#                            against this host's own public IP and against
+#                            Cloudflare's published ranges; pass "cloudflare"
+#                            or "direct" to force a choice instead (e.g. if
+#                            outbound DNS/HTTP from this host can't reach the
+#                            resolvers/IP-echo services auto-detection needs).
 #   --skip-stack             Do everything except `docker compose up`
 #                            (useful to only (re)provision the host-executor
 #                            SSH pipeline, e.g. when migrating --deploy-user).
+#   --skip-docker            Skip installing Docker and skip adding
+#                            --deploy-user to the docker group -- use if you
+#                            already manage Docker yourself (a different
+#                            install method/version pin) and just want this
+#                            script's other phases.
+#   --sqlite                 Use a local SQLite file instead of the
+#                            docker-compose `postgres` service (writes
+#                            DATABASE_URL=sqlite:///./data/app.db into a
+#                            fresh .env explicitly). Postgres is the default
+#                            otherwise -- see config.py's
+#                            _default_database_url() docstring for why this
+#                            script no longer writes DATABASE_URL at all in
+#                            the non-sqlite case.
 
 set -euo pipefail
 
@@ -75,6 +109,9 @@ REPO_DIR="/opt/openvpn-toolkit"
 USE_STAGING_FIRST=0
 FORCE_ENV=0
 SKIP_STACK=0
+SKIP_DOCKER=0
+PROXY_MODE="auto"
+USE_SQLITE=0
 
 log() { echo "[setup-new-machine] $*"; }
 die() { echo "[setup-new-machine] ERROR: $*" >&2; exit 1; }
@@ -89,13 +126,36 @@ while [[ $# -gt 0 ]]; do
 		--repo-dir) REPO_DIR="$2"; shift 2 ;;
 		--use-staging-first) USE_STAGING_FIRST=1; shift ;;
 		--force-env) FORCE_ENV=1; shift ;;
+		--proxy-mode) PROXY_MODE="$2"; shift 2 ;;
 		--skip-stack) SKIP_STACK=1; shift ;;
-		-h|--help) sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		--skip-docker) SKIP_DOCKER=1; shift ;;
+		--sqlite) USE_SQLITE=1; shift ;;
+		-h|--help) sed -n '2,99p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) die "Unknown argument: $1 (see --help)" ;;
 	esac
 done
 
+case "$PROXY_MODE" in
+	auto|cloudflare|direct) ;;
+	*) die "--proxy-mode must be one of: auto, cloudflare, direct (got '$PROXY_MODE')." ;;
+esac
+
 [[ "$EUID" -eq 0 ]] || die "Must run as root (sudo ./setup-new-machine.sh ...)."
+
+# UBUNTU ONLY -- install_docker() below uses Docker's official Ubuntu apt
+# repo, and everything else in this script (and the rest of this repo's
+# bootstrap scripts) assumes apt-get. Fail loudly and immediately rather
+# than getting partway through and hitting a confusing "apt-get: command
+# not found" deep inside install_docker().
+if [[ -r /etc/os-release ]]; then
+	# shellcheck disable=SC1091
+	. /etc/os-release
+else
+	die "Cannot read /etc/os-release to confirm this is Ubuntu -- refusing to guess."
+fi
+[[ "${ID:-}" == "ubuntu" ]] || die "This script only supports Ubuntu (detected: ${PRETTY_NAME:-${ID:-unknown}}). See this script's header for why."
+log "Confirmed OS: ${PRETTY_NAME:-Ubuntu} (${VERSION_CODENAME:-unknown codename})"
+
 [[ "$DEPLOY_USER" != "root" ]] || die "--deploy-user must not be root -- see this script's header for why."
 [[ -d "$REPO_DIR" ]] || die "$REPO_DIR does not exist -- clone the repo there first (see this script's header, prereq 3)."
 id "$DEPLOY_USER" &>/dev/null || die "User '$DEPLOY_USER' does not exist on this host."
@@ -116,7 +176,94 @@ SUDOERS_FILE="/etc/sudoers.d/openvpn-toolkit-host-executor"
 DEPLOY_USER_HOME=$(getent passwd "$DEPLOY_USER" | cut -d: -f6)
 DEPLOY_USER_SSH_DIR="$DEPLOY_USER_HOME/.ssh"
 
-# --- Phase 1: host-executor SSH key + forced command + sudoers -----------
+# --- Phase 1: install Docker (Ubuntu apt repo) ----------------------------
+#
+# Follows docs.docker.com/engine/install/ubuntu exactly: remove old
+# conflicting packages, add Docker's GPG key + apt repo, install the CE
+# packages (including the docker-compose-plugin this whole stack depends
+# on -- `docker compose`, not the standalone `docker-compose` binary).
+# Idempotent: if `docker` and `docker compose` both already work, this is a
+# no-op -- doesn't touch apt sources or reinstall anything, so re-running
+# this script never fights a differently-pinned Docker version an operator
+# installed by hand.
+install_docker() {
+	log "Phase 1: Docker installation"
+
+	if command -v docker &>/dev/null && docker compose version &>/dev/null; then
+		log "  docker + docker compose already present ($(docker --version)) -- skipping install."
+		return
+	fi
+
+	log "  removing any conflicting distro-packaged docker bits (safe no-op if none installed)..."
+	for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
+		apt-get remove -y "$pkg" >/dev/null 2>&1 || true
+	done
+
+	log "  adding Docker's official apt repo..."
+	apt-get update -qq
+	apt-get install -y -qq ca-certificates curl
+	install -m 0755 -d /etc/apt/keyrings
+	curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+	chmod a+r /etc/apt/keyrings/docker.asc
+
+	# shellcheck disable=SC1091
+	local codename
+	codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+	echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $codename stable" \
+		| tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+	log "  installing docker-ce, docker-compose-plugin, and friends..."
+	apt-get update -qq
+	apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+	systemctl is-active --quiet docker || systemctl enable --now docker
+
+	command -v docker &>/dev/null || die "Docker install completed but 'docker' still isn't on PATH -- something went wrong."
+	docker compose version &>/dev/null || die "Docker install completed but 'docker compose' doesn't work -- docker-compose-plugin may have failed to install."
+	log "  installed: $(docker --version)"
+}
+
+# --deploy-user needs to run `docker`/`docker compose` by hand (debugging,
+# manual `docker compose logs`, etc.) without sudo -- membership in the
+# `docker` group grants that. This script's OWN docker/compose calls below
+# never depend on this (the script runs as root throughout, which always
+# has docker.sock access regardless of group membership) -- this phase is
+# purely for the human operator's convenience afterward.
+#
+# SECURITY NOTE (worth being explicit about, matching this repo's existing
+# "minimal privilege footprint" stance elsewhere -- see add-machine.sh's own
+# header): membership in the docker group is root-equivalent on this host --
+# anyone in it can bind-mount the root filesystem into a container and read/
+# write anything as root. This is not a stronger claim than Docker's own
+# docs make; it's just worth restating next to the line of code that grants
+# it, rather than only in Docker's own documentation.
+#
+# Group membership changes do NOT apply to already-open sessions -- only to
+# NEW logins (or a subshell started with `newgrp`/`sg`). This script cannot
+# reach into your current SSH session and rewrite its process's supplementary
+# group list for you (nothing running outside this script's own process tree
+# can), so instead of pretending to "handle" that, it prints the two ways to
+# actually pick it up (see the log lines below) and moves on -- nothing else
+# in this script needs $DEPLOY_USER's docker-group membership to succeed.
+configure_docker_group() {
+	log "Phase 1b: docker group for $DEPLOY_USER"
+
+	if id -nG "$DEPLOY_USER" | tr ' ' '\n' | grep -qx docker; then
+		log "  $DEPLOY_USER is already in the docker group."
+		return
+	fi
+
+	usermod -aG docker "$DEPLOY_USER"
+	log "  added $DEPLOY_USER to the docker group."
+	log "  NOTE: this does NOT apply to any SSH session already open as $DEPLOY_USER"
+	log "  (this script itself is unaffected -- it runs as root, which always has"
+	log "  docker.sock access). For $DEPLOY_USER to run 'docker'/'docker compose'"
+	log "  WITHOUT sudo in an existing session, either start a NEW SSH session, or"
+	log "  run 'newgrp docker' inside the current one (applies immediately, no"
+	log "  reconnect needed, but only affects that one shell)."
+}
+
+# --- Phase 2: host-executor SSH key + forced command + sudoers -----------
 #
 # Deliberately the deploy user (ubuntu), never root: even with the forced-
 # command wrapper restricting *what* this key can run, a root SSH session is
@@ -127,7 +274,7 @@ DEPLOY_USER_SSH_DIR="$DEPLOY_USER_HOME/.ssh"
 # provisioners actually operate: connect as a normal deploy user, escalate
 # only for the specific need.
 setup_host_executor() {
-	log "Phase 1: host-executor SSH key + forced command + sudoers (user: $DEPLOY_USER)"
+	log "Phase 2: host-executor SSH key + forced command + sudoers (user: $DEPLOY_USER)"
 
 	mkdir -p "$SECRETS_DIR"
 	if [[ -f "$DEPLOY_KEY" ]]; then
@@ -216,9 +363,9 @@ SCRIPT
 	fi
 }
 
-# --- Phase 2: .env -----------------------------------------------------
+# --- Phase 3: .env -----------------------------------------------------
 write_env() {
-	log "Phase 2: .env"
+	log "Phase 3: .env"
 	local env_file="$REPO_DIR/.env"
 
 	if [[ -f "$env_file" && "$FORCE_ENV" -eq 0 ]]; then
@@ -231,19 +378,41 @@ write_env() {
 		# --deploy-user ubuntu against a box previously set up with root),
 		# update just that user, preserving the existing host/IP.
 		_sync_host_ssh_target_user "$env_file"
+		# CLIENT_IP_HEADER/CLIENT_IP_TRUST_MIDDLEWARE: only add if genuinely
+		# missing (an existing deployment's choice here -- possibly
+		# hand-edited -- is never overwritten just by re-running this
+		# script; --proxy-mode + --force-env is the explicit way to redo
+		# detection).
+		if ! grep -q '^CLIENT_IP_HEADER=' "$env_file" 2>/dev/null; then
+			detect_proxy_mode
+			_ensure_env_line "$env_file" "CLIENT_IP_HEADER" "$CLIENT_IP_HEADER"
+			_ensure_env_line "$env_file" "CLIENT_IP_TRUST_MIDDLEWARE" "$CLIENT_IP_TRUST_MIDDLEWARE"
+			log "  proxy mode: CLIENT_IP_HEADER=$CLIENT_IP_HEADER CLIENT_IP_TRUST_MIDDLEWARE=$CLIENT_IP_TRUST_MIDDLEWARE"
+		fi
 		return
 	fi
 
 	[[ -n "$DOMAIN" ]] || die "--domain is required to write a fresh .env."
 	[[ -n "$ACME_EMAIL" ]] || die "--acme-email is required to write a fresh .env."
 
+	detect_proxy_mode
+	log "  proxy mode: CLIENT_IP_HEADER=$CLIENT_IP_HEADER CLIENT_IP_TRUST_MIDDLEWARE=$CLIENT_IP_TRUST_MIDDLEWARE"
+
 	local secret_key admin_password pg_password
 	secret_key=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 	admin_password=$(python3 -c "import secrets; print(secrets.token_urlsafe(18))")
 	pg_password=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
 
+	# Postgres is the default (config.py's _default_database_url() builds it
+	# automatically from POSTGRES_PASSWORD below, which is always written) --
+	# DATABASE_URL is only written here explicitly for --sqlite, the opt-out.
+	local database_url_line=""
+	if [[ "$USE_SQLITE" -eq 1 ]]; then
+		database_url_line="DATABASE_URL=sqlite:///./data/app.db"
+	fi
+
 	cat > "$env_file" <<ENVFILE
-DATABASE_URL=sqlite:///./data/app.db
+$database_url_line
 SECRET_KEY=$secret_key
 SESSION_HTTPS_ONLY=true
 
@@ -260,6 +429,9 @@ BOOTSTRAP_ADMIN_PASSWORD=$admin_password
 APP_DOMAIN=$DOMAIN
 ACME_EMAIL=$ACME_EMAIL
 ACME_CASERVER=$([[ "$USE_STAGING_FIRST" -eq 1 ]] && echo "https://acme-staging-v02.api.letsencrypt.org/directory" || echo "")
+
+CLIENT_IP_HEADER=$CLIENT_IP_HEADER
+CLIENT_IP_TRUST_MIDDLEWARE=$CLIENT_IP_TRUST_MIDDLEWARE
 
 IMAGE_TAG=$IMAGE_TAG
 
@@ -280,6 +452,70 @@ ENVFILE
 	log "  wrote $env_file"
 	log "  BOOTSTRAP_ADMIN_USERNAME=admin  BOOTSTRAP_ADMIN_PASSWORD=$admin_password"
 	log "  (shown once -- also readable later via: grep BOOTSTRAP_ADMIN_PASSWORD $env_file)"
+}
+
+# --- Proxy/CDN detection: decides CLIENT_IP_HEADER + CLIENT_IP_TRUST_MIDDLEWARE
+#
+# Pinned Cloudflare edge ranges (https://www.cloudflare.com/ips-v4,
+# https://www.cloudflare.com/ips-v6, as of 2026-08-11 -- same list committed
+# in app/traefik/dynamic.yml.tmpl's cloudflare-only middleware, kept in sync
+# manually since this is a plain bash bootstrap script, not something that
+# parses that YAML file).
+_CF_RANGES="173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32"
+
+_public_ip() {
+	curl -s -4 -m 8 https://api.ipify.org 2>/dev/null \
+		|| curl -s -4 -m 8 https://ifconfig.me 2>/dev/null \
+		|| true
+}
+
+# Sets globals CLIENT_IP_HEADER and CLIENT_IP_TRUST_MIDDLEWARE. Called with
+# PROXY_MODE and (for "auto") $DOMAIN already populated.
+detect_proxy_mode() {
+	if [[ "$PROXY_MODE" == "cloudflare" ]]; then
+		log "  --proxy-mode cloudflare (forced): CLIENT_IP_HEADER=CF-Connecting-IP, enforcing Cloudflare-only ingress."
+		CLIENT_IP_HEADER="CF-Connecting-IP"
+		CLIENT_IP_TRUST_MIDDLEWARE="cloudflare-only"
+		return
+	fi
+	if [[ "$PROXY_MODE" == "direct" ]]; then
+		log "  --proxy-mode direct (forced): CLIENT_IP_HEADER=X-Forwarded-For, no ingress IP enforcement."
+		CLIENT_IP_HEADER="X-Forwarded-For"
+		CLIENT_IP_TRUST_MIDDLEWARE="allow-all"
+		return
+	fi
+
+	# auto
+	[[ -n "$DOMAIN" ]] || die "--domain is required to auto-detect --proxy-mode (or pass --proxy-mode cloudflare|direct explicitly)."
+	local resolved_ip public_ip
+	resolved_ip=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1; exit}')
+	public_ip=$(_public_ip)
+
+	if [[ -z "$resolved_ip" ]]; then
+		log "  auto-detect: could not resolve $DOMAIN -- defaulting to direct (no enforcement). Fix DNS and re-run, or pass --proxy-mode explicitly."
+		CLIENT_IP_HEADER="X-Forwarded-For"
+		CLIENT_IP_TRUST_MIDDLEWARE="allow-all"
+		return
+	fi
+
+	if python3 -c "
+import ipaddress, sys
+ip = ipaddress.ip_address('$resolved_ip')
+ranges = '$_CF_RANGES'.split()
+sys.exit(0 if any(ip in ipaddress.ip_network(r) for r in ranges) else 1)
+" 2>/dev/null; then
+		log "  auto-detect: $DOMAIN resolves to $resolved_ip, inside Cloudflare's published ranges -> Cloudflare-proxied."
+		CLIENT_IP_HEADER="CF-Connecting-IP"
+		CLIENT_IP_TRUST_MIDDLEWARE="cloudflare-only"
+	elif [[ -n "$public_ip" && "$resolved_ip" == "$public_ip" ]]; then
+		log "  auto-detect: $DOMAIN resolves to $resolved_ip, matching this host's own public IP ($public_ip) -> direct."
+		CLIENT_IP_HEADER="X-Forwarded-For"
+		CLIENT_IP_TRUST_MIDDLEWARE="allow-all"
+	else
+		log "  auto-detect: $DOMAIN resolves to $resolved_ip, which is neither a Cloudflare range nor this host's own public IP (${public_ip:-<could not determine>}) -- inconclusive (stale DNS? another CDN/load balancer?). Defaulting to direct/no-enforcement rather than guessing wrong; pass --proxy-mode explicitly once you know which applies."
+		CLIENT_IP_HEADER="X-Forwarded-For"
+		CLIENT_IP_TRUST_MIDDLEWARE="allow-all"
+	fi
 }
 
 _private_ip() {
@@ -320,9 +556,9 @@ _sync_host_ssh_target_user() {
 	fi
 }
 
-# --- Phase 3: enable the deploy-key volume mount -------------------------
+# --- Phase 4: enable the deploy-key volume mount -------------------------
 enable_deploy_key_mount() {
-	log "Phase 3: enable deploy-key volume mount in docker-compose.yml"
+	log "Phase 4: enable deploy-key volume mount in docker-compose.yml"
 	local compose_file="$REPO_DIR/docker-compose.yml"
 	if grep -qE '^\s*-\s*\$\{HOST_SSH_KEY_SOURCE_PATH' "$compose_file"; then
 		log "  already enabled."
@@ -336,9 +572,9 @@ enable_deploy_key_mount() {
 	fi
 }
 
-# --- Phase 4: bring the stack up, staging cert first if requested --------
+# --- Phase 5: bring the stack up, staging cert first if requested --------
 bring_up_stack() {
-	log "Phase 4: docker compose up"
+	log "Phase 5: docker compose up"
 	cd "$REPO_DIR"
 
 	docker compose pull
@@ -399,6 +635,16 @@ _curl_check_once() {
 }
 
 # --- Main -----------------------------------------------------------------
+DOCKER_GROUP_JUST_ADDED=0
+if [[ "$SKIP_DOCKER" -eq 0 ]]; then
+	install_docker
+	if ! id -nG "$DEPLOY_USER" | tr ' ' '\n' | grep -qx docker; then
+		DOCKER_GROUP_JUST_ADDED=1
+	fi
+	configure_docker_group
+else
+	log "Skipping Docker install/group setup (--skip-docker)."
+fi
 setup_host_executor
 write_env
 enable_deploy_key_mount
@@ -409,3 +655,10 @@ else
 fi
 
 log "Done."
+if [[ "$DOCKER_GROUP_JUST_ADDED" -eq 1 ]]; then
+	log ""
+	log "REMINDER: $DEPLOY_USER was just added to the docker group. If you SSH in"
+	log "as $DEPLOY_USER to run docker/docker compose by hand, start a NEW SSH"
+	log "session (or run 'newgrp docker' in your current one) -- an already-open"
+	log "session won't pick this up on its own."
+fi
