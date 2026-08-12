@@ -229,7 +229,14 @@ async function loadClients() {
 			// source_ip for accuracy: see management_client.py's
 			// parse_source_ip() docstring for why vpn-status.py's equivalent
 			// field can't be trusted. View-scoped, so available to viewers too.
-			apiFetch("/api/clients/sessions"),
+			// .catch(() => []) -- isolated from the Promise.all's shared
+			// failure path on purpose: this is a best-effort supplement to
+			// statusAll (RX/TX/Source IP/session-kill eligibility), not the
+			// profile list itself, so a host-executor outage/misconfig here
+			// should only blank those extra columns, never the whole table
+			// (see get_active_sessions' own docstring for the live incident
+			// this was found from).
+			apiFetch("/api/clients/sessions").catch(() => []),
 		]);
 		lastClients = clients;
 		lastStatusByName = Object.fromEntries(statusAll.map(s => [s.name, s]));
