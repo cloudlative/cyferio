@@ -7,6 +7,39 @@
 </div>
 <p class="page-subtitle" style="margin-top:-10px">Usage trends, connection analytics, and quota-relative bandwidth consumption. Only users with a linked VPN profile appear in the quota-based sections below.</p>
 
+<div class="card">
+	<h2>Global Summary</h2>
+	<div class="form-grid" id="global-summary"><p class="muted">Loading…</p></div>
+	<div class="stat-grid" style="margin-top:18px">
+		<div class="card" style="margin-bottom:0">
+			<h3 style="margin-top:0">Top Consumers</h3>
+			<div id="global-top-consumers"><p class="muted">Loading…</p></div>
+		</div>
+		<div class="card" style="margin-bottom:0">
+			<h3 style="margin-top:0">Approaching Quota <span class="muted" style="font-weight:500;font-size:0.8rem">(80-99% used)</span></h3>
+			<div id="global-approaching"><p class="muted">Loading…</p></div>
+		</div>
+		<div class="card" style="margin-bottom:0">
+			<h3 style="margin-top:0">Exceeding Quota <span class="muted" style="font-weight:500;font-size:0.8rem">(100%+ used)</span></h3>
+			<div id="global-exceeding"><p class="muted">Loading…</p></div>
+		</div>
+	</div>
+</div>
+
+<div class="card">
+	<h2>Team-Based Reporting</h2>
+	<div id="team-report"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card">
+	<div class="toolbar">
+		<h2 style="margin:0">Per User</h2>
+		<div class="field" style="max-width:280px;margin-bottom:0">
+			<input type="text" id="user-search" placeholder="Search by name, username, or team…">
+		</div>
+	</div>
+	<div id="user-report"><p class="muted">Loading…</p></div>
+</div>
 {# Usage Analytics -- moved here from the Dashboard so Reports is the one
    central place for analytics/trends/insights, per the "Move Usage
    Analytics to Reports" request. Data source, permission gate (this
@@ -206,39 +239,6 @@
 </div>
 {% endif %}
 
-<div class="card">
-	<h2>Global Summary</h2>
-	<div class="form-grid" id="global-summary"><p class="muted">Loading…</p></div>
-	<div class="stat-grid" style="margin-top:18px">
-		<div class="card" style="margin-bottom:0">
-			<h3 style="margin-top:0">Top Consumers</h3>
-			<div id="global-top-consumers"><p class="muted">Loading…</p></div>
-		</div>
-		<div class="card" style="margin-bottom:0">
-			<h3 style="margin-top:0">Approaching Quota <span class="muted" style="font-weight:500;font-size:0.8rem">(80-99% used)</span></h3>
-			<div id="global-approaching"><p class="muted">Loading…</p></div>
-		</div>
-		<div class="card" style="margin-bottom:0">
-			<h3 style="margin-top:0">Exceeding Quota <span class="muted" style="font-weight:500;font-size:0.8rem">(100%+ used)</span></h3>
-			<div id="global-exceeding"><p class="muted">Loading…</p></div>
-		</div>
-	</div>
-</div>
-
-<div class="card">
-	<h2>Team-Based Reporting</h2>
-	<div id="team-report"><p class="muted">Loading…</p></div>
-</div>
-
-<div class="card">
-	<div class="toolbar">
-		<h2 style="margin:0">Per User</h2>
-		<div class="field" style="max-width:280px;margin-bottom:0">
-			<input type="text" id="user-search" placeholder="Search by name, username, or team…">
-		</div>
-	</div>
-	<div id="user-report"><p class="muted">Loading…</p></div>
-</div>
 {% endblock %}
 
 {% block scripts %}

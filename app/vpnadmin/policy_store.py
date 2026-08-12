@@ -423,3 +423,29 @@ def get_all_usage() -> dict:
         else:
             result[name] = {"period_start": period_start, "bytes_used": 0}
     return result
+
+
+def reset_usage(name: str) -> None:
+    """Admin override -- zeroes `name`'s CURRENT-month bytes_used
+    immediately (e.g. to lift a soft-cutoff block early, or after
+    correcting a billing dispute), unlike the automatic rollover
+    get_usage()/get_all_usage() apply on read: those only ever show 0 for
+    a genuinely NEW period, they never rewrite an old period's stored
+    value. This is the first write path this module has ever needed --
+    every write to client_usage.json was previously host-side only (see
+    host-scripts/policy_lib.py's add_usage(), called from
+    openvpn-client-disconnect.py). Same locked-read-modify-atomic-write
+    shape as every other writer of this file, so a concurrent disconnect-
+    script write can't interleave with this and corrupt the file --
+    different processes, same lock file.
+
+    Deliberately does NOT touch `period_start` -- this zeroes usage
+    for the period that's already current, it isn't a rollover to a new
+    one. If `name` has no usage row yet at all, this is a no-op (there's
+    nothing to reset)."""
+    with _locked(settings.CLIENT_USAGE_FILE):
+        all_usage = _read_json(settings.CLIENT_USAGE_FILE)
+        if name not in all_usage:
+            return
+        all_usage[name]["bytes_used"] = 0
+        _atomic_write_json(settings.CLIENT_USAGE_FILE, all_usage)

@@ -27,6 +27,15 @@
 <script>
 let sessionHistoryEntries = [];
 let sessionHistorySearchTerm = "";
+// Keyed by client name -- OS/MAC aren't recorded per-session in
+// session_history.jsonl (host-scripts/openvpn-client-disconnect.py's
+// _session_history_record() never captured them), so these two new
+// columns show each client's CURRENT registration (same source the admin
+// Clients page's OS column and MAC-DB list already read), not necessarily
+// what was actually in use during any given historical row below -- see
+// the column headers' own title attribute for the same caveat surfaced to
+// the admin.
+let sessionHistoryClientInfo = {};
 
 function populateSessionHistoryFilters(data) {
 	const nameSel = document.getElementById("session-history-filter-name");
@@ -76,14 +85,21 @@ function renderSessionHistoryTable() {
 	el.innerHTML = `<table>
 		<thead><tr>
 			<th>Client</th><th>Connected At</th><th>Disconnected At</th><th>Duration</th><th>Source IP</th>
+			<th title="The client's current registered OS, not necessarily what was in use during this specific session">OS</th>
+			<th title="The client's current registered MAC address(es), not necessarily what was in use during this specific session">MAC Address</th>
 		</tr></thead>
-		<tbody>${pageRows.map(r => `<tr>
+		<tbody>${pageRows.map(r => {
+			const info = sessionHistoryClientInfo[r.client] || {};
+			return `<tr>
 				<td>${escapeHtml(r.client)}</td>
 				<td class="mono">${r.connected_at ? escapeHtml(fmtTimestamp(r.connected_at)) : "n/a"}</td>
 				<td class="mono">${r.disconnected_at ? escapeHtml(fmtTimestamp(r.disconnected_at)) : "n/a"}</td>
 				<td>${escapeHtml(fmtDuration(r.duration_seconds))}</td>
 				<td class="mono">${escapeHtml(r.source_ip || "n/a")}</td>
-			</tr>`).join("")}</tbody>
+				<td>${info.os && info.os !== "n/a" ? escapeHtml(info.os) : "—"}</td>
+				<td class="mono">${info.mac && info.mac !== "n/a" ? escapeHtml(info.mac) : "—"}</td>
+			</tr>`;
+		}).join("")}</tbody>
 	</table>
 	<div class="toolbar" style="margin-top:14px">
 		<span class="muted" style="font-size:0.85rem">Showing ${start + 1}–${Math.min(start + SESSION_HISTORY_PAGE_SIZE, data.length)} of ${data.length}</span>
@@ -106,7 +122,13 @@ async function loadSessionHistory() {
 		// A larger window than the table's own page size -- the VPN Profile
 		// filter is only useful if there's enough history behind it to
 		// filter through (500 is the API's own cap, same as /rejected).
-		sessionHistoryEntries = await apiFetch("/api/status/session-history?limit=500");
+		const [entries, statusAll] = await Promise.all([
+			apiFetch("/api/status/session-history?limit=500"),
+			apiFetch("/api/status/all").catch(() => []), // non-fatal -- OS/MAC columns just show "—" if this fails
+		]);
+		sessionHistoryEntries = entries;
+		sessionHistoryClientInfo = {};
+		for (const c of statusAll) sessionHistoryClientInfo[c.name] = { os: c.os, mac: c.mac };
 		populateSessionHistoryFilters(sessionHistoryEntries);
 		sessionHistoryPage = 1;
 		renderSessionHistoryTable();

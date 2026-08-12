@@ -5,7 +5,15 @@
 	<div class="toolbar-title"><h1 style="margin:0">Diagnostics</h1></div>
 	<button class="btn-secondary" id="refresh-btn">Refresh</button>
 </div>
-<p class="page-subtitle" style="margin-top:-16px">Recent rejected connection attempts. See <a href="/health">Health</a> for database consistency and MAC-db formatting checks.</p>
+<p class="page-subtitle" style="margin-top:-16px">The central place for policy and compliance violations -- rejected connection attempts (device, location, network, and quota restrictions) and active bandwidth-quota warnings across every user. See <a href="/health">Health</a> for MAC-DB consistency and formatting checks.</p>
+
+<div class="ua-summary-row" id="violations-summary"></div>
+
+<div class="card" id="quota-warnings-card" style="display:none">
+	<div class="toolbar"><h2 style="margin:0">Active Quota Warnings</h2></div>
+	<p class="page-subtitle" style="margin:-6px 0 18px">Every user currently near or over their monthly bandwidth quota (Settings -&gt; Notifications sets the warning/critical thresholds) -- the same events shown in each affected user's own notification bell, gathered here in one admin-wide view.</p>
+	<div id="quota-warnings-result"><p class="muted">Loading…</p></div>
+</div>
 
 <div class="card" id="rejected-chart-card" style="display:none">
 	<div class="toolbar"><h2 style="margin:0">Rejections Breakdown</h2></div>
@@ -58,6 +66,64 @@ function topRejectionEntries(data, keyFn, fallbackLabel) {
 		.slice(0, 8);
 }
 
+// Same "is this timestamp today, in the browser's local time" check
+// dashboard.html's own "Rejections Today" stat already uses -- kept
+// local to this file rather than shared, since it's a one-liner.
+function isToday(iso) {
+	const d = new Date(iso);
+	const now = new Date();
+	return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+}
+
+function renderViolationsSummary(rejected, quotaWarnings) {
+	const todayRejected = rejected.filter(r => isToday(r.timestamp));
+	const byCategory = {};
+	for (const r of todayRejected) {
+		const cat = violationCategory(r.reason);
+		byCategory[cat] = (byCategory[cat] || 0) + 1;
+	}
+	const activeCritical = quotaWarnings.filter(n => n.level === "critical").length;
+	document.getElementById("violations-summary").innerHTML = `
+		<div class="ua-summary-stat"><div class="ua-summary-value">${todayRejected.length}</div><div class="ua-summary-label">Rejections Today</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${byCategory["Device Violations"] || 0}</div><div class="ua-summary-label">Device Violations Today</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${byCategory["Location Violations"] || 0}</div><div class="ua-summary-label">Location Violations Today</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${byCategory["Network Violations"] || 0}</div><div class="ua-summary-label">Network Violations Today</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${byCategory["Quota Violations"] || 0}</div><div class="ua-summary-label">Quota Exceeded Today</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${activeCritical}</div><div class="ua-summary-label">Users at Critical Quota</div></div>
+	`;
+}
+
+let lastQuotaWarnings = [];
+
+function renderQuotaWarnings() {
+	const card = document.getElementById("quota-warnings-card");
+	const el = document.getElementById("quota-warnings-result");
+	if (lastQuotaWarnings.length === 0) {
+		card.style.display = "none";
+		return;
+	}
+	card.style.display = "";
+	el.innerHTML = `<table>
+		<thead><tr><th>User</th><th>VPN Profile</th><th>Level</th><th>Usage</th><th>Raised</th></tr></thead>
+		<tbody>${lastQuotaWarnings.map(n => `<tr>
+				<td>${escapeHtml(n.display_name || n.username || "—")}</td>
+				<td class="mono">${escapeHtml(n.vpn_client_name)}</td>
+				<td><span class="status-pill ${n.level === "critical" ? "status-revoked" : "status-offline"}">${escapeHtml(n.level)}</span></td>
+				<td class="mono">${n.pct_used}%</td>
+				<td class="muted">${escapeHtml(fmtTimestamp(n.created_at))}</td>
+			</tr>`).join("")}</tbody>
+	</table>`;
+}
+
+async function loadQuotaWarnings() {
+	try {
+		lastQuotaWarnings = await apiFetch("/api/diagnostics/quota-warnings?limit=50");
+	} catch (e) {
+		lastQuotaWarnings = []; // non-fatal -- rejected-connections data below is the primary content of this page
+	}
+	renderQuotaWarnings();
+}
+
 function renderRejectedChart(data) {
 	const chartCard = document.getElementById("rejected-chart-card");
 	const chartEl = document.getElementById("rejected-chart");
@@ -78,13 +144,38 @@ let rejectedEntries = [];
 // script without a matching UI update still displays as *something*
 // readable rather than disappearing.
 const REJECTION_REASON_LABELS = {
-	mac_mismatch: "MAC mismatch",
-	os_not_allowed: "OS not allowed",
-	country_not_allowed: "Country not allowed",
-	country_lookup_failed: "Country lookup failed",
-	bandwidth_exceeded: "Bandwidth exceeded",
+	// mac_mismatch covers BOTH "never registered" and "wrong MAC presented"
+	// -- openvpn-mac-addr-check.py's MAC-binding gate has no separate
+	// reason string for the two cases (db_lookup() returns False either
+	// way), so this label deliberately spans both rather than claiming a
+	// distinction the underlying data doesn't actually make.
+	mac_mismatch: "MAC Address Mismatch / Unregistered Device",
+	os_not_allowed: "Device OS Restriction Violation",
+	country_not_allowed: "Country Restriction Violation",
+	country_lookup_failed: "Country Lookup Failed",
+	city_not_allowed: "City Restriction Violation",
+	city_lookup_failed: "City Lookup Failed",
+	asn_not_allowed: "Network (ASN) Restriction Violation",
+	asn_lookup_failed: "Network (ASN) Lookup Failed",
+	ip_not_allowed: "IP Restriction Violation",
+	bandwidth_exceeded: "Quota Exceeded",
 };
 function reasonLabel(r) { return REJECTION_REASON_LABELS[r] || r; }
+
+// Category grouping for the summary row -- several raw reason strings
+// (e.g. country_not_allowed/country_lookup_failed) roll up into one
+// user-facing category, same idea as REJECTION_REASON_LABELS above but
+// grouped rather than 1:1.
+const REJECTION_CATEGORY_BY_REASON = {
+	mac_mismatch: "Device Violations",
+	os_not_allowed: "Device Violations",
+	country_not_allowed: "Location Violations", country_lookup_failed: "Location Violations",
+	city_not_allowed: "Location Violations", city_lookup_failed: "Location Violations",
+	asn_not_allowed: "Location Violations", asn_lookup_failed: "Location Violations",
+	ip_not_allowed: "Network Violations",
+	bandwidth_exceeded: "Quota Violations",
+};
+function violationCategory(r) { return REJECTION_CATEGORY_BY_REASON[r] || "Other Violations"; }
 
 function populateRejectedFilters(data) {
 	const nameSel = document.getElementById("rejected-filter-name");
@@ -194,6 +285,7 @@ async function loadRejected() {
 		populateRejectedFilters(rejectedEntries);
 		rejectedPage = 1;
 		renderRejectedTable();
+		renderViolationsSummary(rejectedEntries, lastQuotaWarnings);
 	} catch (e) {
 		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
 	}
@@ -202,7 +294,8 @@ async function loadRejected() {
 document.getElementById("rejected-filter-name").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
 document.getElementById("rejected-filter-os").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
 document.getElementById("rejected-filter-reason").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
-document.getElementById("refresh-btn").addEventListener("click", loadRejected);
+document.getElementById("refresh-btn").addEventListener("click", () => { loadRejected(); loadQuotaWarnings(); });
 loadRejected();
+loadQuotaWarnings().then(() => renderViolationsSummary(rejectedEntries, lastQuotaWarnings));
 </script>
 {% endblock %}

@@ -20,7 +20,7 @@ from .. import cli_wrapper as cli
 from .. import geoip, health, policy_store
 from ..cli_wrapper import ScriptError
 from ..db import engine, get_db
-from ..models import AuditLog, DbStatSnapshot, Team, User, VpnProfileLink
+from ..models import AuditLog, DbStatSnapshot, QuotaNotification, Team, User, VpnProfileLink
 from ..permissions import require_permission_any_scope
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -91,6 +91,36 @@ def _source_ip_summary(sessions: list[dict]) -> dict:
         "asn_distribution": sorted(
             [{"asn": k, "count": v} for k, v in _bucket(2).items()], key=lambda r: r["count"], reverse=True)[:10],
     }
+
+
+def _recent_quota_warnings(db: Session, limit: int = 50) -> list[dict]:
+    """Every user's recent bandwidth-quota-threshold QuotaNotification rows
+    (main.py's _quota_notification_loop), newest first -- an ADMIN-WIDE
+    view across every user, unlike routes/notifications.py's own
+    list_my_notifications() which is deliberately scoped to just the
+    caller's own rows. Used by Diagnostics' "Active Quota Warnings" panel
+    and the Dashboard's System Insights card -- both want "which users are
+    near/over quota right now", just at different levels of detail."""
+    rows = (
+        db.query(QuotaNotification)
+        .options(selectinload(QuotaNotification.user))
+        .order_by(QuotaNotification.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": n.id,
+            "username": n.user.username if n.user else None,
+            "display_name": n.user.display_name if n.user else None,
+            "vpn_client_name": n.vpn_client_name,
+            "level": n.level,
+            "pct_used": n.pct_used,
+            "message": n.message,
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+        }
+        for n in rows
+    ]
 
 
 def _load_rows(db: Session) -> list[dict]:

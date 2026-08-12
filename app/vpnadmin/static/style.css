@@ -543,6 +543,12 @@ tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--surface-hover); }
 tr.row-dim td { opacity: 0.55; }
 tr.row-online td:first-child { box-shadow: inset 3px 0 0 var(--success-strong); }
+/* VPN Clients' single-row-select toolbar redesign -- the selected row gets
+   a persistent highlight distinct from the transient :hover above, so it
+   stays visually obvious which client the toolbar buttons above the table
+   will act on even after the mouse moves away. */
+tr.row-selected td { background: var(--surface-alt); }
+tr.row-selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
 .status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex: none; }

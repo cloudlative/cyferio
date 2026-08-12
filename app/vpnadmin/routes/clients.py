@@ -258,6 +258,22 @@ def revoke_client(name: str, user: User = Depends(_require_client_manager), db: 
     return {"message": f"Client '{name}' revoked successfully."}
 
 
+@router.post("/{name}/reset-usage")
+def reset_client_usage(name: str, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
+    """Admin override -- zeroes `name`'s current-month bandwidth usage
+    immediately (see policy_store.reset_usage's own docstring for why this
+    is the first write path into client_usage.json that isn't the
+    disconnect script). Same permission gate as every other client-
+    management action here (vpn_profiles:execute) -- there's no separate
+    "billing" permission object for this, it's squarely a client-management
+    action like Revoke or Disconnect."""
+    if not NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid client name.")
+    policy_store.reset_usage(name)
+    log_action(db, user, "reset_client_usage", target=name, success=True)
+    return {"message": f"Usage for '{name}' has been reset to 0 for this billing period."}
+
+
 def _host_executor_config() -> HostExecutorConfig:
     """Same shape as routes/openvpn_install.py's own copy -- not shared
     code between the two routers (each is a thin, independently-readable

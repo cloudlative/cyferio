@@ -43,6 +43,29 @@
 </div>
 <p class="muted" style="margin:-16px 0 28px;font-size:0.85rem">"Without a MAC registered" counts clients whose MAC-db entry is currently empty (e.g. every registered MAC was later removed via Manage MACs) -- a new client always gets one at creation, so this is worth a look, but isn't necessarily urgent.</p>
 
+<div class="card" id="dashboard-overview-card">
+	<div class="toolbar"><h2 style="margin:0">Operational Overview</h2></div>
+	<div class="ua-grid">
+		<div class="ua-chart-card">
+			<h3>Users</h3>
+			<div class="ua-summary-row" id="ov-users-summary"></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>VPN Profiles</h3>
+			<div class="ua-summary-row" id="ov-profiles-summary"></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>VPN Activity</h3>
+			<div class="ua-summary-row" id="ov-activity-summary"></div>
+			<div id="ov-activity-lists" style="margin-top:14px"></div>
+		</div>
+		<div class="ua-chart-card">
+			<div class="ua-chart-card-head"><h3>System Insights</h3><span class="status-pill" id="ov-health-badge">—</span></div>
+			<div id="ov-insights"><p class="muted">Loading…</p></div>
+		</div>
+	</div>
+</div>
+
 <div class="card">
 	<div class="toolbar">
 		<h2 style="margin:0">Connected Now</h2>
@@ -160,8 +183,79 @@ async function loadConnectedStats() {
 	}
 }
 
-document.getElementById("refresh-btn").addEventListener("click", loadConnectedStats);
+function ovStat(value, label) {
+	return `<div class="ua-summary-stat"><div class="ua-summary-value">${value}</div><div class="ua-summary-label">${label}</div></div>`;
+}
+
+async function loadDashboardOverview() {
+	try {
+		const ov = await apiFetch("/api/dashboard/overview");
+		document.getElementById("ov-users-summary").innerHTML = [
+			ovStat(ov.users.total, "Total"),
+			ovStat(ov.users.active, "Active"),
+			ovStat(ov.users.disabled, "Disabled"),
+			ovStat(ov.users.recently_created, "New (7d)"),
+			ovStat(ov.users.near_quota, "Near Quota"),
+			ovStat(ov.users.currently_connected, "Connected Now"),
+		].join("");
+		document.getElementById("ov-profiles-summary").innerHTML = [
+			ovStat(ov.vpn_profiles.total, "Total"),
+			ovStat(ov.vpn_profiles.active, "Active"),
+			ovStat(ov.vpn_profiles.revoked, "Revoked"),
+			ovStat(ov.vpn_profiles.with_restrictions, "Restricted"),
+			ovStat(ov.vpn_profiles.exceeding_threshold, "Over Quota"),
+		].join("");
+		document.getElementById("ov-activity-summary").innerHTML = [
+			ovStat(ov.vpn_activity.active_sessions, "Active Sessions"),
+			ovStat(ov.vpn_activity.connections_today, "Connections Today"),
+			ovStat(ov.vpn_activity.failed_connections_today, "Failed Today"),
+			ovStat(ov.vpn_activity.avg_session_duration_seconds != null ? fmtDuration(ov.vpn_activity.avg_session_duration_seconds) : "—", "Avg Session"),
+		].join("");
+		const topConsumers = ov.vpn_activity.top_bandwidth_consumers || [];
+		const mostActive = ov.vpn_activity.most_active_clients || [];
+		document.getElementById("ov-activity-lists").innerHTML = `
+			<div style="display:flex;gap:24px;flex-wrap:wrap">
+				<div style="flex:1;min-width:200px">
+					<h4 style="margin:0 0 6px;font-size:0.8rem;color:var(--text-muted)">Top Bandwidth Consumers</h4>
+					${topConsumers.length ? topConsumers.map(c => `<div class="metric-row"><span>${escapeHtml(c.username)}</span><span class="mono">${c.used_gb}GB</span></div>`).join("") : '<p class="muted">No data yet.</p>'}
+				</div>
+				<div style="flex:1;min-width:200px">
+					<h4 style="margin:0 0 6px;font-size:0.8rem;color:var(--text-muted)">Most Active Clients</h4>
+					${mostActive.length ? mostActive.map(c => `<div class="metric-row"><span>${escapeHtml(c.vpn_client_name)}</span><span class="muted">${c.session_count} session${c.session_count === 1 ? "" : "s"}</span></div>`).join("") : '<p class="muted">No data yet.</p>'}
+				</div>
+			</div>`;
+
+		const badge = document.getElementById("ov-health-badge");
+		badge.className = "status-pill " + (ov.system_insights.health_status.ok ? "status-online" : "status-revoked");
+		badge.textContent = ov.system_insights.health_status.ok ? "Healthy" : `Issues: ${ov.system_insights.health_status.failing_checks.join(", ")}`;
+
+		const alerts = ov.system_insights.recent_alerts;
+		const violations = ov.system_insights.recent_violations || [];
+		const quotaWarnings = ov.system_insights.quota_warnings || [];
+		document.getElementById("ov-insights").innerHTML = `
+			<div style="display:flex;gap:20px;flex-wrap:wrap">
+				${alerts !== null ? `
+				<div style="flex:1;min-width:200px">
+					<h4 style="margin:0 0 6px;font-size:0.8rem;color:var(--text-muted)">Recent Alerts</h4>
+					${alerts.length ? alerts.slice(0, 5).map(a => `<div class="metric-row"><span>${escapeHtml(a.action)}${a.target ? " — " + escapeHtml(a.target) : ""}</span><span class="muted" style="font-size:0.78em">${fmtTimestamp(a.timestamp)}</span></div>`).join("") : '<p class="muted">No recent alerts.</p>'}
+				</div>` : ""}
+				<div style="flex:1;min-width:200px">
+					<h4 style="margin:0 0 6px;font-size:0.8rem;color:var(--text-muted)">Recent Violations</h4>
+					${violations.length ? violations.slice(0, 5).map(v => `<div class="metric-row"><span>${escapeHtml(v.claimed_name || "—")}</span><span class="muted" style="font-size:0.78em">${escapeHtml(v.reason || "—")}</span></div>`).join("") : '<p class="muted">No recent violations.</p>'}
+				</div>
+				<div style="flex:1;min-width:200px">
+					<h4 style="margin:0 0 6px;font-size:0.8rem;color:var(--text-muted)">Quota Warnings</h4>
+					${quotaWarnings.length ? quotaWarnings.slice(0, 5).map(q => `<div class="metric-row"><span>${escapeHtml(q.display_name || q.username || "—")}</span><span class="muted" style="font-size:0.78em">${q.level} (${q.pct_used}%)</span></div>`).join("") : '<p class="muted">No active quota warnings.</p>'}
+				</div>
+			</div>`;
+	} catch (e) {
+		document.getElementById("ov-insights").innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+document.getElementById("refresh-btn").addEventListener("click", () => { loadConnectedStats(); loadDashboardOverview(); });
 loadConnectedStats();
+loadDashboardOverview();
 
 // Auto-refresh Connected Now / online-count without a manual click -- see
 // the matching comment in clients.html for the full "why" (no live push

@@ -32,7 +32,27 @@
 		<button class="filter-chip" data-filter="offline">Offline Only</button>
 		<button class="filter-chip" data-filter="missing_mac">Missing MAC</button>
 	</div>
+	{# Select one row below, then act on it here -- replaces the previous
+	   one-action-button-per-row layout (5-7 buttons crammed into every row
+	   forced horizontal scrolling on any normal-width screen). Every button
+	   starts disabled until selectedClientName is set; see
+	   updateClientToolbarState() below. #}
+	<div class="toolbar client-action-toolbar" id="client-action-toolbar" style="margin-top:12px">
+		<span class="muted" id="client-toolbar-hint" style="font-size:0.85rem">Select a client below to enable actions.</span>
+		<div style="display:flex;gap:8px;flex-wrap:wrap">
+			<button class="btn-secondary btn-sm" id="action-macs-btn" disabled>Manage MACs</button>
+			{% if can_manage_clients %}
+			<button class="btn-secondary btn-sm" id="action-policy-btn" disabled>Manage Restrictions</button>
+			<button class="btn-secondary btn-sm" id="action-ovpn-btn" disabled>View / Copy .ovpn</button>
+			<button class="btn-secondary btn-sm" id="action-email-btn" disabled>Email Profile</button>
+			<button class="btn-secondary btn-sm" id="action-reset-usage-btn" disabled>Reset Usage</button>
+			<button class="btn-danger btn-sm" id="action-disconnect-btn" disabled>Disconnect</button>
+			<button class="btn-danger btn-sm" id="action-revoke-btn" disabled>Revoke</button>
+			{% endif %}
+		</div>
+	</div>
 	<div id="clients-table"><p class="muted">Loading…</p></div>
+	<div id="client-detail-panel" style="display:none;margin-top:18px;padding-top:18px;border-top:1px solid var(--border-light)"></div>
 </div>
 
 <dialog id="macs-dialog">
@@ -182,6 +202,10 @@ let currentFilter = _initialParams.get("online") === "1" ? "online"
 	: _initialParams.get("missing_mac") === "1" ? "missing_mac"
 	: "all";
 let lastClients = [], lastStatusByName = {}, lastPoliciesByName = {}, lastUsageByName = {}, lastUserLinksByName = {}, lastSessionsByName = {};
+// The one selected row (radio-button, single-select -- see renderClients'
+// table markup) that every toolbar action above the table now acts on,
+// replacing the old one-button-per-row layout.
+let selectedClientName = null;
 
 function applyFilterUI() {
 	document.querySelectorAll(".filter-chip").forEach(c => c.classList.toggle("active", c.dataset.filter === currentFilter));
@@ -220,6 +244,8 @@ async function loadClients() {
 		const disconnectAllBtn = document.getElementById("disconnect-all-btn");
 		if (disconnectAllBtn) disconnectAllBtn.disabled = onlineCount === 0;
 		renderClients();
+		updateClientToolbarState();
+		renderClientDetailPanel();
 	} catch (e) {
 		toast(e.message, "error");
 	}
@@ -268,68 +294,106 @@ function renderClients() {
 		return;
 	}
 
-	// Column order follows operational priority: identity/status first,
-	// then live-connection detail (where/what/since/how-long/how-much),
-	// then the slower-moving profile detail (restrictions/MACs/last-seen).
-	// Action buttons stay last, unchanged, exactly as before.
+	// Columns trimmed to the operationally-essential set (identity/status/
+	// who/bandwidth/throughput/restrictions) -- everything else (OS, Source
+	// IP, Connected Since, Duration, In MAC DB, Last Seen, the MAC list
+	// itself) moved into the detail panel below, shown for whichever ONE
+	// row is selected via the radio in the first column. Per-row action
+	// buttons are gone entirely -- see the toolbar above the table instead.
 	el.innerHTML = `<div class="table-scroll"><table>
 		<thead><tr>
-			<th>Name</th><th>Status</th><th>Portal User</th><th>Source IP</th><th>OS</th>
-			<th>Connected Since</th><th>Duration</th>
+			<th></th><th>Name</th><th>Status</th><th>Portal User</th>
 			${isAdmin ? "<th>Bandwidth (this month)</th>" : ""}
-			<th>RX / TX</th><th>Restrictions</th><th>MAC Addresses</th><th>In MAC DB</th><th>Last Seen</th>
-			<th></th>${isAdmin ? "<th></th><th></th><th></th><th></th><th></th>" : ""}
+			<th>RX / TX</th><th>Restrictions</th>
 		</tr></thead>
 		<tbody>${filtered.map(({ c, s, online }) => {
 			const policy = lastPoliciesByName[c.name];
 			const linkedUser = lastUserLinksByName[c.name];
 			const session = lastSessionsByName[c.name];
-			const duration = session && session.connected_since_epoch != null
-				? fmtDuration((Date.now() / 1000) - session.connected_since_epoch)
-				: null;
-			return `<tr data-name="${escapeHtml(c.name)}" class="${online ? "row-online" : ""}">
+			return `<tr data-name="${escapeHtml(c.name)}" class="${online ? "row-online" : ""} ${c.name === selectedClientName ? "row-selected" : ""}">
+				<td><input type="radio" name="client-row-select" class="client-row-radio" value="${escapeHtml(c.name)}" ${c.name === selectedClientName ? "checked" : ""}></td>
 				<td>${escapeHtml(c.name)}</td>
 				<td><span class="status-pill status-${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span></td>
 				<td>${linkedUser ? escapeHtml(linkedUser.display_name || linkedUser.username) : '<span class="muted">-</span>'}</td>
-				<td class="mono">${session ? escapeHtml(session.source_ip) : '<span class="muted">—</span>'}</td>
-				<td>${escapeHtml(s && s.os && s.os !== "n/a" ? s.os : "—")}</td>
-				<td>${session ? escapeHtml(session.connected_since) : '<span class="muted">—</span>'}</td>
-				<td>${duration ? escapeHtml(duration) : '<span class="muted">—</span>'}</td>
 				${isAdmin ? `<td>${bandwidthUsageHtml(policy, lastUsageByName[c.name])}</td>` : ""}
 				<td class="mono">${session ? `${fmtBytes(session.bytes_received)} / ${fmtBytes(session.bytes_sent)}` : '<span class="muted">—</span>'}</td>
 				<td>${restrictionChipsHtml(policy) || '<span class="muted">—</span>'}</td>
-				<td><span class="count-badge">${c.mac_count ?? 0}</span></td>
-				<td>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</td>
-				<td>${escapeHtml(s ? s.last_seen : "—")}</td>
-				<td><button class="btn-secondary btn-sm macs-btn">${isAdmin ? "Manage MACs" : "View MACs"}</button></td>
-				${isAdmin ? `<td><button class="btn-secondary btn-sm policy-btn">Manage Restrictions</button></td>` : ""}
-				${isAdmin ? `<td><button class="btn-secondary btn-sm ovpn-btn">View / Copy .ovpn</button></td>` : ""}
-				${isAdmin ? `<td><button class="btn-secondary btn-sm email-btn">Email Profile</button></td>` : ""}
-				${isAdmin ? `<td>${online ? '<button class="btn-danger btn-sm disconnect-btn">Disconnect</button>' : ""}</td>` : ""}
-				${isAdmin ? `<td class="text-right"><button class="btn-danger btn-sm revoke-btn">Revoke</button></td>` : ""}
 			</tr>`;
 		}).join("")}</tbody>
 	</table></div>`;
 
-	el.querySelectorAll(".macs-btn").forEach(btn => {
-		btn.addEventListener("click", () => showMacs(btn.closest("tr").dataset.name));
+	el.querySelectorAll(".client-row-radio").forEach(radio => {
+		radio.addEventListener("change", () => {
+			selectedClientName = radio.value;
+			renderClients(); // re-render for the row-selected highlight + radio state
+			updateClientToolbarState();
+			renderClientDetailPanel();
+		});
 	});
+}
+
+// Everything moved OUT of the trimmed-down table above (OS, Source IP,
+// Connected Since, Duration, In MAC DB, Last Seen, MAC list) -- shown for
+// whichever one client is currently selected, right below the table.
+function renderClientDetailPanel() {
+	const panel = document.getElementById("client-detail-panel");
+	if (!selectedClientName) {
+		panel.style.display = "none";
+		return;
+	}
+	const c = lastClients.find(x => x.name === selectedClientName);
+	const s = lastStatusByName[selectedClientName];
+	const session = lastSessionsByName[selectedClientName];
+	if (!c) {
+		// Selected client no longer exists in the latest fetch (revoked,
+		// filtered out, etc.) -- clear the stale selection rather than
+		// showing a detail panel for a row that's gone.
+		selectedClientName = null;
+		panel.style.display = "none";
+		updateClientToolbarState();
+		return;
+	}
+	const duration = session && session.connected_since_epoch != null
+		? fmtDuration((Date.now() / 1000) - session.connected_since_epoch)
+		: null;
+	panel.style.display = "";
+	panel.innerHTML = `
+		<h3 style="margin:0 0 12px">${escapeHtml(selectedClientName)} — Details</h3>
+		<div class="form-grid">
+			<div><label>OS</label><div>${escapeHtml(s && s.os && s.os !== "n/a" ? s.os : "—")}</div></div>
+			<div><label>Source IP</label><div class="mono">${session ? escapeHtml(session.source_ip) : "—"}</div></div>
+			<div><label>Connected Since</label><div class="muted">${session ? escapeHtml(session.connected_since) : "—"}</div></div>
+			<div><label>Duration</label><div class="mono">${duration ? escapeHtml(duration) : "—"}</div></div>
+			<div><label>In MAC DB</label><div>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</div></div>
+			<div><label>Last Seen</label><div class="muted">${escapeHtml(s ? s.last_seen : "—")}</div></div>
+		</div>
+		<div style="margin-top:14px">
+			<label class="muted" style="font-size:0.78rem">MAC Addresses (<span class="count-badge">${c.mac_count ?? 0}</span>) -- use "Manage MACs" above to add/remove</label>
+			<div id="client-detail-macs" style="margin-top:6px"><p class="muted">Loading…</p></div>
+		</div>`;
+	apiFetch(`/api/clients/${encodeURIComponent(selectedClientName)}/macs`).then(data => {
+		const macsEl = document.getElementById("client-detail-macs");
+		if (!macsEl) return; // panel may have re-rendered for a different selection by the time this resolves
+		const macs = data.macs || [];
+		macsEl.innerHTML = macs.length
+			? `<div class="restriction-chips">${macs.map(m => `<span class="restriction-chip chip-ip mono">${escapeHtml(m)}</span>`).join("")}</div>`
+			: '<p class="muted">No MAC addresses registered.</p>';
+	}).catch(() => { /* non-fatal -- the rest of the detail panel is still useful */ });
+}
+
+function updateClientToolbarState() {
+	const hasSelection = !!selectedClientName;
+	const online = hasSelection && lastStatusByName[selectedClientName]?.status === "online";
+	document.getElementById("client-toolbar-hint").textContent = hasSelection
+		? `Selected: ${selectedClientName}` : "Select a client below to enable actions.";
+	document.getElementById("action-macs-btn").disabled = !hasSelection;
 	if (isAdmin) {
-		el.querySelectorAll(".disconnect-btn").forEach(btn => {
-			btn.addEventListener("click", () => disconnectClient(btn.closest("tr").dataset.name));
-		});
-		el.querySelectorAll(".revoke-btn").forEach(btn => {
-			btn.addEventListener("click", () => revokeClient(btn.closest("tr").dataset.name));
-		});
-		el.querySelectorAll(".ovpn-btn").forEach(btn => {
-			btn.addEventListener("click", () => showOvpn(btn.closest("tr").dataset.name));
-		});
-		el.querySelectorAll(".email-btn").forEach(btn => {
-			btn.addEventListener("click", () => openEmailDialog(btn.closest("tr").dataset.name));
-		});
-		el.querySelectorAll(".policy-btn").forEach(btn => {
-			btn.addEventListener("click", () => openPolicyDialog(btn.closest("tr").dataset.name));
-		});
+		document.getElementById("action-policy-btn").disabled = !hasSelection;
+		document.getElementById("action-ovpn-btn").disabled = !hasSelection;
+		document.getElementById("action-email-btn").disabled = !hasSelection;
+		document.getElementById("action-reset-usage-btn").disabled = !hasSelection;
+		document.getElementById("action-disconnect-btn").disabled = !hasSelection || !online;
+		document.getElementById("action-revoke-btn").disabled = !hasSelection;
 	}
 }
 
@@ -708,6 +772,38 @@ async function disconnectAllClients() {
 }
 const disconnectAllBtnEl = document.getElementById("disconnect-all-btn");
 if (disconnectAllBtnEl) disconnectAllBtnEl.addEventListener("click", disconnectAllClients);
+
+// Reset Usage -- zeroes the CURRENT month's usage immediately (an admin
+// override, e.g. to lift a soft-cutoff block early or correct a billing
+// dispute; see routes/clients.py's reset_client_usage / policy_store.
+// reset_usage). New action -- nothing like it existed before this redesign.
+async function resetClientUsage(name) {
+	const ok = await confirmDialog(`Reset <strong>${escapeHtml(name)}</strong>'s bandwidth usage for this billing period to 0? This can't be undone, and doesn't change their quota -- only what's counted as used so far this month.`, { confirmLabel: "Reset Usage", danger: true });
+	if (!ok) return;
+	try {
+		const result = await apiFetch(`/api/clients/${encodeURIComponent(name)}/reset-usage`, { method: "POST" });
+		toast(result.message, "success");
+		loadClients();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+// Toolbar action buttons -- all act on selectedClientName (the one
+// radio-selected row), replacing what used to be a per-row button each.
+// Non-admin (viewer) accounts only get "Manage MACs" rendered in the
+// toolbar's markup at all (guarded server-side on can_manage_clients), so
+// the rest of these listeners are wired inside `if (isAdmin)` further up
+// alongside the dialogs/functions they call.
+document.getElementById("action-macs-btn").addEventListener("click", () => { if (selectedClientName) showMacs(selectedClientName); });
+if (isAdmin) {
+	document.getElementById("action-policy-btn").addEventListener("click", () => { if (selectedClientName) openPolicyDialog(selectedClientName); });
+	document.getElementById("action-ovpn-btn").addEventListener("click", () => { if (selectedClientName) showOvpn(selectedClientName); });
+	document.getElementById("action-email-btn").addEventListener("click", () => { if (selectedClientName) openEmailDialog(selectedClientName); });
+	document.getElementById("action-reset-usage-btn").addEventListener("click", () => { if (selectedClientName) resetClientUsage(selectedClientName); });
+	document.getElementById("action-disconnect-btn").addEventListener("click", () => { if (selectedClientName) disconnectClient(selectedClientName); });
+	document.getElementById("action-revoke-btn").addEventListener("click", () => { if (selectedClientName) revokeClient(selectedClientName); });
+}
 
 document.getElementById("refresh-btn").addEventListener("click", loadClients);
 loadClients();

@@ -356,9 +356,27 @@ function buildChartJsConfig(kind, entries, { seriesLabels = null, valueFormatter
 	const tooltipBorder = cssVar("--border-light");
 	const tooltipText = cssVar("--text");
 
+	// Category-axis ticks (dates/day-names/bucket labels) are left as their
+	// own string values -- only the VALUE axis (Y for a normal vertical
+	// chart, X for a horizontal bar) runs through valueFormatter, so a
+	// byte/duration/count-valued chart shows "4.8MB"/"1h 2m" on its axis
+	// the same way its tooltip already does, instead of Chart.js's default
+	// raw-number tick formatting. Was previously wired into the tooltip
+	// callback only (see commonPlugins.tooltip below) -- ticks had no
+	// callback at all, which is exactly why every byte-valued chart's axis
+	// showed e.g. "52428800" instead of "50MB" before this fix.
+	const categoryTicks = { color: tickColor };
+	const valueTicks = { color: tickColor, callback: (v) => valueFormatter(v) };
 	const commonScales = {
-		x: { grid: { color: gridColor }, ticks: { color: tickColor } },
-		y: { grid: { color: gridColor }, ticks: { color: tickColor }, beginAtZero: true },
+		x: { grid: { color: gridColor }, ticks: categoryTicks },
+		y: { grid: { color: gridColor }, ticks: valueTicks, beginAtZero: true },
+	};
+	// Horizontal bars (indexAxis: "y") swap which axis holds values -- X
+	// becomes the value axis, Y becomes the category axis -- so the tick
+	// callback has to move with it, not just reuse commonScales verbatim.
+	const horizontalScales = {
+		x: { grid: { color: gridColor }, ticks: valueTicks, beginAtZero: true },
+		y: { grid: { color: gridColor }, ticks: categoryTicks },
 	};
 	const commonPlugins = {
 		legend: { display: !!seriesLabels, labels: { color: tickColor } },
@@ -407,7 +425,7 @@ function buildChartJsConfig(kind, entries, { seriesLabels = null, valueFormatter
 			},
 			options: {
 				indexAxis: "y", responsive: true, maintainAspectRatio: false,
-				scales: commonScales,
+				scales: horizontalScales,
 				plugins: { ...commonPlugins, legend: { display: false } },
 			},
 		};
