@@ -66,6 +66,19 @@
 		<header class="content-header">
 			<div class="content-header-left"></div>
 			<div class="content-header-right">
+				<div class="notif-bell" id="notif-bell">
+					<button type="button" class="btn-secondary btn-sm notif-bell-toggle" id="notif-bell-toggle" aria-haspopup="true" aria-expanded="false">
+						<span aria-hidden="true">&#128276;</span>
+						<span class="notif-bell-badge" id="notif-bell-badge" style="display:none">0</span>
+					</button>
+					<div class="notif-bell-panel" id="notif-bell-panel">
+						<div class="notif-bell-panel-head">
+							<span>Notifications</span>
+							<button type="button" class="link-button" id="notif-bell-mark-all">Mark all read</button>
+						</div>
+						<div id="notif-bell-list"><p class="muted" style="padding:14px">No notifications.</p></div>
+					</div>
+				</div>
 				{% if is_admin %}
 				<div class="theme-quick-switch" id="theme-quick-switch">
 					<button type="button" class="btn-secondary btn-sm" id="theme-quick-toggle" aria-haspopup="true" aria-expanded="false">

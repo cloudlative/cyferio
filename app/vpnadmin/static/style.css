@@ -296,6 +296,48 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 .content-header .link-button { color: var(--text-muted); font-size: 0.85rem; }
 .content-header .link-button:hover { color: var(--text); }
 
+/* Notification bell -- same anchored-panel shape as .theme-quick-switch
+   below (relative wrapper, absolutely-positioned panel toggled via JS'
+   plain display:block/none, closed on outside click), not a centered
+   <dialog> -- a bell dropdown is anchored to its trigger, not modal. */
+.notif-bell { position: relative; }
+.notif-bell-toggle { position: relative; display: inline-flex; align-items: center; }
+.notif-bell-badge {
+	position: absolute; top: -6px; right: -6px;
+	min-width: 17px; height: 17px; padding: 0 4px;
+	border-radius: 999px;
+	background: var(--danger-strong); color: #fff;
+	font-size: 0.68rem; font-weight: 700; line-height: 17px; text-align: center;
+}
+.notif-bell-panel {
+	display: none;
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 0;
+	z-index: 50;
+	width: 340px;
+	max-height: 420px;
+	overflow-y: auto;
+	background: var(--surface);
+	border: 1.5px solid var(--border-light);
+	border-radius: 9px;
+	box-shadow: var(--shadow-lg);
+}
+.notif-bell-panel-head {
+	display: flex; align-items: center; justify-content: space-between;
+	padding: 12px 14px;
+	border-bottom: 1px solid var(--border-light);
+	font-weight: 700; font-size: 0.85rem;
+	position: sticky; top: 0; background: var(--surface);
+}
+.notif-item { padding: 12px 14px; border-bottom: 1px solid var(--border-light); font-size: 0.85rem; }
+.notif-item:last-child { border-bottom: none; }
+.notif-item.unread { background: var(--surface-alt); }
+.notif-item-level { display: inline-block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 7px; border-radius: 5px; margin-bottom: 5px; }
+.notif-item-level.warning { background: var(--warning-bg); color: var(--warning-text); }
+.notif-item-level.critical { background: var(--danger-bg); color: var(--danger-text); }
+.notif-item-time { color: var(--text-muted); font-size: 0.75rem; margin-top: 4px; }
+
 .theme-quick-switch { position: relative; }
 #theme-quick-toggle { display: inline-flex; align-items: center; gap: 8px; }
 /* A small colored dot -- on the toggle button itself this deliberately has
@@ -1004,6 +1046,10 @@ dialog { border: none; border-radius: var(--radius-lg); box-shadow: var(--shadow
    its own columns to actually use the extra room. */
 #edit-dialog { max-width: 920px; width: 94%; }
 #edit-dialog .form-grid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+/* Add User has the same fieldsets/Location & Network Restrictions shape as
+   Edit User (it's the create-side twin of that same form) -- same width
+   override, same reasoning. */
+#add-user-dialog { max-width: 920px; width: 94%; }
 /* Manage Restrictions (clients.html) grew a Location & Network
    Restrictions section with the same City/ASN geo-picker-row fields as
    Edit User -- same widening rationale as #edit-dialog above. */

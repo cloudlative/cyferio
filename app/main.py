@@ -8,6 +8,7 @@ or via the Dockerfile's CMD.
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import date
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -28,8 +29,11 @@ from vpnadmin.app_settings import prune_audit_log, prune_db_stat_snapshots, refr
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_admin
-from vpnadmin import geo_lists
-from vpnadmin.routes import auth, clients, diagnostics, geo, health, me_vpn, openvpn_install, pages, reports, roles, settings as settings_routes, status, teams, users
+from vpnadmin import geo_lists, mailer
+from vpnadmin import app_settings
+from vpnadmin.models import QuotaNotification
+from vpnadmin.routes import auth, clients, diagnostics, geo, health, me_vpn, notifications, openvpn_install, pages, reports, roles, settings as settings_routes, status, teams, users
+from vpnadmin.routes.reports import _load_rows
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +58,17 @@ DASHBOARD_REFRESH_INTERVAL_SECONDS = 10
 # OFTEN they're taken isn't, matching DASHBOARD_REFRESH_INTERVAL_SECONDS's
 # own precedent of not being admin-configurable either.
 DB_SNAPSHOT_INTERVAL_SECONDS = 600
+
+# How often the background task checks every quota-having, linked user's
+# pct_used against the warning/critical thresholds -- 10 minutes, same
+# reasoning as DB_SNAPSHOT_INTERVAL_SECONDS above (frequent enough that a
+# freshly-crossed threshold surfaces promptly, cheap enough at this scale
+# to not matter). Unlike the thresholds themselves (Settings-page
+# configurable, runtime.quota_notify_warning_pct/critical_pct), how OFTEN
+# this check runs is a fixed code constant, matching every other
+# background loop's own "interval isn't admin-configurable, only retention/
+# thresholds are" precedent.
+QUOTA_NOTIFICATION_INTERVAL_SECONDS = 600
 
 
 async def _dashboard_refresh_loop():
@@ -95,6 +110,76 @@ async def _db_snapshot_loop():
         await asyncio.sleep(DB_SNAPSHOT_INTERVAL_SECONDS)
 
 
+def _check_quota_notifications(db) -> None:
+    """One tick's worth of work for _quota_notification_loop below --
+    factored out as a plain sync function (called via asyncio.to_thread)
+    since it's pure ORM/policy_store reads plus a couple of inserts, no
+    async I/O of its own.
+
+    Reuses routes.reports._load_rows(db) verbatim -- it already computes
+    exactly what's needed (user_id/username/vpn_client_name/quota_gb/
+    used_gb/pct_used) for every active, non-deleted, linked user with a
+    quota set; no separate aggregation code needed here.
+
+    Warning and critical are checked independently per user per tick (not
+    "elif") -- a user who jumps straight from 50% to 97% between two
+    checks still gets BOTH rows created (useful history of having crossed
+    each threshold), not just the higher one. The unique constraint on
+    (user_id, period_start, level) is what actually prevents a duplicate
+    notification for an already-notified threshold this month; the
+    query-first check below is just the normal, expected path (the
+    constraint is a backstop, not the primary mechanism)."""
+    period_start = date.today().replace(day=1)
+    warning_pct = app_settings.runtime.quota_notify_warning_pct
+    critical_pct = app_settings.runtime.quota_notify_critical_pct
+
+    for row in _load_rows(db):
+        pct_used = row["pct_used"]
+        if pct_used is None:  # no quota set -- nothing to threshold against
+            continue
+
+        for level, threshold in (("warning", warning_pct), ("critical", critical_pct)):
+            if pct_used < threshold:
+                continue
+            already_exists = (
+                db.query(QuotaNotification)
+                .filter_by(user_id=row["user_id"], period_start=period_start, level=level)
+                .first()
+            )
+            if already_exists is not None:
+                continue
+            message = (
+                f"Your VPN client '{row['vpn_client_name']}' has used {pct_used}% of its "
+                f"{row['quota_gb']}GB monthly quota."
+            )
+            db.add(QuotaNotification(
+                user_id=row["user_id"], vpn_client_name=row["vpn_client_name"],
+                level=level, pct_used=pct_used, message=message, period_start=period_start,
+            ))
+            db.commit()
+            if level == "critical" and app_settings.runtime.notify_admin_on_quota_critical and app_settings.runtime.admin_notification_email:
+                mailer.send_admin_notification(
+                    subject=f"Bandwidth quota critical: {row['username']}",
+                    body=f"{row['username']}'s VPN client '{row['vpn_client_name']}' has used "
+                         f"{pct_used}% of its {row['quota_gb']}GB monthly quota.",
+                )
+
+
+async def _quota_notification_loop():
+    # Same independent-loop shape as _db_snapshot_loop above -- its own
+    # SessionLocal(), its own interval, fail-soft try/except per tick.
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                await asyncio.to_thread(_check_quota_notifications, db)
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("Quota notification check failed; will retry next tick")
+        await asyncio.sleep(QUOTA_NOTIFICATION_INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
@@ -126,12 +211,14 @@ async def lifespan(_app: FastAPI):
     geo_lists.ensure_fresh()
     refresh_task = asyncio.create_task(_dashboard_refresh_loop())
     db_snapshot_task = asyncio.create_task(_db_snapshot_loop())
+    quota_notification_task = asyncio.create_task(_quota_notification_loop())
     try:
         yield
     finally:
         refresh_task.cancel()
         db_snapshot_task.cancel()
-        for task in (refresh_task, db_snapshot_task):
+        quota_notification_task.cancel()
+        for task in (refresh_task, db_snapshot_task, quota_notification_task):
             try:
                 await task
             except asyncio.CancelledError:
@@ -165,6 +252,7 @@ app.include_router(roles.router)
 app.include_router(me_vpn.router)
 app.include_router(openvpn_install.router)
 app.include_router(reports.router)
+app.include_router(notifications.router)
 
 
 @app.get("/healthz")

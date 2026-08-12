@@ -5,128 +5,12 @@
 <p class="page-subtitle">Accounts that can log into this admin app -- each is tied to a VPN profile, created together below (or linked to an existing one via Edit User).</p>
 
 <div class="card">
-	<h2>Add a User</h2>
-	<form id="add-user-form">
-		<!-- Row 1: Username, First Name, Last Name, Role -->
-		<div class="form-row">
-			<div class="field">
-				<label for="u-username">Username</label>
-				<input type="text" id="u-username" required minlength="3">
-			</div>
-			<div class="field">
-				<label for="u-first">First Name</label>
-				<input type="text" id="u-first" required>
-			</div>
-			<div class="field">
-				<label for="u-last">Last Name <span class="muted">(optional)</span></label>
-				<input type="text" id="u-last">
-			</div>
-			<div class="field">
-				<label for="u-role">Role</label>
-				<select id="u-role"></select>
-			</div>
-		</div>
-		<!-- Row 2: Email, Phone, Team(s) -->
-		<div class="form-row" style="margin-top:16px">
-			<div class="field">
-				<label for="u-email">Email</label>
-				<input type="email" id="u-email" required placeholder="e.g. asif@example.com">
-			</div>
-			<div class="field">
-				<label for="u-phone-mount">Phone <span class="muted">(optional)</span></label>
-				<div id="u-phone-mount"></div>
-			</div>
-			<div class="field">
-				<label for="u-team-toggle">Teams <span class="muted">(optional, select several)</span></label>
-				<div id="u-team-ms"></div>
-			</div>
-		</div>
-		<!-- Row 3: New Password, Confirm Password, Generate (aligned to row end) -->
-		<div class="form-row password-row" style="margin-top:16px">
-			<div class="field">
-				<label for="u-password">New Password</label>
-				<input type="password" id="u-password" required minlength="8">
-			</div>
-			<div class="field">
-				<label for="u-password-confirm">Confirm Password</label>
-				<input type="password" id="u-password-confirm" required minlength="8">
-			</div>
-			<div class="field password-row-generate">
-				<label aria-hidden="true">&nbsp;</label>
-				<button type="button" class="btn-secondary" id="u-password-generate">Generate</button>
-			</div>
-		</div>
-		<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Password must be at least 8 characters and include at least 1 uppercase letter, 1 number, and 1 special character.</p>
-
-		<fieldset style="margin-top:16px">
-			<legend>Device &amp; Access Policy</legend>
-			<div class="field-stack">
-				<div class="field">
-					<label for="u-mac">Device MAC Address</label>
-					<input type="text" id="u-mac" required placeholder="aa:bb:cc:dd:ee:ff">
-					<p class="field-hint">Provisions the VPN profile -- any common format, normalized automatically.</p>
-				</div>
-				<div class="field">
-					<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
-					<div class="checkbox-row">
-						<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="windows"> Windows</label>
-						<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="linux"> Linux</label>
-						<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="mac"> macOS</label>
-					</div>
-				</div>
-				<div class="field">
-					<label for="u-bandwidth">Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited, min 0.1)</span></label>
-					<input type="text" id="u-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)" style="max-width:280px">
-				</div>
-			</div>
-		</fieldset>
-
-		<fieldset style="margin-top:16px">
-			<legend>Location &amp; Network Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
-			<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees.</p>
-			<div class="field-stack">
-				<div class="field">
-					<label class="checkbox-label"><input type="checkbox" id="u-restrict-country"> Restrict by country</label>
-					<p class="field-hint">Empty list = any country.</p>
-					<div id="u-countries-ms"></div>
-				</div>
-				<div class="field">
-					<label class="checkbox-label"><input type="checkbox" id="u-restrict-city"> Restrict by city</label>
-					<p class="field-hint">Pick a country, then select any number of cities. Empty list = any city.</p>
-					<p class="field-hint" id="u-cities-building" style="display:none">City list is still building -- try again shortly.</p>
-					<div class="geo-picker-row">
-						<select id="u-city-country"><option value="">Loading countries…</option></select>
-						<div id="u-cities-ms"></div>
-					</div>
-				</div>
-				<div class="field">
-					<label class="checkbox-label"><input type="checkbox" id="u-restrict-asn"> Restrict by network (ASN)</label>
-					<p class="field-hint">Identifies the connecting ISP/network. Empty list = any network.</p>
-					<p class="field-hint" id="u-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
-					<div class="geo-picker-row">
-						<select id="u-asn-country"><option value="">Any country (search all networks)</option></select>
-						<div id="u-asns-ms"></div>
-					</div>
-				</div>
-				<div class="field">
-					<label class="checkbox-label"><input type="checkbox" id="u-restrict-ip"> Restrict by IP address</label>
-					<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
-					<textarea id="u-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
-				</div>
-			</div>
-		</fieldset>
-
-		<div class="form-row" style="margin-top:16px">
-			<button type="submit" class="btn-primary">Add User</button>
-			<button type="button" class="btn-secondary" id="add-user-clear">Clear</button>
-		</div>
-	</form>
-</div>
-
-<div class="card">
 	<div class="toolbar">
 		<div class="toolbar-title"><h2 style="margin:0">All Users</h2><span class="count-badge" id="users-count">— users</span></div>
-		<button class="btn-secondary" id="refresh-btn">Refresh</button>
+		<div class="form-row" style="gap:10px">
+			<button class="btn-primary" id="add-user-btn">Add User</button>
+			<button class="btn-secondary" id="refresh-btn">Refresh</button>
+		</div>
 	</div>
 	<div class="field" style="max-width:320px;margin-bottom:16px">
 		<input type="text" id="user-search" placeholder="Search by name, username, or team…">
@@ -140,6 +24,128 @@
 	</div>
 	<div id="deleted-table"><p class="muted">Loading…</p></div>
 </div>
+
+<dialog id="add-user-dialog">
+	<div class="dialog-body">
+		<h2>Add a User</h2>
+		<form id="add-user-form">
+			<!-- Row 1: Username, First Name, Last Name, Role -->
+			<div class="form-row">
+				<div class="field">
+					<label for="u-username">Username</label>
+					<input type="text" id="u-username" required minlength="3">
+				</div>
+				<div class="field">
+					<label for="u-first">First Name</label>
+					<input type="text" id="u-first" required>
+				</div>
+				<div class="field">
+					<label for="u-last">Last Name <span class="muted">(optional)</span></label>
+					<input type="text" id="u-last">
+				</div>
+				<div class="field">
+					<label for="u-role">Role</label>
+					<select id="u-role"></select>
+				</div>
+			</div>
+			<!-- Row 2: Email, Phone, Team(s) -->
+			<div class="form-row" style="margin-top:16px">
+				<div class="field">
+					<label for="u-email">Email</label>
+					<input type="email" id="u-email" required placeholder="e.g. asif@example.com">
+				</div>
+				<div class="field">
+					<label for="u-phone-mount">Phone <span class="muted">(optional)</span></label>
+					<div id="u-phone-mount"></div>
+				</div>
+				<div class="field">
+					<label for="u-team-toggle">Teams <span class="muted">(optional, select several)</span></label>
+					<div id="u-team-ms"></div>
+				</div>
+			</div>
+			<!-- Row 3: New Password, Confirm Password, Generate (aligned to row end) -->
+			<div class="form-row password-row" style="margin-top:16px">
+				<div class="field">
+					<label for="u-password">New Password</label>
+					<input type="password" id="u-password" required minlength="8">
+				</div>
+				<div class="field">
+					<label for="u-password-confirm">Confirm Password</label>
+					<input type="password" id="u-password-confirm" required minlength="8">
+				</div>
+				<div class="field password-row-generate">
+					<label aria-hidden="true">&nbsp;</label>
+					<button type="button" class="btn-secondary" id="u-password-generate">Generate</button>
+				</div>
+			</div>
+			<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Password must be at least 8 characters and include at least 1 uppercase letter, 1 number, and 1 special character.</p>
+
+			<fieldset style="margin-top:16px">
+				<legend>Device &amp; Access Policy</legend>
+				<div class="field-stack">
+					<div class="field">
+						<label for="u-mac">Device MAC Address</label>
+						<input type="text" id="u-mac" required placeholder="aa:bb:cc:dd:ee:ff">
+						<p class="field-hint">Provisions the VPN profile -- any common format, normalized automatically.</p>
+					</div>
+					<div class="field">
+						<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
+						<div class="checkbox-row">
+							<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="windows"> Windows</label>
+							<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="linux"> Linux</label>
+							<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="mac"> macOS</label>
+						</div>
+					</div>
+					<div class="field">
+						<label for="u-bandwidth">Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited, min 0.1)</span></label>
+						<input type="text" id="u-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)" style="max-width:280px">
+					</div>
+				</div>
+			</fieldset>
+
+			<fieldset style="margin-top:16px">
+				<legend>Location &amp; Network Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees.</p>
+				<div class="field-stack">
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="u-restrict-country"> Restrict by country</label>
+						<p class="field-hint">Empty list = any country.</p>
+						<div id="u-countries-ms"></div>
+					</div>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="u-restrict-city"> Restrict by city</label>
+						<p class="field-hint">Pick a country, then select any number of cities. Empty list = any city.</p>
+						<p class="field-hint" id="u-cities-building" style="display:none">City list is still building -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="u-city-country"><option value="">Loading countries…</option></select>
+							<div id="u-cities-ms"></div>
+						</div>
+					</div>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="u-restrict-asn"> Restrict by network (ASN)</label>
+						<p class="field-hint">Identifies the connecting ISP/network. Empty list = any network.</p>
+						<p class="field-hint" id="u-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="u-asn-country"><option value="">Any country (search all networks)</option></select>
+							<div id="u-asns-ms"></div>
+						</div>
+					</div>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="u-restrict-ip"> Restrict by IP address</label>
+						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
+						<textarea id="u-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
+					</div>
+				</div>
+			</fieldset>
+
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" id="add-user-clear">Clear</button>
+				<button type="button" class="btn-secondary" id="add-user-cancel">Cancel</button>
+				<button type="submit" class="btn-primary">Add User</button>
+			</div>
+		</form>
+	</div>
+</dialog>
 
 <dialog id="edit-dialog">
 	<div class="dialog-body">
@@ -393,6 +399,33 @@ const ePasswordConfirm = wirePasswordConfirm(
 const editSaveBtn = document.getElementById("edit-save-btn");
 const editDirty = bindDirtyTracking(document.getElementById("edit-form"), editSaveBtn);
 closeOnBackdropClick(document.getElementById("edit-dialog"));
+closeOnBackdropClick(document.getElementById("add-user-dialog"));
+
+// Add User now opens on demand rather than sitting always-visible above
+// the user list -- resetAddUserForm() is the single reset path shared by
+// the dialog-open, Clear button, and post-submit-success cases (previously
+// the success handler and the Clear button each reset a slightly
+// different subset of widgets -- addCitiesMs/addAsnsMs were only ever
+// reset by Clear, never on a successful submit -- unified here so a
+// second Add User doesn't inherit a stale city/ASN restriction picker
+// selection from the just-created user).
+function resetAddUserForm() {
+	document.getElementById("add-user-form").reset();
+	document.getElementById("u-password").type = "password";
+	document.getElementById("u-password-confirm").type = "password";
+	addTeamMs.reset();
+	addPhone.reset();
+	addCountriesMs.reset();
+	addCitiesMs.reset();
+	addAsnsMs.reset();
+}
+function openAddUserDialog() {
+	resetAddUserForm();
+	document.getElementById("add-user-dialog").showModal();
+	document.getElementById("u-username").focus();
+}
+document.getElementById("add-user-btn").addEventListener("click", openAddUserDialog);
+document.getElementById("add-user-cancel").addEventListener("click", () => document.getElementById("add-user-dialog").close());
 
 // Reset Password (Actions column) -- a dedicated, single-purpose popup
 // (New Password / Confirm / Generate only, no other edit fields), separate
@@ -837,29 +870,20 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				})(),
 			},
 		});
+		// Close before toasting -- see the Edit User submit handler's own
+		// comment for why (toast() nests inside an open <dialog>; closing
+		// first, not after, keeps it visible for its whole lifetime instead
+		// of hidden inside the now-closed dialog).
+		document.getElementById("add-user-dialog").close();
 		toast(`User '${username}' created.`);
-		document.getElementById("add-user-form").reset();
-		document.getElementById("u-password").type = "password";
-		document.getElementById("u-password-confirm").type = "password";
-		addTeamMs.reset();
-		addPhone.reset();
-		addCountriesMs.reset();
+		resetAddUserForm();
 		loadUsers();
 	} catch (e) {
 		toast(e.message, "error");
 	}
 });
 
-document.getElementById("add-user-clear").addEventListener("click", () => {
-	document.getElementById("add-user-form").reset();
-	document.getElementById("u-password").type = "password";
-	document.getElementById("u-password-confirm").type = "password";
-	addTeamMs.reset();
-	addPhone.reset();
-	addCountriesMs.reset();
-	addCitiesMs.reset();
-	addAsnsMs.reset();
-});
+document.getElementById("add-user-clear").addEventListener("click", resetAddUserForm);
 
 document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); loadTeamOptions(); loadRoleOptions(); });
 loadUsers();

@@ -1739,3 +1739,80 @@ const THEME_QUICK_LABELS = {
 		});
 	});
 })();
+
+/**
+ * Notification bell (sidebar header) -- backs QuotaNotification rows
+ * (routes/notifications.py), currently the only notification type this
+ * app raises. Polls GET /api/notifications every 60s (much lower-frequency
+ * data than the 10s dashboard-snapshot cadence elsewhere in this app --
+ * a bandwidth-quota threshold crossing doesn't need near-real-time
+ * visibility) plus once on page load; updates the unread badge always,
+ * re-renders the list only while the panel is open (no point rebuilding
+ * DOM the user can't see). Same anchored-panel toggle shape as
+ * initThemeQuickSwitch above (plain style.display, close on outside
+ * click) -- present on every authenticated page since it's in base.html,
+ * not gated by role (every account, including "User"-role self-service
+ * accounts, can have notifications about their own quota).
+ */
+(function initNotificationBell() {
+	const root = document.getElementById("notif-bell");
+	if (!root) return;
+	const toggle = document.getElementById("notif-bell-toggle");
+	const panel = document.getElementById("notif-bell-panel");
+	const badge = document.getElementById("notif-bell-badge");
+	const listEl = document.getElementById("notif-bell-list");
+	let lastNotifications = [];
+
+	function renderList() {
+		listEl.innerHTML = lastNotifications.length
+			? lastNotifications.map((n) => `
+				<div class="notif-item ${n.read_at ? "" : "unread"}" data-id="${n.id}">
+					<span class="notif-item-level ${n.level}">${n.level}</span>
+					<div>${escapeHtml(n.message)}</div>
+					<div class="notif-item-time">${fmtTimestamp(n.created_at)}</div>
+				</div>`).join("")
+			: '<p class="muted" style="padding:14px">No notifications.</p>';
+		listEl.querySelectorAll(".notif-item.unread").forEach((el) => {
+			el.addEventListener("click", async () => {
+				try {
+					await apiFetch(`/api/notifications/${el.dataset.id}/read`, { method: "POST" });
+					await refresh();
+				} catch (e) { /* non-fatal -- the item just stays marked unread */ }
+			});
+		});
+	}
+
+	async function refresh() {
+		try {
+			const data = await apiFetch("/api/notifications");
+			lastNotifications = data.notifications || [];
+			badge.style.display = data.unread_count > 0 ? "" : "none";
+			badge.textContent = data.unread_count > 99 ? "99+" : String(data.unread_count);
+			if (panel.style.display === "block") renderList();
+		} catch (e) { /* non-fatal -- bell just stays at its last-known state */ }
+	}
+
+	toggle.addEventListener("click", () => {
+		const willOpen = panel.style.display !== "block";
+		panel.style.display = willOpen ? "block" : "none";
+		toggle.setAttribute("aria-expanded", String(willOpen));
+		if (willOpen) renderList();
+	});
+	document.addEventListener("click", (ev) => {
+		if (!root.contains(ev.target)) {
+			panel.style.display = "none";
+			toggle.setAttribute("aria-expanded", "false");
+		}
+	});
+	document.getElementById("notif-bell-mark-all").addEventListener("click", async () => {
+		try {
+			await apiFetch("/api/notifications/read-all", { method: "POST" });
+			await refresh();
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+
+	refresh();
+	setInterval(refresh, 60000);
+})();

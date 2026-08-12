@@ -17,6 +17,11 @@
 </div>
 
 <div class="card">
+	<div class="toolbar"><h2 style="margin:0">Current Session</h2></div>
+	<div id="vp-session"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card">
 	<div class="toolbar"><h2 style="margin:0">Bandwidth Usage</h2></div>
 	<div id="vp-bandwidth"><p class="muted">Loading…</p></div>
 </div>
@@ -54,6 +59,29 @@ async function loadMyProfile() {
 		} else {
 			statusEl.innerHTML = '<span class="status-pill status-online">Active</span>';
 		}
+		// Current Session -- status/source IP/OS/connected-since/duration/
+		// RX-TX/last-seen, all sourced from vpn-status.py (see me_vpn.py's
+		// get_my_vpn_profile), scoped to just this account's own client by
+		// construction (no id param exists to request anyone else's).
+		const sessEl = document.getElementById("vp-session");
+		const sess = p.session;
+		if (!sess) {
+			sessEl.innerHTML = '<p class="muted">No session data available yet.</p>';
+		} else {
+			const pillClass = sess.status === "online" ? "status-online" : sess.status === "revoked" ? "status-revoked" : "status-offline";
+			const pillLabel = sess.status === "online" ? "Online" : sess.status === "revoked" ? "Revoked" : "Offline";
+			sessEl.innerHTML = `
+				<div class="form-grid">
+					<div><label>Status</label><div><span class="status-pill ${pillClass}">${pillLabel}</span></div></div>
+					<div><label>Source IP</label><div class="mono">${sess.source_ip ? escapeHtml(sess.source_ip) : "—"}</div></div>
+					<div><label>OS</label><div>${sess.os && sess.os !== "n/a" ? escapeHtml(sess.os) : "—"}</div></div>
+					<div><label>Connected Since</label><div class="muted">${sess.connected_since ? escapeHtml(sess.connected_since) : "—"}</div></div>
+					<div><label>Duration</label><div class="mono">${sess.duration ? escapeHtml(sess.duration) : "—"}</div></div>
+					<div><label>RX / TX</label><div class="mono">${sess.bytes_received_h && sess.bytes_sent_h ? `${escapeHtml(sess.bytes_received_h)} / ${escapeHtml(sess.bytes_sent_h)}` : "—"}</div></div>
+					<div><label>Last Seen</label><div class="muted">${sess.last_seen ? escapeHtml(sess.last_seen) : "—"}</div></div>
+				</div>`;
+		}
+
 		// View-only -- no edit controls here, same read-only posture as the
 		// rest of this self-service page (an admin sets the quota via
 		// Clients' Manage Restrictions dialog).

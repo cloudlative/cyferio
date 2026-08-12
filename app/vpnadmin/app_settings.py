@@ -142,6 +142,9 @@ class _RuntimeSettings:
         self.admin_notification_email = None
         self.notify_admin_on_user_created = False
         self.notify_admin_on_client_revoked = False
+        self.quota_notify_warning_pct = 80
+        self.quota_notify_critical_pct = 95
+        self.notify_admin_on_quota_critical = False
         self.reports_default_range_days = 7
         self.db_snapshot_retention_days = 90  # None/0 (if explicitly set) = keep forever
         self.maintenance_mode = False
@@ -194,6 +197,9 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.admin_notification_email = row.admin_notification_email
     runtime.notify_admin_on_user_created = bool(row.notify_admin_on_user_created)
     runtime.notify_admin_on_client_revoked = bool(row.notify_admin_on_client_revoked)
+    runtime.quota_notify_warning_pct = row.quota_notify_warning_pct if row.quota_notify_warning_pct is not None else 80
+    runtime.quota_notify_critical_pct = row.quota_notify_critical_pct if row.quota_notify_critical_pct is not None else 95
+    runtime.notify_admin_on_quota_critical = bool(row.notify_admin_on_quota_critical)
     runtime.reports_default_range_days = row.reports_default_range_days if row.reports_default_range_days is not None else 7
     # Unlike audit_retention_days above (default = keep forever), this
     # defaults to 90 days when never explicitly set -- a continuously-

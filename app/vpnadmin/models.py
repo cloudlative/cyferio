@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, Enum, Text, Float, ForeignKey, Table, UniqueConstraint, event
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Date, DateTime, Enum, Text, Float, ForeignKey, Table, UniqueConstraint, event
 from sqlalchemy.orm import backref, validates, relationship
 
 from .db import Base
@@ -397,6 +397,16 @@ class AppSettings(Base):
     admin_notification_email = Column(String(254), nullable=True)
     notify_admin_on_user_created = Column(Boolean, nullable=True)
     notify_admin_on_client_revoked = Column(Boolean, nullable=True)
+    # Quota threshold notifications (QuotaNotification below) -- NULL falls
+    # back to 80/95 (see app_settings.py's refresh_runtime_cache). Admin
+    # email is critical-only, opt-in (default off), same "admin notified
+    # only for the more serious case" stance every other quota control in
+    # this app already takes -- the in-app notification (both levels) is
+    # always on for the affected user, no opt-out, since it's their own
+    # quota being reported to them, not a broadcast.
+    quota_notify_warning_pct = Column(Integer, nullable=True)
+    quota_notify_critical_pct = Column(Integer, nullable=True)
+    notify_admin_on_quota_critical = Column(Boolean, nullable=True)
 
     # Reporting: default selected range (days) for the Dashboard's Usage
     # Analytics chart -- 0 means "All time". Purely a UI default, same
@@ -499,6 +509,38 @@ class DbStatSnapshot(Base):
     blks_read = Column(BigInteger, nullable=True)
     waiting_locks_count = Column(Integer, nullable=True)
     long_running_query_count = Column(Integer, nullable=True)
+
+
+class QuotaNotification(Base):
+    """One row per (user, month, threshold-level) bandwidth-quota crossing
+    -- written by main.py's _quota_notification_loop, backing the in-app
+    notification bell (routes/notifications.py) and, for "critical" only,
+    an optional admin email (mailer.send_admin_notification, gated by
+    AppSettings.notify_admin_on_quota_critical).
+
+    The unique constraint is what makes "notify once per user per month
+    per level" enforceable -- the loop still does a query-first existence
+    check before inserting (clearer intent, same effect), this is the
+    backstop against a duplicate slipping through. `period_start` is the
+    first-of-month this row concerns, same "YYYY-MM-01" convention
+    policy_lib.py's client_usage.json already uses -- lets a user cross
+    80% again next month and get a fresh notification, not silence
+    forever after the first one."""
+    __tablename__ = "quota_notifications"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    vpn_client_name = Column(String(64), nullable=False)
+    level = Column(String(16), nullable=False)  # "warning" | "critical"
+    pct_used = Column(Float, nullable=False)  # the pct_used value AT THE TIME this was raised, not live
+    message = Column(String(512), nullable=False)  # pre-built human-readable text, see the loop -- UI renders verbatim
+    period_start = Column(Date, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User")
+
+    __table_args__ = (UniqueConstraint("user_id", "period_start", "level", name="uq_quota_notif_period_level"),)
 
 
 class VpnProfileLink(Base):

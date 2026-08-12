@@ -55,6 +55,11 @@ def get_my_vpn_profile(user: User = Depends(require_permission("vpn_profiles", "
     # Cross-reference the live client snapshot for status/created info, same
     # data routes/clients.py's get_clients already exposes admin-side --
     # self-service just gets exactly its own row instead of the full list.
+    # NOTE: get_clients_snapshot() is install-script-backed MAC-DB metadata
+    # only ({name, in_db, mac_count}) -- see get_dashboard_snapshot()'s own
+    # docstring on why it's NOT interchangeable with the status/vpn-status.py
+    # -backed calls below. client_info.in_db is what "Active"/"Not
+    # registered" already reads (see my_vpn_profile.html) -- kept as-is.
     client_info = None
     try:
         for c in cli.get_clients_snapshot():
@@ -63,11 +68,43 @@ def get_my_vpn_profile(user: User = Depends(require_permission("vpn_profiles", "
                 break
     except ScriptError:
         pass  # non-fatal -- MAC info above is the important part, status is a bonus
+    # Current-session visibility (status/source IP/OS/connected-since/
+    # duration/RX-TX/last-seen) -- these fields already exist in vpn-status.py's
+    # own output, just not previously read by this endpoint. Deliberately
+    # NOT using /api/clients/sessions (routes/clients.py, the admin Clients
+    # page's live management-socket source for source_ip/connected_since/
+    # RX-TX) -- that endpoint is any-scope-gated (admin/staff only, see its
+    # require_permission_any_scope("vpn_profiles","view") gate) and would
+    # 403 for an own-scope "User" role account. get_status_all_snapshot()/
+    # get_status_connected_snapshot() are both vpn-status.py-backed and
+    # already reachable under this endpoint's own scope, at the cost of a
+    # slightly less authoritative source_ip per management_client.py's
+    # parse_source_ip() docstring -- an acceptable tradeoff for self-service
+    # display, not a security decision made unattended.
+    session_info = None
+    try:
+        status_row = next((c for c in cli.get_status_all_snapshot() if c.get("name") == link.vpn_client_name), None)
+        connected_row = next((c for c in cli.get_status_connected_snapshot() if c.get("name") == link.vpn_client_name), None)
+        if status_row is not None:
+            live = connected_row or status_row
+            session_info = {
+                "status": status_row.get("status"),
+                "os": status_row.get("os"),
+                "last_seen": status_row.get("last_seen"),
+                "source_ip": live.get("source_ip"),
+                "connected_since": connected_row.get("connected_since") if connected_row else None,
+                "duration": live.get("duration"),
+                "bytes_received_h": live.get("bytes_received_h"),
+                "bytes_sent_h": live.get("bytes_sent_h"),
+            }
+    except ScriptError:
+        pass  # non-fatal -- same "bonus, not required" stance as client_info above
     return {
         "vpn_client_name": link.vpn_client_name,
         "linked_at": link.linked_at.isoformat() if link.linked_at else None,
         "macs": (macs or {}).get("macs", []),
         "client_info": client_info,
+        "session": session_info,
         # View-only bandwidth visibility (task feedback: "VPN users with
         # standard User permissions should also be able to see current
         # usage, allocated bandwidth, remaining bandwidth" from their

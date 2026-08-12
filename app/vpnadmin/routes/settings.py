@@ -2,7 +2,7 @@ import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from .. import mailer, policy_store
@@ -54,6 +54,10 @@ class UpdateSettingsRequest(BaseModel):
     admin_notification_email: str | None = None
     notify_admin_on_user_created: bool | None = None
     notify_admin_on_client_revoked: bool | None = None
+
+    quota_notify_warning_pct: int | None = None
+    quota_notify_critical_pct: int | None = None
+    notify_admin_on_quota_critical: bool | None = None
 
     reports_default_range_days: int | None = None
     db_snapshot_retention_days: int | None = None
@@ -149,6 +153,25 @@ class UpdateSettingsRequest(BaseModel):
             raise ValueError("Admin notification email must be a valid email address.")
         return v
 
+    @field_validator("quota_notify_warning_pct", "quota_notify_critical_pct")
+    @classmethod
+    def _quota_notify_pct_range(cls, v):
+        if v is not None and not (1 <= v <= 99):
+            raise ValueError("Quota notification thresholds must be between 1 and 99 percent.")
+        return v
+
+    @model_validator(mode="after")
+    def _warning_below_critical(self):
+        # Only checked when BOTH are present in this request -- a partial
+        # update touching just one of the two can't validate a relationship
+        # between values it doesn't have; update_settings() below re-checks
+        # the resulting merged state for the same reason the SMTP/admin-email
+        # cross-field checks there do.
+        if self.quota_notify_warning_pct is not None and self.quota_notify_critical_pct is not None:
+            if self.quota_notify_warning_pct >= self.quota_notify_critical_pct:
+                raise ValueError("The warning threshold must be lower than the critical threshold.")
+        return self
+
     @field_validator("reports_default_range_days")
     @classmethod
     def _reports_range(cls, v):
@@ -238,6 +261,9 @@ def _serialize() -> dict:
         "admin_notification_email": s.admin_notification_email,
         "notify_admin_on_user_created": s.notify_admin_on_user_created,
         "notify_admin_on_client_revoked": s.notify_admin_on_client_revoked,
+        "quota_notify_warning_pct": s.quota_notify_warning_pct,
+        "quota_notify_critical_pct": s.quota_notify_critical_pct,
+        "notify_admin_on_quota_critical": s.notify_admin_on_quota_critical,
         "reports_default_range_days": s.reports_default_range_days,
         "db_snapshot_retention_days": s.db_snapshot_retention_days,
         "maintenance_mode": s.maintenance_mode,
@@ -280,6 +306,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                    "audit_retention_days", "log_failed_login_attempts", "default_new_user_role",
                    "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "admin_notification_email",
                    "notify_admin_on_user_created", "notify_admin_on_client_revoked",
+                   "quota_notify_warning_pct", "quota_notify_critical_pct", "notify_admin_on_quota_critical",
                    "reports_default_range_days", "db_snapshot_retention_days", "maintenance_mode", "maintenance_message",
                    "notification_duration_ms", "login_theme", "timezone", "time_format"):
         if field in fields_set:
@@ -301,8 +328,19 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
     if (row.smtp_username or row.smtp_password) and not row.smtp_host:
         raise HTTPException(status_code=400, detail="SMTP host is required when a username or password is set.")
 
-    if (row.notify_admin_on_user_created or row.notify_admin_on_client_revoked) and not row.admin_notification_email:
+    if (row.notify_admin_on_user_created or row.notify_admin_on_client_revoked or row.notify_admin_on_quota_critical) and not row.admin_notification_email:
         raise HTTPException(status_code=400, detail="An admin notification email is required to enable event notifications.")
+
+    # Same "check the resulting merged state, not just this request's own
+    # fields" reasoning as the SMTP/admin-email checks above -- a request
+    # that only touches one of the two threshold fields still needs this
+    # checked against whatever the OTHER one ends up being (already-saved
+    # or just-defaulted), not skipped just because this particular request
+    # didn't mention it.
+    effective_warning = row.quota_notify_warning_pct if row.quota_notify_warning_pct is not None else 80
+    effective_critical = row.quota_notify_critical_pct if row.quota_notify_critical_pct is not None else 95
+    if effective_warning >= effective_critical:
+        raise HTTPException(status_code=400, detail="The warning threshold must be lower than the critical threshold.")
 
     if changes:
         row.updated_at = datetime.now(timezone.utc)

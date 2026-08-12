@@ -159,11 +159,21 @@
 				<label for="s-admin-notify-email">Admin Notification Email <span class="muted">(optional)</span></label>
 				<input type="email" id="s-admin-notify-email" placeholder="admin@example.com">
 			</div>
+			<div class="field">
+				<label for="s-quota-warning-pct">Bandwidth Quota Warning Threshold <span class="muted">(%)</span></label>
+				<input type="text" id="s-quota-warning-pct" inputmode="numeric" placeholder="80">
+			</div>
+			<div class="field">
+				<label for="s-quota-critical-pct">Bandwidth Quota Critical Threshold <span class="muted">(%)</span></label>
+				<input type="text" id="s-quota-critical-pct" inputmode="numeric" placeholder="95">
+			</div>
 		</div>
 		<div class="checkbox-row" style="margin-top:12px">
 			<label class="checkbox-label"><input type="checkbox" id="s-notify-user-created"> Email me when a new user is created</label>
 			<label class="checkbox-label"><input type="checkbox" id="s-notify-client-revoked"> Email me when a VPN client is revoked</label>
+			<label class="checkbox-label"><input type="checkbox" id="s-notify-quota-critical"> Email me when a user hits the critical quota threshold</label>
 		</div>
+		<p class="muted" style="margin:10px 0 0;font-size:0.82rem">Users are always shown their own bandwidth quota warnings in-app (bell icon) at both thresholds -- these two fields set where those thresholds sit; the checkbox above is only about the admin's own email copy at the critical threshold.</p>
 	</div>
 
 	<div class="card">
@@ -336,6 +346,8 @@ const sDbSnapshotRetentionValidation = sDbSnapshotRetentionEl
 	? attachInlineValidation(sDbSnapshotRetentionEl, (v) => numberRangeError(v, { min: 0, label: "Database Reporting history retention", emptyOk: true }))
 	: null;
 const sNotificationDurationValidation = attachInlineValidation(document.getElementById("s-notification-duration"), (v) => numberRangeError(v, { min: 0.2, max: 30, label: "Notification duration", emptyOk: true, allowDecimal: true }));
+const sQuotaWarningPctValidation = attachInlineValidation(document.getElementById("s-quota-warning-pct"), (v) => numberRangeError(v, { min: 1, max: 99, label: "Bandwidth quota warning threshold", emptyOk: true }));
+const sQuotaCriticalPctValidation = attachInlineValidation(document.getElementById("s-quota-critical-pct"), (v) => numberRangeError(v, { min: 1, max: 99, label: "Bandwidth quota critical threshold", emptyOk: true }));
 
 // A curated fallback list, only used if the browser doesn't support
 // Intl.supportedValuesOf (Chrome/Edge 99+, Firefox 102+, Safari 15.4+ all
@@ -391,6 +403,9 @@ async function loadSettings() {
 		setVal("s-admin-notify-email", s.admin_notification_email);
 		document.getElementById("s-notify-user-created").checked = !!s.notify_admin_on_user_created;
 		document.getElementById("s-notify-client-revoked").checked = !!s.notify_admin_on_client_revoked;
+		setVal("s-quota-warning-pct", s.quota_notify_warning_pct != null ? s.quota_notify_warning_pct : 80);
+		setVal("s-quota-critical-pct", s.quota_notify_critical_pct != null ? s.quota_notify_critical_pct : 95);
+		document.getElementById("s-notify-quota-critical").checked = !!s.notify_admin_on_quota_critical;
 		document.getElementById("s-reports-range").value = String(s.reports_default_range_days != null ? s.reports_default_range_days : 7);
 		setVal("s-db-snapshot-retention", s.db_snapshot_retention_days);
 		document.getElementById("s-maintenance-mode").checked = !!s.maintenance_mode;
@@ -425,13 +440,20 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		sLockoutThresholdValidation, sLockoutMinutesValidation, sDefaultBandwidthValidation,
 		sAdminNotifyEmailValidation, sAuditRetentionValidation, sNotificationDurationValidation,
 		sDbSnapshotRetentionValidation, // null (and filtered out) if this field isn't rendered
+		sQuotaWarningPctValidation, sQuotaCriticalPctValidation,
 	].filter(Boolean);
 	if (!numericChecks.every((v) => v.check())) {
 		toast("Please fix the highlighted field(s) before saving.", "error");
 		return;
 	}
-	if ((document.getElementById("s-notify-user-created").checked || document.getElementById("s-notify-client-revoked").checked) && !val("s-admin-notify-email")) {
+	if ((document.getElementById("s-notify-user-created").checked || document.getElementById("s-notify-client-revoked").checked || document.getElementById("s-notify-quota-critical").checked) && !val("s-admin-notify-email")) {
 		toast("An admin notification email is required to enable event notifications.", "error");
+		return;
+	}
+	const quotaWarningPct = val("s-quota-warning-pct") ? Number(val("s-quota-warning-pct")) : 80;
+	const quotaCriticalPct = val("s-quota-critical-pct") ? Number(val("s-quota-critical-pct")) : 95;
+	if (quotaWarningPct >= quotaCriticalPct) {
+		toast("The warning threshold must be lower than the critical threshold.", "error");
 		return;
 	}
 	const body = {
@@ -456,6 +478,9 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		admin_notification_email: val("s-admin-notify-email") || null,
 		notify_admin_on_user_created: document.getElementById("s-notify-user-created").checked,
 		notify_admin_on_client_revoked: document.getElementById("s-notify-client-revoked").checked,
+		quota_notify_warning_pct: intOrNull(val("s-quota-warning-pct")),
+		quota_notify_critical_pct: intOrNull(val("s-quota-critical-pct")),
+		notify_admin_on_quota_critical: document.getElementById("s-notify-quota-critical").checked,
 		reports_default_range_days: intOrNull(document.getElementById("s-reports-range").value),
 		db_snapshot_retention_days: intOrNull(val("s-db-snapshot-retention")),
 		maintenance_mode: document.getElementById("s-maintenance-mode").checked,
