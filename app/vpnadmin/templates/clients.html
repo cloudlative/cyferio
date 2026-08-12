@@ -78,10 +78,10 @@
 			</div>
 			<div class="field">
 				<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
-				<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:4px">
-					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="policy-os-check" value="windows"> Windows</label>
-					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="policy-os-check" value="linux"> Linux</label>
-					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="policy-os-check" value="mac"> macOS</label>
+				<div class="checkbox-row">
+					<label class="checkbox-label"><input type="checkbox" class="policy-os-check" value="windows"> Windows</label>
+					<label class="checkbox-label"><input type="checkbox" class="policy-os-check" value="linux"> Linux</label>
+					<label class="checkbox-label"><input type="checkbox" class="policy-os-check" value="mac"> macOS</label>
 				</div>
 				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Leaving all three unchecked means <strong>no restriction</strong> (any OS can connect) -- it does NOT block every OS.</p>
 			</div>
@@ -322,7 +322,7 @@ async function refreshMacsDialog(name) {
 		} else {
 			html += `<p class="muted">${data.count} registered:</p><ul class="mac-list">${data.macs.map(m => `
 				<li>
-					${isAdmin ? `<label style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer"><input type="checkbox" class="mac-checkbox" value="${escapeHtml(m)}"><span class="mono">${escapeHtml(m)}</span></label>` : `<span class="mono">${escapeHtml(m)}</span>`}
+					${isAdmin ? `<label class="checkbox-label" style="flex:1"><input type="checkbox" class="mac-checkbox" value="${escapeHtml(m)}"><span class="mono">${escapeHtml(m)}</span></label>` : `<span class="mono">${escapeHtml(m)}</span>`}
 					${isAdmin ? `<button class="btn-secondary btn-sm mac-remove-btn" data-mac="${escapeHtml(m)}">Remove</button>` : ""}
 				</li>
 			`).join("")}</ul>`;
@@ -504,6 +504,7 @@ if (isAdmin) {
 		emptyLabel: "No countries found.", unitLabel: "country", searchPlaceholder: "Type to search countries…",
 	});
 	policyCountryMs.setOptions(clientCountryOptions);
+	const policyBandwidthValidation = attachInlineValidation(document.getElementById("policy-bandwidth"), bandwidthError);
 
 	let policyClientName = null;
 	async function openPolicyDialog(name) {
@@ -550,6 +551,10 @@ if (isAdmin) {
 	document.getElementById("policy-dialog-cancel").addEventListener("click", () => document.getElementById("policy-dialog").close());
 	document.getElementById("policy-form").addEventListener("submit", async (ev) => {
 		ev.preventDefault();
+		if (!policyBandwidthValidation.check()) {
+			toast("Please fix the highlighted field before saving.", "error");
+			return;
+		}
 		const countryCode = policyCountryMs.getSelected()[0] || null;
 		const allowedOs = [...document.querySelectorAll(".policy-os-check:checked")].map(cb => cb.value);
 		const bwRaw = document.getElementById("policy-bandwidth").value.trim();

@@ -75,11 +75,20 @@
 			</div>
 			<div class="field">
 				<label for="p-new-pw">New Password</label>
-				<input type="password" id="p-new-pw" autocomplete="new-password" required minlength="8">
+				<div class="password-field-row">
+					<input type="password" id="p-new-pw" autocomplete="new-password" required minlength="8">
+					<button type="button" class="btn-secondary btn-sm" id="p-password-generate">Generate</button>
+				</div>
 			</div>
-			<button type="submit" class="btn-primary">Update Password</button>
+			<div class="field">
+				<label for="p-new-pw-confirm">Confirm New Password</label>
+				<input type="password" id="p-new-pw-confirm" autocomplete="new-password" required minlength="8">
+			</div>
 		</div>
-		<p class="muted" style="margin-top:10px">At least 8 characters, including 1 uppercase letter, 1 number, and 1 special character. You'll stay logged in on this device.</p>
+		<p class="field-hint">At least 8 characters, including 1 uppercase letter, 1 number, and 1 special character. You'll stay logged in on this device.</p>
+		<div class="form-row" style="margin-top:14px">
+			<button type="submit" class="btn-primary" id="password-save-btn" disabled>Update Password</button>
+		</div>
 	</form>
 </div>
 {% endblock %}
@@ -109,7 +118,7 @@ function phoneError(combined) {
 	if (!combined) return null;
 	if (combined.startsWith("+92")) {
 		if (!/^\+92-\d{3}-\d{7}$/.test(combined)) {
-			return "Pakistani numbers must be in the format +92-333-1234567 (3-digit prefix, 7-digit number).";
+			return "Pakistani numbers must be in the format +92-321-1234567 (3-digit prefix, 7-digit number).";
 		}
 		return null;
 	}
@@ -118,10 +127,27 @@ function phoneError(combined) {
 }
 const pEmailValidation = attachInlineValidation(document.getElementById("p-email"), emailError);
 const pPhoneValidation = attachInlineValidation(profilePhone.getLocalInputEl(), () => phoneError(profilePhone.getValue()));
-// passwordPolicyError() is the shared helper in app.js (mirrors routes/
-// users.py's _valid_password) -- also used by users.html's Add/Edit User
-// and Reset Password forms via wirePasswordConfirm.
-const pNewPwValidation = attachInlineValidation(document.getElementById("p-new-pw"), passwordPolicyError);
+
+// New Password / Confirm / Generate -- same shared wirePasswordConfirm
+// helper (and the same passwordPolicyError() rules) as the admin Add/Edit
+// User forms and the Reset Password dialog on users.html, so self-service
+// password changes behave identically to an admin-driven reset.
+const pNewPwEl = document.getElementById("p-new-pw");
+const pNewPwConfirmEl = document.getElementById("p-new-pw-confirm");
+const pCurrentPwEl = document.getElementById("p-current-pw");
+const passwordSaveBtn = document.getElementById("password-save-btn");
+const pPasswordConfirm = wirePasswordConfirm(
+	pNewPwEl, pNewPwConfirmEl, document.getElementById("p-password-generate"), { required: true },
+);
+// Save stays disabled until Current Password is filled in AND New/Confirm
+// both pass policy + match -- Generate populates New/Confirm and dispatches
+// synthetic input events (see wirePasswordConfirm in app.js), which this
+// listener picks up immediately, same "Generate -> Save enables right
+// away" behavior as the Reset Password dialog.
+function updatePasswordSaveState() {
+	passwordSaveBtn.disabled = !(pCurrentPwEl.value && !pPasswordConfirm.check());
+}
+[pCurrentPwEl, pNewPwEl, pNewPwConfirmEl].forEach((el) => el.addEventListener("input", updatePasswordSaveState));
 
 async function loadTeamOptions() {
 	try {
@@ -192,19 +218,17 @@ document.getElementById("refresh-btn").addEventListener("click", loadProfile);
 
 document.getElementById("password-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
-	const current = document.getElementById("p-current-pw").value;
-	const next = document.getElementById("p-new-pw").value;
-	if (!pNewPwValidation.check()) {
-		toast("Please fix the highlighted field before saving.", "error");
-		return;
-	}
+	const current = pCurrentPwEl.value;
+	const pwCheckError = pPasswordConfirm.check();
+	if (pwCheckError) { toast(pwCheckError, "error"); return; }
 	try {
 		await apiFetch("/api/users/me", {
 			method: "PATCH",
-			body: { current_password: current, new_password: next },
+			body: { current_password: current, new_password: pNewPwEl.value },
 		});
 		toast("Password updated.");
 		document.getElementById("password-form").reset();
+		passwordSaveBtn.disabled = true;
 	} catch (e) {
 		toast(e.message, "error");
 	}

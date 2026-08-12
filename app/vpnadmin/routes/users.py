@@ -150,7 +150,7 @@ def _valid_email_required(v: str) -> str:
 
 
 # Pakistan (+92) gets a real, strict shape check -- 3-digit mobile prefix,
-# dash, 7-digit subscriber number, e.g. +92-333-1234567 -- because that's
+# dash, 7-digit subscriber number, e.g. +92-321-1234567 -- because that's
 # this deployment's own explicitly-requested standard format. This is
 # deliberately NOT generalized to every dial code: a 3+7 split is specific
 # to Pakistan's own numbering plan and would reject plenty of legitimately-
@@ -189,7 +189,7 @@ def _valid_phone(v: str | None) -> str | None:
                 v = f"+92-{local[:3]}-{local[3:]}"
         if not _PHONE_PK_RE.match(v):
             raise ValueError(
-                "Pakistani phone numbers must be in the format +92-333-1234567 "
+                "Pakistani phone numbers must be in the format +92-321-1234567 "
                 "(3-digit prefix, dash, 7-digit number)."
             )
         return v
@@ -197,7 +197,7 @@ def _valid_phone(v: str | None) -> str | None:
     if _PHONE_GENERAL_RE.match(v) or _PHONE_LEGACY_RE.match(v):
         return v
     raise ValueError(
-        "Phone number must be in the format +<country code>-<number>, e.g. +92-333-1234567."
+        "Phone number must be in the format +<country code>-<number>, e.g. +92-321-1234567."
     )
 
 

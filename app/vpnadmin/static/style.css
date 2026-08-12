@@ -60,8 +60,24 @@
    Values are the exact 6 palettes approved in the theme preview; each
    theme's accent-glow rgba is that theme's own `accent` hex translated to
    rgb(), same construction as the default glow above (#6366f1 -> 99,102,241).
---------------------------------------------------------------------- */
+
+   Each theme ALSO now tints its own --bg/--surface*/--border* neutrals
+   toward its accent hue (previously only the accent/sidebar-gradient
+   varied and every theme shared the exact same navy chrome underneath --
+   which is why 6 "distinct" themes read as one theme with 6 different
+   link colors). Still deliberately dark across the board (this is a
+   working admin UI, not a showcase) and --text/--text-muted/--text-faint
+   and every status color (--danger/--success/--warning) stay constant per
+   this file's own long-standing rule above -- only the neutral backdrop
+   shifts, so contrast/legibility is unaffected, just its hue. */
 :root, [data-theme="constellation"] {
+	--bg: #131722;
+	--bg-elevated: #1a1f2e;
+	--surface: #1e2436;
+	--surface-alt: #262d43;
+	--surface-hover: #2c3450;
+	--border: #3a4460;
+	--border-light: #4a5578;
 	--accent: #6366f1;
 	--accent-2: #818cf8;
 	--accent-3: #22d3ee;
@@ -72,54 +88,89 @@
 	--side-3: #201c38;
 }
 [data-theme="contour"] {
+	--bg: #0c1a1e;
+	--bg-elevated: #112329;
+	--surface: #142d33;
+	--surface-alt: #1a373e;
+	--surface-hover: #1f4149;
+	--border: #2c4d54;
+	--border-light: #3c636b;
 	--accent: #0ea5e9;
 	--accent-2: #14b8a6;
 	--accent-3: #5eead4;
 	--accent-gradient: linear-gradient(135deg, #0ea5e9 0%, #14b8a6 55%, #5eead4 130%);
 	--accent-glow: 0 0 0 1px rgba(14, 165, 233, 0.4), 0 4px 20px rgba(14, 165, 233, 0.25);
-	--side-1: #131b22;
-	--side-2: #152229;
-	--side-3: #132420;
+	--side-1: #0c181d;
+	--side-2: #0d2026;
+	--side-3: #0b211d;
 }
 [data-theme="ingress"] {
+	--bg: #04060d;
+	--bg-elevated: #080c17;
+	--surface: #0c1220;
+	--surface-alt: #101a2c;
+	--surface-hover: #142236;
+	--border: #202e4a;
+	--border-light: #2d3f61;
 	--accent: #1d4ed8;
 	--accent-2: #0ea5e9;
 	--accent-3: #67e8f9;
 	--accent-gradient: linear-gradient(135deg, #1d4ed8 0%, #0ea5e9 55%, #67e8f9 130%);
 	--accent-glow: 0 0 0 1px rgba(29, 78, 216, 0.4), 0 4px 20px rgba(29, 78, 216, 0.25);
-	--side-1: #0a0e18;
-	--side-2: #0c1220;
-	--side-3: #0a1524;
+	--side-1: #060911;
+	--side-2: #070d18;
+	--side-3: #061021;
 }
 [data-theme="cipher"] {
+	--bg: #08120e;
+	--bg-elevated: #0d1a15;
+	--surface: #12211b;
+	--surface-alt: #182a22;
+	--surface-hover: #1d3329;
+	--border: #2a473c;
+	--border-light: #395a4c;
 	--accent: #059669;
 	--accent-2: #10b981;
 	--accent-3: #34d399;
 	--accent-gradient: linear-gradient(135deg, #059669 0%, #10b981 55%, #34d399 130%);
 	--accent-glow: 0 0 0 1px rgba(5, 150, 105, 0.4), 0 4px 20px rgba(5, 150, 105, 0.25);
-	--side-1: #0c1613;
-	--side-2: #0e1c18;
-	--side-3: #0a1a15;
+	--side-1: #08130f;
+	--side-2: #0a1a14;
+	--side-3: #071a12;
 }
 [data-theme="perimeter"] {
+	--bg: #180f06;
+	--bg-elevated: #21160a;
+	--surface: #2b1e0e;
+	--surface-alt: #352713;
+	--surface-hover: #403018;
+	--border: #573f1c;
+	--border-light: #6e5227;
 	--accent: #d97706;
 	--accent-2: #f59e0b;
 	--accent-3: #fbbf24;
 	--accent-gradient: linear-gradient(135deg, #d97706 0%, #f59e0b 55%, #fbbf24 130%);
 	--accent-glow: 0 0 0 1px rgba(217, 119, 6, 0.4), 0 4px 20px rgba(217, 119, 6, 0.25);
-	--side-1: #191309;
-	--side-2: #1f1608;
-	--side-3: #1a1006;
+	--side-1: #170f07;
+	--side-2: #1d1407;
+	--side-3: #180f05;
 }
 [data-theme="horizon"] {
+	--bg: #140a1c;
+	--bg-elevated: #1c1027;
+	--surface: #251533;
+	--surface-alt: #2e1a3f;
+	--surface-hover: #38204c;
+	--border: #4a2c62;
+	--border-light: #5f3b7c;
 	--accent: #7c3aed;
 	--accent-2: #db2777;
 	--accent-3: #f472b6;
 	--accent-gradient: linear-gradient(135deg, #7c3aed 0%, #db2777 55%, #f472b6 130%);
 	--accent-glow: 0 0 0 1px rgba(124, 58, 237, 0.4), 0 4px 20px rgba(124, 58, 237, 0.25);
-	--side-1: #160f1e;
-	--side-2: #1c1226;
-	--side-3: #170f22;
+	--side-1: #130b1c;
+	--side-2: #170d22;
+	--side-3: #140a1e;
 }
 
 * { box-sizing: border-box; }
@@ -566,6 +617,57 @@ label { display: block; font-weight: 700; font-size: 0.82rem; margin-bottom: 6px
 fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin: 0 0 18px; }
 fieldset legend { padding: 0 8px; color: var(--text-muted); font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
 
+/* --- Checkboxes -------------------------------------------------------
+   Custom-drawn (appearance:none + a clip-path checkmark) rather than the
+   browser default -- every OS/browser renders a native checkbox
+   differently and none of them pick up this app's own accent color, so
+   they previously looked visually disconnected from everything else on
+   the page. Same box for every checkbox app-wide (Login Restrictions,
+   Allowed Device OS, Manage MACs' bulk-select, the Roles permission
+   matrix, ...) -- one definition, no per-page variants. */
+input[type="checkbox"] {
+	appearance: none;
+	-webkit-appearance: none;
+	width: 18px;
+	height: 18px;
+	flex: none;
+	margin: 0;
+	display: inline-grid;
+	place-content: center;
+	border: 1.5px solid var(--border-light);
+	border-radius: 5px;
+	background: var(--surface-alt);
+	cursor: pointer;
+	vertical-align: middle;
+	transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+input[type="checkbox"]::before {
+	content: "";
+	width: 10px;
+	height: 10px;
+	transform: scale(0);
+	transition: transform 0.12s cubic-bezier(0.2, 0.8, 0.3, 1.2);
+	clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+	background: #fff;
+}
+input[type="checkbox"]:checked {
+	background: var(--accent-gradient);
+	border-color: transparent;
+}
+input[type="checkbox"]:checked::before { transform: scale(1); }
+input[type="checkbox"]:hover:not(:disabled) { border-color: var(--accent-2); }
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Label wrapping a checkbox (the checkbox itself + its text, e.g. "Restrict
+   by country") -- one class instead of each template hand-rolling the same
+   `display:flex;align-items:center;gap:8px;cursor:pointer` inline style. */
+.checkbox-label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+/* A horizontal group of several checkbox-labels (e.g. the Windows/Linux/
+   macOS "Allowed Device OS" set) -- wraps on narrow screens instead of
+   overflowing. */
+.checkbox-row { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 4px; }
+
 /* --- Phone input (dial-code <select> + local-number field), see app.js's
    createPhoneInput -- used anywhere a User.phone is entered/edited. Country
    select width was a fixed 130px, truncating longer names ("United Arab
@@ -602,28 +704,6 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
 .toolbar .toolbar-title { display: flex; align-items: baseline; gap: 10px; }
 .count-badge { font-size: 0.85rem; font-weight: 700; color: var(--text-muted); background: var(--surface-alt); border: 1px solid var(--border-light); padding: 3px 12px; border-radius: 999px; }
-
-/* --- Collapsible "Add restrictions" panel (Add Client form) --------- */
-/* Same idea as .filter-chip's pill language but styled as an inline
-   link-button rather than a toggle chip -- this is a disclosure control,
-   not a filter, and it needs to sit unobtrusively above an otherwise
-   collapsed section so most client creations (no restrictions) never see
-   it expand. */
-.restrictions-toggle {
-	display: inline-flex; align-items: center; gap: 6px;
-	background: none; border: none; box-shadow: none; padding: 4px 0;
-	color: var(--accent-2); font-weight: 700; font-size: 0.88rem; cursor: pointer;
-}
-.restrictions-toggle:hover { text-decoration: underline; transform: none; }
-.restrictions-toggle .chevron { display: inline-block; font-size: 0.75rem; transition: transform 0.2s ease; }
-.restrictions-toggle[aria-expanded="true"] .chevron { transform: rotate(90deg); }
-.restrictions-toggle .count-badge { background: rgba(99, 102, 241, 0.16); color: var(--accent-2); border-color: rgba(99, 102, 241, 0.35); }
-
-.restrictions-panel {
-	max-height: 0; overflow: hidden; opacity: 0;
-	transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease;
-}
-.restrictions-panel.open { max-height: 640px; opacity: 1; margin-top: 14px; }
 
 .restrictions-summary { margin: 10px 0 0; font-size: 0.82rem; }
 .restrictions-summary strong { color: var(--text); }
@@ -813,6 +893,12 @@ dialog #toast-container { position: absolute; bottom: 16px; right: 16px; left: 1
 .text-right { text-align: right; }
 
 dialog { border: none; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: 0; max-width: 460px; width: 90%; background: var(--surface); color: var(--text); border: 1px solid var(--border-light); }
+/* Edit User now shows every section inline (Access, VPN Profile, Login
+   Restrictions, Reset Password) with no collapsible panels -- wider than
+   the 460px every other dialog uses so its .form-grid sections (Login
+   Restrictions) actually lay out 2-up instead of collapsing to 1 column
+   and stacking into a long, narrow scroll. */
+#edit-dialog { max-width: 640px; }
 dialog::backdrop { background: rgba(8, 10, 16, 0.72); backdrop-filter: blur(2px); }
 dialog .dialog-body { padding: 28px; }
 dialog .dialog-body h2 { background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; display: inline-block; }

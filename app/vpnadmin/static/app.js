@@ -740,15 +740,15 @@ const _DIAL_CODES_BY_LENGTH = [...DIAL_CODES].sort((a, b) => b[1].length - a[1].
  * to distinguish between; pressing "p" never reliably landed on Pakistan.
  * Name-first fixes that for free, no custom keyboard handling needed.
  *
- * Stored/returned values are dash-grouped ("+92-333-1234567" for Pakistan,
+ * Stored/returned values are dash-grouped ("+92-321-1234567" for Pakistan,
  * "+<dialcode>-<local digits>" everywhere else) -- see routes/users.py's
  * _valid_phone for the server-side format this mirrors exactly and is the
  * real source of truth for.
  *
  * Usage:
  *   const phone = createPhoneInput(document.getElementById("mount"));
- *   phone.setValue(u.phone);       // parses "+92-333-1234567" -> ("+92", "3331234567")
- *   phone.getValue();              // -> "+92-333-1234567", or "" if local number is blank
+ *   phone.setValue(u.phone);       // parses "+92-321-1234567" -> ("+92", "3331234567")
+ *   phone.getValue();              // -> "+92-321-1234567", or "" if local number is blank
  *   phone.getLocalInputEl();       // the local-number <input>, for attaching blur/input validation
  */
 const _DIAL_CODES_BY_NAME = [...DIAL_CODES].sort((a, b) => a[0].localeCompare(b[0]));
@@ -761,7 +761,7 @@ const _DIAL_CODES_BY_NAME = [...DIAL_CODES].sort((a, b) => a[0].localeCompare(b[
 const DEFAULT_DIAL_CODE = "+92"; // Pakistan
 
 // Pakistan's mobile numbers are always a 3-digit prefix + 7-digit
-// subscriber number (+92-333-1234567) -- this is the one dial code this
+// subscriber number (+92-321-1234567) -- this is the one dial code this
 // widget actively reformats as-you-type (auto-inserting the dash after 3
 // digits) and shows a concrete example placeholder for, matching the
 // backend's own _PHONE_PK_RE strict check. Every other country keeps a
@@ -782,12 +782,12 @@ function createPhoneInput(root) {
 		<select class="phone-dial-select" aria-label="Country code">
 			${_DIAL_CODES_BY_NAME.map(([name, dial]) => `<option value="${dial}"${dial === DEFAULT_DIAL_CODE ? " selected" : ""}>${escapeHtml(name)} ${dial}</option>`).join("")}
 		</select>
-		<input type="text" class="phone-local-input" inputmode="tel" placeholder="333-1234567">`;
+		<input type="text" class="phone-local-input" inputmode="tel" placeholder="321-1234567">`;
 	const dialSelect = root.querySelector(".phone-dial-select");
 	const localInput = root.querySelector(".phone-local-input");
 
 	function refreshPlaceholder() {
-		localInput.placeholder = dialSelect.value === "+92" ? "333-1234567" : "Local number";
+		localInput.placeholder = dialSelect.value === "+92" ? "321-1234567" : "Local number";
 	}
 
 	// Live-format as the admin types: strip anything non-digit, cap at 10
@@ -1037,6 +1037,41 @@ function macError(v) {
 	return null;
 }
 
+/**
+ * Real-time mirror of policy_store.set_policy's/routes/users.py's
+ * _valid_bandwidth_gb's bandwidth-quota rule: blank means unlimited (no
+ * error), otherwise a number >= 0.1 GB (100 MB). Used by users.html's Add/
+ * Edit User bandwidth field and clients.html's Manage Restrictions dialog.
+ */
+function bandwidthError(v) {
+	v = (v || "").trim();
+	if (!v) return null; // blank = unlimited, always valid
+	const n = Number(v);
+	if (!Number.isFinite(n)) return "Bandwidth quota must be a number.";
+	if (n < 0.1) return "Bandwidth quota must be at least 0.1 GB (100 MB) -- leave blank for unlimited.";
+	return null;
+}
+
+/**
+ * Generic "is this a whole number within range" check for the numeric
+ * Settings fields (SMTP port, session timeout, min password length, audit
+ * retention, ...) -- `min`/`max` are inclusive, either can be omitted for
+ * an open-ended bound. `emptyOk` lets a blank field mean "use the default"
+ * (several of these settings fall back to an env-var default when
+ * cleared) rather than being flagged as invalid.
+ */
+function numberRangeError(v, { min, max, label = "Value", emptyOk = false, allowDecimal = false } = {}) {
+	v = (v || "").trim();
+	if (!v) return emptyOk ? null : `${label} is required.`;
+	if (!(allowDecimal ? /^-?\d+(\.\d+)?$/ : /^-?\d+$/).test(v)) {
+		return `${label} must be a ${allowDecimal ? "number" : "whole number"}.`;
+	}
+	const n = Number(v);
+	if (min != null && n < min) return `${label} must be at least ${min}.`;
+	if (max != null && n > max) return `${label} must be at most ${max}.`;
+	return null;
+}
+
 function passwordPolicyError(v) {
 	v = v || "";
 	const problems = [];
@@ -1161,6 +1196,33 @@ function escapeHtml(s) {
 	return div.innerHTML;
 }
 
+// Mirrors app_settings.py's ACTIVE_THEME_IDS/resolve_active_theme exactly
+// (same 6 ids, same "hour // 2 % 6" 2-hour-slot rotation, same local-time
+// basis) -- the client-side half of applying a theme change immediately
+// (see applyThemeImmediately below) without waiting for a server round-trip
+// to know which theme "auto" currently resolves to.
+const ACTIVE_THEME_IDS = ["constellation", "contour", "ingress", "cipher", "perimeter", "horizon"];
+function resolveActiveThemeClientSide(loginThemeSetting) {
+	if (loginThemeSetting && loginThemeSetting !== "auto") return loginThemeSetting;
+	const slot = Math.floor(new Date().getHours() / 2) % ACTIVE_THEME_IDS.length;
+	return ACTIVE_THEME_IDS[slot];
+}
+
+/**
+ * Stamps the resolved theme directly onto <html data-theme="...">, live,
+ * on the currently-open page -- used by both the header quick-switch and
+ * the Settings page's theme dropdown so a theme change is visible the
+ * instant it's saved, no page reload needed (previously both round-tripped
+ * via window.location.reload() purely to pick up the new data-theme
+ * base.html renders server-side on the NEXT page load; the setting itself
+ * was already saved immediately, only the visual effect was delayed).
+ * Purely a DOM update -- the caller is still responsible for persisting
+ * the choice via PATCH /api/settings.
+ */
+function applyThemeImmediately(loginThemeSetting) {
+	document.documentElement.setAttribute("data-theme", resolveActiveThemeClientSide(loginThemeSetting));
+}
+
 /**
  * Header quick theme switcher (admin-only, see base.html's
  * .theme-quick-switch) -- lets an admin change the app's active theme
@@ -1192,11 +1254,14 @@ function escapeHtml(s) {
 	panel.querySelectorAll(".theme-quick-option").forEach((btn) => {
 		btn.addEventListener("click", async () => {
 			panel.style.display = "none";
+			const themeValue = btn.dataset.themeValue;
+			const previousTheme = document.documentElement.getAttribute("data-theme");
+			applyThemeImmediately(themeValue); // instant, no reload -- see this function's docstring
 			try {
-				await apiFetch("/api/settings", { method: "PATCH", body: { login_theme: btn.dataset.themeValue } });
+				await apiFetch("/api/settings", { method: "PATCH", body: { login_theme: themeValue } });
 				toast("Theme updated.");
-				window.location.reload();
 			} catch (e) {
+				if (previousTheme) document.documentElement.setAttribute("data-theme", previousTheme); // roll back the optimistic apply -- the save itself failed
 				toast(e.message, "error");
 			}
 		});

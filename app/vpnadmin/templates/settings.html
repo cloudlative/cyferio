@@ -71,6 +71,7 @@
 			<div class="field">
 				<label for="s-login-theme">Active Theme</label>
 				<select id="s-login-theme"></select>
+				<p class="field-hint" id="theme-active-note"></p>
 			</div>
 		</div>
 		<p class="muted" id="theme-description" style="margin-bottom:0"></p>
@@ -176,6 +177,56 @@ function renderThemeDescription() {
 	document.getElementById("theme-description").textContent = choice ? choice.description : "";
 }
 
+// "auto" is the environment-variable default (config.py's LOGIN_THEME) --
+// every fresh install starts here, so it's labeled "Default" in the
+// dropdown regardless of what this particular deployment currently has
+// saved. Distinct from "currently active": if the saved setting IS "auto",
+// the *resolved* theme (which one of the 6 is actually showing right now,
+// per app_settings.py's 2-hour rotation -- see resolveActiveThemeClientSide
+// in app.js) is a different, time-varying thing, called out separately in
+// #theme-active-note below rather than pretending "auto" itself is a color.
+const DEFAULT_THEME_ID = "auto";
+
+function populateThemeSelect(savedSetting) {
+	const themeSelect = document.getElementById("s-login-theme");
+	themeSelect.innerHTML = _themeChoices.map(c => {
+		const tag = c.id === DEFAULT_THEME_ID ? " (Default)" : "";
+		return `<option value="${c.id}">${escapeHtml(c.label)}${tag}</option>`;
+	}).join("");
+	themeSelect.value = savedSetting || DEFAULT_THEME_ID;
+	updateThemeActiveNote(savedSetting);
+}
+
+// Called on load and whenever the dropdown's own value changes (so picking
+// a different option updates this note immediately, before Save is even
+// clicked) -- see this file's docstring on applyThemeImmediately in app.js
+// for why the resolution has to happen client-side rather than waiting on
+// another server round-trip.
+function updateThemeActiveNote(savedSetting) {
+	const selected = document.getElementById("s-login-theme").value;
+	const resolved = resolveActiveThemeClientSide(selected);
+	const resolvedChoice = _themeChoices.find(c => c.id === resolved);
+	const resolvedLabel = resolvedChoice ? resolvedChoice.label : resolved;
+	const note = document.getElementById("theme-active-note");
+	if (selected === DEFAULT_THEME_ID) {
+		note.textContent = `Right now, auto-rotate is showing: ${resolvedLabel}.`;
+	} else {
+		note.textContent = selected === (window._savedLoginTheme || "") ? "This is the currently active theme." : "Not yet saved -- click Save Settings to apply.";
+	}
+}
+
+// numberRangeError() (app.js) mirrors the same bounds routes/settings.py's
+// UpdateSettingsRequest field_validators enforce server-side -- real-time
+// feedback only, the server is still the actual source of truth. Every one
+// of these fields falls back to an env-var default when left blank (see
+// app_settings.py's refresh_runtime_cache), so blank itself is never an
+// error here.
+const sSmtpPortValidation = attachInlineValidation(document.getElementById("s-smtp-port"), (v) => numberRangeError(v, { min: 1, max: 65535, label: "SMTP port", emptyOk: true }));
+const sMinPwLenValidation = attachInlineValidation(document.getElementById("s-min-pw-len"), (v) => numberRangeError(v, { min: 6, max: 128, label: "Minimum password length", emptyOk: true }));
+const sSessionTimeoutValidation = attachInlineValidation(document.getElementById("s-session-timeout"), (v) => numberRangeError(v, { min: 1, label: "Session timeout", emptyOk: true }));
+const sAuditRetentionValidation = attachInlineValidation(document.getElementById("s-audit-retention"), (v) => numberRangeError(v, { min: 0, label: "Audit log retention", emptyOk: true }));
+const sNotificationDurationValidation = attachInlineValidation(document.getElementById("s-notification-duration"), (v) => numberRangeError(v, { min: 0.2, max: 30, label: "Notification duration", emptyOk: true, allowDecimal: true }));
+
 // A curated fallback list, only used if the browser doesn't support
 // Intl.supportedValuesOf (Chrome/Edge 99+, Firefox 102+, Safari 15.4+ all
 // do -- this is just a safety net for something older). Where it IS
@@ -225,9 +276,8 @@ async function loadSettings() {
 		document.getElementById("smtp-status").textContent = s.smtp_configured ? "Currently configured." : "Not configured -- email features are disabled.";
 
 		_themeChoices = s.theme_choices || [];
-		const themeSelect = document.getElementById("s-login-theme");
-		themeSelect.innerHTML = _themeChoices.map(c => `<option value="${c.id}">${escapeHtml(c.label)}</option>`).join("");
-		themeSelect.value = s.login_theme || "auto";
+		window._savedLoginTheme = s.login_theme || DEFAULT_THEME_ID;
+		populateThemeSelect(window._savedLoginTheme);
 		renderThemeDescription();
 
 		populateTimezoneSelect(s.timezone || "UTC");
@@ -237,10 +287,21 @@ async function loadSettings() {
 	}
 }
 
-document.getElementById("s-login-theme").addEventListener("change", renderThemeDescription);
+document.getElementById("s-login-theme").addEventListener("change", () => {
+	renderThemeDescription();
+	updateThemeActiveNote();
+});
 
 document.getElementById("settings-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
+	const numericChecks = [
+		sSmtpPortValidation, sMinPwLenValidation, sSessionTimeoutValidation,
+		sAuditRetentionValidation, sNotificationDurationValidation,
+	];
+	if (!numericChecks.every((v) => v.check())) {
+		toast("Please fix the highlighted field(s) before saving.", "error");
+		return;
+	}
 	const body = {
 		app_name: val("s-app-name") || null,
 		app_tagline: val("s-app-tagline") || null,
@@ -264,6 +325,13 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 	};
 	try {
 		await apiFetch("/api/settings", { method: "PATCH", body });
+		// Applies the new theme to this page immediately -- no reload (see
+		// app.js's applyThemeImmediately docstring). Every other setting
+		// here already takes effect on its own next use (e.g. the next
+		// toast reads the new duration); theme was the one exception since
+		// <html data-theme="..."> is otherwise only ever stamped at
+		// server-render time.
+		applyThemeImmediately(body.login_theme);
 		toast("Settings saved.");
 		loadSettings();
 	} catch (e) {

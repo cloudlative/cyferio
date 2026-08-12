@@ -52,21 +52,19 @@
 				<label for="u-phone-mount">Phone <span class="muted">(optional)</span></label>
 				<div id="u-phone-mount"></div>
 			</div>
-		</div>
-		<div class="form-row" style="margin-top:16px">
 			<div class="field">
 				<label for="u-mac">Device MAC Address</label>
 				<input type="text" id="u-mac" required placeholder="aa:bb:cc:dd:ee:ff">
-				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Creating a user also provisions their VPN profile -- MAC can be entered in any common format (colons, dashes, or none — any case) and will be normalized automatically. To attach an already-existing VPN profile instead, use Edit User after creating the account.</p>
+				<p class="field-hint">Provisions the VPN profile -- any common format, normalized automatically.</p>
 			</div>
 		</div>
 		<div class="form-row" style="margin-top:16px">
 			<div class="field">
 				<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
-				<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:4px">
-					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="u-os-check" value="windows"> Windows</label>
-					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="u-os-check" value="linux"> Linux</label>
-					<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="u-os-check" value="mac"> macOS</label>
+				<div class="checkbox-row">
+					<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="windows"> Windows</label>
+					<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="linux"> Linux</label>
+					<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="mac"> macOS</label>
 				</div>
 			</div>
 			<div class="field">
@@ -74,51 +72,40 @@
 				<input type="text" id="u-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)">
 			</div>
 		</div>
-		<button type="button" class="restrictions-toggle" id="u-restrictions-toggle" aria-expanded="false">
-			<span class="chevron">▸</span> Login restrictions <span class="muted">(optional)</span>
-		</button>
-		<div class="restrictions-panel" id="u-restrictions-panel">
-			<div class="field">
-				<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-					<input type="checkbox" id="u-restrict-country">
-					Restrict login by country
-				</label>
-				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from the selected countries (detected via GeoIP on the sign-in request's IP). Leave unchecked, or the list empty, to allow any country.</p>
-				<div id="u-countries-ms"></div>
-			</div>
-			<div class="field" style="margin-top:14px">
-				<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-					<input type="checkbox" id="u-restrict-city">
-					Restrict login by city
-				</label>
-				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these cities (detected via GeoIP). Pick a country to browse its cities, then select any number -- picks accumulate across countries. GeoIP city detection is approximate, not precise. Leave unchecked, or the list empty, to allow any city.</p>
-				<p class="muted" id="u-cities-building" style="display:none;font-size:0.82rem">City list is still building (first-time setup takes a couple of minutes) -- try again shortly.</p>
-				<div class="geo-picker-row">
-					<select id="u-city-country"><option value="">Loading countries…</option></select>
-					<div id="u-cities-ms"></div>
+
+		<fieldset style="margin-top:16px">
+			<legend>Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+			<div class="form-grid">
+				<div class="field">
+					<label class="checkbox-label"><input type="checkbox" id="u-restrict-country"> Restrict by country</label>
+					<p class="field-hint">GeoIP on the sign-in IP. Empty list = any country.</p>
+					<div id="u-countries-ms"></div>
+				</div>
+				<div class="field">
+					<label class="checkbox-label"><input type="checkbox" id="u-restrict-asn"> Restrict by network (ASN)</label>
+					<p class="field-hint">Identifies the connecting ISP/network. Empty list = any network.</p>
+					<p class="field-hint" id="u-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
+					<div class="geo-picker-row">
+						<select id="u-asn-country"><option value="">Any country (search all networks)</option></select>
+						<div id="u-asns-ms"></div>
+					</div>
+				</div>
+				<div class="field">
+					<label class="checkbox-label"><input type="checkbox" id="u-restrict-city"> Restrict by city</label>
+					<p class="field-hint">Approximate (GeoIP). Pick a country, then select any number of cities.</p>
+					<p class="field-hint" id="u-cities-building" style="display:none">City list is still building -- try again shortly.</p>
+					<div class="geo-picker-row">
+						<select id="u-city-country"><option value="">Loading countries…</option></select>
+						<div id="u-cities-ms"></div>
+					</div>
+				</div>
+				<div class="field">
+					<label class="checkbox-label"><input type="checkbox" id="u-restrict-ip"> Restrict by IP address</label>
+					<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
+					<textarea id="u-allowed-ips" rows="2" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
 				</div>
 			</div>
-			<div class="field" style="margin-top:14px">
-				<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-					<input type="checkbox" id="u-restrict-asn">
-					Restrict login by network (ASN)
-				</label>
-				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these networks/ISPs -- identifies the network a connection came from, regardless of which country it geolocates to. "Any country" searches every known network by name (needed for global operators like Google or Cloudflare, which don't confidently belong to one country). Leave unchecked, or the list empty, to allow any network.</p>
-				<p class="muted" id="u-asns-building" style="display:none;font-size:0.82rem">Network list is still building (first-time setup takes a moment) -- try again shortly.</p>
-				<div class="geo-picker-row">
-					<select id="u-asn-country"><option value="">Any country (search all networks)</option></select>
-					<div id="u-asns-ms"></div>
-				</div>
-			</div>
-			<div class="field" style="margin-top:14px">
-				<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-					<input type="checkbox" id="u-restrict-ip">
-					Restrict login by IP address
-				</label>
-				<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these IPs or CIDR ranges, one per line (e.g. 203.0.113.5 or 10.0.0.0/24). Leave unchecked, or the list empty, to allow any IP.</p>
-				<textarea id="u-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
-			</div>
-		</div>
+		</fieldset>
 
 		<div class="form-row" style="margin-top:16px">
 			<button type="submit" class="btn-primary">Add User</button>
@@ -203,10 +190,10 @@
 				<div id="e-vpn-policy" style="display:none;margin-top:14px">
 					<div class="field">
 						<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
-						<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:4px">
-							<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="e-os-check" value="windows"> Windows</label>
-							<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="e-os-check" value="linux"> Linux</label>
-							<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="e-os-check" value="mac"> macOS</label>
+						<div class="checkbox-row">
+							<label class="checkbox-label"><input type="checkbox" class="e-os-check" value="windows"> Windows</label>
+							<label class="checkbox-label"><input type="checkbox" class="e-os-check" value="linux"> Linux</label>
+							<label class="checkbox-label"><input type="checkbox" class="e-os-check" value="mac"> macOS</label>
 						</div>
 					</div>
 					<div class="field" style="margin-top:10px">
@@ -217,50 +204,34 @@
 			</fieldset>
 			<fieldset>
 				<legend>Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
-				<button type="button" class="restrictions-toggle" id="e-restrictions-toggle" aria-expanded="false">
-					<span class="chevron">▸</span> Edit login restrictions <span class="muted">(optional)</span>
-					<span class="count-badge" id="e-restrictions-count" style="display:none"></span>
-				</button>
-				<div class="restrictions-panel" id="e-restrictions-panel">
+				<div class="form-grid">
 					<div class="field">
-						<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-							<input type="checkbox" id="e-restrict-country">
-							Restrict login by country
-						</label>
-						<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from the selected countries (detected via GeoIP on the sign-in request's IP). Leave unchecked, or the list empty, to allow any country.</p>
+						<label class="checkbox-label"><input type="checkbox" id="e-restrict-country"> Restrict by country</label>
+						<p class="field-hint">GeoIP on the sign-in IP. Empty list = any country.</p>
 						<div id="e-countries-ms"></div>
 					</div>
-					<div class="field" style="margin-top:14px">
-						<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-							<input type="checkbox" id="e-restrict-city">
-							Restrict login by city
-						</label>
-						<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these cities (detected via GeoIP). Pick a country to browse its cities, then select any number -- picks accumulate across countries. GeoIP city detection is approximate, not precise. Leave unchecked, or the list empty, to allow any city.</p>
-						<p class="muted" id="e-cities-building" style="display:none;font-size:0.82rem">City list is still building (first-time setup takes a couple of minutes) -- try again shortly.</p>
-						<div class="geo-picker-row">
-							<select id="e-city-country"><option value="">Loading countries…</option></select>
-							<div id="e-cities-ms"></div>
-						</div>
-					</div>
-					<div class="field" style="margin-top:14px">
-						<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-							<input type="checkbox" id="e-restrict-asn">
-							Restrict login by network (ASN)
-						</label>
-						<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these networks/ISPs -- identifies the network a connection came from, regardless of which country it geolocates to. "Any country" searches every known network by name (needed for global operators like Google or Cloudflare, which don't confidently belong to one country). Leave unchecked, or the list empty, to allow any network.</p>
-						<p class="muted" id="e-asns-building" style="display:none;font-size:0.82rem">Network list is still building (first-time setup takes a moment) -- try again shortly.</p>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="e-restrict-asn"> Restrict by network (ASN)</label>
+						<p class="field-hint">Identifies the connecting ISP/network. Empty list = any network.</p>
+						<p class="field-hint" id="e-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
 						<div class="geo-picker-row">
 							<select id="e-asn-country"><option value="">Any country (search all networks)</option></select>
 							<div id="e-asns-ms"></div>
 						</div>
 					</div>
-					<div class="field" style="margin-top:14px;margin-bottom:0">
-						<label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-							<input type="checkbox" id="e-restrict-ip">
-							Restrict login by IP address
-						</label>
-						<p class="muted" style="margin:4px 0 8px;font-size:0.82rem">Only allow sign-in from these IPs or CIDR ranges, one per line (e.g. 203.0.113.5 or 10.0.0.0/24). Leave unchecked, or the list empty, to allow any IP.</p>
-						<textarea id="e-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="e-restrict-city"> Restrict by city</label>
+						<p class="field-hint">Approximate (GeoIP). Pick a country, then select any number of cities.</p>
+						<p class="field-hint" id="e-cities-building" style="display:none">City list is still building -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="e-city-country"><option value="">Loading countries…</option></select>
+							<div id="e-cities-ms"></div>
+						</div>
+					</div>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="e-restrict-ip"> Restrict by IP address</label>
+						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
+						<textarea id="e-allowed-ips" rows="2" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
 					</div>
 				</div>
 			</fieldset>
@@ -294,20 +265,18 @@
 		<h2>Reset Password</h2>
 		<p class="muted" id="reset-pw-username" style="margin-top:0"></p>
 		<form id="reset-pw-form">
-			<div class="form-row">
-				<div class="field">
-					<label for="rp-password">New Password</label>
-					<div class="password-field-row">
-						<input type="password" id="rp-password" required minlength="8">
-						<button type="button" class="btn-secondary btn-sm" id="rp-password-generate">Generate</button>
-					</div>
-				</div>
-				<div class="field">
-					<label for="rp-password-confirm">Confirm Password</label>
-					<input type="password" id="rp-password-confirm" required minlength="8">
+			<div class="field">
+				<label for="rp-password">New Password</label>
+				<div class="password-field-row">
+					<input type="password" id="rp-password" required minlength="8">
+					<button type="button" class="btn-secondary btn-sm" id="rp-password-generate">Generate</button>
 				</div>
 			</div>
-			<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Must be at least 8 characters and include at least 1 uppercase letter, 1 number, and 1 special character.</p>
+			<div class="field" style="margin-top:14px">
+				<label for="rp-password-confirm">Confirm Password</label>
+				<input type="password" id="rp-password-confirm" required minlength="8">
+			</div>
+			<p class="field-hint">Must be at least 8 characters and include at least 1 uppercase letter, 1 number, and 1 special character.</p>
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="reset-pw-cancel">Cancel</button>
 				<button type="submit" class="btn-primary" id="reset-pw-save-btn" disabled>Save Password</button>
@@ -456,7 +425,7 @@ function phoneError(combined) {
 	if (!combined) return null;
 	if (combined.startsWith("+92")) {
 		if (!/^\+92-\d{3}-\d{7}$/.test(combined)) {
-			return "Pakistani numbers must be in the format +92-333-1234567 (3-digit prefix, 7-digit number).";
+			return "Pakistani numbers must be in the format +92-321-1234567 (3-digit prefix, 7-digit number).";
 		}
 		return null;
 	}
@@ -484,6 +453,8 @@ const ePhoneValidation = attachInlineValidation(editPhone.getLocalInputEl(), () 
 // validator.normalize_mac's tolerance) -- required here (Add User's MAC
 // field is mandatory), unlike its optional use on the OpenVPN Install page.
 const uMacValidation = attachInlineValidation(document.getElementById("u-mac"), (v) => (v || "").trim() ? macError(v) : "Device MAC Address is required.");
+const uBandwidthValidation = attachInlineValidation(document.getElementById("u-bandwidth"), bandwidthError);
+const eBandwidthValidation = attachInlineValidation(document.getElementById("e-bandwidth"), bandwidthError);
 
 const uPasswordConfirm = wirePasswordConfirm(
 	document.getElementById("u-password"), document.getElementById("u-password-confirm"),
@@ -592,39 +563,6 @@ async function loadTeamOptions() {
 		toast(e.message, "error");
 	}
 }
-
-const uRestrictionsToggle = document.getElementById("u-restrictions-toggle");
-const uRestrictionsPanel = document.getElementById("u-restrictions-panel");
-uRestrictionsToggle.addEventListener("click", () => {
-	const willOpen = !uRestrictionsPanel.classList.contains("open");
-	uRestrictionsPanel.classList.toggle("open", willOpen);
-	uRestrictionsToggle.setAttribute("aria-expanded", String(willOpen));
-});
-
-// Same collapsible pattern in the Edit dialog -- previously always fully
-// expanded there, adding real scroll length to the modal even for the
-// common case of a user with no login restrictions set at all.
-const eRestrictionsToggle = document.getElementById("e-restrictions-toggle");
-const eRestrictionsPanel = document.getElementById("e-restrictions-panel");
-const eRestrictionsCount = document.getElementById("e-restrictions-count");
-eRestrictionsToggle.addEventListener("click", () => {
-	const willOpen = !eRestrictionsPanel.classList.contains("open");
-	eRestrictionsPanel.classList.toggle("open", willOpen);
-	eRestrictionsToggle.setAttribute("aria-expanded", String(willOpen));
-});
-// Reflects however many of the 4 restriction types are currently active --
-// called after populating the checkboxes on dialog open, and again on any
-// change while it's open, so the badge (and the auto-expand below) always
-// matches the actual on-screen state, not just what was loaded.
-function updateEditRestrictionsCount() {
-	const n = ["e-restrict-country", "e-restrict-city", "e-restrict-asn", "e-restrict-ip"]
-		.filter(id => document.getElementById(id).checked).length;
-	eRestrictionsCount.style.display = n ? "" : "none";
-	eRestrictionsCount.textContent = n ? `${n} active` : "";
-}
-["e-restrict-country", "e-restrict-city", "e-restrict-asn", "e-restrict-ip"].forEach(id => {
-	document.getElementById(id).addEventListener("change", updateEditRestrictionsCount);
-});
 
 function matchesSearch(u) {
 	if (!userSearchTerm) return true;
@@ -862,16 +800,6 @@ function openEdit(u) {
 	editAsnsMs.setSelected(u.allowed_login_asns || []);
 	document.getElementById("e-restrict-ip").checked = !!u.restrict_login_by_ip;
 	document.getElementById("e-allowed-ips").value = (u.allowed_login_ips || []).join("\n");
-	// Auto-expand the restrictions panel if this user already has any
-	// active -- collapsed-by-default is right for the common "no
-	// restrictions" case, but hiding EXISTING restrictions on open would
-	// make them easy to miss/silently leave in place. Stays collapsed
-	// (matching Add's default) when none are set.
-	const hasAnyRestriction = u.restrict_login_by_country || u.restrict_login_by_city
-		|| u.restrict_login_by_asn || u.restrict_login_by_ip;
-	eRestrictionsPanel.classList.toggle("open", hasAnyRestriction);
-	eRestrictionsToggle.setAttribute("aria-expanded", String(hasAnyRestriction));
-	updateEditRestrictionsCount();
 	document.getElementById("edit-dialog").showModal();
 	editDirty.arm();
 }
@@ -882,7 +810,7 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
 	const firstName = document.getElementById("e-first").value.trim();
 	if (!firstName) { toast("First Name is required.", "error"); return; }
-	if (!eEmailValidation.check() || !ePhoneValidation.check()) {
+	if (!eEmailValidation.check() || !ePhoneValidation.check() || !eBandwidthValidation.check()) {
 		toast("Please fix the highlighted field(s) before saving.", "error");
 		return;
 	}
@@ -937,7 +865,7 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 	const firstName = document.getElementById("u-first").value.trim();
 	const mac = document.getElementById("u-mac").value.trim();
 	if (!firstName) { toast("First Name is required.", "error"); return; }
-	if (!uEmailValidation.check() || !uPhoneValidation.check() || !uMacValidation.check()) {
+	if (!uEmailValidation.check() || !uPhoneValidation.check() || !uMacValidation.check() || !uBandwidthValidation.check()) {
 		toast("Please fix the highlighted field(s) before submitting.", "error");
 		return;
 	}
