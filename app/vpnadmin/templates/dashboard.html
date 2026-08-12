@@ -98,10 +98,30 @@
 
 {% block scripts %}
 <script>
+const isAdmin = {{ "true" if can_manage_clients else "false" }};
+
 async function loadConnectedStats() {
 	try {
-		const data = await apiFetch("/api/dashboard");
+		const [data, policiesResp, userLinks, sessions] = await Promise.all([
+			apiFetch("/api/dashboard"),
+			// Restriction badges + bandwidth usage are an admin-only feature
+			// (same gating as clients.html's own "Manage Restrictions") --
+			// non-admin viewers skip this fetch entirely rather than hitting
+			// a 403 on every page load/auto-refresh tick.
+			isAdmin ? apiFetch("/api/clients/policies") : Promise.resolve({ policies: {}, usage: {} }),
+			apiFetch("/api/clients/user-links"),
+			// Live session data straight from OpenVPN's management interface,
+			// used only for Source IP here -- see management_client.py's
+			// parse_source_ip() docstring for why the dashboard snapshot's
+			// own connected[].source_ip can't be trusted (vpn-status.py bug).
+			apiFetch("/api/clients/sessions"),
+		]);
 		const connected = data.connected, all = data.all_clients, clients = data.clients, revoked = data.revoked, rejected = data.rejected;
+		const policiesByName = policiesResp.policies || {};
+		const usageByName = policiesResp.usage || {};
+		const userLinksByName = userLinks || {};
+		const sessionsByName = Object.fromEntries(sessions.map(s => [s.common_name, s]));
+		const clientsByName = Object.fromEntries(clients.map(c => [c.name, c]));
 
 		document.getElementById("stat-online").textContent = connected.length;
 		document.getElementById("stat-total").textContent = all.length;
@@ -133,18 +153,42 @@ async function loadConnectedStats() {
 			return;
 		}
 		const sorted = [...connected].sort((a, b) => a.name.localeCompare(b.name));
-		el.innerHTML = `<table>
-			<thead><tr><th>Name</th><th>Source IP</th><th>OS</th><th>Connected Since</th><th>Duration</th><th>RX / TX</th></tr></thead>
-			<tbody>${sorted.map(c => `
-				<tr class="row-online">
+		// Column order matches clients.html's All Clients table (see that
+		// page's renderClients() for the same priority reasoning) --
+		// identity/status first, then live-connection detail, then the
+		// slower-moving profile detail. "Last Seen" is always "now
+		// (connected)" here since this table is online-clients-only, but
+		// stays for column-set parity with the All Clients table.
+		el.innerHTML = `<div class="table-scroll"><table>
+			<thead><tr>
+				<th>Name</th><th>Status</th><th>Portal User</th><th>Source IP</th><th>OS</th>
+				<th>Connected Since</th><th>Duration</th>
+				${isAdmin ? "<th>Bandwidth (this month)</th>" : ""}
+				<th>RX / TX</th><th>Restrictions</th><th>MAC Addresses</th><th>In MAC DB</th><th>Last Seen</th>
+			</tr></thead>
+			<tbody>${sorted.map(c => {
+				const session = sessionsByName[c.name];
+				const meta = all.find(a => a.name === c.name) || {};
+				const policy = policiesByName[c.name];
+				const linkedUser = userLinksByName[c.name];
+				const client = clientsByName[c.name] || {};
+				return `<tr class="row-online">
 					<td>${escapeHtml(c.name)}</td>
-					<td class="mono">${escapeHtml(c.source_ip)}</td>
-					<td>${escapeHtml(c.os)}</td>
+					<td><span class="status-pill status-online">Online</span></td>
+					<td>${linkedUser ? escapeHtml(linkedUser.display_name || linkedUser.username) : '<span class="muted">-</span>'}</td>
+					<td class="mono">${escapeHtml(session ? session.source_ip : c.source_ip)}</td>
+					<td>${escapeHtml(meta.os && meta.os !== "n/a" ? meta.os : "—")}</td>
 					<td>${escapeHtml(c.connected_since)}</td>
 					<td>${escapeHtml(c.duration)}</td>
+					${isAdmin ? `<td>${bandwidthUsageHtml(policy, usageByName[c.name])}</td>` : ""}
 					<td class="mono">${escapeHtml(c.bytes_received_h)} / ${escapeHtml(c.bytes_sent_h)}</td>
-				</tr>`).join("")}</tbody>
-		</table>`;
+					<td>${restrictionChipsHtml(policy) || '<span class="muted">—</span>'}</td>
+					<td><span class="count-badge">${client.mac_count ?? 0}</span></td>
+					<td>${client.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</td>
+					<td>now (connected)</td>
+				</tr>`;
+			}).join("")}</tbody>
+		</table></div>`;
 	} catch (e) {
 		toast(e.message, "error");
 	}

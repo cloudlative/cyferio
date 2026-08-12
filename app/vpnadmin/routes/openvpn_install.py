@@ -135,7 +135,7 @@ def post_install(
     mac: str | None = None,
     port: int = 1194,
     protocol: str = "udp",
-    dns: int = 1,
+    dns: int = 3,
     client_name: str | None = None,
     public_ip: str | None = None,
     user: User = Depends(_require_elevated),

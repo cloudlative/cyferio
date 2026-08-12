@@ -72,6 +72,38 @@ class ClientSession:
     bytes_received: int
     bytes_sent: int
     connected_since: str  # OpenVPN's own human-readable string, passed through as-is
+    connected_since_epoch: int | None = None  # "Connected Since (time_t)" -- UTC, DST/timezone-proof
+    source_ip: str = ""  # real_address with the leading "proto:" and trailing ":port" stripped
+
+
+# Matches the "proto:" prefix OpenVPN puts on CLIENT_LIST's Real Address
+# field, e.g. "udp4:182.185.203.112:53266" or "tcp6:[2001:db8::1]:1194" --
+# udp4/udp6/tcp4/tcp6 are the only values OpenVPN emits here.
+_REAL_ADDRESS_PROTO_RE = re.compile(r"^(?:udp|tcp)[46]:")
+
+
+def parse_source_ip(real_address: str) -> str:
+    """Extracts just the IP from CLIENT_LIST's "Real Address" field, e.g.
+    "udp4:182.185.203.112:53266" -> "182.185.203.112", or
+    "tcp6:[2001:db8::1]:1194" -> "2001:db8::1".
+
+    This exists because vpn-status.py's own Source IP column has the
+    equivalent bug uncaught until now: it does `real_addr.split(":")[0]`,
+    which on this "proto:ip:port" shape returns the *protocol* ("udp4"),
+    not the IP -- silently wrong for every session, always. vpn-status.py
+    is off-limits to modify (see its own header comment), and its JSON
+    output doesn't expose the raw Real Address for a caller to reprocess
+    (only the already-mis-sliced result), so that bug can't be fixed
+    downstream of it either. This client already gets the correct raw
+    value from `status 3` for an unrelated reason (session listing/kill),
+    so it's the one place in this app that can compute Source IP
+    correctly -- callers needing an accurate Source IP should prefer this
+    over vpn-status.py's connected/all-clients "source_ip" field."""
+    addr = _REAL_ADDRESS_PROTO_RE.sub("", real_address, count=1)
+    if addr.startswith("["):  # bracketed IPv6, e.g. "[2001:db8::1]:1194"
+        end = addr.find("]")
+        return addr[1:end] if end != -1 else addr
+    return addr.rsplit(":", 1)[0] if ":" in addr else addr  # IPv4 "ip:port" -> "ip"
 
 
 class ManagementClient:
@@ -196,13 +228,17 @@ class ManagementClient:
                     )
                 row = dict(zip(header, values))
                 try:
+                    real_address = row["Real Address"]
+                    since_epoch_raw = row.get("Connected Since (time_t)")
                     sessions.append(ClientSession(
                         common_name=row["Common Name"],
-                        real_address=row["Real Address"],
+                        real_address=real_address,
                         virtual_address=row.get("Virtual Address", ""),
                         bytes_received=int(row.get("Bytes Received") or 0),
                         bytes_sent=int(row.get("Bytes Sent") or 0),
                         connected_since=row.get("Connected Since", ""),
+                        connected_since_epoch=int(since_epoch_raw) if since_epoch_raw else None,
+                        source_ip=parse_source_ip(real_address),
                     ))
                 except KeyError as e:
                     raise MgmtProtocolError(f"`status 3` CLIENT_LIST row missing expected field {e}: {line!r}") from e

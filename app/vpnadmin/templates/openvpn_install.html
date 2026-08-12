@@ -70,14 +70,14 @@
 		<div class="field">
 			<label for="ovi-dns">DNS</label>
 			<select id="ovi-dns">
-				<option value="1" selected>Current system resolvers</option>
+				<option value="1">Current system resolvers</option>
 				<option value="2">Google</option>
-				<option value="3">1.1.1.1</option>
+				<option value="3" selected>1.1.1.1 (Cloudflare)</option>
 				<option value="4">OpenDNS</option>
 				<option value="5">Quad9</option>
 				<option value="6">AdGuard</option>
 			</select>
-			<p class="field-hint">DNS servers pushed to connected clients.</p>
+			<p class="field-hint">DNS servers pushed to connected clients. Defaults to Cloudflare (1.1.1.1) -- "Current system resolvers" can break DNS for VPN clients on cloud hosts (e.g. GCP's 169.254.169.254 metadata resolver isn't reachable through the tunnel).</p>
 		</div>
 		<div class="field">
 			<label for="ovi-public-ip">Public IP/hostname</label>

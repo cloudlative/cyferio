@@ -181,7 +181,7 @@ const _initialParams = new URLSearchParams(location.search);
 let currentFilter = _initialParams.get("online") === "1" ? "online"
 	: _initialParams.get("missing_mac") === "1" ? "missing_mac"
 	: "all";
-let lastClients = [], lastStatusByName = {}, lastPoliciesByName = {}, lastUsageByName = {}, lastUserLinksByName = {};
+let lastClients = [], lastStatusByName = {}, lastPoliciesByName = {}, lastUsageByName = {}, lastUserLinksByName = {}, lastSessionsByName = {};
 
 function applyFilterUI() {
 	document.querySelectorAll(".filter-chip").forEach(c => c.classList.toggle("active", c.dataset.filter === currentFilter));
@@ -190,7 +190,7 @@ function applyFilterUI() {
 async function loadClients() {
 	const el = document.getElementById("clients-table");
 	try {
-		const [clients, statusAll, policies, userLinks] = await Promise.all([
+		const [clients, statusAll, policies, userLinks, sessions] = await Promise.all([
 			apiFetch("/api/clients"),
 			apiFetch("/api/status/all"),
 			// Restriction badges + bandwidth usage are an admin-only feature
@@ -198,12 +198,21 @@ async function loadClients() {
 			// this fetch entirely rather than hitting a 403 on every page load.
 			isAdmin ? apiFetch("/api/clients/policies") : Promise.resolve({ policies: {}, usage: {} }),
 			apiFetch("/api/clients/user-links"),
+			// Live session data (Source IP, Connected Since, RX/TX) straight
+			// from OpenVPN's management interface -- distinct from statusAll
+			// above (vpn-status.py's own connected/all-clients view, sourced
+			// from the periodic status FILE). Used instead of statusAll's own
+			// source_ip for accuracy: see management_client.py's
+			// parse_source_ip() docstring for why vpn-status.py's equivalent
+			// field can't be trusted. View-scoped, so available to viewers too.
+			apiFetch("/api/clients/sessions"),
 		]);
 		lastClients = clients;
 		lastStatusByName = Object.fromEntries(statusAll.map(s => [s.name, s]));
 		lastPoliciesByName = policies.policies || {};
 		lastUsageByName = policies.usage || {};
 		lastUserLinksByName = userLinks || {};
+		lastSessionsByName = Object.fromEntries(sessions.map(s => [s.common_name, s]));
 		const onlineCount = clients.filter(c => lastStatusByName[c.name]?.status === "online").length;
 		document.getElementById("client-count").innerHTML =
 			`${clients.length} client${clients.length === 1 ? "" : "s"} — ` +
@@ -259,24 +268,39 @@ function renderClients() {
 		return;
 	}
 
-	el.innerHTML = `<table>
+	// Column order follows operational priority: identity/status first,
+	// then live-connection detail (where/what/since/how-long/how-much),
+	// then the slower-moving profile detail (restrictions/MACs/last-seen).
+	// Action buttons stay last, unchanged, exactly as before.
+	el.innerHTML = `<div class="table-scroll"><table>
 		<thead><tr>
-			<th>Name</th><th>Status</th><th>Portal User</th><th>In MAC DB</th><th>MAC Addresses</th><th>Last Seen</th><th>Restrictions</th>
+			<th>Name</th><th>Status</th><th>Portal User</th><th>Source IP</th><th>OS</th>
+			<th>Connected Since</th><th>Duration</th>
 			${isAdmin ? "<th>Bandwidth (this month)</th>" : ""}
+			<th>RX / TX</th><th>Restrictions</th><th>MAC Addresses</th><th>In MAC DB</th><th>Last Seen</th>
 			<th></th>${isAdmin ? "<th></th><th></th><th></th><th></th><th></th>" : ""}
 		</tr></thead>
 		<tbody>${filtered.map(({ c, s, online }) => {
 			const policy = lastPoliciesByName[c.name];
 			const linkedUser = lastUserLinksByName[c.name];
+			const session = lastSessionsByName[c.name];
+			const duration = session && session.connected_since_epoch != null
+				? fmtDuration((Date.now() / 1000) - session.connected_since_epoch)
+				: null;
 			return `<tr data-name="${escapeHtml(c.name)}" class="${online ? "row-online" : ""}">
 				<td>${escapeHtml(c.name)}</td>
 				<td><span class="status-pill status-${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span></td>
 				<td>${linkedUser ? escapeHtml(linkedUser.display_name || linkedUser.username) : '<span class="muted">-</span>'}</td>
-				<td>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</td>
-				<td><span class="count-badge">${c.mac_count ?? 0}</span></td>
-				<td>${escapeHtml(s ? s.last_seen : "—")}</td>
-				<td>${restrictionChipsHtml(policy) || '<span class="muted">—</span>'}</td>
+				<td class="mono">${session ? escapeHtml(session.source_ip) : '<span class="muted">—</span>'}</td>
+				<td>${escapeHtml(s && s.os && s.os !== "n/a" ? s.os : "—")}</td>
+				<td>${session ? escapeHtml(session.connected_since) : '<span class="muted">—</span>'}</td>
+				<td>${duration ? escapeHtml(duration) : '<span class="muted">—</span>'}</td>
 				${isAdmin ? `<td>${bandwidthUsageHtml(policy, lastUsageByName[c.name])}</td>` : ""}
+				<td class="mono">${session ? `${fmtBytes(session.bytes_received)} / ${fmtBytes(session.bytes_sent)}` : '<span class="muted">—</span>'}</td>
+				<td>${restrictionChipsHtml(policy) || '<span class="muted">—</span>'}</td>
+				<td><span class="count-badge">${c.mac_count ?? 0}</span></td>
+				<td>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</td>
+				<td>${escapeHtml(s ? s.last_seen : "—")}</td>
 				<td><button class="btn-secondary btn-sm macs-btn">${isAdmin ? "Manage MACs" : "View MACs"}</button></td>
 				${isAdmin ? `<td><button class="btn-secondary btn-sm policy-btn">Manage Restrictions</button></td>` : ""}
 				${isAdmin ? `<td><button class="btn-secondary btn-sm ovpn-btn">View / Copy .ovpn</button></td>` : ""}
@@ -285,7 +309,7 @@ function renderClients() {
 				${isAdmin ? `<td class="text-right"><button class="btn-danger btn-sm revoke-btn">Revoke</button></td>` : ""}
 			</tr>`;
 		}).join("")}</tbody>
-	</table>`;
+	</table></div>`;
 
 	el.querySelectorAll(".macs-btn").forEach(btn => {
 		btn.addEventListener("click", () => showMacs(btn.closest("tr").dataset.name));
@@ -309,60 +333,8 @@ function renderClients() {
 	}
 }
 
-const OS_LABELS = { windows: "Win", linux: "Linux", mac: "macOS" };
-
-// Current/Allocated/Remaining + a usage bar for one client's row -- "45GB /
-// 100GB" with app.js's shared usageBar() (same visual language as Health's
-// resource-usage bars). Clients with no quota configured show "Unlimited"
-// instead of a bar, since there's no denominator to show progress against.
-// Usage numbers reflect the last disconnect, not a live mid-session total
-// (same "not live" caveat as the Manage Restrictions dialog's usage note).
-function bandwidthUsageHtml(policy, usage) {
-	const quotaGb = policy && policy.bandwidth_monthly_gb;
-	if (!quotaGb) return '<span class="muted">Unlimited</span>';
-	const usedBytes = (usage && usage.bytes_used) || 0;
-	const quotaBytes = quotaGb * 1024 ** 3;
-	const pct = Math.round((usedBytes / quotaBytes) * 100);
-	return `<div style="display:flex;align-items:center;gap:8px">
-		<span class="mono" style="font-size:0.85rem;white-space:nowrap">${fmtBytes(usedBytes)} / ${quotaGb}GB</span>
-		${usageBar(pct)}
-	</div>`;
-}
-
-// Compact restriction-summary chips for one client's row in the All Clients
-// table -- only ever called for clients that actually have a policy (see
-// renderClients()), and only ever renders the chips for restrictions that
-// are actually set, so a client with none produces nothing.
-function restrictionChipsHtml(policy) {
-	if (!policy) return "";
-	const chips = [];
-	const countries = policy.allowed_countries || [];
-	if (countries.length) {
-		const label = countries.join("/");
-		chips.push(`<span class="restriction-chip chip-country" title="Restricted to: ${escapeHtml(countries.map(countryName).join(", "))}">${escapeHtml(label)}</span>`);
-	}
-	if (policy.allowed_os && policy.allowed_os.length) {
-		const label = policy.allowed_os.map(o => OS_LABELS[o] || o).join("/");
-		chips.push(`<span class="restriction-chip chip-os" title="Allowed OS: ${escapeHtml(label)}">${escapeHtml(label)} only</span>`);
-	}
-	if (policy.bandwidth_monthly_gb) {
-		chips.push(`<span class="restriction-chip chip-bw" title="Monthly bandwidth quota: ${policy.bandwidth_monthly_gb}GB">${policy.bandwidth_monthly_gb}GB/mo</span>`);
-	}
-	const cities = policy.allowed_cities || [];
-	if (cities.length) {
-		chips.push(`<span class="restriction-chip chip-city" title="Restricted to cities: ${escapeHtml(cities.join(", "))}">${cities.length} cit${cities.length === 1 ? "y" : "ies"}</span>`);
-	}
-	const asns = policy.allowed_asns || [];
-	if (asns.length) {
-		chips.push(`<span class="restriction-chip chip-asn" title="Restricted to networks: ${escapeHtml(asns.join(", "))}">${asns.length} network${asns.length === 1 ? "" : "s"}</span>`);
-	}
-	const ips = policy.allowed_ips || [];
-	if (ips.length) {
-		chips.push(`<span class="restriction-chip chip-ip" title="Restricted to IPs: ${escapeHtml(ips.join(", "))}">${ips.length} IP${ips.length === 1 ? "" : "s"}</span>`);
-	}
-	if (!chips.length) return "";
-	return `<div class="restriction-chips">${chips.join("")}</div>`;
-}
+// OS_LABELS, bandwidthUsageHtml(), restrictionChipsHtml() now live in
+// app.js (shared with dashboard.html's Connected Now table).
 
 // Live "This client will be restricted to: ..." summary sentence, used by
 // the Manage Restrictions dialog.

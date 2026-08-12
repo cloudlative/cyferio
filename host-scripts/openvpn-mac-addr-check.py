@@ -152,8 +152,22 @@ with open(log_file, 'a') as LogFile:
     LogFile.write("---------------------------------------\n")
 
     for name, value in os.environ.items():
+        # Both writers MUST use the identical "KEY: value" (colon, single
+        # space, no space before the colon) format -- vpn-status.py's
+        # iter_env_blocks() parses openvpn.log with a regex anchored on
+        # exactly that shape (see its ENV_LINE_RE / module docstring: "New
+        # rejection reasons are... parsed the same way as any other 'KEY:
+        # value' env line"). This LogFile.write() call previously wrote
+        # "KEY : value" (a stray space before the colon) -- silently
+        # unparseable by that regex, so every env var dumped to this file
+        # (IV_HWADDR, IV_PLAT, UV_PLAT_REL, etc.) was invisible to
+        # vpn-status.py even though it looked present when tailing the log
+        # by eye. Live via stdout->journal (print(), above) worked fine;
+        # only this file-based copy -- the one vpn-status.py actually reads
+        # (CONN_LOG) -- was broken, which is why the OS column has been
+        # showing "n/a" for connections logged before this fix.
         print("{0}: {1}".format(name, value))
-        LogFile.write(name + " : " + value + "\n")
+        LogFile.write(name + ": " + value + "\n")
 
     # 1) MAC-binding check -- unchanged from the original script's behavior
     # and exact message text (backward-compatible with existing log

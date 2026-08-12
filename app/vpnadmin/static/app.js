@@ -1258,6 +1258,65 @@ function usageBar(pct) {
 	return `<span class="usage-bar"><span class="usage-bar-fill ${level}" style="width:${Math.min(100, pct)}%"></span></span>`;
 }
 
+const OS_LABELS = { windows: "Win", linux: "Linux", mac: "macOS" };
+
+// Current/Allocated/Remaining + a usage bar for one client's row -- "45GB /
+// 100GB" with the shared usageBar() above (same visual language as Health's
+// resource-usage bars). Clients with no quota configured show "Unlimited"
+// instead of a bar, since there's no denominator to show progress against.
+// Usage numbers reflect the last disconnect, not a live mid-session total
+// (same "not live" caveat as the Manage Restrictions dialog's usage note).
+// Shared by clients.html (All Clients table) and dashboard.html (Connected
+// Now table) -- promoted here from clients.html so both can call it without
+// duplicating the same markup/logic.
+function bandwidthUsageHtml(policy, usage) {
+	const quotaGb = policy && policy.bandwidth_monthly_gb;
+	if (!quotaGb) return '<span class="muted">Unlimited</span>';
+	const usedBytes = (usage && usage.bytes_used) || 0;
+	const quotaBytes = quotaGb * 1024 ** 3;
+	const pct = Math.round((usedBytes / quotaBytes) * 100);
+	return `<div style="display:flex;align-items:center;gap:8px">
+		<span class="mono" style="font-size:0.85rem;white-space:nowrap">${fmtBytes(usedBytes)} / ${quotaGb}GB</span>
+		${usageBar(pct)}
+	</div>`;
+}
+
+// Compact restriction-summary chips for one client's row -- only ever
+// called for clients that actually have a policy, and only ever renders
+// the chips for restrictions that are actually set, so a client with none
+// produces nothing. Shared by clients.html and dashboard.html (see
+// bandwidthUsageHtml above for why this moved here).
+function restrictionChipsHtml(policy) {
+	if (!policy) return "";
+	const chips = [];
+	const countries = policy.allowed_countries || [];
+	if (countries.length) {
+		const label = countries.join("/");
+		chips.push(`<span class="restriction-chip chip-country" title="Restricted to: ${escapeHtml(countries.map(countryName).join(", "))}">${escapeHtml(label)}</span>`);
+	}
+	if (policy.allowed_os && policy.allowed_os.length) {
+		const label = policy.allowed_os.map(o => OS_LABELS[o] || o).join("/");
+		chips.push(`<span class="restriction-chip chip-os" title="Allowed OS: ${escapeHtml(label)}">${escapeHtml(label)} only</span>`);
+	}
+	if (policy.bandwidth_monthly_gb) {
+		chips.push(`<span class="restriction-chip chip-bw" title="Monthly bandwidth quota: ${policy.bandwidth_monthly_gb}GB">${policy.bandwidth_monthly_gb}GB/mo</span>`);
+	}
+	const cities = policy.allowed_cities || [];
+	if (cities.length) {
+		chips.push(`<span class="restriction-chip chip-city" title="Restricted to cities: ${escapeHtml(cities.join(", "))}">${cities.length} cit${cities.length === 1 ? "y" : "ies"}</span>`);
+	}
+	const asns = policy.allowed_asns || [];
+	if (asns.length) {
+		chips.push(`<span class="restriction-chip chip-asn" title="Restricted to networks: ${escapeHtml(asns.join(", "))}">${asns.length} network${asns.length === 1 ? "" : "s"}</span>`);
+	}
+	const ips = policy.allowed_ips || [];
+	if (ips.length) {
+		chips.push(`<span class="restriction-chip chip-ip" title="Restricted to IPs: ${escapeHtml(ips.join(", "))}">${ips.length} IP${ips.length === 1 ? "" : "s"}</span>`);
+	}
+	if (!chips.length) return "";
+	return `<div class="restriction-chips">${chips.join("")}</div>`;
+}
+
 function fmtDuration(totalSeconds) {
 	const seconds = Math.max(0, Math.trunc(Number(totalSeconds) || 0));
 	const d = Math.floor(seconds / 86400);
