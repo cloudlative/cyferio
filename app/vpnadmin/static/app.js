@@ -576,6 +576,111 @@ async function copyTextToClipboard(text, sourceEl) {
 	return copied;
 }
 
+// --- City/ASN cascading "pick a country, search its GeoIP-real values"
+// pickers -- shared by users.html's Login Restrictions panels AND
+// clients.html's Manage Restrictions dialog (both need identical City/ASN
+// pickers now that Location & Network Restrictions is a VPN-profile-level
+// concept too, not just a User one -- see policy_store.py's module
+// docstring). Originally lived only in users.html's own <script> block;
+// moved here once a second page needed the exact same widget rather than
+// a second, easily-drifting copy. See geo.py for how /api/geo/* is built
+// (an offline walk of the actual GeoLite2 databases, so nothing shown
+// here can ever be a value GeoIP could never return at connect/login
+// time).
+//
+// Lazy end to end -- NOTHING here fetches until the admin actually opens
+// this picker's dropdown, and the multiselect itself is in searchable
+// mode (capped, server-ranked results per keystroke) rather than ever
+// holding a whole country's list client-side. Both matter: some countries
+// have thousands of cities/ASNs (the US alone: ~11.7k cities, ~18.6k
+// ASNs) and "any country" ASN search spans ~78k entries.
+//
+// wireGeoPicker returns { onSearch } for the multiselect's searchable mode
+// -- doesn't touch the multiselect widget directly, since it doesn't exist
+// yet at the point this needs to be called (see createGeoPicker below: the
+// country <select>'s wiring and the multiselect's own onSearch both need
+// this same closure, but the multiselect needs onSearch to already exist
+// before it can be constructed).
+function wireGeoPicker({ countrySelectEl, kind, buildingEl }) {
+	// kind: "cities" or "asns". ASN's country select additionally carries
+	// a "" (any country) option already in the HTML -- searches every
+	// known network when no specific country is picked.
+	const countriesUrl = kind === "cities" ? "/api/geo/countries-with-cities" : "/api/geo/countries-with-asns";
+	const toOption = kind === "cities"
+		? (v) => ({ id: v, label: v })
+		: (v) => ({ id: v.asn, label: `${v.asn} — ${v.org}` });
+	let countriesLoaded = false;
+
+	async function loadCountriesOnce() {
+		if (countriesLoaded) return;
+		countriesLoaded = true;
+		try {
+			const [status, countries] = await Promise.all([
+				apiFetch("/api/geo/status"),
+				apiFetch(countriesUrl),
+			]);
+			const ready = kind === "cities" ? status.city_ready : status.asn_ready;
+			if (buildingEl) buildingEl.style.display = ready ? "none" : "";
+			const placeholderOpt = kind === "asns"
+				? '<option value="">Any country (search all networks)</option>'
+				: '<option value="">Select a country…</option>';
+			countrySelectEl.innerHTML = placeholderOpt + countries
+				.map(code => `<option value="${code}">${escapeHtml(_COUNTRY_NAME_BY_CODE[code] || code)} (${code})</option>`)
+				.join("");
+		} catch (e) {
+			countriesLoaded = false; // allow a retry next time the picker opens
+			toast(e.message, "error");
+		}
+	}
+
+	// Opening the country <select> itself is also a natural "the admin is
+	// about to use this picker" signal, so the country list loads then
+	// too, not just on the multiselect's own open -- whichever happens
+	// first.
+	countrySelectEl.addEventListener("mousedown", loadCountriesOnce, { once: true });
+
+	return async function onSearch(q) {
+		await loadCountriesOnce();
+		const country = countrySelectEl.value;
+		if (kind === "cities" && !country) {
+			return { results: [], total: 0 }; // no "any country" mode for cities -- see module comment above
+		}
+		const params = new URLSearchParams();
+		if (country) params.set("country", country);
+		if (q) params.set("q", q);
+		const { results, total } = await apiFetch(`/api/geo/${kind}?${params.toString()}`);
+		return { results: results.map(toOption), total };
+	};
+}
+
+function createGeoPicker({ mountEl, countrySelectEl, kind, buildingEl, pickerOpts }) {
+	const onSearch = wireGeoPicker({ countrySelectEl, kind, buildingEl });
+	const ms = createMultiselectDropdown(mountEl, { ...pickerOpts, searchable: true, onSearch });
+	// Re-searches with whatever's currently typed whenever the country
+	// changes -- this is the one piece that genuinely needs the real `ms`
+	// instance, so it's wired here, after ms exists, rather than inside
+	// wireGeoPicker.
+	countrySelectEl.addEventListener("change", () => ms.refresh());
+	return ms;
+}
+
+// Default { placeholder, unitLabel, emptyLabel, searchPlaceholder } sets
+// for createGeoPicker's `pickerOpts` -- shared verbatim between
+// users.html's two Login Restrictions panels (Add/Edit) and clients.html's
+// Manage Restrictions dialog, `idType: "string"` in both since city names
+// and "AS12345" values are never numeric ids.
+const CITY_PICKER_OPTS = { placeholder: "No cities selected", idType: "string", unitLabel: "cities", emptyLabel: "No matching cities -- pick a country above, or try a different search.", searchPlaceholder: "Pick a country, then search its cities…" };
+const ASN_PICKER_OPTS = { placeholder: "No networks selected", idType: "string", unitLabel: "networks", emptyLabel: "No matching networks -- try a different search.", searchPlaceholder: "Search by network/org name or AS number…" };
+
+// Splits a "one entry per line" restriction textarea (allowed IPs) into a
+// clean array -- blank lines and stray commas both tolerated. Shared by
+// users.html's and clients.html's restriction forms; server-side
+// validators (geo_validators.py's valid_ip_list) are the real check, this
+// just turns free text into an array before it's sent.
+function parseLineList(text) {
+	return text.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+}
+
 // Static ISO 3166-1 alpha-2 country list (code, English short name) --
 // used by the VPN Clients page's "Manage Restrictions" dialog to populate
 // a per-client country-restriction <select>. Self-contained, no runtime

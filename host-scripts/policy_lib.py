@@ -50,6 +50,15 @@ DEFAULTS = {
     "SESSION_HISTORY_FILE": "/etc/openvpn/server/policy/session_history.jsonl",
     "MAXMIND_LICENSE_KEY": "",
     "MAXMIND_DB_PATH": "/etc/openvpn/server/GeoLite2-Country.mmdb",
+    # City/ASN editions, added alongside country-only support for the
+    # Location & Network Restrictions VPN-profile sync (see
+    # client_policy.json's allowed_cities/allowed_asns) -- same directory
+    # and naming convention as the app container's own GEOIP_CITY_DB_PATH/
+    # GEOIP_ASN_DB_PATH (config.py), since both processes read the exact
+    # same bind-mounted /etc/openvpn/server/ files, just from two different
+    # runtime environments (this script runs on the host, unmounted).
+    "MAXMIND_CITY_DB_PATH": "/etc/openvpn/server/GeoLite2-City.mmdb",
+    "MAXMIND_ASN_DB_PATH": "/etc/openvpn/server/GeoLite2-ASN.mmdb",
     "DB_FILE": "/etc/openvpn/server/openvpn_db.txt",
     "CONN_LOG": "/etc/openvpn/server/openvpn.log",
 }
@@ -197,11 +206,28 @@ def atomic_write_json(path, data):
         raise
 
 
+def _normalize_policy_shape(entry):
+    """Mirrors the app-side policy_store.py's function of the same name
+    (kept in sync by hand, same reasoning as this whole module not being a
+    shared import across the Docker container and the OpenVPN host -- see
+    this file's own module docstring) -- lifts a pre-sync entry's single
+    `country` string onto the new allowed_countries list on read, without
+    rewriting the file (only the app's own set_policy() call, the next
+    time an admin touches this client's restrictions, persists the new
+    shape for real)."""
+    if not entry:
+        return entry
+    if "allowed_countries" not in entry and entry.get("country"):
+        entry = dict(entry)
+        entry["allowed_countries"] = [entry.pop("country")]
+    return entry
+
+
 def get_policy(name):
     """Returns the policy dict for one client ({} if unrestricted)."""
     with _locked(CLIENT_POLICY_FILE):
         all_policies = read_json(CLIENT_POLICY_FILE, {})
-    return all_policies.get(name, {}) or {}
+    return _normalize_policy_shape(all_policies.get(name, {}) or {})
 
 
 def current_month_start(today=None):
@@ -321,3 +347,81 @@ def geoip_lookup_country(ip, mmdb_path):
         return None, None
     except Exception:
         return None, "lookup_error"
+
+
+def geoip_lookup_city(ip, mmdb_path):
+    """City-edition counterpart to geoip_lookup_country -- same
+    (value_or_None, error_or_None) contract. Returns the city NAME (not a
+    code -- GeoLite2 has no stable city id), matching the exact strings
+    client_policy.json's allowed_cities holds (canonicalized by
+    geo_validators.valid_city_list on the app side at save time)."""
+    if not mmdb_path or not os.path.exists(mmdb_path):
+        return None, "mmdb_missing"
+    try:
+        import geoip2.database
+        import geoip2.errors
+    except ImportError:
+        return None, "geoip2_not_installed"
+    try:
+        with geoip2.database.Reader(mmdb_path) as reader:
+            resp = reader.city(ip)
+            name = resp.city.name
+            return (name.strip() if name else None), None
+    except geoip2.errors.AddressNotFoundError:
+        return None, None
+    except Exception:
+        return None, "lookup_error"
+
+
+def geoip_lookup_asn(ip, mmdb_path):
+    """ASN-edition counterpart to geoip_lookup_country -- same
+    (value_or_None, error_or_None) contract. Returns "AS<number>" (e.g.
+    "AS15169"), matching the exact format client_policy.json's
+    allowed_asns holds (geo_validators.valid_asn_list's normalized form)."""
+    if not mmdb_path or not os.path.exists(mmdb_path):
+        return None, "mmdb_missing"
+    try:
+        import geoip2.database
+        import geoip2.errors
+    except ImportError:
+        return None, "geoip2_not_installed"
+    try:
+        with geoip2.database.Reader(mmdb_path) as reader:
+            resp = reader.asn(ip)
+            number = resp.autonomous_system_number
+            return (f"AS{number}" if number is not None else None), None
+    except geoip2.errors.AddressNotFoundError:
+        return None, None
+    except Exception:
+        return None, "lookup_error"
+
+
+def ip_matches_allowlist(ip, allowed):
+    """Dual-stack (IPv4/IPv6) check of `ip` against a list of single IPs
+    and/or CIDR ranges -- mirrors the app-side client_ip.py's function of
+    the same name exactly (same reasoning as _normalize_policy_shape above
+    for why this is a hand-kept-in-sync duplicate rather than a shared
+    import: this script runs on the bare host, outside the app's Docker
+    image/dependencies). No geoip2 dependency needed -- pure stdlib
+    ipaddress, so this never fails on a missing mmdb the way the
+    country/city/ASN checks can. Returns False (not an error) for a
+    missing/unparseable `ip` -- an unverifiable connecting address can
+    never match an allowlist, so this is a fail-closed comparison, not a
+    fail-open one; the caller decides what to do with a False."""
+    import ipaddress
+    if not ip:
+        return False
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    for entry in allowed:
+        try:
+            if "/" in entry:
+                if addr in ipaddress.ip_network(entry, strict=False):
+                    return True
+            elif addr == ipaddress.ip_address(entry):
+                return True
+        except ValueError:
+            continue
+    return False

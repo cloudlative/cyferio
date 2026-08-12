@@ -15,6 +15,10 @@ from .. import vpn_identity_sync
 from ..audit import log_action
 from ..cli_wrapper import ScriptError
 from ..db import get_db
+from ..geo_validators import valid_asn_list as _valid_asn_list
+from ..geo_validators import valid_city_list as _valid_city_list
+from ..geo_validators import valid_country_list as _valid_country_list
+from ..geo_validators import valid_ip_list as _valid_ip_list
 from ..models import User, VpnProfileLink
 from ..permissions import require_permission, require_permission_any_scope
 from ..policy_store import PolicyValidationError
@@ -388,18 +392,48 @@ def restore_revoked_client(name: str, body: RestoreClientRequest, user: User = D
 class PolicyRequest(BaseModel):
     """Same partial-update-by-field-presence convention as Settings'
     UpdateSettingsRequest: a field omitted from the request body is left
-    untouched; an explicit null clears it. The "Manage Restrictions"
-    dialog always sends all three fields together (it always shows/edits
-    the full current state at once), but the API itself stays field-level
-    partial for consistency with the rest of this app.
+    untouched; an explicit null (or [] for the list fields) clears it. The
+    "Manage Restrictions" dialog always sends every field together (it
+    always shows/edits the full current state at once), but the API
+    itself stays field-level partial for consistency with the rest of
+    this app.
 
-    `country` is a per-client ISO 3166-1 alpha-2 code chosen independently
-    from a full country dropdown (see templates/clients.html) -- there is
-    no deployment-wide "the one restricted country" concept; every client
-    can be restricted to a different country, or none at all."""
-    country: str | None = None
+    allowed_countries/allowed_cities/allowed_asns/allowed_ips are
+    per-client lists chosen independently, same shape and validation
+    (geo_validators.py) as a portal User's own Login Restrictions
+    (routes/users.py's CreateUserRequest/UpdateUserRequest) -- there is no
+    deployment-wide "the one restricted country" concept; every client can
+    be restricted differently, or not at all. See policy_store.py's
+    module docstring for how a linked User's restrictions sync onto these
+    same fields automatically; this endpoint is the other way to set them
+    (unlinked clients, or a VPN-only restriction that intentionally
+    differs from the linked user's own login restrictions)."""
     allowed_os: list[str] | None = None
     bandwidth_monthly_gb: float | None = None
+    allowed_countries: list[str] | None = None
+    allowed_cities: list[str] | None = None
+    allowed_asns: list[str] | None = None
+    allowed_ips: list[str] | None = None
+
+    @field_validator("allowed_countries")
+    @classmethod
+    def _countries(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_country_list(v) if v is not None else v
+
+    @field_validator("allowed_cities")
+    @classmethod
+    def _cities(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_city_list(v) if v is not None else v
+
+    @field_validator("allowed_asns")
+    @classmethod
+    def _asns(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_asn_list(v) if v is not None else v
+
+    @field_validator("allowed_ips")
+    @classmethod
+    def _ips(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_ip_list(v) if v is not None else v
 
 
 @router.get("/policies")
@@ -434,20 +468,29 @@ def update_client_policy(name: str, body: PolicyRequest, user: User = Depends(_r
     try:
         result = policy_store.set_policy(
             name,
-            country=body.country if "country" in fields_set else ...,
             allowed_os=body.allowed_os if "allowed_os" in fields_set else ...,
             bandwidth_monthly_gb=body.bandwidth_monthly_gb if "bandwidth_monthly_gb" in fields_set else ...,
+            allowed_countries=body.allowed_countries if "allowed_countries" in fields_set else ...,
+            allowed_cities=body.allowed_cities if "allowed_cities" in fields_set else ...,
+            allowed_asns=body.allowed_asns if "allowed_asns" in fields_set else ...,
+            allowed_ips=body.allowed_ips if "allowed_ips" in fields_set else ...,
         )
     except PolicyValidationError as e:
         log_action(db, user, "update_client_policy", target=name, detail=str(e), success=False)
         raise HTTPException(status_code=400, detail=str(e))
 
     detail_bits = []
-    if "country" in fields_set:
-        detail_bits.append(f"country={body.country or 'ANY'}")
     if "allowed_os" in fields_set:
         detail_bits.append(f"allowed_os={','.join(body.allowed_os) if body.allowed_os else 'ANY'}")
     if "bandwidth_monthly_gb" in fields_set:
         detail_bits.append(f"bandwidth_monthly_gb={body.bandwidth_monthly_gb or 'ANY'}")
+    if "allowed_countries" in fields_set:
+        detail_bits.append(f"allowed_countries={','.join(body.allowed_countries) if body.allowed_countries else 'ANY'}")
+    if "allowed_cities" in fields_set:
+        detail_bits.append(f"allowed_cities={','.join(body.allowed_cities) if body.allowed_cities else 'ANY'}")
+    if "allowed_asns" in fields_set:
+        detail_bits.append(f"allowed_asns={','.join(body.allowed_asns) if body.allowed_asns else 'ANY'}")
+    if "allowed_ips" in fields_set:
+        detail_bits.append(f"allowed_ips={','.join(body.allowed_ips) if body.allowed_ips else 'ANY'}")
     log_action(db, user, "update_client_policy", target=name, detail="; ".join(detail_bits) or "no changes", success=True)
     return {"policy": result}

@@ -30,6 +30,7 @@ from contextlib import contextmanager
 from datetime import date
 
 from .config import settings
+from .geo_validators import valid_asn_list, valid_city_list, valid_country_list, valid_ip_list
 
 VALID_OS = {"windows", "linux", "mac"}
 
@@ -135,6 +136,26 @@ def _atomic_write_json(path: str, data: dict) -> None:
         raise
 
 
+def _normalize_policy_shape(entry: dict) -> dict:
+    """Backward-compat read-side migration: entries written before the
+    Location & Network Restrictions sync (single `country` string, no
+    city/ASN/IP fields at all) are lifted onto the new list-based shape
+    on every read, without rewriting the file -- the next set_policy()
+    call for that client persists the new shape for real. Doing this at
+    read time (once, here) rather than as a one-off migration script means
+    every consumer (this module's own callers, the Clients-page API,
+    host-scripts/policy_lib.py's own mirrored version of this same logic)
+    sees the new shape uniformly, and a client nobody has touched since
+    before this change keeps its restriction enforced in the meantime
+    instead of silently reading as unrestricted."""
+    if not entry:
+        return entry
+    if "allowed_countries" not in entry and entry.get("country"):
+        entry = dict(entry)
+        entry["allowed_countries"] = [entry.pop("country")]
+    return entry
+
+
 def get_policy(name: str) -> dict:
     """Returns the policy dict for one client ({} if unrestricted).
 
@@ -154,42 +175,55 @@ def get_policy(name: str) -> dict:
             all_policies = _read_json(settings.CLIENT_POLICY_FILE)
     except OSError:
         return {}
-    return all_policies.get(name, {}) or {}
+    return _normalize_policy_shape(all_policies.get(name, {}) or {})
 
 
 def get_all_policies() -> dict:
     try:
         with _locked(settings.CLIENT_POLICY_FILE):
-            return _read_json(settings.CLIENT_POLICY_FILE)
+            all_policies = _read_json(settings.CLIENT_POLICY_FILE)
     except OSError:
         return {}
+    return {name: _normalize_policy_shape(entry) for name, entry in all_policies.items()}
 
 
 class PolicyValidationError(ValueError):
     pass
 
 
-def set_policy(name: str, *, country: str | None | object = ..., allowed_os: list[str] | None | object = ...,
-               bandwidth_monthly_gb: float | None | object = ...) -> dict:
+def set_policy(name: str, *,
+               allowed_os: list[str] | None | object = ...,
+               bandwidth_monthly_gb: float | None | object = ...,
+               allowed_countries: list[str] | None | object = ...,
+               allowed_cities: list[str] | None | object = ...,
+               allowed_asns: list[str] | None | object = ...,
+               allowed_ips: list[str] | None | object = ...) -> dict:
     """Partial update of one client's policy -- any parameter left at its
-    `...` sentinel default is untouched; pass an explicit `None` to clear
-    that field. A resulting policy with no meaningful fields left removes
-    the client's entry entirely rather than leaving a stale `{}` row.
-    Returns the resulting (post-update) policy dict for this client.
+    `...` sentinel default is untouched; pass an explicit `None` (or `[]`
+    for the list fields) to clear that field. A resulting policy with no
+    meaningful fields left removes the client's entry entirely rather than
+    leaving a stale `{}` row. Returns the resulting (post-update) policy
+    dict for this client (already in the new, `_normalize_policy_shape`d
+    form -- a plain `country` key is never written by this function
+    anymore, only ever read for backward compat, see that function).
 
-    Validates inputs (country code shape, OS names, positive bandwidth) --
-    this is the only write path into client_policy.json from the web UI,
-    so it's the natural place for that, matching cli_wrapper's general
-    pattern of "the underlying tool validates its own inputs" even though
-    here "the underlying tool" is this module itself rather than a script.
+    Validates every input (country/city/ASN/IP list shape, OS names,
+    positive bandwidth) via geo_validators.py -- the exact same rules
+    User.allowed_login_* uses (routes/users.py), so a restriction that's
+    valid on one side is guaranteed valid on the other. This is the only
+    write path into client_policy.json from the web UI, so it's the
+    natural enforcement point, matching cli_wrapper's general pattern of
+    "the underlying tool validates its own inputs" even though here "the
+    underlying tool" is this module itself rather than a script.
+
+    allowed_countries/allowed_cities/allowed_asns/allowed_ips together
+    replace the VPN-connection half of what used to be called "Login
+    Restrictions" on the User side and, before this change, only a single
+    `country` string here -- see docs/rbac_identity_design.md and
+    routes/users.py's create_user/update_user for how a User's own
+    restrictions now sync onto these same four fields for its linked VPN
+    profile.
     """
-    if country is not ...:
-        if country is not None:
-            country = country.strip().upper()
-            if len(country) != 2 or not country.isalpha():
-                raise PolicyValidationError(
-                    f"Invalid country code: '{country}' -- expected an ISO 3166-1 alpha-2 code (e.g. PK)."
-                )
     if allowed_os is not ...:
         if allowed_os is not None:
             allowed_os = sorted({o.strip().lower() for o in allowed_os if o.strip()})
@@ -210,16 +244,31 @@ def set_policy(name: str, *, country: str | None | object = ..., allowed_os: lis
                 raise PolicyValidationError(
                     "Bandwidth quota must be at least 0.1 GB (100 MB) -- leave blank to clear it."
                 )
+    if allowed_countries is not ... and allowed_countries is not None:
+        try:
+            allowed_countries = valid_country_list(allowed_countries) or None
+        except ValueError as e:
+            raise PolicyValidationError(str(e))
+    if allowed_cities is not ... and allowed_cities is not None:
+        try:
+            allowed_cities = valid_city_list(allowed_cities) or None
+        except ValueError as e:
+            raise PolicyValidationError(str(e))
+    if allowed_asns is not ... and allowed_asns is not None:
+        try:
+            allowed_asns = valid_asn_list(allowed_asns) or None
+        except ValueError as e:
+            raise PolicyValidationError(str(e))
+    if allowed_ips is not ... and allowed_ips is not None:
+        try:
+            allowed_ips = valid_ip_list(allowed_ips) or None
+        except ValueError as e:
+            raise PolicyValidationError(str(e))
 
     with _locked(settings.CLIENT_POLICY_FILE):
         all_policies = _read_json(settings.CLIENT_POLICY_FILE)
-        entry = dict(all_policies.get(name) or {})
+        entry = _normalize_policy_shape(dict(all_policies.get(name) or {}))
 
-        if country is not ...:
-            if country is None:
-                entry.pop("country", None)
-            else:
-                entry["country"] = country
         if allowed_os is not ...:
             if allowed_os is None:
                 entry.pop("allowed_os", None)
@@ -230,6 +279,31 @@ def set_policy(name: str, *, country: str | None | object = ..., allowed_os: lis
                 entry.pop("bandwidth_monthly_gb", None)
             else:
                 entry["bandwidth_monthly_gb"] = bandwidth_monthly_gb
+        if allowed_countries is not ...:
+            if allowed_countries is None:
+                entry.pop("allowed_countries", None)
+            else:
+                entry["allowed_countries"] = allowed_countries
+        if allowed_cities is not ...:
+            if allowed_cities is None:
+                entry.pop("allowed_cities", None)
+            else:
+                entry["allowed_cities"] = allowed_cities
+        if allowed_asns is not ...:
+            if allowed_asns is None:
+                entry.pop("allowed_asns", None)
+            else:
+                entry["allowed_asns"] = allowed_asns
+        if allowed_ips is not ...:
+            if allowed_ips is None:
+                entry.pop("allowed_ips", None)
+            else:
+                entry["allowed_ips"] = allowed_ips
+        # Legacy singular key never persists past a write, even if this
+        # particular call didn't touch country-restriction fields at all --
+        # _normalize_policy_shape above already lifted it onto
+        # allowed_countries in `entry` before any of the branches ran.
+        entry.pop("country", None)
 
         if entry:
             all_policies[name] = entry

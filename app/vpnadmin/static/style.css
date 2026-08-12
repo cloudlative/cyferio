@@ -967,6 +967,10 @@ dialog { border: none; border-radius: var(--radius-lg); box-shadow: var(--shadow
    its own columns to actually use the extra room. */
 #edit-dialog { max-width: 920px; width: 94%; }
 #edit-dialog .form-grid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+/* Manage Restrictions (clients.html) grew a Location & Network
+   Restrictions section with the same City/ASN geo-picker-row fields as
+   Edit User -- same widening rationale as #edit-dialog above. */
+#policy-dialog { max-width: 780px; width: 94%; }
 dialog::backdrop { background: rgba(8, 10, 16, 0.72); backdrop-filter: blur(2px); }
 dialog .dialog-body { padding: 28px; }
 dialog .dialog-body h2 { background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; display: inline-block; }

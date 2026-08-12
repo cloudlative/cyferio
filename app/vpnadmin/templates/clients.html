@@ -72,24 +72,56 @@
 	<div class="dialog-body">
 		<h2 id="policy-dialog-title">Manage Restrictions</h2>
 		<form id="policy-form">
-			<div class="field">
-				<label>Restrict Country <span class="muted">(GeoIP on the client's connecting IP; blank = any country)</span></label>
-				<div id="policy-country-ms"></div>
-			</div>
-			<div class="field">
-				<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
-				<div class="checkbox-row">
-					<label class="checkbox-label"><input type="checkbox" class="policy-os-check" value="windows"> Windows</label>
-					<label class="checkbox-label"><input type="checkbox" class="policy-os-check" value="linux"> Linux</label>
-					<label class="checkbox-label"><input type="checkbox" class="policy-os-check" value="mac"> macOS</label>
+			<fieldset>
+				<legend>Device &amp; Access Policy</legend>
+				<div class="field-stack">
+					<div class="field">
+						<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
+						<div class="checkbox-row">
+							<label class="checkbox-label"><input type="checkbox" class="policy-os-check" value="windows"> Windows</label>
+							<label class="checkbox-label"><input type="checkbox" class="policy-os-check" value="linux"> Linux</label>
+							<label class="checkbox-label"><input type="checkbox" class="policy-os-check" value="mac"> macOS</label>
+						</div>
+						<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Leaving all three unchecked means <strong>no restriction</strong> (any OS can connect) -- it does NOT block every OS.</p>
+					</div>
+					<div class="field">
+						<label for="policy-bandwidth">Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited, decimals allowed, min 0.1)</span></label>
+						<input type="text" id="policy-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)" style="max-width:280px">
+						<p class="muted" style="margin:6px 0 0;font-size:0.82rem" id="policy-usage-note"></p>
+					</div>
 				</div>
-				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Leaving all three unchecked means <strong>no restriction</strong> (any OS can connect) -- it does NOT block every OS.</p>
-			</div>
-			<div class="field">
-				<label for="policy-bandwidth">Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited, decimals allowed, min 0.1)</span></label>
-				<input type="text" id="policy-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)">
-				<p class="muted" style="margin:6px 0 0;font-size:0.82rem" id="policy-usage-note"></p>
-			</div>
+			</fieldset>
+			<fieldset>
+				<legend>Location &amp; Network Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the client's connecting IP at each connection attempt -- MaxMind-based, so these are approximate, not exact-location guarantees. Mirrors the same restriction types available on a linked portal user's own Login Restrictions (Edit User).</p>
+				<div class="field-stack">
+					<div class="field">
+						<label>Restrict by country <span class="muted">(blank = any country)</span></label>
+						<div id="policy-country-ms"></div>
+					</div>
+					<div class="field">
+						<label>Restrict by city <span class="muted">(blank = any city)</span></label>
+						<p class="field-hint" id="policy-cities-building" style="display:none">City list is still building -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="policy-city-country"><option value="">Loading countries…</option></select>
+							<div id="policy-cities-ms"></div>
+						</div>
+					</div>
+					<div class="field">
+						<label>Restrict by network (ASN) <span class="muted">(blank = any network)</span></label>
+						<p class="field-hint" id="policy-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="policy-asn-country"><option value="">Any country (search all networks)</option></select>
+							<div id="policy-asns-ms"></div>
+						</div>
+					</div>
+					<div class="field">
+						<label for="policy-allowed-ips">Restrict by IP address <span class="muted">(blank = any IP)</span></label>
+						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
+						<textarea id="policy-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
+					</div>
+				</div>
+			</fieldset>
 			<p class="muted restrictions-summary" id="policy-restrictions-summary"></p>
 			<p class="muted" style="font-size:0.82rem">
 				Restrictions are checked when a client connects (soft cutoff for bandwidth -- an already-connected session is never
@@ -268,8 +300,10 @@ function bandwidthUsageHtml(policy, usage) {
 function restrictionChipsHtml(policy) {
 	if (!policy) return "";
 	const chips = [];
-	if (policy.country) {
-		chips.push(`<span class="restriction-chip chip-country" title="Restricted to ${escapeHtml(countryName(policy.country))}">${escapeHtml(policy.country)}</span>`);
+	const countries = policy.allowed_countries || [];
+	if (countries.length) {
+		const label = countries.join("/");
+		chips.push(`<span class="restriction-chip chip-country" title="Restricted to: ${escapeHtml(countries.map(countryName).join(", "))}">${escapeHtml(label)}</span>`);
 	}
 	if (policy.allowed_os && policy.allowed_os.length) {
 		const label = policy.allowed_os.map(o => OS_LABELS[o] || o).join("/");
@@ -278,17 +312,30 @@ function restrictionChipsHtml(policy) {
 	if (policy.bandwidth_monthly_gb) {
 		chips.push(`<span class="restriction-chip chip-bw" title="Monthly bandwidth quota: ${policy.bandwidth_monthly_gb}GB">${policy.bandwidth_monthly_gb}GB/mo</span>`);
 	}
+	const cities = policy.allowed_cities || [];
+	if (cities.length) {
+		chips.push(`<span class="restriction-chip chip-city" title="Restricted to cities: ${escapeHtml(cities.join(", "))}">${cities.length} cit${cities.length === 1 ? "y" : "ies"}</span>`);
+	}
+	const asns = policy.allowed_asns || [];
+	if (asns.length) {
+		chips.push(`<span class="restriction-chip chip-asn" title="Restricted to networks: ${escapeHtml(asns.join(", "))}">${asns.length} network${asns.length === 1 ? "" : "s"}</span>`);
+	}
+	const ips = policy.allowed_ips || [];
+	if (ips.length) {
+		chips.push(`<span class="restriction-chip chip-ip" title="Restricted to IPs: ${escapeHtml(ips.join(", "))}">${ips.length} IP${ips.length === 1 ? "" : "s"}</span>`);
+	}
 	if (!chips.length) return "";
 	return `<div class="restriction-chips">${chips.join("")}</div>`;
 }
 
 // Live "This client will be restricted to: ..." summary sentence, used by
-// the Manage Restrictions dialog -- pass the current country code (or
-// null) and the other two field elements in, get back the same
-// human-readable sentence.
-function restrictionsSummaryText(countryCode, osChecks, bandwidthEl) {
+// the Manage Restrictions dialog.
+function restrictionsSummaryText({ countries, cities, asns, ips, osChecks, bandwidthEl }) {
 	const bits = [];
-	if (countryCode) bits.push(countryName(countryCode));
+	if (countries && countries.length) bits.push(countries.map(countryName).join("/"));
+	if (cities && cities.length) bits.push(`${cities.length} cit${cities.length === 1 ? "y" : "ies"}`);
+	if (asns && asns.length) bits.push(`${asns.length} network${asns.length === 1 ? "" : "s"}`);
+	if (ips && ips.length) bits.push(`${ips.length} IP${ips.length === 1 ? "" : "s"}`);
 	const osVals = [...osChecks].filter(cb => cb.checked).map(cb => cb.value);
 	if (osVals.length) bits.push(osVals.map(o => OS_LABELS[o] || o).join("/"));
 	const bw = bandwidthEl.value.trim();
@@ -499,12 +546,28 @@ if (isAdmin) {
 		return i === 0 ? `${Math.round(v)}${units[i]}` : `${v.toFixed(1)}${units[i]}`;
 	}
 
+	// Restrict by country -- multi-select now (was single: true, one
+	// country max) to match the exact same restriction shape a linked
+	// portal user's own Login Restrictions offers (User.allowed_login_countries)
+	// -- see policy_store.py's allowed_countries.
 	const policyCountryMs = createMultiselectDropdown(document.getElementById("policy-country-ms"), {
-		placeholder: "Any country (unrestricted)", idType: "string", single: true, localFilter: true,
-		emptyLabel: "No countries found.", unitLabel: "country", searchPlaceholder: "Type to search countries…",
+		placeholder: "Any country (unrestricted)", idType: "string", localFilter: true,
+		emptyLabel: "No countries found.", unitLabel: "countries", searchPlaceholder: "Type to search countries…",
 	});
 	policyCountryMs.setOptions(clientCountryOptions);
 	const policyBandwidthValidation = attachInlineValidation(document.getElementById("policy-bandwidth"), bandwidthError);
+
+	// City/ASN pickers -- same createGeoPicker widget (app.js) users.html's
+	// Login Restrictions panels use, just mounted on this dialog's own
+	// elements.
+	const policyCitiesMs = createGeoPicker({
+		mountEl: document.getElementById("policy-cities-ms"), countrySelectEl: document.getElementById("policy-city-country"),
+		kind: "cities", buildingEl: document.getElementById("policy-cities-building"), pickerOpts: CITY_PICKER_OPTS,
+	});
+	const policyAsnsMs = createGeoPicker({
+		mountEl: document.getElementById("policy-asns-ms"), countrySelectEl: document.getElementById("policy-asn-country"),
+		kind: "asns", buildingEl: document.getElementById("policy-asns-building"), pickerOpts: ASN_PICKER_OPTS,
+	});
 
 	let policyClientName = null;
 	async function openPolicyDialog(name) {
@@ -516,7 +579,10 @@ if (isAdmin) {
 		dlg.showModal();
 		try {
 			const data = await apiFetch(`/api/clients/${encodeURIComponent(name)}/policy`);
-			policyCountryMs.setSelected(data.policy.country ? [data.policy.country] : []);
+			policyCountryMs.setSelected(data.policy.allowed_countries || []);
+			policyCitiesMs.setSelected(data.policy.allowed_cities || []);
+			policyAsnsMs.setSelected(data.policy.allowed_asns || []);
+			document.getElementById("policy-allowed-ips").value = (data.policy.allowed_ips || []).join("\n");
 			const allowedOs = data.policy.allowed_os || [];
 			document.querySelectorAll(".policy-os-check").forEach(cb => { cb.checked = allowedOs.includes(cb.value); });
 			document.getElementById("policy-bandwidth").value = data.policy.bandwidth_monthly_gb ?? "";
@@ -536,15 +602,21 @@ if (isAdmin) {
 	window.openPolicyDialog = openPolicyDialog;
 
 	function updatePolicyDialogSummary() {
-		document.getElementById("policy-restrictions-summary").innerHTML = restrictionsSummaryText(
-			policyCountryMs.getSelected()[0] || null,
-			document.querySelectorAll(".policy-os-check"),
-			document.getElementById("policy-bandwidth"),
-		);
+		document.getElementById("policy-restrictions-summary").innerHTML = restrictionsSummaryText({
+			countries: policyCountryMs.getSelected(),
+			cities: policyCitiesMs.getSelected(),
+			asns: policyAsnsMs.getSelected(),
+			ips: parseLineList(document.getElementById("policy-allowed-ips").value),
+			osChecks: document.querySelectorAll(".policy-os-check"),
+			bandwidthEl: document.getElementById("policy-bandwidth"),
+		});
 	}
 	// "change" bubbles up from the multiselect's internal checkboxes to its
 	// mount div, same as any native form control -- no special event needed.
 	document.getElementById("policy-country-ms").addEventListener("change", updatePolicyDialogSummary);
+	document.getElementById("policy-cities-ms").addEventListener("change", updatePolicyDialogSummary);
+	document.getElementById("policy-asns-ms").addEventListener("change", updatePolicyDialogSummary);
+	document.getElementById("policy-allowed-ips").addEventListener("input", updatePolicyDialogSummary);
 	document.querySelectorAll(".policy-os-check").forEach(cb => cb.addEventListener("change", updatePolicyDialogSummary));
 	document.getElementById("policy-bandwidth").addEventListener("input", updatePolicyDialogSummary);
 
@@ -555,7 +627,6 @@ if (isAdmin) {
 			toast("Please fix the highlighted field before saving.", "error");
 			return;
 		}
-		const countryCode = policyCountryMs.getSelected()[0] || null;
 		const allowedOs = [...document.querySelectorAll(".policy-os-check:checked")].map(cb => cb.value);
 		const bwRaw = document.getElementById("policy-bandwidth").value.trim();
 		const submitBtn = document.getElementById("policy-submit");
@@ -564,9 +635,12 @@ if (isAdmin) {
 			await apiFetch(`/api/clients/${encodeURIComponent(policyClientName)}/policy`, {
 				method: "PUT",
 				body: {
-					country: countryCode,
 					allowed_os: allowedOs,
 					bandwidth_monthly_gb: bwRaw ? Number(bwRaw) : null,
+					allowed_countries: policyCountryMs.getSelected(),
+					allowed_cities: policyCitiesMs.getSelected(),
+					allowed_asns: policyAsnsMs.getSelected(),
+					allowed_ips: parseLineList(document.getElementById("policy-allowed-ips").value),
 				},
 			});
 			document.getElementById("policy-dialog").close();

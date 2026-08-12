@@ -1,4 +1,3 @@
-import ipaddress
 import json
 import re
 from datetime import datetime, timezone
@@ -16,6 +15,10 @@ from ..audit import log_action
 from ..auth import hash_password, require_user, verify_password
 from ..cli_wrapper import ScriptError
 from ..db import get_db
+from ..geo_validators import valid_asn_list as _valid_asn_list
+from ..geo_validators import valid_city_list as _valid_city_list
+from ..geo_validators import valid_country_list as _valid_country_list
+from ..geo_validators import valid_ip_list as _valid_ip_list
 from ..models import Gender, Role, RoleDef, Team, User, VpnProfileLink
 from ..permissions import require_permission
 from ..policy_store import PolicyValidationError
@@ -201,98 +204,12 @@ def _valid_phone(v: str | None) -> str | None:
     )
 
 
-def _valid_country_list(v: list[str]) -> list[str]:
-    """Same lightweight "2-letter alpha shape" check as policy_store.py's
-    client-country validator -- not a fixed enum against a real ISO list,
-    for the same reason: less to maintain, and this app's own country
-    dropdown (app.js's ISO_3166_COUNTRIES) is already the real source of
-    truth for what a human picks from in the UI. Normalizes to uppercase
-    and dedupes, preserving first-seen order."""
-    seen = []
-    for code in v:
-        code = (code or "").strip().upper()
-        if not code:
-            continue
-        if len(code) != 2 or not code.isalpha():
-            raise ValueError(f"Invalid country code: '{code}' -- expected an ISO 3166-1 alpha-2 code (e.g. PK).")
-        if code not in seen:
-            seen.append(code)
-    return seen
-
-
-def _valid_ip_list(v: list[str]) -> list[str]:
-    """Each entry is either a single IP address or a CIDR range, dual-stack
-    (IPv4/IPv6) -- see client_ip.py's ip_matches_allowlist, the runtime
-    counterpart that checks a login attempt's IP against exactly this
-    list. Normalizes each entry to str(ipaddress...) form (consistent
-    formatting regardless of how the admin typed it, e.g. leading zeros)
-    and dedupes, preserving first-seen order."""
-    seen = []
-    for entry in v:
-        entry = (entry or "").strip()
-        if not entry:
-            continue
-        try:
-            normalized = str(ipaddress.ip_network(entry, strict=False)) if "/" in entry else str(ipaddress.ip_address(entry))
-        except ValueError:
-            raise ValueError(f"'{entry}' isn't a valid IP address or CIDR range (e.g. 203.0.113.5 or 10.0.0.0/24).")
-        if normalized not in seen:
-            seen.append(normalized)
-    return seen
-
-
-def _valid_city_list(v: list[str]) -> list[str]:
-    """Each entry must be a real city name from geo_lists.py's City
-    pick-list -- picker-only, no free text (see users.html's cascading
-    country -> city selector): a hand-typed name GeoIP could never
-    actually return at login time would create a restriction that can
-    never be satisfied, i.e. a silent, permanent lockout for that
-    restriction type. Canonicalizes to the exact casing MaxMind uses and
-    dedupes case-insensitively. If the city index hasn't finished its
-    first build yet (fresh install / just-replaced mmdb, see geo_lists.py
-    for the rebuild window), city_exists() returns None and this falls
-    back to a shape-only check instead of blocking admins entirely during
-    that window."""
-    seen_lower = set()
-    result = []
-    for name in v:
-        name = (name or "").strip()
-        if not name:
-            continue
-        exists = geo_lists.city_exists(name)
-        if exists is False:
-            raise ValueError(f"'{name}' isn't a known city in the GeoIP database -- pick one from the list.")
-        canonical = geo_lists.canonical_city(name) if exists else name
-        if len(canonical) > 100:
-            raise ValueError(f"City name too long (max 100 characters): '{canonical[:40]}...'")
-        key = canonical.lower()
-        if key not in seen_lower:
-            seen_lower.add(key)
-            result.append(canonical)
-    return result
-
-
-def _valid_asn_list(v: list[str]) -> list[str]:
-    """Each entry must be a real ASN from geo_lists.py's ASN pick-list --
-    same picker-only rationale as _valid_city_list. Normalizes shape
-    ("15169" or "as15169" -> "AS15169") first, then checks membership;
-    same not-yet-built fallback as _valid_city_list via asn_exists()
-    returning None."""
-    seen = []
-    for entry in v:
-        entry = (entry or "").strip().upper()
-        if not entry:
-            continue
-        digits = entry[2:] if entry.startswith("AS") else entry
-        if not digits.isdigit():
-            raise ValueError(f"'{entry}' isn't a valid AS number -- expected e.g. AS15169 or 15169.")
-        normalized = f"AS{int(digits)}"
-        exists = geo_lists.asn_exists(normalized)
-        if exists is False:
-            raise ValueError(f"'{normalized}' isn't a known network in the GeoIP database -- pick one from the list.")
-        if normalized not in seen:
-            seen.append(normalized)
-    return seen
+# _valid_country_list/_valid_city_list/_valid_asn_list/_valid_ip_list used
+# to live here as free functions; they now live in geo_validators.py
+# (imported near the top of this file under their original _valid_* names,
+# so every call site below is unchanged) since policy_store.py needs the
+# exact same rules for the Clients page's Manage Restrictions dialog --
+# see geo_validators.py's module docstring.
 
 
 # Mirrors policy_store.set_policy's own validation (that module is the
@@ -814,11 +731,26 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     # wins, same "most specific setting wins" precedence as every other
     # env-var/DB-row-default pair in this app (see app_settings.py).
     effective_bandwidth = body.bandwidth_monthly_gb if body.bandwidth_monthly_gb is not None else app_settings.runtime.default_bandwidth_monthly_gb
+    # Location & Network Restrictions sync: the toggle+list pairs on User
+    # (restrict_login_by_country + allowed_login_countries, etc.) collapse
+    # onto policy_store's plain "list, empty/None = unrestricted" shape here
+    # -- a restriction toggle left off means "sync nothing for this kind",
+    # same as an admin never having touched that Login Restrictions field
+    # at all. See policy_store.set_policy's docstring for the shared
+    # geo_validators.py rules this data has already passed once, at the
+    # CreateUserRequest field-validator level, above.
     policy = {}
-    if body.allowed_os or effective_bandwidth:
+    if body.allowed_os or effective_bandwidth or body.restrict_login_by_country or body.restrict_login_by_city \
+            or body.restrict_login_by_asn or body.restrict_login_by_ip:
         try:
             policy = policy_store.set_policy(
-                body.username, allowed_os=body.allowed_os or None, bandwidth_monthly_gb=effective_bandwidth,
+                body.username,
+                allowed_os=body.allowed_os or None,
+                bandwidth_monthly_gb=effective_bandwidth,
+                allowed_countries=body.allowed_login_countries if body.restrict_login_by_country else None,
+                allowed_cities=body.allowed_login_cities if body.restrict_login_by_city else None,
+                allowed_asns=body.allowed_login_asns if body.restrict_login_by_asn else None,
+                allowed_ips=body.allowed_login_ips if body.restrict_login_by_ip else None,
             )
         except (PolicyValidationError, OSError) as e:
             log_action(db, admin, "create_user", target=body.username,
@@ -973,17 +905,40 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     # Sync VPN-profile-level restrictions onto the linked client's policy --
     # a no-op if this user has no linked profile yet (the rare
     # cert-created-but-DB-failed edge case; there's nothing to sync onto
-    # until an admin attaches one via the vpn-link endpoint below). Only
-    # touches fields actually present in this PATCH, same partial-update
-    # convention as everything else in this endpoint.
+    # until an admin attaches one via the vpn-link endpoint below).
+    #
+    # Location & Network Restrictions (country/city/ASN/IP) are read from
+    # `target` -- already committed above -- rather than from `body`,
+    # because each is a toggle+list PAIR (restrict_login_by_country +
+    # allowed_login_countries) and this PATCH can touch just one half of a
+    # pair (e.g. only the toggle) while leaving the other at whatever it
+    # already was; `target` always reflects the correct POST-MERGE
+    # combination of both, `body` alone would not. allowed_os/
+    # bandwidth_monthly_gb stay body-driven (unchanged from before this
+    # sync) since those have no such toggle -- "field present in this PATCH
+    # at all" is already the right signal for them.
+    restriction_fields_touched = bool(
+        {"restrict_login_by_country", "allowed_login_countries", "restrict_login_by_city", "allowed_login_cities",
+         "restrict_login_by_asn", "allowed_login_asns", "restrict_login_by_ip", "allowed_login_ips"}
+        & body.model_fields_set
+    )
     client_name = target.vpn_profile_link.vpn_client_name if target.vpn_profile_link else None
     policy = policy_store.get_policy(client_name) if client_name else {}
-    if client_name and ("allowed_os" in body.model_fields_set or "bandwidth_monthly_gb" in body.model_fields_set):
+    if client_name and ("allowed_os" in body.model_fields_set or "bandwidth_monthly_gb" in body.model_fields_set
+                         or restriction_fields_touched):
         try:
             policy = policy_store.set_policy(
                 client_name,
                 allowed_os=body.allowed_os if "allowed_os" in body.model_fields_set else ...,
                 bandwidth_monthly_gb=body.bandwidth_monthly_gb if "bandwidth_monthly_gb" in body.model_fields_set else ...,
+                allowed_countries=(json.loads(target.allowed_login_countries or "[]") if target.restrict_login_by_country else None)
+                    if restriction_fields_touched else ...,
+                allowed_cities=(json.loads(target.allowed_login_cities or "[]") if target.restrict_login_by_city else None)
+                    if restriction_fields_touched else ...,
+                allowed_asns=(json.loads(target.allowed_login_asns or "[]") if target.restrict_login_by_asn else None)
+                    if restriction_fields_touched else ...,
+                allowed_ips=(json.loads(target.allowed_login_ips or "[]") if target.restrict_login_by_ip else None)
+                    if restriction_fields_touched else ...,
             )
             log_action(db, admin, "update_user", target=target.username, detail="synced VPN profile restrictions")
         except (PolicyValidationError, OSError) as e:
@@ -1027,7 +982,27 @@ def link_vpn_profile(user_id: int, body: VpnLinkRequest, admin: User = Depends(r
         db.rollback()
         raise HTTPException(status_code=409, detail=f"'{name}' was just linked to another user -- pick a different profile.")
     log_action(db, admin, "link_vpn_profile", target=target.username, detail=name)
-    return _serialize(target)
+
+    # Push this user's already-configured Device & Access Policy / Location
+    # & Network Restrictions onto the profile it's just been attached to --
+    # same "the User side is the sync source" direction as create_user/
+    # update_user above. This profile may have been sitting unassigned with
+    # its own (possibly different, possibly none) restrictions from before
+    # the link -- the user's settings win, since they're what an admin was
+    # just looking at when they chose to attach this profile.
+    policy = {}
+    try:
+        policy = policy_store.set_policy(
+            name,
+            allowed_countries=json.loads(target.allowed_login_countries or "[]") if target.restrict_login_by_country else None,
+            allowed_cities=json.loads(target.allowed_login_cities or "[]") if target.restrict_login_by_city else None,
+            allowed_asns=json.loads(target.allowed_login_asns or "[]") if target.restrict_login_by_asn else None,
+            allowed_ips=json.loads(target.allowed_login_ips or "[]") if target.restrict_login_by_ip else None,
+        )
+    except (PolicyValidationError, OSError) as e:
+        log_action(db, admin, "link_vpn_profile", target=target.username,
+                   detail=f"VPN profile restrictions could not be synced: {e}", success=False)
+    return _serialize(target, {name: policy})
 
 
 @router.delete("/{user_id}")

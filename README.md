@@ -122,15 +122,18 @@ Notably, **where generated `.ovpn` files get delivered is auto-detected**, not h
 
 `openvpn-install.sh --add-user` registers each client as a `name=mac` line in `openvpn_db.txt`. A `client-connect` script (`openvpn-mac-addr-check.py`, already wired into `server.conf`) checks the connecting certificate's CN against the device's MAC address (via `IV_HWADDR`, which requires `push-peer-info` — already set in every generated `.ovpn`) on every connection attempt, and rejects anything that doesn't match. This adds a device-binding layer on top of normal certificate authentication: a stolen/copied `.ovpn` file alone isn't enough to connect from an unregistered device.
 
-## Per-client restrictions (country / OS / bandwidth quota)
+## Per-client restrictions (country / city / ASN / IP / OS / bandwidth quota)
 
 On top of the MAC-binding check above, each client can optionally be restricted by:
 
-- **Country** — a per-client dropdown of ISO 3166-1 countries (or "Unrestricted"); each client can be restricted to a *different* country independently, verified via GeoIP against the connecting IP.
+- **Allowed countries** — one or more ISO 3166-1 countries (or "Unrestricted"); verified via GeoIP against the connecting IP.
+- **Allowed cities** — one or more city names, verified via GeoIP (GeoLite2-City).
+- **Allowed networks (ASN)** — one or more autonomous system numbers, verified via GeoIP (GeoLite2-ASN) — identifies the connecting ISP/network rather than a physical location.
+- **Allowed IP addresses** — one or more single IPs or CIDR ranges, checked directly against the connecting IP (no GeoIP database needed for this one).
 - **Allowed device OS** — a subset of `windows` / `linux` / `mac` (matched against OpenVPN's own `IV_PLAT`). **Leaving this empty means unrestricted (any OS allowed) — it does NOT mean "block everything."**
-- **Weekly bandwidth quota** — a soft cutoff in GB, checked only at connection time. A session that goes over quota mid-connection is **not** killed; it's simply not allowed to *reconnect* once the week's quota is used up. Resets every Monday 00:00 server-local time.
+- **Monthly bandwidth quota** — a soft cutoff in GB, checked only at connection time. A session that goes over quota mid-connection is **not** killed; it's simply not allowed to *reconnect* once the month's quota is used up. Resets on the 1st of each calendar month, server-local time.
 
-All three are entirely optional per client, and orthogonal to the MAC-binding check (which always applies).
+Every one of the above is entirely optional per client (an unset/empty list for that kind means "no restriction of that kind"), and all are orthogonal to the MAC-binding check (which always applies regardless). Country/city/ASN/IP are collectively "Location & Network Restrictions" -- the exact same restriction types (and the exact same validation rules) a linked portal user's own Login Restrictions offers on the Users page; creating, linking, or editing a user with Login Restrictions enabled automatically syncs the same values onto their linked VPN profile's `client_policy.json` entry (see `app/vpnadmin/policy_store.py`'s module docstring and `routes/users.py`'s `create_user`/`update_user`/`link_vpn_profile`). A VPN profile can also be restricted directly and independently from the Clients page's "Manage Restrictions" dialog (useful for a profile with no linked portal user, or a VPN-only restriction that's deliberately different from that user's own login restriction).
 
 ### How it's enforced
 
@@ -158,7 +161,7 @@ chmod 664 /etc/openvpn/server/policy/client_policy.json /etc/openvpn/server/poli
 
 This lives in its own subdirectory rather than directly in `/etc/openvpn/server/` (which is root-owned) because the connect/disconnect scripts run as `nobody` and need to atomically write-then-rename `client_usage.json` — which requires *write permission on the containing directory itself*, not just the file; owning the file alone isn't enough. `policy_lib.py` also makes a best-effort attempt to create/chown this directory itself if it's missing and the caller happens to be running as root (the app, or `openvpn-install.sh`/`client_policy_cli.py` via sudo) — but do the above explicitly rather than relying on that fallback, same reasoning as the original installer's own setup steps `touch`-ing + `chown`-ing `openvpn_db.txt`/`openvpn.log` up front. Skipping this doesn't break the MAC-binding check or take down the VPN — a policy-file read failure fails *open* (treated as unrestricted, loudly logged) rather than rejecting connections — but restrictions and usage tracking silently won't work until it's done.
 
-The connect script checks, in order, once identity is established by the MAC check: OS → country → bandwidth quota. Each rejection is logged to `openvpn.log` with a machine-readable `reason` (`mac_mismatch`, `os_not_allowed`, `country_not_allowed`, `country_lookup_failed`, `bandwidth_exceeded`), visible via `vpn-status.py --rejected-connections` and the web app's Diagnostics page.
+The connect script checks, in order, once identity is established by the MAC check: OS → country → city → ASN → IP address → bandwidth quota. Each rejection is logged to `openvpn.log` with a machine-readable `reason` (`mac_mismatch`, `os_not_allowed`, `country_not_allowed`, `country_lookup_failed`, `city_not_allowed`, `city_lookup_failed`, `asn_not_allowed`, `asn_lookup_failed`, `ip_not_allowed`, `bandwidth_exceeded`), visible via `vpn-status.py --rejected-connections` and the web app's Diagnostics page.
 
 ### Storage
 
@@ -167,15 +170,15 @@ Two new JSON files under `/etc/openvpn/server/policy/` (paths configurable via `
 - **`client_policy.json`** — admin-configured restrictions, keyed by client name:
   ```json
   {
-    "alice": {"country": "PK", "allowed_os": ["windows", "linux"], "bandwidth_weekly_gb": 5},
-    "bob": {"bandwidth_weekly_gb": 10}
+    "alice": {"allowed_countries": ["PK", "AE"], "allowed_cities": ["Karachi"], "allowed_os": ["windows", "linux"], "bandwidth_monthly_gb": 5},
+    "bob": {"allowed_asns": ["AS15169"], "allowed_ips": ["203.0.113.5", "10.0.0.0/24"], "bandwidth_monthly_gb": 10}
   }
   ```
-  A client absent from this file, or present with an empty object, is fully unrestricted (only the MAC check applies). Written by the web app (`app/vpnadmin/policy_store.py`, direct filesystem access via the bind-mounted `/etc/openvpn`) or the CLI (`openvpn-install.sh --set-country`/`--set-os`/`--set-bandwidth`, which delegate to `client_policy_cli.py`).
+  A client absent from this file, or present with an empty object, is fully unrestricted (only the MAC check applies). An older entry with a single `country` string (pre-dating the multi-country/city/ASN/IP fields) is read as a one-item `allowed_countries` list automatically — no manual migration needed, see `policy_store.py`'s `_normalize_policy_shape`. Written by the web app (`app/vpnadmin/policy_store.py`, direct filesystem access via the bind-mounted `/etc/openvpn`) or the CLI (`openvpn-install.sh --set-country`/`--set-os`/`--set-bandwidth`, which delegate to `client_policy_cli.py` — note the CLI only supports a single country and doesn't yet have `--set-city`/`--set-asn`/`--set-ip` equivalents; use the web UI for those).
 
-- **`client_usage.json`** — weekly bandwidth usage, keyed by client name, written only by `openvpn-client-disconnect.py`:
+- **`client_usage.json`** — monthly bandwidth usage, keyed by client name, written only by `openvpn-client-disconnect.py`:
   ```json
-  {"alice": {"week_start": "2026-08-03", "bytes_used": 1073741824}}
+  {"alice": {"period_start": "2026-08-01", "bytes_used": 1073741824}}
   ```
 
 Both files use an atomic write-to-tmp-then-`rename` pattern with `flock`-based locking (see `host-scripts/policy_lib.py`), so the app, the CLI, and the connect/disconnect scripts can all touch them concurrently without corruption.
@@ -185,30 +188,32 @@ Both files use an atomic write-to-tmp-then-`rename` pattern with `flock`-based l
 ```bash
 sudo bash openvpn-install.sh --set-country alice PK      # restrict alice to country code PK, or ANY to clear
 sudo bash openvpn-install.sh --set-os alice windows,linux # restrict alice's allowed OS, or ANY to clear
-sudo bash openvpn-install.sh --set-bandwidth alice 5      # 5 GB/week quota for alice, or ANY to clear
+sudo bash openvpn-install.sh --set-bandwidth alice 5      # 5 GB/month quota for alice, or ANY to clear
 sudo bash openvpn-install.sh --get-policy alice           # show alice's current policy
 sudo bash openvpn-install.sh --get-policy                 # show every client's policy
 ```
 
+City/ASN/IP restrictions have no CLI equivalent yet (a known, documented gap, not an oversight) — set those from the web UI's "Manage Restrictions" dialog, or by editing `client_policy.json`'s `allowed_cities`/`allowed_asns`/`allowed_ips` directly.
+
 ### Web UI
 
-The VPN Clients page's "Manage Restrictions" dialog exposes all three settings per client — a full ISO 3166-1 country dropdown, the OS checkboxes, and the bandwidth quota field — plus a best-effort (updated-on-disconnect, not live) "used this week" indicator when a quota is set. The country list is a static, self-contained dataset embedded in `app.js` (no external API call at runtime).
+The VPN Clients page's "Manage Restrictions" dialog exposes every setting above per client, grouped into "Device & Access Policy" (OS, bandwidth) and "Location & Network Restrictions" (country, city, ASN, IP) — the same two groupings Edit User uses for a portal user's own policy/restriction fields — plus a best-effort (updated-on-disconnect, not live) "used this month" indicator when a quota is set. The country list is a static, self-contained dataset embedded in `app.js` (no external API call at runtime); city and ASN use the same cascading "pick a country, search its real GeoIP values" pickers as the Users page's Login Restrictions (see `geo_lists.py`).
 
-### Setting up country restriction (GeoIP)
+### Setting up country/city/ASN restriction (GeoIP)
 
-Country restriction needs a MaxMind GeoLite2-Country database on the OpenVPN host, which requires a **free** MaxMind account:
+These need the matching MaxMind GeoLite2 database/edition on the OpenVPN host (Country for country restriction, City for city, ASN for network/ASN — IP address restriction needs none of them, pure `ipaddress` stdlib comparison), which requires a **free** MaxMind account:
 
 1. Sign up at <https://www.maxmind.com/en/geolite2/signup> and generate a license key.
 2. Add it to `/etc/openvpn/vpn-tools.conf`:
    ```
    MAXMIND_LICENSE_KEY=your_key_here
    ```
-3. Run `sudo bash geoip-update.sh` once to fetch the database (defaults to `/etc/openvpn/server/GeoLite2-Country.mmdb`; override with `MAXMIND_DB_PATH`).
+3. Run `sudo bash geoip-update.sh` once to fetch the database(s) (defaults: `/etc/openvpn/server/GeoLite2-Country.mmdb` / `-City.mmdb` / `-ASN.mmdb`; override via `MAXMIND_DB_PATH`/`MAXMIND_CITY_DB_PATH`/`MAXMIND_ASN_DB_PATH`).
 4. Install the weekly refresh timer: copy `systemd/openvpn-geoip-update.{service,timer}` to `/etc/systemd/system/`, then `systemctl enable --now openvpn-geoip-update.timer`. Safe to install *before* step 1/2 — the update script detects a missing license key and exits cleanly (logging why) instead of erroring.
-5. `python3 -m pip install geoip2` on the OpenVPN host (the connect script's GeoIP lookup uses this pure-Python MaxMind db reader — needed only on the host, not inside the app's Docker image).
-6. Pick a country per client from the "Manage Restrictions" dialog's dropdown on the VPN Clients page (or `openvpn-install.sh --set-country NAME CODE` from the CLI) — no deployment-wide setting to configure; every client is independent.
+5. `python3 -m pip install geoip2` on the OpenVPN host (the connect script's GeoIP lookups use this pure-Python MaxMind db reader — needed only on the host, not inside the app's Docker image).
+6. Pick countries/cities/ASNs/IPs per client from the "Manage Restrictions" dialog on the VPN Clients page (or `openvpn-install.sh --set-country NAME CODE` from the CLI, country-only) — no deployment-wide setting to configure; every client is independent. Or configure the same restrictions on a portal user's Login Restrictions and let them sync onto the linked VPN profile automatically (see above).
 
-**Fail-safe behavior:** a client with *no* country restriction configured never triggers a GeoIP lookup at all (zero dependency on the mmdb/geoip2 being present). A client *with* a country restriction configured, where the lookup can't be completed (missing db, missing package, any other error), is **rejected** (fail closed) rather than silently let through — logged as `country_lookup_failed`, distinct from an actual `country_not_allowed` mismatch.
+**Fail-safe behavior:** a client with *no* restriction of a given kind configured never triggers a GeoIP lookup for that kind at all (zero dependency on the matching mmdb/geoip2 being present). A client *with* a restriction of that kind configured, where the lookup can't be completed (missing db, missing package, any other error), is **rejected** (fail closed) rather than silently let through — logged as `<kind>_lookup_failed`, distinct from an actual `<kind>_not_allowed` mismatch. IP address restriction has no separate "lookup failed" case (no database involved) — an empty/unparseable connecting IP simply never matches the allowlist.
 
 ### Design notes
 
