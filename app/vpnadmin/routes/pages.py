@@ -20,6 +20,25 @@ templates = Jinja2Templates(directory="vpnadmin/templates")
 apply_settings_globals(templates)
 
 
+def _password_reset_redirect(user: User, request: Request) -> RedirectResponse | None:
+    """Every page route below (except /change-password itself) calls this
+    right after its own `if user is None` check -- forces a redirect to
+    /change-password until the account holder has proven they know the
+    current password via a successful self-service change (see
+    models.py's User.must_reset_password docstring for the full list of
+    what sets/clears this flag: every newly-created account, an admin's
+    manual password reset, vs. cleared only by update_my_profile).
+    Deliberately per-route (matching this file's existing `if user is
+    None: redirect` convention, repeated in every route rather than
+    factored into shared middleware -- see the architecture note in the
+    PR this shipped with) rather than a global Starlette middleware, which
+    would be the only new access-control pattern in a codebase that
+    otherwise does every gate via FastAPI Depends()."""
+    if user.must_reset_password and request.url.path != "/change-password":
+        return RedirectResponse("/change-password", status_code=303)
+    return None
+
+
 def _ctx(user: User, db: Session, **extra) -> dict:
     return {
         "user": user,
@@ -67,6 +86,9 @@ def _ctx(user: User, db: Session, **extra) -> dict:
 def dashboard(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     # "System Administration Page" from the "User" self-service role's perspective
     # (aggregate counts across every client) -- any_scope excludes it, same
     # as the /api/dashboard route it reads from.
@@ -79,6 +101,9 @@ def dashboard(request: Request, user: User | None = Depends(get_current_user), d
 def clients_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission_any_scope(db, user, "vpn_profiles", "view"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "clients.html", _ctx(user, db))
@@ -88,6 +113,9 @@ def clients_page(request: Request, user: User | None = Depends(get_current_user)
 def revoked_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission_any_scope(db, user, "vpn_profiles", "view"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "revoked.html", _ctx(user, db))
@@ -97,6 +125,9 @@ def revoked_page(request: Request, user: User | None = Depends(get_current_user)
 def diagnostics_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission_any_scope(db, user, "health", "view"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "diagnostics.html", _ctx(user, db))
@@ -106,6 +137,9 @@ def diagnostics_page(request: Request, user: User | None = Depends(get_current_u
 def health_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission_any_scope(db, user, "health", "view"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "health.html", _ctx(user, db))
@@ -115,6 +149,9 @@ def health_page(request: Request, user: User | None = Depends(get_current_user),
 def reports_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission_any_scope(db, user, "reports", "view"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "reports.html", _ctx(user, db))
@@ -124,6 +161,9 @@ def reports_page(request: Request, user: User | None = Depends(get_current_user)
 def connection_history_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission_any_scope(db, user, "vpn_profiles", "view"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "connection_history.html", _ctx(user, db))
@@ -133,6 +173,9 @@ def connection_history_page(request: Request, user: User | None = Depends(get_cu
 def users_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission(db, user, "users", "manage"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "users.html", _ctx(user, db))
@@ -142,6 +185,9 @@ def users_page(request: Request, user: User | None = Depends(get_current_user), 
 def users_activity_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission(db, user, "audit_log", "manage"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "users_activity.html", _ctx(user, db))
@@ -151,6 +197,9 @@ def users_activity_page(request: Request, user: User | None = Depends(get_curren
 def profile_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     return templates.TemplateResponse(request, "profile.html", _ctx(user, db))
 
 
@@ -158,6 +207,9 @@ def profile_page(request: Request, user: User | None = Depends(get_current_user)
 def teams_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission(db, user, "teams", "manage"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "teams.html", _ctx(user, db))
@@ -167,6 +219,9 @@ def teams_page(request: Request, user: User | None = Depends(get_current_user), 
 def settings_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission(db, user, "settings", "manage"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "settings.html", _ctx(user, db))
@@ -176,6 +231,9 @@ def settings_page(request: Request, user: User | None = Depends(get_current_user
 def my_vpn_profile_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission(db, user, "vpn_profiles", "view"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "my_vpn_profile.html", _ctx(user, db))
@@ -185,6 +243,9 @@ def my_vpn_profile_page(request: Request, user: User | None = Depends(get_curren
 def my_reports_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     # Same gate as /my-vpn-profile above -- plain has_permission (not
     # any_scope), since this is inherently "own" data by construction (the
     # backing endpoint, GET /api/me/vpn-profile/report, never takes an id
@@ -202,6 +263,9 @@ def my_reports_page(request: Request, user: User | None = Depends(get_current_us
 def roles_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     if not has_permission(db, user, "roles", "manage"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "roles.html", _ctx(user, db))
@@ -211,6 +275,9 @@ def roles_page(request: Request, user: User | None = Depends(get_current_user), 
 def openvpn_install_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
     # Bootstrap-admin-only, not just openvpn_install/execute -- see
     # routes/openvpn_install.py's module docstring for why.
     if not has_permission(db, user, "openvpn_install", "execute") or not user.is_bootstrap_admin:
@@ -227,5 +294,19 @@ def openvpn_install_page(request: Request, user: User | None = Depends(get_curre
             elevated_ttl_minutes=openvpn_install.ELEVATED_TTL_MINUTES,
         ),
     )
+
+
+@router.get("/change-password")
+def change_password_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Deliberately does NOT call _password_reset_redirect -- this IS the
+    # destination it redirects to; calling it here would be a no-op at
+    # best (the helper already excludes this exact path) and confusing to
+    # read at worst. No permission gate beyond being logged in -- every
+    # account, any role, must be able to reach this page regardless of
+    # what else they can/can't do, or a locked-out account would have no
+    # way to ever unlock itself.
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    return templates.TemplateResponse(request, "change_password.html", _ctx(user, db))
 
 

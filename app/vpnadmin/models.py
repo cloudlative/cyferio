@@ -183,11 +183,20 @@ class User(Base):
     role_def = relationship("RoleDef")
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    # Forces a password change on next login -- set True for accounts this
-    # app auto-creates with a system-generated temp password (VPN profile
-    # auto-linking, migration-created accounts; see VpnProfileLink and
-    # routes/clients.py). Never set for accounts an admin creates with a
-    # password they chose deliberately.
+    # Forces a password change on next login, enforced by every page route
+    # in routes/pages.py (redirects to /change-password until cleared) --
+    # set True for: accounts this app auto-creates with a system-generated
+    # temp password (VPN profile auto-linking, migration-created accounts;
+    # see VpnProfileLink and routes/clients.py), EVERY newly admin-created
+    # account (routes/users.py's create_user -- changed from this column's
+    # original narrower scope: an admin choosing the initial password is
+    # still "provisioned for you", not proof the account holder has ever
+    # seen/confirmed it), and an admin's manual password reset
+    # (update_user's password-reset branch -- a reset password is exactly
+    # as "not yet confirmed by the account holder" as a freshly-created
+    # one). Cleared only by a successful SELF-service change
+    # (update_my_profile), which is the one action that proves the account
+    # holder actually knows the current password.
     must_reset_password = Column(Boolean, nullable=False, default=False)
 
     # Set once, only by auth.bootstrap_admin(), on the very first admin

@@ -28,20 +28,26 @@
 <dialog id="add-user-dialog">
 	<div class="dialog-body">
 		<h2>Add a User</h2>
-		<form id="add-user-form">
+		<form id="add-user-form" autocomplete="off">
 			<!-- Row 1: Username, First Name, Last Name, Role -->
 			<div class="form-row">
 				<div class="field">
 					<label for="u-username">Username</label>
-					<input type="text" id="u-username" required minlength="3">
+					<input type="text" id="u-username" required minlength="3" autocomplete="off">
 				</div>
 				<div class="field">
+					<!-- autocomplete="off" on this form + these two fields --
+					     Chrome's autofill matches on the "First/Last Name" LABEL
+					     TEXT alone (no `name` attribute needed to trigger it) and
+					     was filling these in with the logged-in ADMIN's own saved
+					     name, not the new account's -- these fields describe
+					     someone ELSE, never the person filling out the form. -->
 					<label for="u-first">First Name</label>
-					<input type="text" id="u-first" required>
+					<input type="text" id="u-first" required autocomplete="off">
 				</div>
 				<div class="field">
 					<label for="u-last">Last Name <span class="muted">(optional)</span></label>
-					<input type="text" id="u-last">
+					<input type="text" id="u-last" autocomplete="off">
 				</div>
 				<div class="field">
 					<label for="u-role">Role</label>
@@ -52,7 +58,7 @@
 			<div class="form-row" style="margin-top:16px">
 				<div class="field">
 					<label for="u-email">Email</label>
-					<input type="email" id="u-email" required placeholder="e.g. asif@example.com">
+					<input type="email" id="u-email" required placeholder="e.g. asif@example.com" autocomplete="off">
 				</div>
 				<div class="field field-wide-phone">
 					<label for="u-phone-mount">Phone <span class="muted">(optional)</span></label>
@@ -145,7 +151,7 @@
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="add-user-clear">Clear</button>
 				<button type="button" class="btn-secondary" id="add-user-cancel">Cancel</button>
-				<button type="submit" class="btn-primary">Add User</button>
+				<button type="submit" class="btn-primary" id="add-user-submit-btn">Add User</button>
 			</div>
 		</form>
 	</div>
@@ -154,15 +160,18 @@
 <dialog id="edit-dialog">
 	<div class="dialog-body">
 		<h2>Edit User</h2>
-		<form id="edit-form">
+		<form id="edit-form" autocomplete="off">
 			<!-- Row 1: Username (read-only), First Name, Last Name, Role -- plus
 			     Status, which has no home in the requested 3-row layout (Create
 			     has no equivalent concept -- a new account always starts
-			     Active) but still needs to live somewhere admin-visible. -->
+			     Active) but still needs to live somewhere admin-visible.
+			     autocomplete="off" throughout -- same reasoning as Add User's
+			     own fields: this dialog edits someone ELSE's identity, never
+			     the admin's own, so browser autofill must never touch it. -->
 			<div class="form-row">
 				<div class="field"><label for="e-username">Username</label><input type="text" id="e-username" disabled class="mono"></div>
-				<div class="field"><label for="e-first">First Name</label><input type="text" id="e-first" required></div>
-				<div class="field"><label for="e-last">Last Name</label><input type="text" id="e-last"></div>
+				<div class="field"><label for="e-first">First Name</label><input type="text" id="e-first" required autocomplete="off"></div>
+				<div class="field"><label for="e-last">Last Name</label><input type="text" id="e-last" autocomplete="off"></div>
 				<div class="field">
 					<label for="e-role">Role</label>
 					<select id="e-role"></select>
@@ -175,7 +184,7 @@
 			</div>
 			<!-- Row 2: Email, Phone, Team(s) -->
 			<div class="form-row" style="margin-top:14px">
-				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email" required></div>
+				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email" required autocomplete="off"></div>
 				<div class="field field-wide-phone"><label for="e-phone-mount">Phone</label><div id="e-phone-mount"></div></div>
 				<div class="field"><label for="e-team-toggle">Teams <span class="muted">(select several)</span></label><div id="e-team-ms"></div></div>
 			</div>
@@ -849,6 +858,17 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 	}
 	const pwCheckError = uPasswordConfirm.check();
 	if (pwCheckError) { toast(pwCheckError, "error"); return; }
+	// User creation does real synchronous work server-side (issuing a VPN
+	// cert via easy-rsa, before any DB write -- see create_user()'s own
+	// docstring) that can take a second or so -- the global top-of-page
+	// spinner (apiFetch's own _progressStart/_progressDone) already covers
+	// this, but it's subtle; disabling the button and swapping its label
+	// gives immediate, hard-to-miss feedback and also blocks an
+	// impatient double-click from firing a second create request.
+	const submitBtn = document.getElementById("add-user-submit-btn");
+	const originalLabel = submitBtn.textContent;
+	submitBtn.disabled = true;
+	submitBtn.textContent = "Creating…";
 	try {
 		const result = await apiFetch("/api/users", {
 			method: "POST",
@@ -891,6 +911,9 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 		loadUsers();
 	} catch (e) {
 		toast(e.message, "error");
+	} finally {
+		submitBtn.disabled = false;
+		submitBtn.textContent = originalLabel;
 	}
 });
 

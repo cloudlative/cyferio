@@ -644,6 +644,12 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
         if not body.current_password or not verify_password(body.current_password, user.password_hash):
             raise HTTPException(status_code=400, detail="Current password is incorrect.")
         user.password_hash = hash_password(body.new_password)
+        # A successful SELF-service change (current password verified
+        # above) is the one action that proves the account holder actually
+        # knows/received the current password -- clears the forced-change
+        # gate that routes/pages.py enforces on every page. See models.py's
+        # must_reset_password docstring for what sets this flag.
+        user.must_reset_password = False
         changes.append("password")
 
     if changes:
@@ -689,6 +695,10 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         email=body.email,
         phone=body.phone,
         teams=teams,
+        # Every newly-provisioned account must change its password on
+        # first login, regardless of how the admin set it -- see
+        # models.py's must_reset_password docstring for the full policy.
+        must_reset_password=True,
         restrict_login_by_country=body.restrict_login_by_country,
         allowed_login_countries=json.dumps(body.allowed_login_countries) if body.allowed_login_countries else None,
         restrict_login_by_ip=body.restrict_login_by_ip,
@@ -875,6 +885,11 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         changes.append("deleted" if body.deleted else "restored")
     if body.password:
         target.password_hash = hash_password(body.password)
+        # Same "not yet confirmed by the account holder" reasoning as a
+        # freshly-created account -- see models.py's must_reset_password
+        # docstring. Forces a change on next login even though the admin
+        # (not the account holder) is the one who just set this password.
+        target.must_reset_password = True
         changes.append("password reset")
     for field in ("first_name", "last_name", "gender"):
         value = getattr(body, field)
