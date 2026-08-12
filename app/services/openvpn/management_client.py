@@ -209,7 +209,18 @@ class ManagementClient:
         header: list[str] | None = None
         sessions: list[ClientSession] = []
         for line in lines:
-            parts = line.split(",")
+            # The management interface's `status 3` response is TAB-
+            # separated (confirmed against this deployment's real OpenVPN
+            # 2.7.0 socket -- "HEADER\tCLIENT_LIST\tCommon Name\t...",
+            # "CLIENT_LIST\tclient\tudp4:...\t..."). This is NOT the same
+            # delimiter as the `status` FILE vpn-status.py reads (that one
+            # is comma-separated, "HEADER,CLIENT_LIST,Common Name,..." --
+            # see this deployment's actual openvpn-status.log). Splitting
+            # on "," here (the original implementation) meant every line
+            # matched neither the HEADER nor CLIENT_LIST check -- header
+            # stayed None and list_sessions() silently returned an empty
+            # list for every call, even with clients connected.
+            parts = line.split("\t")
             if not parts:
                 continue
             if parts[0] == "HEADER" and len(parts) > 1 and parts[1] == "CLIENT_LIST":

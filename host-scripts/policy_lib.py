@@ -542,7 +542,15 @@ def list_sessions(socket_path):
     header = None
     sessions = []
     for line in lines:
-        parts = line.split(",")
+        # The management interface's `status 3` response is TAB-separated,
+        # not comma-separated like the `status` FILE vpn-status.py reads --
+        # confirmed against this deployment's real OpenVPN 2.7.0 socket
+        # (see management_client.py's matching comment/fix for the
+        # app-side duplicate of this same bug). Splitting on "," here made
+        # this function silently return an empty list on every call, even
+        # with clients connected -- meaning hard quota enforcement never
+        # actually detected a single over-quota session since it shipped.
+        parts = line.split("\t")
         if not parts:
             continue
         if parts[0] == "HEADER" and len(parts) > 1 and parts[1] == "CLIENT_LIST":

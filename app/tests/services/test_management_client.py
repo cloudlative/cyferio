@@ -38,16 +38,22 @@ class TestListSessions:
         return mc
 
     def test_parses_real_client_list_shape(self, monkeypatch):
-        # Matches this deployment's actual OpenVPN 2.7.0 `status 3` output.
+        # Matches this deployment's actual OpenVPN 2.7.0 management-socket
+        # `status 3` output -- captured live via a raw socket query.
+        # Deliberately TAB-separated: this is the management SOCKET
+        # protocol, NOT the comma-separated `status` FILE vpn-status.py
+        # reads (see list_sessions()'s comment for the bug this caught --
+        # splitting on "," here silently returned an empty list for every
+        # call, even with clients connected).
         lines = [
-            "TITLE,OpenVPN 2.7.0 x86_64-pc-linux-gnu",
-            "HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,"
-            "Virtual IPv6 Address,Bytes Received,Bytes Sent,Connected Since,"
-            "Connected Since (time_t),Username,Client ID,Peer ID,Data Channel Cipher",
-            "CLIENT_LIST,test,udp4:182.185.203.112:63223,10.8.0.3,,129722,96623,"
-            "2026-08-12 12:18:53,1786537133,UNDEF,128,1,AES-256-GCM",
-            "HEADER,ROUTING_TABLE,Virtual Address,Common Name,Real Address,Last Ref,Last Ref (time_t)",
-            "GLOBAL_STATS,Max bcast/mcast queue length,1",
+            "TITLE\tOpenVPN 2.7.0 x86_64-pc-linux-gnu",
+            "HEADER\tCLIENT_LIST\tCommon Name\tReal Address\tVirtual Address\t"
+            "Virtual IPv6 Address\tBytes Received\tBytes Sent\tConnected Since\t"
+            "Connected Since (time_t)\tUsername\tClient ID\tPeer ID\tData Channel Cipher",
+            "CLIENT_LIST\ttest\tudp4:182.185.203.112:63223\t10.8.0.3\t\t129722\t96623\t"
+            "2026-08-12 12:18:53\t1786537133\tUNDEF\t128\t1\tAES-256-GCM",
+            "HEADER\tROUTING_TABLE\tVirtual Address\tCommon Name\tReal Address\tLast Ref\tLast Ref (time_t)",
+            "GLOBAL_STATS\tMax bcast/mcast queue length\t1",
         ]
         mc = self._mc(monkeypatch, lines)
         sessions = mc.list_sessions()
@@ -64,9 +70,26 @@ class TestListSessions:
 
     def test_no_sessions(self, monkeypatch):
         lines = [
+            "HEADER\tCLIENT_LIST\tCommon Name\tReal Address\tVirtual Address\t"
+            "Virtual IPv6 Address\tBytes Received\tBytes Sent\tConnected Since\t"
+            "Connected Since (time_t)\tUsername\tClient ID\tPeer ID\tData Channel Cipher",
+        ]
+        mc = self._mc(monkeypatch, lines)
+        assert mc.list_sessions() == []
+
+    def test_comma_separated_lines_are_not_mistaken_for_tab_separated(self, monkeypatch):
+        # Regression guard for the actual bug: a comma-separated line (the
+        # `status` FILE's shape, not the socket's) must NOT be silently
+        # accepted as a zero-session response -- it should simply fail to
+        # match HEADER/CLIENT_LIST at all (header stays None, nothing
+        # appended), same as any other unrecognized line, rather than this
+        # test passing "by accident" the way the pre-fix implementation did.
+        lines = [
             "HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,"
             "Virtual IPv6 Address,Bytes Received,Bytes Sent,Connected Since,"
             "Connected Since (time_t),Username,Client ID,Peer ID,Data Channel Cipher",
+            "CLIENT_LIST,test,udp4:182.185.203.112:63223,10.8.0.3,,129722,96623,"
+            "2026-08-12 12:18:53,1786537133,UNDEF,128,1,AES-256-GCM",
         ]
         mc = self._mc(monkeypatch, lines)
         assert mc.list_sessions() == []
