@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from services.openvpn.exceptions import ValidationError as MacFormatError
 from services.openvpn.validator import normalize_mac
 
+from .. import app_settings
 from .. import cli_wrapper as cli
 from .. import mailer
 from .. import policy_store
@@ -242,6 +243,11 @@ def revoke_client(name: str, user: User = Depends(_require_client_manager), db: 
     # A human revoked this on purpose -- unaffected by protected_from_auto_revoke,
     # see vpn_identity_sync.py's module docstring.
     vpn_identity_sync.sync_after_client_revoke(db, name)
+    if app_settings.runtime.notify_admin_on_client_revoked:
+        mailer.send_admin_notification(
+            subject=f"VPN client revoked: {name}",
+            body=f"{user.username} revoked VPN client '{name}'.\n\n{result}",
+        )
     return {"message": f"Client '{name}' revoked successfully."}
 
 

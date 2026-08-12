@@ -9,7 +9,7 @@ from .. import mailer
 from ..app_settings import ACTIVE_THEME_IDS, SMTP_PASSWORD_PLACEHOLDER, THEME_CHOICES, get_settings_row, refresh_runtime_cache, runtime
 from ..audit import log_action
 from ..db import get_db
-from ..models import User
+from ..models import RoleDef, User
 from ..permissions import require_permission
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -41,8 +41,23 @@ class UpdateSettingsRequest(BaseModel):
 
     min_password_length: int | None = None
     session_timeout_minutes: int | None = None
+    account_lockout_threshold: int | None = None
+    account_lockout_minutes: int | None = None
     audit_retention_days: int | None = None
+    log_failed_login_attempts: bool | None = None
     notification_duration_ms: int | None = None
+
+    default_new_user_role: str | None = None
+    default_bandwidth_monthly_gb: float | None = None
+
+    admin_notification_email: str | None = None
+    notify_admin_on_user_created: bool | None = None
+    notify_admin_on_client_revoked: bool | None = None
+
+    reports_default_range_days: int | None = None
+
+    maintenance_mode: bool | None = None
+    maintenance_message: str | None = None
 
     login_theme: str | None = None
 
@@ -91,6 +106,54 @@ class UpdateSettingsRequest(BaseModel):
         # sit on screen.
         if v is not None and not (200 <= v <= 30000):
             raise ValueError("Notification duration must be between 200 and 30000 milliseconds.")
+        return v
+
+    @field_validator("account_lockout_threshold")
+    @classmethod
+    def _lockout_threshold(cls, v):
+        # 0 is a valid, meaningful value (disables lockout entirely) --
+        # only negative numbers are rejected.
+        if v is not None and v < 0:
+            raise ValueError("Account lockout threshold can't be negative.")
+        return v
+
+    @field_validator("account_lockout_minutes")
+    @classmethod
+    def _lockout_minutes(cls, v):
+        if v is not None and v < 1:
+            raise ValueError("Account lockout duration must be at least 1 minute.")
+        return v
+
+    @field_validator("default_bandwidth_monthly_gb")
+    @classmethod
+    def _default_bandwidth(cls, v):
+        # Same minimum as the per-user quota field (policy_store.set_policy) --
+        # anything smaller than 100MB isn't a meaningful monthly allowance.
+        if v is not None and v < 0.1:
+            raise ValueError("Default monthly bandwidth quota must be at least 0.1 GB, or left blank for unlimited.")
+        return v
+
+    @field_validator("admin_notification_email")
+    @classmethod
+    def _admin_email(cls, v: str | None) -> str | None:
+        if v and not mailer.is_valid_email(v):
+            raise ValueError("Admin notification email must be a valid email address.")
+        return v
+
+    @field_validator("reports_default_range_days")
+    @classmethod
+    def _reports_range(cls, v):
+        # 0 = "All history" (see dashboard.html's Usage Analytics range
+        # select, whose own options are 7/14/30/60/90/all).
+        if v is not None and v not in (0, 7, 14, 30, 60, 90):
+            raise ValueError("Default report range must be 0 (all history), 7, 14, 30, 60, or 90 days.")
+        return v
+
+    @field_validator("maintenance_message")
+    @classmethod
+    def _maintenance_msg(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 512:
+            raise ValueError("Maintenance message must be 512 characters or fewer.")
         return v
 
     @field_validator("login_theme")
@@ -145,7 +208,18 @@ def _serialize() -> dict:
         "smtp_configured": bool(s.smtp_host),
         "min_password_length": s.min_password_length,
         "session_timeout_minutes": s.session_timeout_minutes,
+        "account_lockout_threshold": s.account_lockout_threshold,
+        "account_lockout_minutes": s.account_lockout_minutes,
         "audit_retention_days": s.audit_retention_days,
+        "log_failed_login_attempts": s.log_failed_login_attempts,
+        "default_new_user_role": s.default_new_user_role,
+        "default_bandwidth_monthly_gb": s.default_bandwidth_monthly_gb,
+        "admin_notification_email": s.admin_notification_email,
+        "notify_admin_on_user_created": s.notify_admin_on_user_created,
+        "notify_admin_on_client_revoked": s.notify_admin_on_client_revoked,
+        "reports_default_range_days": s.reports_default_range_days,
+        "maintenance_mode": s.maintenance_mode,
+        "maintenance_message": s.maintenance_message,
         "notification_duration_ms": s.notification_duration_ms,
         "login_theme": s.login_theme or "auto",
         "timezone": s.timezone,
@@ -154,22 +228,38 @@ def _serialize() -> dict:
 
 
 @router.get("")
-def get_settings(_: User = Depends(require_admin)):
+def get_settings(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     body = _serialize()
     body["theme_choices"] = THEME_CHOICES
+    # Role choices for the "Default Role for New Users" dropdown (User
+    # Management card) -- same RoleDef rows the Add User form itself
+    # offers, so an admin can only ever pick a role that actually exists.
+    # Excludes super_admin for the same reason create_user() already
+    # forbids assigning it (see routes/users.py's _resolve_creatable_role).
+    body["role_choices"] = [
+        {"slug": r.slug, "name": r.name}
+        for r in db.query(RoleDef).filter(RoleDef.slug != "super_admin").order_by(RoleDef.name).all()
+    ]
     return body
 
 
 @router.patch("")
 def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    if body.default_new_user_role is not None:
+        if not db.query(RoleDef).filter(RoleDef.slug == body.default_new_user_role).first():
+            raise HTTPException(status_code=400, detail=f"No such role: '{body.default_new_user_role}'.")
     row = get_settings_row(db)
     fields_set = body.model_fields_set
     changes = []
 
     for field in ("app_name", "app_tagline", "app_footer_credit", "smtp_host", "smtp_port",
                    "smtp_username", "smtp_from", "smtp_use_tls", "min_password_length",
-                   "session_timeout_minutes", "audit_retention_days", "notification_duration_ms",
-                   "login_theme", "timezone", "time_format"):
+                   "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
+                   "audit_retention_days", "log_failed_login_attempts", "default_new_user_role",
+                   "default_bandwidth_monthly_gb", "admin_notification_email",
+                   "notify_admin_on_user_created", "notify_admin_on_client_revoked",
+                   "reports_default_range_days", "maintenance_mode", "maintenance_message",
+                   "notification_duration_ms", "login_theme", "timezone", "time_format"):
         if field in fields_set:
             value = getattr(body, field)
             if value != getattr(row, field):
@@ -188,6 +278,9 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
     # authenticate anywhere.
     if (row.smtp_username or row.smtp_password) and not row.smtp_host:
         raise HTTPException(status_code=400, detail="SMTP host is required when a username or password is set.")
+
+    if (row.notify_admin_on_user_created or row.notify_admin_on_client_revoked) and not row.admin_notification_email:
+        raise HTTPException(status_code=400, detail="An admin notification email is required to enable event notifications.")
 
     if changes:
         row.updated_at = datetime.now(timezone.utc)

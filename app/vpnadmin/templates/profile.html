@@ -16,8 +16,9 @@
 		<div><label>Role</label><div><span class="role-badge role-{{ user.role_slug }}">{{ user.role_display_name }}</span></div></div>
 		<div><label>Created</label><div class="muted" id="p-created">—</div></div>
 		<div><label>Last Login</label><div class="muted" id="p-last-login">—</div></div>
+		<div><label>Team(s)</label><div class="muted" id="p-teams">—</div></div>
 	</div>
-	<p class="muted">Your role and account status are managed by an admin. Everything below, you control yourself.</p>
+	<p class="muted">Your role, account status, and team membership are managed by an admin. Everything below, you control yourself.</p>
 </div>
 
 <div class="card">
@@ -42,13 +43,6 @@
 					<option value="female">Female</option>
 					<option value="other">Other</option>
 				</select>
-			</div>
-			<div class="field">
-				<label for="p-team-toggle">Teams <span class="muted">(select several)</span></label>
-				<div id="p-team-ms"></div>
-				{% if user.role_slug == "viewer" %}
-				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Viewers can't change their own team -- ask an admin.</p>
-				{% endif %}
 			</div>
 		</div>
 		<div class="form-row" style="margin-top:16px">
@@ -95,9 +89,6 @@
 
 {% block scripts %}
 <script>
-let myTeamIds = [];
-const isViewer = {{ "true" if user.role_slug == "viewer" else "false" }};
-const teamMs = createMultiselectDropdown(document.getElementById("p-team-ms"), { placeholder: "Unassigned", disabled: isViewer });
 const profilePhone = createPhoneInput(document.getElementById("p-phone-mount"));
 
 // Mirrors routes/users.py's _valid_email/_valid_phone -- server-side is
@@ -149,16 +140,6 @@ function updatePasswordSaveState() {
 }
 [pCurrentPwEl, pNewPwEl, pNewPwConfirmEl].forEach((el) => el.addEventListener("input", updatePasswordSaveState));
 
-async function loadTeamOptions() {
-	try {
-		const teams = await apiFetch("/api/teams");
-		teamMs.setOptions(teams.filter(t => t.team !== "Unassigned").map(t => ({ id: t.id, label: t.team })));
-		teamMs.setSelected(myTeamIds);
-	} catch (e) {
-		toast(e.message, "error");
-	}
-}
-
 function updateDisplayedIdentity(me) {
 	// First Name is the primary displayed identity, not the login username
 	// (which stays visible as secondary/account info below it).
@@ -179,8 +160,7 @@ async function loadProfile() {
 		document.getElementById("p-gender").value = me.gender || "unspecified";
 		document.getElementById("p-email").value = me.email || "";
 		profilePhone.setValue(me.phone || "");
-		myTeamIds = me.team_ids || [];
-		await loadTeamOptions();
+		document.getElementById("p-teams").textContent = (me.teams && me.teams.length) ? me.teams.join(", ") : "Unassigned";
 		updateDisplayedIdentity(me);
 	} catch (e) {
 		toast(e.message, "error");
@@ -204,10 +184,10 @@ document.getElementById("profile-form").addEventListener("submit", async (ev) =>
 				gender: document.getElementById("p-gender").value,
 				email: document.getElementById("p-email").value.trim(),
 				phone: profilePhone.getValue(),
-				team_ids: teamMs.getSelected(),
 			},
 		});
 		updateDisplayedIdentity(updated);
+		document.getElementById("p-teams").textContent = (updated.teams && updated.teams.length) ? updated.teams.join(", ") : "Unassigned";
 		toast("Profile updated.");
 	} catch (e) {
 		toast(e.message, "error");

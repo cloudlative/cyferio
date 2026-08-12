@@ -65,16 +65,17 @@
 				{% if is_admin %}
 				<div class="theme-quick-switch" id="theme-quick-switch">
 					<button type="button" class="btn-secondary btn-sm" id="theme-quick-toggle" aria-haspopup="true" aria-expanded="false">
-						<span class="nav-icon">◐</span>Theme
+						<span class="theme-swatch-dot" id="theme-quick-swatch"></span>
+						<span id="theme-quick-label">Theme</span>
 					</button>
 					<div class="theme-quick-panel" id="theme-quick-panel">
-						<button type="button" class="theme-quick-option" data-theme-value="auto">Auto-rotate</button>
-						<button type="button" class="theme-quick-option" data-theme-value="constellation">Constellation</button>
-						<button type="button" class="theme-quick-option" data-theme-value="contour">Signal Contour</button>
-						<button type="button" class="theme-quick-option" data-theme-value="ingress">Ingress Field</button>
-						<button type="button" class="theme-quick-option" data-theme-value="cipher">Cipher Rain</button>
-						<button type="button" class="theme-quick-option" data-theme-value="perimeter">Perimeter Grid</button>
-						<button type="button" class="theme-quick-option" data-theme-value="horizon">Data Horizon</button>
+						<button type="button" class="theme-quick-option" data-theme-value="auto"><span class="theme-swatch-dot theme-swatch-auto"></span>Auto-rotate<span class="theme-quick-check">✓</span></button>
+						<button type="button" class="theme-quick-option" data-theme-value="constellation"><span class="theme-swatch-dot theme-swatch-constellation"></span>Constellation<span class="theme-quick-check">✓</span></button>
+						<button type="button" class="theme-quick-option" data-theme-value="contour"><span class="theme-swatch-dot theme-swatch-contour"></span>Signal Contour<span class="theme-quick-check">✓</span></button>
+						<button type="button" class="theme-quick-option" data-theme-value="ingress"><span class="theme-swatch-dot theme-swatch-ingress"></span>Ingress Field<span class="theme-quick-check">✓</span></button>
+						<button type="button" class="theme-quick-option" data-theme-value="cipher"><span class="theme-swatch-dot theme-swatch-cipher"></span>Cipher Rain<span class="theme-quick-check">✓</span></button>
+						<button type="button" class="theme-quick-option" data-theme-value="perimeter"><span class="theme-swatch-dot theme-swatch-perimeter"></span>Perimeter Grid<span class="theme-quick-check">✓</span></button>
+						<button type="button" class="theme-quick-option" data-theme-value="horizon"><span class="theme-swatch-dot theme-swatch-horizon"></span>Data Horizon<span class="theme-quick-check">✓</span></button>
 					</div>
 				</div>
 				{% endif %}
@@ -115,6 +116,15 @@
 		// Notifications, defaults to 1000ms. Same "cached `runtime` value read
 		// at render time" pattern as the timezone globals above.
 		window.NOTIFICATION_DURATION_MS = {{ app_settings.notification_duration_ms | tojson }};
+		// The raw saved setting ("auto" or a pinned theme id) -- read by
+		// static/app.js's initThemeQuickSwitch() so the header switch can
+		// show which option is the currently *active* one (vs. just which
+		// theme happens to be rendered on <html data-theme="...">, which for
+		// "auto" is only one of the 6, not the setting itself). Not
+		// admin-gated at the template level (base.html already only renders
+		// #theme-quick-switch for admins), so this is harmless to include
+		// unconditionally.
+		window.SAVED_LOGIN_THEME = {{ app_settings.login_theme | tojson }};
 	</script>
 	<script src="/static/app.js?v={{ static_version }}"></script>
 	{% block scripts %}{% endblock %}

@@ -542,11 +542,25 @@ async function loadRoleOptions() {
 		// The API orders roles is_system-desc-then-name, which puts "Admin"
 		// alphabetically before "Viewer" -- without this, a freshly-loaded
 		// Add User form would default to creating an ADMIN account. Default
-		// to the least-privileged role instead (viewer if present, else
-		// whatever the server listed first) -- same safe-default intent as
-		// the previous hardcoded <option>viewer</option> being listed first.
-		if (roles.some(r => r.slug === "viewer")) {
-			document.getElementById("u-role").value = "viewer";
+		// to Settings -> User Management's configured default role if one is
+		// set and still exists (falls back to "viewer" otherwise) -- same
+		// safe-default intent as the previous hardcoded <option>viewer</option>
+		// being listed first, just admin-configurable now.
+		let defaultRoleSlug = "viewer";
+		try {
+			// GET /api/settings is settings-manage-gated, a narrower
+			// permission than what got this page loaded at all -- an Editor
+			// with users-manage but not settings-manage is expected to hit a
+			// 403 here, silently kept on the "viewer" fallback rather than
+			// surfaced as an error toast (this is a UX nicety, not a
+			// required capability of this form).
+			const s = await apiFetch("/api/settings");
+			if (s.default_new_user_role && creatableRoles.some(r => r.slug === s.default_new_user_role)) {
+				defaultRoleSlug = s.default_new_user_role;
+			}
+		} catch (e) { /* not settings-manage -- keep the "viewer" fallback */ }
+		if (creatableRoles.some(r => r.slug === defaultRoleSlug)) {
+			document.getElementById("u-role").value = defaultRoleSlug;
 		}
 	} catch (e) {
 		toast(e.message, "error");

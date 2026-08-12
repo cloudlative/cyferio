@@ -9,7 +9,7 @@
 
 <form id="settings-form">
 	<div class="card">
-		<h2>Branding</h2>
+		<h2>Organization</h2>
 		<div class="form-grid">
 			<div class="field">
 				<label for="s-app-name">App Name</label>
@@ -106,29 +106,101 @@
 				<label for="s-session-timeout">Session Timeout <span class="muted">(minutes of inactivity)</span></label>
 				<input type="text" id="s-session-timeout" inputmode="numeric" placeholder="480">
 			</div>
-		</div>
-	</div>
-
-	<div class="card">
-		<h2>Notifications</h2>
-		<p class="muted" style="margin-top:0">Controls how long toast/notification popups stay on screen across the whole app.</p>
-		<div class="form-grid">
 			<div class="field">
-				<label for="s-notification-duration">Notification Duration <span class="muted">(seconds)</span></label>
-				<input type="text" id="s-notification-duration" inputmode="decimal" placeholder="1">
+				<label for="s-lockout-threshold">Account Lockout Threshold <span class="muted">(failed attempts; blank or 0 = disabled)</span></label>
+				<input type="text" id="s-lockout-threshold" inputmode="numeric" placeholder="Disabled">
+			</div>
+			<div class="field">
+				<label for="s-lockout-minutes">Lockout Duration <span class="muted">(minutes)</span></label>
+				<input type="text" id="s-lockout-minutes" inputmode="numeric" placeholder="15">
 			</div>
 		</div>
 	</div>
 
 	<div class="card">
-		<h2>Audit Log Retention</h2>
+		<h2>User Management</h2>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-default-role">Default Role for New Users</label>
+				<select id="s-default-role"></select>
+				<p class="field-hint">Pre-selected on the Add User form -- an admin can still choose a different role before saving.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="card">
+		<h2>VPN Management</h2>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-default-bandwidth">Default Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited, min 0.1)</span></label>
+				<input type="text" id="s-default-bandwidth" inputmode="decimal" placeholder="Unlimited">
+				<p class="field-hint">Applied to a new user's VPN profile only when the Add User form's own quota field is left blank.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="card">
+		<h2>Notifications</h2>
+		<p class="muted" style="margin-top:0">Controls how long toast/notification popups stay on screen across the whole app, plus optional admin-facing event emails (uses the SMTP settings above).</p>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-notification-duration">Notification Duration <span class="muted">(seconds)</span></label>
+				<input type="text" id="s-notification-duration" inputmode="decimal" placeholder="1">
+			</div>
+			<div class="field">
+				<label for="s-admin-notify-email">Admin Notification Email <span class="muted">(optional)</span></label>
+				<input type="email" id="s-admin-notify-email" placeholder="admin@example.com">
+			</div>
+		</div>
+		<div class="checkbox-row" style="margin-top:12px">
+			<label class="checkbox-label"><input type="checkbox" id="s-notify-user-created"> Email me when a new user is created</label>
+			<label class="checkbox-label"><input type="checkbox" id="s-notify-client-revoked"> Email me when a VPN client is revoked</label>
+		</div>
+	</div>
+
+	<div class="card">
+		<h2>Logging &amp; Auditing</h2>
 		<div class="form-grid">
 			<div class="field">
 				<label for="s-audit-retention">Keep Audit Log Entries For <span class="muted">(days; blank or 0 = keep forever)</span></label>
 				<input type="text" id="s-audit-retention" inputmode="numeric" placeholder="Keep forever">
 			</div>
 		</div>
-		<p class="muted" style="margin-bottom:0">Pruning of older entries happens on app startup/deploy, not instantly on save.</p>
+		<p class="muted" style="margin:10px 0 0">Pruning of older entries happens on app startup/deploy, not instantly on save.</p>
+		<div class="checkbox-row" style="margin-top:12px">
+			<label class="checkbox-label"><input type="checkbox" id="s-log-failed-logins"> Log wrong-password login attempts to the audit log</label>
+		</div>
+	</div>
+
+	<div class="card">
+		<h2>Reporting</h2>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-reports-range">Default Usage Analytics Range</label>
+				<select id="s-reports-range">
+					<option value="7">Last 7 days</option>
+					<option value="14">Last 14 days</option>
+					<option value="30">Last 30 days</option>
+					<option value="60">Last 2 months</option>
+					<option value="90">Last 3 months</option>
+					<option value="0">All history</option>
+				</select>
+				<p class="field-hint">The range the Dashboard's Usage Analytics chart opens with -- still changeable per-visit there.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="card">
+		<h2>System Administration</h2>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-maintenance-message">Maintenance Message <span class="muted">(shown to blocked users)</span></label>
+				<input type="text" id="s-maintenance-message" maxlength="512" placeholder="This application is temporarily down for maintenance. Please try again shortly.">
+			</div>
+		</div>
+		<div class="checkbox-row" style="margin-top:12px">
+			<label class="checkbox-label"><input type="checkbox" id="s-maintenance-mode"> Maintenance mode <span class="muted">(blocks login for everyone except Admin/Super Admin)</span></label>
+		</div>
 	</div>
 
 	<div class="form-row">
@@ -224,6 +296,15 @@ function updateThemeActiveNote(savedSetting) {
 const sSmtpPortValidation = attachInlineValidation(document.getElementById("s-smtp-port"), (v) => numberRangeError(v, { min: 1, max: 65535, label: "SMTP port", emptyOk: true }));
 const sMinPwLenValidation = attachInlineValidation(document.getElementById("s-min-pw-len"), (v) => numberRangeError(v, { min: 6, max: 128, label: "Minimum password length", emptyOk: true }));
 const sSessionTimeoutValidation = attachInlineValidation(document.getElementById("s-session-timeout"), (v) => numberRangeError(v, { min: 1, label: "Session timeout", emptyOk: true }));
+const sLockoutThresholdValidation = attachInlineValidation(document.getElementById("s-lockout-threshold"), (v) => numberRangeError(v, { min: 0, label: "Account lockout threshold", emptyOk: true }));
+const sLockoutMinutesValidation = attachInlineValidation(document.getElementById("s-lockout-minutes"), (v) => numberRangeError(v, { min: 1, label: "Lockout duration", emptyOk: true }));
+const sDefaultBandwidthValidation = attachInlineValidation(document.getElementById("s-default-bandwidth"), bandwidthError);
+const sAdminNotifyEmailValidation = attachInlineValidation(document.getElementById("s-admin-notify-email"), (v) => {
+	v = (v || "").trim();
+	if (!v) return null;
+	if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return "That doesn't look like a valid email address.";
+	return null;
+});
 const sAuditRetentionValidation = attachInlineValidation(document.getElementById("s-audit-retention"), (v) => numberRangeError(v, { min: 0, label: "Audit log retention", emptyOk: true }));
 const sNotificationDurationValidation = attachInlineValidation(document.getElementById("s-notification-duration"), (v) => numberRangeError(v, { min: 0.2, max: 30, label: "Notification duration", emptyOk: true, allowDecimal: true }));
 
@@ -271,7 +352,20 @@ async function loadSettings() {
 		document.getElementById("s-smtp-tls").value = String(!!s.smtp_use_tls);
 		setVal("s-min-pw-len", s.min_password_length);
 		setVal("s-session-timeout", s.session_timeout_minutes);
+		setVal("s-lockout-threshold", s.account_lockout_threshold);
+		setVal("s-lockout-minutes", s.account_lockout_minutes);
 		setVal("s-audit-retention", s.audit_retention_days);
+		document.getElementById("s-log-failed-logins").checked = s.log_failed_login_attempts !== false;
+		setVal("s-default-bandwidth", s.default_bandwidth_monthly_gb);
+		setVal("s-admin-notify-email", s.admin_notification_email);
+		document.getElementById("s-notify-user-created").checked = !!s.notify_admin_on_user_created;
+		document.getElementById("s-notify-client-revoked").checked = !!s.notify_admin_on_client_revoked;
+		document.getElementById("s-reports-range").value = String(s.reports_default_range_days != null ? s.reports_default_range_days : 7);
+		document.getElementById("s-maintenance-mode").checked = !!s.maintenance_mode;
+		setVal("s-maintenance-message", s.maintenance_message);
+		const roleSelect = document.getElementById("s-default-role");
+		roleSelect.innerHTML = (s.role_choices || []).map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
+		roleSelect.value = s.default_new_user_role || "user";
 		setVal("s-notification-duration", s.notification_duration_ms != null ? (s.notification_duration_ms / 1000) : 1);
 		document.getElementById("smtp-status").textContent = s.smtp_configured ? "Currently configured." : "Not configured -- email features are disabled.";
 
@@ -296,10 +390,15 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 	ev.preventDefault();
 	const numericChecks = [
 		sSmtpPortValidation, sMinPwLenValidation, sSessionTimeoutValidation,
-		sAuditRetentionValidation, sNotificationDurationValidation,
+		sLockoutThresholdValidation, sLockoutMinutesValidation, sDefaultBandwidthValidation,
+		sAdminNotifyEmailValidation, sAuditRetentionValidation, sNotificationDurationValidation,
 	];
 	if (!numericChecks.every((v) => v.check())) {
 		toast("Please fix the highlighted field(s) before saving.", "error");
+		return;
+	}
+	if ((document.getElementById("s-notify-user-created").checked || document.getElementById("s-notify-client-revoked").checked) && !val("s-admin-notify-email")) {
+		toast("An admin notification email is required to enable event notifications.", "error");
 		return;
 	}
 	const body = {
@@ -314,7 +413,18 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		smtp_use_tls: document.getElementById("s-smtp-tls").value === "true",
 		min_password_length: intOrNull(val("s-min-pw-len")),
 		session_timeout_minutes: intOrNull(val("s-session-timeout")),
+		account_lockout_threshold: intOrNull(val("s-lockout-threshold")),
+		account_lockout_minutes: intOrNull(val("s-lockout-minutes")),
 		audit_retention_days: intOrNull(val("s-audit-retention")),
+		log_failed_login_attempts: document.getElementById("s-log-failed-logins").checked,
+		default_new_user_role: document.getElementById("s-default-role").value || null,
+		default_bandwidth_monthly_gb: val("s-default-bandwidth") ? Number(val("s-default-bandwidth")) : null,
+		admin_notification_email: val("s-admin-notify-email") || null,
+		notify_admin_on_user_created: document.getElementById("s-notify-user-created").checked,
+		notify_admin_on_client_revoked: document.getElementById("s-notify-client-revoked").checked,
+		reports_default_range_days: intOrNull(document.getElementById("s-reports-range").value),
+		maintenance_mode: document.getElementById("s-maintenance-mode").checked,
+		maintenance_message: val("s-maintenance-message") || null,
 		notification_duration_ms: (() => {
 			const secs = Number(val("s-notification-duration"));
 			return Number.isFinite(secs) && secs > 0 ? Math.round(secs * 1000) : null;
@@ -332,6 +442,8 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		// <html data-theme="..."> is otherwise only ever stamped at
 		// server-render time.
 		applyThemeImmediately(body.login_theme);
+		window.SAVED_LOGIN_THEME = body.login_theme;
+		if (window.refreshThemeQuickSwitch) window.refreshThemeQuickSwitch(body.login_theme); // keep the header switch's name/checkmark in sync without a reload
 		toast("Settings saved.");
 		loadSettings();
 	} catch (e) {

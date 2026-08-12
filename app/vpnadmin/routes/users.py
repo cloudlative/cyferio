@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from services.openvpn.exceptions import ValidationError as MacFormatError
 from services.openvpn.validator import normalize_mac
 
-from .. import app_settings, geo_lists, policy_store, vpn_identity_sync
+from .. import app_settings, geo_lists, mailer, policy_store, vpn_identity_sync
 from .. import cli_wrapper as cli
 from ..audit import log_action
 from ..auth import hash_password, require_user, verify_password
@@ -560,7 +560,6 @@ class UpdateProfileRequest(BaseModel):
     gender: Gender | None = None
     email: str | None = None
     phone: str | None = None
-    team_ids: list[int] | None = None
     current_password: str | None = None
     new_password: str | None = None
 
@@ -710,24 +709,13 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
                 setattr(user, field, value)
                 changes.append(field)
 
-    if "team_ids" in body.model_fields_set:
-        new_teams = _resolve_teams(db, body.team_ids or [])
-        if {t.id for t in new_teams} != {t.id for t in user.teams}:
-            # Team membership determines which clients/routing policy a
-            # user is scoped to -- letting a viewer self-assign into a
-            # different team would be a privilege-adjacent change they
-            # shouldn't be able to make unsupervised, even though everything
-            # else on this form (name, gender, password) is fine for any
-            # role to self-serve. Admins/editors still manage their own
-            # teams here same as before; only an admin can change a
-            # viewer's teams (via PATCH /api/users/{id}).
-            if _role_slug(user) == "viewer":
-                raise HTTPException(
-                    status_code=403,
-                    detail="Viewers can't change their own team assignment -- ask an admin.",
-                )
-            user.teams = new_teams
-            changes.append("teams")
+    # Team membership is deliberately NOT self-service for anyone (not even
+    # admins/editors editing their own account) -- UpdateProfileRequest has
+    # no team_ids field at all. Assignment happens only through admin/editor
+    # user management (PATCH /api/users/{id}'s UpdateUserRequest.team_ids),
+    # per the "Regular users should not be able to assign or modify their
+    # own team membership" requirement -- see profile.html, which shows
+    # team(s) read-only.
 
     if body.new_password:
         if not body.current_password or not verify_password(body.current_password, user.password_hash):
@@ -820,15 +808,33 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     # entirely (no file write at all) when neither restriction was set --
     # matches policy_store's own "no policy entry = fully unrestricted"
     # default, avoids touching client_policy.json for the common case.
+    # Settings -> VPN Management's org-wide default only fills in when this
+    # request left the per-user quota blank -- an explicit 0.1+ GB value on
+    # the form (including one that happens to match the default) always
+    # wins, same "most specific setting wins" precedence as every other
+    # env-var/DB-row-default pair in this app (see app_settings.py).
+    effective_bandwidth = body.bandwidth_monthly_gb if body.bandwidth_monthly_gb is not None else app_settings.runtime.default_bandwidth_monthly_gb
     policy = {}
-    if body.allowed_os or body.bandwidth_monthly_gb:
+    if body.allowed_os or effective_bandwidth:
         try:
             policy = policy_store.set_policy(
-                body.username, allowed_os=body.allowed_os or None, bandwidth_monthly_gb=body.bandwidth_monthly_gb,
+                body.username, allowed_os=body.allowed_os or None, bandwidth_monthly_gb=effective_bandwidth,
             )
         except (PolicyValidationError, OSError) as e:
             log_action(db, admin, "create_user", target=body.username,
                        detail=f"VPN profile restrictions could not be applied: {e}", success=False)
+
+    if app_settings.runtime.notify_admin_on_user_created:
+        mailer.send_admin_notification(
+            subject=f"New user created: {body.username}",
+            body=(
+                f"{admin.username} created a new user account.\n\n"
+                f"Username: {body.username}\n"
+                f"Role: {role_def.name}\n"
+                f"Email: {body.email}\n"
+                f"VPN profile: {body.username}\n"
+            ),
+        )
     return _serialize(user, {body.username: policy})
 
 

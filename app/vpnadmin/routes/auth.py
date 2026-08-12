@@ -1,11 +1,12 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from .. import geoip
+from .. import app_settings, geoip
 from ..app_settings import apply_settings_globals
 from ..audit import log_action
 from ..auth import get_current_user, login_user, logout_user, verify_password
@@ -45,6 +46,27 @@ def login_submit(
         # nothing meaningful to restriction-check yet for a username that
         # doesn't exist -- straight to the generic error.
         return generic_error
+
+    # Maintenance mode (Settings -> System Administration): blocks every
+    # role except admin/super_admin. Checked before restriction/lockout/
+    # password checks -- a maintenance window shouldn't leak any of that
+    # detail to a non-admin account that can't log in anyway right now.
+    if app_settings.runtime.maintenance_mode and user.role_slug not in ("admin", "super_admin"):
+        message = app_settings.runtime.maintenance_message or "This application is temporarily down for maintenance. Please try again shortly."
+        return templates.TemplateResponse(request, "login.html", {"error": message}, status_code=503)
+
+    # Account lockout (Settings -> Security): a threshold of 0/None disables
+    # this entirely (the pre-existing behavior). locked_until is set once
+    # failed_login_attempts reaches the threshold (see the wrong-password
+    # branch further down) and simply expires on its own -- no admin unlock
+    # action needed for the common case.
+    if user.locked_until and user.locked_until > datetime.now(timezone.utc):
+        remaining_minutes = max(1, int((user.locked_until - datetime.now(timezone.utc)).total_seconds() // 60) + 1)
+        return templates.TemplateResponse(
+            request, "login.html",
+            {"error": f"Too many failed login attempts. Try again in about {remaining_minutes} minute(s)."},
+            status_code=423,
+        )
 
     # Country/City/ASN/IP restriction checks run BEFORE password
     # verification (see this task's own "Authentication Flow Requirements":
@@ -134,7 +156,27 @@ def login_submit(
                 )
 
     if not verify_password(password, user.password_hash):
+        user.failed_login_attempts += 1
+        threshold = app_settings.runtime.account_lockout_threshold
+        locked_now = False
+        if threshold and user.failed_login_attempts >= threshold:
+            user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=app_settings.runtime.account_lockout_minutes)
+            locked_now = True
+        if app_settings.runtime.log_failed_login_attempts:
+            detail = f"IP {client_ip or 'unknown'}; attempt {user.failed_login_attempts}"
+            if locked_now:
+                detail += f"; account locked for {app_settings.runtime.account_lockout_minutes} minute(s)"
+            log_action(db, user, "login_failed", target=user.username, detail=detail, success=False)
+        db.commit()
         return generic_error
+
+    # Successful password check -- clear any lockout state so the next
+    # failed streak (if any) starts fresh rather than compounding onto an
+    # old one.
+    if user.failed_login_attempts or user.locked_until:
+        user.failed_login_attempts = 0
+        user.locked_until = None
+        db.commit()
 
     login_user(request, user, db)
     return RedirectResponse("/", status_code=303)

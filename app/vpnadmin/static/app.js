@@ -1233,11 +1233,67 @@ function applyThemeImmediately(loginThemeSetting) {
  * mechanism. A no-op on any page that doesn't render the switch (non-admin
  * users), since it's gated on the element existing.
  */
+// Display labels for the header switch's current-theme name -- mirrors
+// app_settings.py's THEME_CHOICES labels (kept in sync manually, same as
+// the panel's own hardcoded button labels in base.html, since this button
+// needs to show a name INSTANTLY on page load, before any API round-trip).
+const THEME_QUICK_LABELS = {
+	auto: "Auto-rotate", constellation: "Constellation", contour: "Signal Contour",
+	ingress: "Ingress Field", cipher: "Cipher Rain", perimeter: "Perimeter Grid", horizon: "Data Horizon",
+};
+
+/**
+ * Header quick theme switcher (admin-only, see base.html's
+ * .theme-quick-switch) -- lets an admin change the app's active theme
+ * (login-page background + logged-in accent palette, see
+ * app_settings.py's resolve_active_theme) without visiting the full
+ * Settings page. Deliberately reuses the exact same PATCH /api/settings
+ * `login_theme` field the Settings page dropdown writes to -- no second
+ * mechanism. A no-op on any page that doesn't render the switch (non-admin
+ * users), since it's gated on the element existing.
+ *
+ * Also keeps the button itself legible at a glance (request: "Display the
+ * currently selected theme name... Provide a visual indicator... without
+ * opening Settings"): the toggle shows the resolved theme's name plus a
+ * colored dot (via #theme-quick-swatch, which just reads var(--accent) off
+ * the live <html data-theme="...">, so it always matches whatever's
+ * actually rendered), and the open panel marks the currently-SAVED setting
+ * (not just the resolved one -- "auto" itself gets the checkmark when
+ * that's what's saved, even though the resolved theme underneath it is
+ * only one of the 6) with a checkmark plus an `.active` highlight.
+ */
 (function initThemeQuickSwitch() {
 	const root = document.getElementById("theme-quick-switch");
 	if (!root) return;
 	const toggle = document.getElementById("theme-quick-toggle");
 	const panel = document.getElementById("theme-quick-panel");
+	const label = document.getElementById("theme-quick-label");
+
+	// window.SAVED_LOGIN_THEME (base.html) is the raw setting as of the last
+	// page render; kept in sync client-side after every successful save
+	// below so a second change in the same page view doesn't need a reload.
+	let savedTheme = window.SAVED_LOGIN_THEME || "auto";
+
+	function updateQuickLabel() {
+		label.textContent = THEME_QUICK_LABELS[savedTheme] || savedTheme;
+	}
+	function updatePanelActiveMarks() {
+		panel.querySelectorAll(".theme-quick-option").forEach((btn) => {
+			btn.classList.toggle("active", btn.dataset.themeValue === savedTheme);
+		});
+	}
+	updateQuickLabel();
+	updatePanelActiveMarks();
+
+	// Exposed so settings.html's own theme dropdown -- a second place the
+	// saved setting can change from, on the same page, without a reload --
+	// can keep this header switch in sync immediately after its own save,
+	// rather than the header only catching up on next navigation.
+	window.refreshThemeQuickSwitch = (newSavedTheme) => {
+		savedTheme = newSavedTheme || "auto";
+		updateQuickLabel();
+		updatePanelActiveMarks();
+	};
 
 	toggle.addEventListener("click", () => {
 		const willOpen = panel.style.display !== "block";
@@ -1256,12 +1312,20 @@ function applyThemeImmediately(loginThemeSetting) {
 			panel.style.display = "none";
 			const themeValue = btn.dataset.themeValue;
 			const previousTheme = document.documentElement.getAttribute("data-theme");
+			const previousSaved = savedTheme;
 			applyThemeImmediately(themeValue); // instant, no reload -- see this function's docstring
+			savedTheme = themeValue;
+			updateQuickLabel();
+			updatePanelActiveMarks();
 			try {
 				await apiFetch("/api/settings", { method: "PATCH", body: { login_theme: themeValue } });
+				window.SAVED_LOGIN_THEME = themeValue;
 				toast("Theme updated.");
 			} catch (e) {
 				if (previousTheme) document.documentElement.setAttribute("data-theme", previousTheme); // roll back the optimistic apply -- the save itself failed
+				savedTheme = previousSaved;
+				updateQuickLabel();
+				updatePanelActiveMarks();
 				toast(e.message, "error");
 			}
 		});

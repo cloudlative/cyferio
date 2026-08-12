@@ -30,8 +30,9 @@
 <div class="card" id="role-detail-card" style="display:none">
 	<div class="toolbar">
 		<div class="toolbar-title"><h2 style="margin:0" id="role-detail-title">Role</h2><span class="count-badge" id="role-detail-users">— users</span></div>
-		<div>
+		<div class="form-row" style="margin:0;gap:8px">
 			<button class="btn-danger btn-sm" id="role-delete-btn">Delete Role</button>
+			<button type="button" class="btn-secondary btn-sm" id="role-close-btn" title="Close (no changes are saved automatically)">✕ Close</button>
 		</div>
 	</div>
 	<div class="form-row" style="margin-bottom:16px">
@@ -47,12 +48,23 @@
 	</div>
 
 	<h3>Permissions</h3>
-	<p class="muted" style="margin-top:0">"Manage" grants every action on that module, including on records that aren't the caller's own. "Own only" restricts View/Update to the caller's own record (used by the "User" self-service role for its own account and VPN profile).</p>
+	<div class="scope-legend">
+		<div class="scope-legend-item">
+			<span class="status-pill status-offline">Own Records Only</span>
+			<span class="muted">This role can view, modify, or manage only the records it owns or is assigned to -- e.g. its own account and its own linked VPN profile. Everyone else's records stay invisible to it, even for View.</span>
+		</div>
+		<div class="scope-legend-item">
+			<span class="status-pill status-online">Any Records</span>
+			<span class="muted">This role can view, modify, or manage every record of that type, regardless of who owns it -- the normal admin-style scope.</span>
+		</div>
+	</div>
+	<p class="muted" style="margin-top:10px">"Manage" grants every action on that module, including on records that aren't the caller's own, and implies View/Create/Update/Delete/Execute even if those boxes are left unchecked. Use the Scope column on the right to choose between "Own Records Only" and "Any Records" per module.</p>
 	<div class="table-scroll">
 		<table id="matrix-table">
 			<thead>
 				<tr>
-					<th>Module</th><th>View</th><th>Create</th><th>Update</th><th>Delete</th><th>Execute</th><th>Manage</th><th>Scope</th>
+					<th>Module</th><th>View</th><th>Create</th><th>Update</th><th>Delete</th><th>Execute</th><th>Manage</th>
+					<th title="Own Records Only: limited to records this role owns/is assigned to. Any Records: every record of this type, regardless of owner.">Scope ⓘ</th>
 				</tr>
 			</thead>
 			<tbody id="matrix-body"></tbody>
@@ -121,9 +133,9 @@ function renderMatrix(role) {
 			<td>${escapeHtml(label)}</td>
 			${cells}
 			<td>
-				<select data-obj="${key}" data-scope>
-					<option value="any" ${row.scope === "any" ? "selected" : ""}>Any record</option>
-					<option value="own" ${row.scope === "own" ? "selected" : ""}>Own only</option>
+				<select data-obj="${key}" data-scope title="Own Records Only: limited to this role's own records. Any Records: every record of this type.">
+					<option value="any" ${row.scope === "any" ? "selected" : ""}>Any Records</option>
+					<option value="own" ${row.scope === "own" ? "selected" : ""}>Own Records Only</option>
 				</select>
 			</td>
 		</tr>`;
@@ -202,6 +214,18 @@ document.getElementById("matrix-save-btn").addEventListener("click", async () =>
 	} catch (e) {
 		toast(e.message, "error");
 	}
+});
+
+// Closing is purely a visibility toggle -- neither Save Details nor Save
+// Permissions is required first (per request #1: "if no changes have been
+// made, users should be able to close the screen without being forced to
+// save or cancel"). Any actual edits sitting in the form are simply
+// discarded, same as navigating away from any other unsaved form in this
+// app -- no confirmation prompt, since this card has its own explicit Save
+// buttons rather than autosaving.
+document.getElementById("role-close-btn").addEventListener("click", () => {
+	document.getElementById("role-detail-card").style.display = "none";
+	currentRole = null;
 });
 
 document.getElementById("role-delete-btn").addEventListener("click", async () => {

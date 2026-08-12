@@ -297,14 +297,39 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 .content-header .link-button:hover { color: var(--text); }
 
 .theme-quick-switch { position: relative; }
-.theme-quick-switch .nav-icon { font-size: 0.9rem; }
+#theme-quick-toggle { display: inline-flex; align-items: center; gap: 8px; }
+/* A small colored dot -- on the toggle button itself this deliberately has
+   NO theme-specific class, so it just inherits var(--accent) off the live
+   <html data-theme="..."> the page is actually rendering in, and always
+   matches at a glance with zero JS color logic. Inside the panel, each
+   option gets its own hardcoded per-theme class below (the panel itself
+   isn't under that theme's [data-theme] scope, so it can't inherit the
+   real value) -- same hex pairs as style.css's own [data-theme="..."]
+   blocks' --accent/--accent-2, so the swatch always matches what selecting
+   it will actually look like. */
+.theme-swatch-dot {
+	display: inline-block;
+	width: 10px; height: 10px;
+	border-radius: 50%;
+	flex: none;
+	background: var(--accent);
+	box-shadow: 0 0 0 2px var(--surface), 0 0 6px 1px rgba(0,0,0,0.25);
+}
+.theme-swatch-auto { background: conic-gradient(#6366f1, #0ea5e9, #059669, #d97706, #7c3aed, #6366f1); }
+.theme-swatch-constellation { background: linear-gradient(135deg, #6366f1, #22d3ee); }
+.theme-swatch-contour { background: linear-gradient(135deg, #0ea5e9, #5eead4); }
+.theme-swatch-ingress { background: linear-gradient(135deg, #1d4ed8, #67e8f9); }
+.theme-swatch-cipher { background: linear-gradient(135deg, #059669, #34d399); }
+.theme-swatch-perimeter { background: linear-gradient(135deg, #d97706, #fbbf24); }
+.theme-swatch-horizon { background: linear-gradient(135deg, #7c3aed, #f472b6); }
+
 .theme-quick-panel {
 	display: none;
 	position: absolute;
 	top: calc(100% + 6px);
 	right: 0;
 	z-index: 50;
-	min-width: 190px;
+	min-width: 210px;
 	background: var(--surface);
 	border: 1.5px solid var(--border-light);
 	border-radius: 9px;
@@ -312,7 +337,9 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	padding: 6px;
 }
 .theme-quick-option {
-	display: block;
+	display: flex;
+	align-items: center;
+	gap: 9px;
 	width: 100%;
 	text-align: left;
 	background: none;
@@ -326,6 +353,13 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	margin: 0;
 }
 .theme-quick-option:hover { background: var(--surface-hover); transform: none; }
+.theme-quick-check { margin-left: auto; opacity: 0; color: var(--accent); font-weight: 700; }
+/* .active = the currently-SAVED setting (not necessarily what's resolved
+   on screen right now -- "auto" itself is marked active even though the
+   theme actually showing is only one of the 6 it rotates through, see
+   app.js's initThemeQuickSwitch docstring). */
+.theme-quick-option.active { background: var(--surface-alt); }
+.theme-quick-option.active .theme-quick-check { opacity: 1; }
 
 /* --- Content footer ----------------------------------------------------
    Full-width within the content column, 3 zones (left/center/right) --
@@ -536,6 +570,18 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .geo-picker-row { display: flex; gap: 8px; align-items: flex-start; }
 .geo-picker-row select { flex: 0 0 auto; width: 200px; }
 .geo-picker-row .ms-dropdown { flex: 1 1 auto; min-width: 0; }
+
+/* Small screens: dialogs shrink to 90-94% of a narrow viewport (see the
+   `dialog` rule above), which isn't enough room for a fixed 200px country
+   <select> plus a multiselect side by side -- stack them instead of
+   squeezing both into a sliver. Same breakpoint used for the top-of-form
+   .form-row pairs, which already wrap via flex-wrap but benefit from a
+   little extra top margin on the second field once stacked. */
+@media (max-width: 560px) {
+	.geo-picker-row { flex-direction: column; }
+	.geo-picker-row select { width: 100%; }
+	.form-row .field { min-width: 100%; }
+}
 
 /* --- Multiselect dropdown (createMultiselectDropdown in app.js) --------
    Closed-by-default team picker: looks/behaves like a normal <select>
@@ -893,12 +939,18 @@ dialog #toast-container { position: absolute; bottom: 16px; right: 16px; left: 1
 .text-right { text-align: right; }
 
 dialog { border: none; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: 0; max-width: 460px; width: 90%; background: var(--surface); color: var(--text); border: 1px solid var(--border-light); }
-/* Edit User now shows every section inline (Access, VPN Profile, Login
-   Restrictions, Reset Password) with no collapsible panels -- wider than
-   the 460px every other dialog uses so its .form-grid sections (Login
-   Restrictions) actually lay out 2-up instead of collapsing to 1 column
-   and stacking into a long, narrow scroll. */
-#edit-dialog { max-width: 640px; }
+/* Edit User shows every section inline (Access, VPN Profile, Login
+   Restrictions, Reset Password) with no collapsible panels -- much wider
+   than the 460px every other dialog uses so fields get to expand into the
+   available space rather than being squeezed into narrow columns. This was
+   640px before; at that width the Login Restrictions .form-grid's City/ASN
+   fields (a fixed-width 200px country <select> plus a multiselect, see
+   .geo-picker-row) only had ~80-100px left for the multiselect itself --
+   values truncated and felt "congested". Widening the dialog itself (not
+   individual fields) is the fix; #edit-dialog .form-grid below then widens
+   its own columns to actually use the extra room. */
+#edit-dialog { max-width: 920px; width: 94%; }
+#edit-dialog .form-grid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 dialog::backdrop { background: rgba(8, 10, 16, 0.72); backdrop-filter: blur(2px); }
 dialog .dialog-body { padding: 28px; }
 dialog .dialog-body h2 { background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; display: inline-block; }
@@ -956,6 +1008,14 @@ tr.team-row:hover .team-row-view, tr.team-row:focus-visible .team-row-view { opa
    selectable/copyable and reads correctly to a screen reader. */
 .note { background: var(--surface-alt); border: 1px solid var(--border-light); border-radius: 8px; padding: 10px 14px; margin: 0 0 16px; font-size: 0.85rem; color: var(--text-muted); }
 .note strong { color: var(--text); }
+
+/* Own Records Only vs Any Records legend on the Roles permission matrix
+   (roles.html) -- explains the Scope column in plain language, next to the
+   same wording used in the column's own tooltip and each <select>'s
+   options. */
+.scope-legend { display: flex; flex-direction: column; gap: 8px; background: var(--surface-alt); border: 1px solid var(--border-light); border-radius: 8px; padding: 12px 14px; }
+.scope-legend-item { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: 0.85rem; }
+.scope-legend-item .status-pill { flex: none; }
 
 .table-scroll { overflow-x: auto; }
 .traefik-router-table { table-layout: fixed; }

@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, ForeignKey, Table, UniqueConstraint, event
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, Float, ForeignKey, Table, UniqueConstraint, event
 from sqlalchemy.orm import backref, validates, relationship
 
 from .db import Base
@@ -253,6 +253,20 @@ class User(Base):
     restrict_login_by_asn = Column(Boolean, nullable=False, default=False)
     allowed_login_asns = Column(Text, nullable=True)  # JSON list of AS numbers, e.g. ["AS15169","AS8075"]
 
+    # --- Account lockout (see AppSettings.account_lockout_threshold/
+    # account_lockout_minutes, auth.py's login_submit) -----------------------
+    # failed_login_attempts resets to 0 on any successful login; once it
+    # reaches the configured threshold, locked_until is set to
+    # now + account_lockout_minutes and login is refused (with a clear
+    # "try again after ..." message) until that time passes, at which point
+    # the next attempt is allowed again (and either succeeds, resetting the
+    # counter, or fails and starts a fresh lockout window). No admin
+    # unlock button is needed for the common case since it's just a timer,
+    # but an admin can already zero this out manually via the DB if ever
+    # needed -- no UI for that yet, deliberately out of scope here.
+    failed_login_attempts = Column(Integer, nullable=False, default=0)
+    locked_until = Column(DateTime(timezone=True), nullable=True)
+
     @validates("username")
     def _normalize_username(self, key, value):
         return value.strip().lower()
@@ -334,9 +348,55 @@ class AppSettings(Base):
     # Security
     min_password_length = Column(Integer, nullable=True)
     session_timeout_minutes = Column(Integer, nullable=True)
+    # Account lockout after repeated failed login attempts -- NULL/0 on the
+    # threshold disables lockout entirely (the pre-existing behavior). See
+    # User.failed_login_attempts/locked_until below for the per-account
+    # counters this drives, and auth.py's login_submit for enforcement.
+    account_lockout_threshold = Column(Integer, nullable=True)
+    account_lockout_minutes = Column(Integer, nullable=True)
 
     # Audit log retention -- NULL/0 means "keep forever" (no pruning).
     audit_retention_days = Column(Integer, nullable=True)
+    # Whether a plain wrong-password login attempt (as opposed to the
+    # country/city/ASN/IP restriction blocks, which are always logged) gets
+    # its own AuditLog row -- see auth.py's login_submit. Defaults to True;
+    # an admin who finds the resulting volume unhelpful can turn it off.
+    log_failed_login_attempts = Column(Boolean, nullable=True)
+
+    # User Management: which RoleDef slug the Add User form pre-selects --
+    # purely a UX default (an admin can always pick a different role before
+    # submitting), not a server-side fallback, since the form always submits
+    # an explicit role. NULL falls back to "user" (the self-service role).
+    default_new_user_role = Column(String(64), nullable=True)
+
+    # VPN Management: the Monthly Bandwidth Quota (GB) applied to a new
+    # user's VPN profile when the Add User form's own quota field is left
+    # blank -- NULL means "no org-wide default", i.e. unlimited, same as
+    # leaving the per-user field blank always has meant. See create_user()
+    # in routes/users.py.
+    default_bandwidth_monthly_gb = Column(Float, nullable=True)
+
+    # Notifications: admin-facing (not per-user) event emails, sent via the
+    # same SMTP config as .ovpn delivery -- see mailer.py's
+    # send_admin_notification. All three are opt-in (default off) so a
+    # fresh install with SMTP configured for .ovpn delivery doesn't
+    # suddenly start emailing anyone without an explicit admin choice.
+    admin_notification_email = Column(String(254), nullable=True)
+    notify_admin_on_user_created = Column(Boolean, nullable=True)
+    notify_admin_on_client_revoked = Column(Boolean, nullable=True)
+
+    # Reporting: default selected range (days) for the Dashboard's Usage
+    # Analytics chart -- 0 means "All time". Purely a UI default, same
+    # spirit as default_new_user_role above; an admin can still change the
+    # dropdown per-visit.
+    reports_default_range_days = Column(Integer, nullable=True)
+
+    # System Administration: when true, login is blocked for every role
+    # except admin/super_admin, with `maintenance_message` (falls back to a
+    # generic message if blank) shown in place of the normal error -- see
+    # auth.py's login_submit. Does not touch already-established sessions.
+    maintenance_mode = Column(Boolean, nullable=True)
+    maintenance_message = Column(String(512), nullable=True)
 
     # Toast/notification popup display duration, in milliseconds -- NULL
     # falls back to app_settings.py's 1000ms (1 second) default. Read

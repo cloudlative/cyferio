@@ -121,3 +121,31 @@ def send_test_email(*, to_address: str, host: str, port: int, username: str, pas
         host=host, port=port, username=username, password=password,
         use_tls=use_tls, from_address=from_address, to_address=to_address, msg=msg,
     )
+
+
+def send_admin_notification(*, subject: str, body: str) -> bool:
+    """Fire-and-forget event notification to `runtime.admin_notification_email`
+    (Settings -> Notifications) -- used by routes/users.py's create_user and
+    routes/clients.py's revoke_client when the matching
+    `notify_admin_on_*` toggle is on. Deliberately swallows delivery
+    failures (returns False, logs nothing itself -- callers already run
+    inside an audit-logged request and can note the failure there if they
+    choose to) rather than letting a broken/unreachable SMTP server turn an
+    otherwise-successful user-creation or client-revoke into a 500: the
+    notification is a courtesy, not a precondition for the action it's
+    reporting on. Returns True on a successful send, False if not
+    configured or if the send itself failed."""
+    s = app_settings.runtime
+    if not is_configured() or not s.admin_notification_email:
+        return False
+    msg = EmailMessage()
+    msg["Subject"] = f"[{s.app_name}] {subject}"
+    msg.set_content(body)
+    try:
+        _send(
+            host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
+            use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=s.admin_notification_email, msg=msg,
+        )
+        return True
+    except Exception:
+        return False

@@ -131,7 +131,18 @@ class _RuntimeSettings:
         self.smtp_use_tls = env_settings.SMTP_USE_TLS
         self.min_password_length = 8
         self.session_timeout_minutes = max(1, env_settings.SESSION_MAX_AGE_SECONDS // 60)
+        self.account_lockout_threshold = 0  # 0 = disabled
+        self.account_lockout_minutes = 15
         self.audit_retention_days = None  # None/0 = keep forever
+        self.log_failed_login_attempts = True
+        self.default_new_user_role = "user"
+        self.default_bandwidth_monthly_gb = None  # None = unlimited
+        self.admin_notification_email = None
+        self.notify_admin_on_user_created = False
+        self.notify_admin_on_client_revoked = False
+        self.reports_default_range_days = 7
+        self.maintenance_mode = False
+        self.maintenance_message = None
         self.notification_duration_ms = 1000  # 1 second default, admin-configurable (Settings -> Notifications)
         self.login_theme = env_settings.LOGIN_THEME
         self.timezone = env_settings.APP_TIMEZONE
@@ -170,7 +181,18 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.smtp_use_tls = row.smtp_use_tls if row.smtp_use_tls is not None else env_settings.SMTP_USE_TLS
     runtime.min_password_length = row.min_password_length or 8
     runtime.session_timeout_minutes = row.session_timeout_minutes or max(1, env_settings.SESSION_MAX_AGE_SECONDS // 60)
+    runtime.account_lockout_threshold = row.account_lockout_threshold or 0
+    runtime.account_lockout_minutes = row.account_lockout_minutes or 15
     runtime.audit_retention_days = row.audit_retention_days
+    runtime.log_failed_login_attempts = row.log_failed_login_attempts if row.log_failed_login_attempts is not None else True
+    runtime.default_new_user_role = row.default_new_user_role or "user"
+    runtime.default_bandwidth_monthly_gb = row.default_bandwidth_monthly_gb
+    runtime.admin_notification_email = row.admin_notification_email
+    runtime.notify_admin_on_user_created = bool(row.notify_admin_on_user_created)
+    runtime.notify_admin_on_client_revoked = bool(row.notify_admin_on_client_revoked)
+    runtime.reports_default_range_days = row.reports_default_range_days if row.reports_default_range_days is not None else 7
+    runtime.maintenance_mode = bool(row.maintenance_mode)
+    runtime.maintenance_message = row.maintenance_message
     runtime.notification_duration_ms = row.notification_duration_ms or 1000
     runtime.login_theme = row.login_theme or env_settings.LOGIN_THEME
     runtime.timezone = row.timezone or env_settings.APP_TIMEZONE
