@@ -83,6 +83,7 @@ def install(
 
     completed: list[str] = []
     client = sanitize_client_name(first_client_name) if first_client_name else None
+    os_info: package_manager.OSInfo | None = None
     try:
         if install_packages:
             os_info = package_manager.detect_os()
@@ -119,7 +120,7 @@ def install(
         # `install-host-scripts` CLI action for that case). Previously this
         # entire step was a manual, README-documented process, entirely
         # outside this installer.
-        host_scripts_manager.install_host_scripts(paths)
+        host_scripts_manager.install_host_scripts(paths, os_info=os_info)
         completed.append(_STEP_HOST_SCRIPTS)
 
         firewall_manager.enable_ip_forward(ipv6=bool(opts.ip6))
