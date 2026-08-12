@@ -13,7 +13,17 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from vpnadmin import cli_wrapper, health
+from vpnadmin import cli_wrapper
+# Aliased to health_data -- routes/health.py (the API router module,
+# imported below via `from vpnadmin.routes import ... health ...`) and
+# vpnadmin/health.py (this data-gathering module) share the bare name
+# "health"; importing both unaliased into this one file means the second
+# import silently rebinds the name, leaving whichever was imported first
+# unreachable. Confirmed live on the test box: this exact collision made
+# write_db_stat_snapshot() resolve to routes/health.py's module object
+# (which has no such attribute) instead of this one, crashing the
+# snapshot loop's very first tick on every startup.
+from vpnadmin import health as health_data
 from vpnadmin.app_settings import prune_audit_log, prune_db_stat_snapshots, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
@@ -35,7 +45,7 @@ DASHBOARD_REFRESH_INTERVAL_SECONDS = 10
 
 # How often the background task takes one Postgres stats sample for
 # Database Reporting's trend charts (routes/reports.py's GET
-# /api/reports/database, health.write_db_stat_snapshot) -- 10 minutes:
+# /api/reports/database, health_data.write_db_stat_snapshot) -- 10 minutes:
 # frequent enough for meaningful trend granularity on charts spanning
 # days/weeks, infrequent enough that ~144 rows/day is a non-issue for
 # storage or the retention pruning below. A fixed code constant, not an
@@ -73,7 +83,7 @@ async def _db_snapshot_loop():
         try:
             db = SessionLocal()
             try:
-                await asyncio.to_thread(health.write_db_stat_snapshot, db)
+                await asyncio.to_thread(health_data.write_db_stat_snapshot, db)
             finally:
                 db.close()
         except Exception:
