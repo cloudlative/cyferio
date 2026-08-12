@@ -63,6 +63,51 @@ class TestArgumentConstruction:
             "sudo", "-n", "python3", "/fake/vpn-status.py", "--rejected-connections", "42", "--json",
         ]
 
+    def test_session_history_without_client_omits_flag(self, monkeypatch):
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, "[]")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.status_session_history(limit=71)
+        assert seen["args"] == [
+            "sudo", "-n", "python3", "/fake/vpn-status.py", "--session-history", "71", "--json",
+        ]
+
+    def test_session_history_with_client_passes_flag(self, monkeypatch):
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, "[]")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.status_session_history(limit=72, client="alice")
+        assert seen["args"] == [
+            "sudo", "-n", "python3", "/fake/vpn-status.py", "--session-history", "72", "--client", "alice", "--json",
+        ]
+
+    def test_session_history_client_filter_has_isolated_cache_key(self, monkeypatch):
+        # A scoped (client="alice") and an unscoped call for the same
+        # limit must not share a cache entry -- otherwise whichever ran
+        # first would silently serve its (wrong) result to the other.
+        calls = {"n": 0}
+
+        def fake_run(args, **kwargs):
+            calls["n"] += 1
+            return _completed(args, 0, "[]")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.status_session_history(limit=73)
+        cw.status_session_history(limit=73, client="alice")
+        cw.status_session_history(limit=73, client="bob")
+        assert calls["n"] == 3  # three distinct cache keys -> three real subprocess calls
+        # Re-requesting any of the three now hits the cache, not a 4th call.
+        cw.status_session_history(limit=73, client="alice")
+        assert calls["n"] == 3
+
     def test_no_sudo_when_use_sudo_false(self, monkeypatch):
         settings.USE_SUDO = False
         seen = {}

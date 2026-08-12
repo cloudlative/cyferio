@@ -73,6 +73,91 @@
 	</div>
 </div>
 
+<div class="card" id="per-user-analytics">
+	<div class="toolbar">
+		<h2 style="margin:0">Per-User Analytics</h2>
+	</div>
+	<p class="page-subtitle" style="margin:-6px 0 18px">Pick a user to see their own bandwidth, connection, source IP, and session-duration history -- drawn from the same session data as the Analytics section above, just scoped to one person.</p>
+	<div class="field" style="max-width:360px">
+		<label for="pua-user-picker">User</label>
+		<div id="pua-user-picker"></div>
+	</div>
+
+	<div id="pua-empty-state" class="muted" style="margin-top:18px">Select a user above to see their analytics.</div>
+
+	<div id="pua-body" style="display:none;margin-top:22px">
+		<div class="ua-summary-row" id="pua-summary"></div>
+		<div class="ua-grid">
+			<div class="ua-chart-card">
+				<div class="ua-chart-card-head"><h3>Bandwidth</h3><div id="pua-bandwidth-type"></div></div>
+				<div class="chart-canvas-mount"><canvas id="pua-bandwidth"></canvas></div>
+			</div>
+			<div class="ua-chart-card">
+				<h3>Top Usage Days</h3>
+				<div id="pua-top-days"><p class="muted">No data in range.</p></div>
+			</div>
+			<div class="ua-chart-card">
+				<div class="ua-chart-card-head"><h3>Connections</h3><div id="pua-connections-type"></div></div>
+				<div class="chart-canvas-mount"><canvas id="pua-connections"></canvas></div>
+			</div>
+			<div class="ua-chart-card">
+				<h3>Successful vs Failed Connections</h3>
+				<div class="chart-canvas-mount"><canvas id="pua-success-fail"></canvas></div>
+			</div>
+			<div class="ua-chart-card">
+				<h3>Top Source IPs</h3>
+				<div id="pua-top-ips"><p class="muted">No data in range.</p></div>
+			</div>
+			<div class="ua-chart-card">
+				<h3>Country Distribution</h3>
+				<div class="chart-canvas-mount"><canvas id="pua-country-dist"></canvas></div>
+				<p class="muted" style="font-size:0.78rem;margin:8px 0 0">Requires MaxMind GeoLite2 databases to be present on the server -- shows nothing if they aren't (same as the Users page's country/city/ASN restriction pickers).</p>
+			</div>
+			<div class="ua-chart-card">
+				<h3>Session Duration</h3>
+				<div id="pua-duration-summary" style="display:flex;gap:20px;margin-bottom:12px;flex-wrap:wrap"></div>
+				<div class="chart-canvas-mount"><canvas id="pua-duration-trend"></canvas></div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="card" id="user-activity-analytics">
+	<div class="toolbar">
+		<h2 style="margin:0">User Activity Analytics</h2>
+	</div>
+	<p class="page-subtitle" style="margin:-6px 0 18px">Login activity only reflects logins since this feature shipped -- there is no retroactive login history. Everything else here is drawn from the same session-history window as the Analytics section above.</p>
+
+	<div class="ua-grid">
+		<div class="ua-chart-card">
+			<div class="ua-chart-card-head"><h3>Active Users</h3>
+				<select id="uaa-granularity" class="chart-type-select">
+					<option value="day">By Day</option>
+					<option value="week">By Week</option>
+					<option value="month">By Month</option>
+				</select>
+			</div>
+			<div class="chart-canvas-mount"><canvas id="uaa-active-users"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<div class="ua-chart-card-head"><h3>Login Activity</h3><div id="uaa-login-type"></div></div>
+			<div class="chart-canvas-mount"><canvas id="uaa-login-activity"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Most Active Users</h3>
+			<div id="uaa-most-active"><p class="muted">No data in range.</p></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Least Active Users</h3>
+			<div id="uaa-least-active"><p class="muted">No data in range.</p></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Peak Concurrent Connections</h3>
+			<div class="chart-canvas-mount"><canvas id="uaa-peak-concurrent"></canvas></div>
+		</div>
+	</div>
+</div>
+
 <div class="card">
 	<h2>Global Summary</h2>
 	<div class="form-grid" id="global-summary"><p class="muted">Loading…</p></div>
@@ -277,11 +362,18 @@ async function loadUsageAnalytics() {
 	try {
 		uaEntries = await apiFetch("/api/status/session-history?limit=500");
 		renderUsageAnalytics();
+		// User Activity Analytics' Active Users / Most-Least Active / Peak
+		// Concurrent charts all read this same `uaEntries` fetch (see that
+		// section's own script block, further down this file) -- rendered
+		// from here, not a second independent fetch, so they can only ever
+		// be as fresh/stale as the Analytics section above them.
+		renderUserActivityAnalytics();
 	} catch (e) {
 		["ua-peak-hours"].forEach(id => {
 			document.getElementById(id).innerHTML = `<p class="muted">Could not load: ${escapeHtml(e.message)}</p>`;
 		});
 		document.getElementById("ua-summary").innerHTML = "";
+		renderUserActivityAnalytics(); // renders each chart's own empty state against uaEntries=[]
 	}
 }
 
@@ -310,6 +402,339 @@ document.getElementById("ua-range").value = {{ (app_settings.reports_default_ran
 document.getElementById("ua-range").addEventListener("change", renderUsageAnalytics);
 document.getElementById("ua-refresh").addEventListener("click", loadUsageAnalytics);
 loadUsageAnalytics();
+
+// --- Per-User Analytics ---------------------------------------------------
+let puaUserOptions = [];
+let puaData = null; // last-loaded /api/reports/users/{id} response
+const puaChartType = {};
+
+// The picker's own multiselect widget has no live onChange callback of its
+// own (every existing caller elsewhere in this app reads getSelected() on
+// form-submit, not live) -- listening for the internal checkbox's native
+// "change" event bubbling up through this mount (event delegation) is
+// simpler than reaching into the widget's internals for a hook that
+// doesn't exist. localFilter (not searchable) mode is used deliberately:
+// unlike the tens-of-thousands-of-entries city/ASN pickers this widget
+// was originally built for, this list is bounded by "users with a linked
+// VPN profile" -- small enough to fetch once and filter in-browser, no
+// server round trip per keystroke needed.
+const puaPickerMount = document.getElementById("pua-user-picker");
+const puaPicker = createMultiselectDropdown(puaPickerMount, {
+	placeholder: "Select a user…", idType: "number", single: true, localFilter: true,
+	searchPlaceholder: "Type to search…", emptyLabel: "No users with a linked VPN profile yet.", unitLabel: "user",
+});
+puaPickerMount.addEventListener("change", () => {
+	const [id] = puaPicker.getSelected();
+	if (id) loadPuaUser(id);
+});
+
+async function loadPuaUserOptions() {
+	try {
+		puaUserOptions = await apiFetch("/api/reports/user-options");
+		puaPicker.setOptions(puaUserOptions.map(u => ({ id: u.id, label: `${u.display_name} (${u.username})` })));
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+// Applies the page-wide #ua-range filter to this one user's own session
+// rows -- the server-side `client` filter (see cli_wrapper.status_session_history)
+// already scopes /api/reports/users/{id} to just this user, so this is
+// only date-range narrowing, same client-side filtering shape as
+// renderUsageAnalytics()'s own `rows` computation above.
+function puaRangeFilteredSessions() {
+	const range = document.getElementById("ua-range").value;
+	let rows = (puaData.sessions || []).filter(r => r.connected_at);
+	if (range !== "all") {
+		const cutoff = Date.now() - parseInt(range, 10) * 86400000;
+		rows = rows.filter(r => new Date(r.connected_at).getTime() >= cutoff);
+	}
+	return rows;
+}
+
+async function loadPuaUser(userId) {
+	document.getElementById("pua-empty-state").style.display = "none";
+	const body = document.getElementById("pua-body");
+	body.style.display = "";
+	try {
+		puaData = await apiFetch(`/api/reports/users/${userId}`);
+		renderPuaCharts();
+	} catch (e) {
+		puaData = null;
+		body.innerHTML = `<p class="muted">Could not load: ${escapeHtml(e.message)}</p>`;
+	}
+}
+
+function renderPuaCharts() {
+	if (!puaData) return;
+	const rows = puaRangeFilteredSessions();
+	const range = document.getElementById("ua-range").value;
+
+	const totalBytes = rows.reduce((sum, r) => sum + (r.bytes_received || 0) + (r.bytes_sent || 0), 0);
+	document.getElementById("pua-summary").innerHTML = `
+		<div class="ua-summary-stat"><div class="ua-summary-value">${puaData.quota_gb != null ? `${fmtGb(puaData.used_gb)} / ${fmtGb(puaData.quota_gb)}` : "Unlimited"}</div><div class="ua-summary-label">This Month's Quota Usage</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${rows.length}</div><div class="ua-summary-label">Sessions In Range</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${fmtBytes(totalBytes)}</div><div class="ua-summary-label">Bandwidth In Range</div></div>
+	`;
+
+	// Bandwidth per day + Top Usage Days.
+	const byDate = new Map();
+	for (const r of rows) {
+		const parts = uaLocalParts(r.connected_at);
+		if (!parts) continue;
+		const e = byDate.get(parts.dateKey) || { rx: 0, tx: 0, count: 0 };
+		e.rx += r.bytes_received || 0;
+		e.tx += r.bytes_sent || 0;
+		e.count += 1;
+		byDate.set(parts.dateKey, e);
+	}
+	const sortedDates = [...byDate.keys()].sort();
+	renderChart(
+		document.getElementById("pua-bandwidth"),
+		buildChartJsConfig(puaChartType.bandwidth, sortedDates.map(k => ({ label: uaShortDateLabel(k), values: [byDate.get(k).rx, byDate.get(k).tx] })),
+			{ seriesLabels: ["Received", "Sent"], valueFormatter: fmtBytes }),
+	);
+	const topDays = [...byDate.entries()]
+		.map(([k, v]) => ({ label: uaShortDateLabel(k), value: v.rx + v.tx }))
+		.sort((a, b) => b.value - a.value)
+		.slice(0, 5);
+	document.getElementById("pua-top-days").innerHTML = topDays.length
+		? topDays.map(d => `<div class="metric-row"><span>${escapeHtml(d.label)}</span><span class="mono">${fmtBytes(d.value)}</span></div>`).join("")
+		: '<p class="muted">No data in range.</p>';
+
+	// Connections per day + successful vs failed (session-history count
+	// vs rejected-attempts count for this same client, per day).
+	renderChart(
+		document.getElementById("pua-connections"),
+		buildChartJsConfig(puaChartType.connections, sortedDates.map(k => ({ label: uaShortDateLabel(k), value: byDate.get(k).count })),
+			{ valueFormatter: uaSessionCountLabel }),
+	);
+	const rejectedInRange = (puaData.rejected || []).filter(r => {
+		const t = new Date(r.timestamp);
+		if (isNaN(t)) return false;
+		return range === "all" || t.getTime() >= Date.now() - parseInt(range, 10) * 86400000;
+	});
+	const byDateFail = new Map();
+	for (const r of rejectedInRange) {
+		const parts = uaLocalParts(r.timestamp);
+		if (parts) byDateFail.set(parts.dateKey, (byDateFail.get(parts.dateKey) || 0) + 1);
+	}
+	const successFailDates = [...new Set([...sortedDates, ...byDateFail.keys()])].sort();
+	renderChart(
+		document.getElementById("pua-success-fail"),
+		buildChartJsConfig("stacked-bar", successFailDates.map(k => ({ label: uaShortDateLabel(k), values: [byDate.get(k)?.count || 0, byDateFail.get(k) || 0] })),
+			{ seriesLabels: ["Successful", "Failed"], valueFormatter: uaSessionCountLabel }),
+	);
+
+	// Source IP Analytics -- computed server-side (see reports.py's
+	// _source_ip_summary) against this user's FULL session-history fetch
+	// (up to the 500-row cap), not range-filtered here, since "most
+	// frequently used source IPs" is more useful as an all-time signal
+	// than something that resets to near-empty on a 7-day default range.
+	const ipSummary = puaData.source_ip_summary || {};
+	document.getElementById("pua-top-ips").innerHTML = (ipSummary.top_ips || []).length
+		? ipSummary.top_ips.map(r => `<div class="metric-row"><span class="mono">${escapeHtml(r.ip)}</span><span class="muted">${uaSessionCountLabel(r.count)}</span></div>`).join("")
+		: '<p class="muted">No data yet.</p>';
+	renderChart(
+		document.getElementById("pua-country-dist"),
+		buildChartJsConfig("donut", (ipSummary.country_distribution || []).map(r => ({ label: countryName(r.country), value: r.count })), { valueFormatter: uaSessionCountLabel }),
+	);
+
+	// Session Duration Analytics.
+	const durations = rows.map(r => r.duration_seconds || 0).filter(d => d > 0);
+	const totalDuration = durations.reduce((s, d) => s + d, 0);
+	document.getElementById("pua-duration-summary").innerHTML = durations.length ? `
+		<div><label class="muted" style="font-size:0.78rem">Average</label><div class="mono">${fmtDuration(totalDuration / durations.length)}</div></div>
+		<div><label class="muted" style="font-size:0.78rem">Longest</label><div class="mono">${fmtDuration(Math.max(...durations))}</div></div>
+		<div><label class="muted" style="font-size:0.78rem">Shortest</label><div class="mono">${fmtDuration(Math.min(...durations))}</div></div>
+		<div><label class="muted" style="font-size:0.78rem">Total Connected Time</label><div class="mono">${fmtDuration(totalDuration)}</div></div>
+	` : '<p class="muted">No sessions in range.</p>';
+	const avgDurByDate = new Map();
+	for (const r of rows) {
+		const parts = uaLocalParts(r.connected_at);
+		if (!parts || !r.duration_seconds) continue;
+		const e = avgDurByDate.get(parts.dateKey) || { sum: 0, count: 0 };
+		e.sum += r.duration_seconds;
+		e.count += 1;
+		avgDurByDate.set(parts.dateKey, e);
+	}
+	const avgDurDates = [...avgDurByDate.keys()].sort();
+	renderChart(
+		document.getElementById("pua-duration-trend"),
+		buildChartJsConfig("line", avgDurDates.map(k => ({ label: uaShortDateLabel(k), value: Math.round(avgDurByDate.get(k).sum / avgDurByDate.get(k).count) })), { valueFormatter: fmtDuration }),
+	);
+}
+
+puaChartType.bandwidth = chartTypeSelector(document.getElementById("pua-bandwidth-type"), {
+	types: ["stacked-bar", "line", "area"], current: "stacked-bar", storageKey: "chart-type:pua-bandwidth",
+	onChange: (t) => { puaChartType.bandwidth = t; renderPuaCharts(); },
+});
+puaChartType.connections = chartTypeSelector(document.getElementById("pua-connections-type"), {
+	types: ["bar", "line", "area"], current: "bar", storageKey: "chart-type:pua-connections",
+	onChange: (t) => { puaChartType.connections = t; renderPuaCharts(); },
+});
+
+document.getElementById("ua-range").addEventListener("change", renderPuaCharts);
+loadPuaUserOptions();
+
+// --- User Activity Analytics ----------------------------------------------
+const uaaChartType = {};
+
+// Week/month bucket-key helpers for the Active Users granularity toggle --
+// same UTC-constructed-Date labeling tolerance uaShortDateLabel already
+// accepts elsewhere on this page (display-only, not exact-boundary math).
+function uaaWeekKey(dateKey) {
+	const [y, m, d] = dateKey.split("-").map(Number);
+	const dt = new Date(Date.UTC(y, m - 1, d));
+	const diffToMonday = (dt.getUTCDay() + 6) % 7; // Monday-anchored week start
+	dt.setUTCDate(dt.getUTCDate() - diffToMonday);
+	return dt.toISOString().slice(0, 10);
+}
+function uaaMonthKey(dateKey) { return dateKey.slice(0, 7); } // "YYYY-MM"
+function uaaMonthLabel(monthKey) {
+	const [y, m] = monthKey.split("-").map(Number);
+	return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+}
+
+function uaaFilteredRows() {
+	const range = document.getElementById("ua-range").value;
+	let rows = uaEntries.filter(r => r.connected_at);
+	if (range !== "all") {
+		const cutoff = Date.now() - parseInt(range, 10) * 86400000;
+		rows = rows.filter(r => new Date(r.connected_at).getTime() >= cutoff);
+	}
+	return rows;
+}
+
+// "Active" = distinct connecting identities (portal username where a
+// portal account is linked, else the raw VPN client name -- same fallback
+// convention Top Clients by Data Usage already uses for unlinked clients)
+// per bucket, from VPN connection activity -- works immediately against
+// existing session history, unlike Login Activity below (which only has
+// data from this feature's own ship date forward).
+function renderActiveUsersChart() {
+	const granularity = document.getElementById("uaa-granularity").value;
+	const byBucket = new Map();
+	for (const r of uaaFilteredRows()) {
+		const parts = uaLocalParts(r.connected_at);
+		if (!parts) continue;
+		const bucketKey = granularity === "week" ? uaaWeekKey(parts.dateKey) : granularity === "month" ? uaaMonthKey(parts.dateKey) : parts.dateKey;
+		if (!byBucket.has(bucketKey)) byBucket.set(bucketKey, new Set());
+		byBucket.get(bucketKey).add(r.portal_username || r.client);
+	}
+	const sortedBuckets = [...byBucket.keys()].sort();
+	const labelFn = granularity === "week" ? (k) => `Wk of ${uaShortDateLabel(k)}` : granularity === "month" ? uaaMonthLabel : uaShortDateLabel;
+	renderChart(
+		document.getElementById("uaa-active-users"),
+		buildChartJsConfig("bar", sortedBuckets.map(k => ({ label: labelFn(k), value: byBucket.get(k).size })),
+			{ valueFormatter: (v) => `${v} active user${v === 1 ? "" : "s"}` }),
+	);
+}
+
+let uaaLoginEntries = [];
+async function loadLoginActivity() {
+	const range = document.getElementById("ua-range").value;
+	const days = range === "all" ? 365 : parseInt(range, 10);
+	try {
+		uaaLoginEntries = await apiFetch(`/api/reports/login-activity?days=${days}`);
+	} catch (e) {
+		uaaLoginEntries = [];
+	}
+	renderLoginActivityChart();
+}
+function renderLoginActivityChart() {
+	const byDate = new Map();
+	for (const r of uaaLoginEntries) {
+		const parts = uaLocalParts(r.timestamp);
+		if (parts) byDate.set(parts.dateKey, (byDate.get(parts.dateKey) || 0) + 1);
+	}
+	const sortedDates = [...byDate.keys()].sort();
+	renderChart(
+		document.getElementById("uaa-login-activity"),
+		buildChartJsConfig(uaaChartType.login, sortedDates.map(k => ({ label: uaShortDateLabel(k), value: byDate.get(k) })),
+			{ valueFormatter: (v) => `${v} login${v === 1 ? "" : "s"}` }),
+	);
+}
+
+// Ranked by total VPN sessions in range -- "least active" deliberately
+// excludes identities with ZERO sessions in range (nobody with no
+// connection activity at all appears in `uaEntries` to begin with, so
+// this is naturally already scoped to "least active among those who
+// connected at least once," not a meaningless ranking of total silence).
+function renderActiveUserRankings() {
+	const byIdentity = new Map();
+	for (const r of uaaFilteredRows()) {
+		const identity = r.portal_display_name || r.portal_username || r.client;
+		byIdentity.set(identity, (byIdentity.get(identity) || 0) + 1);
+	}
+	const ranked = [...byIdentity.entries()].sort((a, b) => b[1] - a[1]);
+	const rowHtml = ([label, count]) => `<div class="metric-row"><span>${escapeHtml(label)}</span><span class="muted mono">${uaSessionCountLabel(count)}</span></div>`;
+	const most = ranked.slice(0, 5);
+	const least = ranked.slice(-5).reverse();
+	document.getElementById("uaa-most-active").innerHTML = most.length ? most.map(rowHtml).join("") : '<p class="muted">No data in range.</p>';
+	document.getElementById("uaa-least-active").innerHTML = least.length ? least.map(rowHtml).join("") : '<p class="muted">No data in range.</p>';
+}
+
+// A sweep-line over every session's (connected_at, disconnected_at)
+// interval -- at each connect/disconnect, +1/-1 a running counter, and
+// record the max seen so far as that calendar day's peak. Known, accepted
+// gap: a day with ZERO connect/disconnect events at all (every session
+// spanning it started and ended on some OTHER day) never gets a map
+// entry, so it renders as "no data" rather than the carried-over
+// concurrency that was technically still active -- not reachable in
+// practice given this app's own session-duration buckets top out at "8h+"
+// (see the Session Duration chart above), never multi-day, so closing
+// this gap for a case that can't currently occur wasn't worth the extra
+// day-enumeration complexity.
+function computeDailyPeakConcurrent(sessions) {
+	const events = [];
+	for (const s of sessions) {
+		const start = Date.parse(s.connected_at);
+		const end = Date.parse(s.disconnected_at);
+		if (isNaN(start) || isNaN(end) || end < start) continue;
+		events.push({ t: start, delta: 1 });
+		events.push({ t: end, delta: -1 });
+	}
+	events.sort((a, b) => a.t - b.t);
+	const peakByDay = new Map();
+	let current = 0;
+	let lastDayKey = null;
+	for (const ev of events) {
+		const parts = uaLocalParts(new Date(ev.t).toISOString());
+		if (!parts) continue;
+		if (parts.dateKey !== lastDayKey) {
+			if (!peakByDay.has(parts.dateKey)) peakByDay.set(parts.dateKey, current);
+			lastDayKey = parts.dateKey;
+		}
+		current += ev.delta;
+		const prevPeak = peakByDay.get(parts.dateKey) || 0;
+		if (current > prevPeak) peakByDay.set(parts.dateKey, current);
+	}
+	return peakByDay;
+}
+function renderPeakConcurrentChart() {
+	const peakByDay = computeDailyPeakConcurrent(uaaFilteredRows().filter(r => r.disconnected_at));
+	const sortedDates = [...peakByDay.keys()].sort();
+	renderChart(
+		document.getElementById("uaa-peak-concurrent"),
+		buildChartJsConfig("line", sortedDates.map(k => ({ label: uaShortDateLabel(k), value: peakByDay.get(k) })),
+			{ valueFormatter: (v) => `${v} concurrent` }),
+	);
+}
+
+function renderUserActivityAnalytics() {
+	renderActiveUsersChart();
+	renderActiveUserRankings();
+	renderPeakConcurrentChart();
+}
+
+uaaChartType.login = chartTypeSelector(document.getElementById("uaa-login-type"), {
+	types: ["bar", "line", "area"], current: "bar", storageKey: "chart-type:login-activity",
+	onChange: (t) => { uaaChartType.login = t; renderLoginActivityChart(); },
+});
+document.getElementById("uaa-granularity").addEventListener("change", renderActiveUsersChart);
+document.getElementById("ua-range").addEventListener("change", loadLoginActivity);
+loadLoginActivity();
 
 // --- Bandwidth/quota tables (unchanged from before this round) ----------
 function fmtGb(v) { return v == null ? "—" : `${v}GB`; }

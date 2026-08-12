@@ -24,7 +24,7 @@ def test_session_history_rows_carry_linked_portal_user(app_client, db_session, m
         {"client": "waleed-laptop", "connected_at": "2026-08-10T00:00:00Z"},
         {"client": "unlinked-client", "connected_at": "2026-08-10T00:00:00Z"},
     ]
-    monkeypatch.setattr(status_routes.cli, "status_session_history", lambda limit: fake_rows)
+    monkeypatch.setattr(status_routes.cli, "status_session_history", lambda limit, client=None: fake_rows)
 
     login(app_client, "admin", "adminpass123")
     r = app_client.get("/api/status/session-history")

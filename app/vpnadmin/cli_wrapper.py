@@ -281,7 +281,7 @@ def status_rejected(limit: int = 20) -> list[dict]:
         _parse_json_or_raise(_run_status_script("--rejected-connections", str(limit), "--json")))
 
 
-def status_session_history(limit: int = 20) -> list[dict]:
+def status_session_history(limit: int = 20, client: str | None = None) -> list[dict]:
     """Connection History page's data source -- past (ended) sessions, each
     with connected/disconnected timestamps, duration, source IP, and byte
     counts. See vpn-status.py's cmd_session_history / host-scripts/
@@ -289,9 +289,19 @@ def status_session_history(limit: int = 20) -> list[dict]:
     row. Not part of the shared dashboard snapshot below (that snapshot is
     scoped to what Dashboard/Clients/Revoked/Diagnostics need on every
     load; Connection History is its own page with its own fetch, same as
-    e.g. /api/lint-db)."""
-    return _cached(("status_session_history", limit), lambda:
-        _parse_json_or_raise(_run_status_script("--session-history", str(limit), "--json")))
+    e.g. /api/lint-db).
+
+    `client`, if given, is passed straight through to vpn-status.py's own
+    `--client` flag (server-side filtering, not a post-fetch narrowing of
+    the same 500-row window) -- added for Per-User Analytics (see
+    routes/reports.py), which needs one user's own session history without
+    shipping/filtering the full window client-side the way
+    connection_history.html's page-level search does. `client` is part of
+    the cache key so a scoped and an unscoped call for the same `limit`
+    never collide in the 3s TTL cache."""
+    return _cached(("status_session_history", limit, client), lambda:
+        _parse_json_or_raise(_run_status_script(
+            "--session-history", str(limit), *(["--client", client] if client else []), "--json")))
 
 
 # --- Combined dashboard summary ------------------------------------------

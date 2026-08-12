@@ -44,16 +44,21 @@ def get_rejected(limit: int = Query(20, ge=1, le=500), _: User = Depends(_requir
 @router.get("/session-history")
 def get_session_history(
     limit: int = Query(20, ge=1, le=500),
+    client: str | None = Query(None, description="Server-side filter to one VPN client's own session history"),
     _: User = Depends(_require_status_viewer),
     db: Session = Depends(get_db),
 ):
     """Connection History page. Same access level as /rejected (any
     logged-in user, admin or viewer) -- this is read-only historical data,
     not a mutating endpoint, matching Diagnostics' own require_user gate.
-    Filtering by client name is done client-side against this same window,
-    same as Diagnostics' rejected-connections filters (see that page's
-    populateRejectedFilters/renderRejectedTable for the pattern this
-    mirrors).
+    Filtering by client name is, by default, done client-side against this
+    same window, same as Diagnostics' rejected-connections filters (see
+    that page's populateRejectedFilters/renderRejectedTable for the pattern
+    this mirrors) -- `client` is an OPT-IN server-side filter added for
+    Per-User Analytics (routes/reports.py), which needs one user's own
+    history without shipping the full 500-row window just to filter one
+    name out of it; connection_history.html's own page-wide search still
+    uses the unfiltered fetch + client-side filtering as before.
 
     Each row is enriched here with the linked portal user's identity
     (`portal_username`/`portal_display_name`, both null if this VPN client
@@ -63,7 +68,7 @@ def get_session_history(
     any_scope vpn_profiles/view already exposes every client's session
     history here, just not who it's linked to."""
     try:
-        rows = cli.status_session_history(limit)
+        rows = cli.status_session_history(limit, client)
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
 

@@ -179,6 +179,15 @@ def login_submit(
         db.commit()
 
     login_user(request, user, db)
+    # Same log_action helper/naming convention as "login_failed"/
+    # "login_blocked_ip" above, just for the success case -- powers User
+    # Activity Analytics' Login Activity chart (routes/reports.py). Subject
+    # to the same audit_retention_days pruning as every other AuditLog
+    # entry (app_settings.prune_audit_log), no separate cleanup needed.
+    # Starts accumulating from this deploy forward only -- there is no
+    # retroactive login history, since successful logins were never
+    # audit-logged before this.
+    log_action(db, user, "login_success", target=user.username, success=True)
     return RedirectResponse("/", status_code=303)
 
 
