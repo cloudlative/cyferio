@@ -61,6 +61,23 @@ DEFAULTS = {
     "MAXMIND_ASN_DB_PATH": "/etc/openvpn/server/GeoLite2-ASN.mmdb",
     "DB_FILE": "/etc/openvpn/server/openvpn_db.txt",
     "CONN_LOG": "/etc/openvpn/server/openvpn.log",
+    # Same-directory JSON cache of the app's AppSettings defaults this
+    # module has no DB access to read directly -- see the app-side
+    # config.py's GLOBAL_DEFAULTS_FILE / policy_store.write_global_defaults
+    # docstrings. Read by get_global_defaults() below.
+    "GLOBAL_DEFAULTS_FILE": "/etc/openvpn/server/policy/global_defaults.json",
+    # OpenVPN's management-interface Unix socket -- see the app-side
+    # management_client.py and host_scripts_manager.py's
+    # render_server_conf_additions (which is what actually wires the
+    # `management <path> unix` directive into server.conf). Read by
+    # quota_enforcer.py.
+    "MANAGEMENT_SOCKET": "/etc/openvpn/server/mgmt.sock",
+    # Plain-text log of every hard-enforcement kill quota_enforcer.py
+    # actually takes (or fails to take) -- separate from CONN_LOG, which
+    # openvpn-mac-addr-check.py writes in a specific format vpn-status.py
+    # parses; keeping this in its own file avoids any risk of interfering
+    # with that parsing.
+    "QUOTA_ENFORCER_LOG": "/etc/openvpn/server/quota-enforcer.log",
 }
 
 
@@ -243,6 +260,32 @@ def get_policy(name):
     with _locked(CLIENT_POLICY_FILE):
         all_policies = read_json(CLIENT_POLICY_FILE, {})
     return _normalize_policy_shape(all_policies.get(name, {}) or {})
+
+
+GLOBAL_DEFAULTS_FILE = CFG["GLOBAL_DEFAULTS_FILE"]
+MANAGEMENT_SOCKET = CFG["MANAGEMENT_SOCKET"]
+_DEFAULT_GLOBAL_DEFAULTS = {"quota_enforcement_policy": "soft"}
+
+
+def get_global_defaults():
+    """Returns the app's current AppSettings defaults this module can't
+    reach via DB (currently just quota_enforcement_policy) -- fails open
+    to _DEFAULT_GLOBAL_DEFAULTS (matching this app's actual built-in
+    default, "soft") on ANY problem: missing file (a fresh install where
+    no settings save has happened yet), unreadable, malformed JSON, or a
+    key that's gone missing. quota_enforcer.py getting this wrong in the
+    "soft" direction is the safe failure mode -- it just means hard
+    enforcement doesn't kick in for clients relying on the global default
+    until this file is readable again, never the other way around."""
+    try:
+        with _locked(GLOBAL_DEFAULTS_FILE):
+            data = read_json(GLOBAL_DEFAULTS_FILE, {})
+    except OSError:
+        data = {}
+    result = dict(_DEFAULT_GLOBAL_DEFAULTS)
+    if isinstance(data.get("quota_enforcement_policy"), str) and data["quota_enforcement_policy"] in ("soft", "hard"):
+        result["quota_enforcement_policy"] = data["quota_enforcement_policy"]
+    return result
 
 
 def current_month_start(today=None):
@@ -440,3 +483,108 @@ def ip_matches_allowlist(ip, allowed):
         except ValueError:
             continue
     return False
+
+
+# --- OpenVPN management-interface client, for quota_enforcer.py --------
+# Hand-kept-in-sync duplicate of the app-side management_client.py --
+# same reasoning as everything else in this module (this script runs
+# outside the app's Docker image/dependencies, as `nobody`, with no
+# import path back to app/). Deliberately minimal: quota_enforcer.py only
+# ever needs `status 3` (live per-session byte counts) and `kill`.
+
+class ManagementError(Exception):
+    pass
+
+
+def _mgmt_read_until_end(sock):
+    lines = []
+    buf = b""
+    while True:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise ManagementError("management socket closed before an END line was seen")
+        buf += chunk
+        while b"\n" in buf:
+            raw_line, buf = buf.split(b"\n", 1)
+            line = raw_line.decode("utf-8", errors="replace").rstrip("\r")
+            if line == "END":
+                return lines
+            lines.append(line)
+
+
+def _mgmt_read_line(sock):
+    buf = b""
+    while not buf.endswith(b"\n"):
+        chunk = sock.recv(1)
+        if not chunk:
+            break
+        buf += chunk
+    return buf.decode("utf-8", errors="replace").strip()
+
+
+def list_sessions(socket_path):
+    """Returns a list of {common_name, bytes_received, bytes_sent} dicts,
+    one per currently-connected client, via `status 3`. Raises
+    ManagementError/OSError on any connection or protocol problem --
+    quota_enforcer.py's own polling loop decides how to handle that (log
+    and retry next tick, never crash the whole poller over one bad
+    read)."""
+    import socket as socket_mod
+    sock = socket_mod.socket(socket_mod.AF_UNIX, socket_mod.SOCK_STREAM)
+    sock.settimeout(10)
+    try:
+        sock.connect(socket_path)
+        _mgmt_read_line(sock)  # banner
+        sock.sendall(b"status 3\n")
+        lines = _mgmt_read_until_end(sock)
+    finally:
+        sock.close()
+    header = None
+    sessions = []
+    for line in lines:
+        parts = line.split(",")
+        if not parts:
+            continue
+        if parts[0] == "HEADER" and len(parts) > 1 and parts[1] == "CLIENT_LIST":
+            header = parts[2:]
+            continue
+        if parts[0] == "CLIENT_LIST":
+            values = parts[1:]
+            if header is None or len(values) < len(header):
+                raise ManagementError(f"unexpected status 3 CLIENT_LIST row: {line!r}")
+            row = dict(zip(header, values))
+            try:
+                sessions.append({
+                    "common_name": row["Common Name"],
+                    "bytes_received": int(row.get("Bytes Received") or 0),
+                    "bytes_sent": int(row.get("Bytes Sent") or 0),
+                })
+            except KeyError as e:
+                raise ManagementError(f"status 3 CLIENT_LIST row missing field {e}: {line!r}")
+    return sessions
+
+
+def kill_session(socket_path, common_name):
+    """Terminates `common_name`'s active session. Returns True if OpenVPN
+    reported success, False if it reported the common name wasn't found
+    (already disconnected -- not treated as an error, see
+    quota_enforcer.py). Raises ManagementError for anything else
+    (malformed response) or OSError for a connection problem."""
+    import re as re_mod
+    import socket as socket_mod
+    if not re_mod.match(r"^[0-9a-zA-Z_-]+$", common_name):
+        raise ManagementError(f"refusing to send an unsafe common name to the management interface: {common_name!r}")
+    sock = socket_mod.socket(socket_mod.AF_UNIX, socket_mod.SOCK_STREAM)
+    sock.settimeout(10)
+    try:
+        sock.connect(socket_path)
+        _mgmt_read_line(sock)  # banner
+        sock.sendall(f"kill {common_name}\n".encode("utf-8"))
+        response = _mgmt_read_line(sock)
+    finally:
+        sock.close()
+    if response.startswith("SUCCESS"):
+        return True
+    if "not found" in response.lower():
+        return False
+    raise ManagementError(f"OpenVPN refused kill for {common_name!r}: {response}")

@@ -39,6 +39,9 @@
 			<a href="/diagnostics" class="{{ 'active' if request.url.path == '/diagnostics' }}"><span class="nav-icon">⚙</span>Diagnostics</a>
 			<a href="/health" class="{{ 'active' if request.url.path == '/health' }}"><span class="nav-icon">♥</span>Health</a>
 			{% endif %}
+			{% if can_view_reports %}
+			<a href="/reports" class="{{ 'active' if request.url.path == '/reports' }}"><span class="nav-icon">▦</span>Reports</a>
+			{% endif %}
 			{% if is_admin %}
 			<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
 			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>

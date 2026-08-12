@@ -34,6 +34,7 @@ from pathlib import Path
 
 from ..system import package_manager
 from ..system.process_manager import CommandError, run
+from . import service_manager
 from .exceptions import InstallError
 from .paths import OpenVPNPaths
 
@@ -46,6 +47,10 @@ logger = logging.getLogger(__name__)
 # no guarantee of what directory it was launched from.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 HOST_SCRIPTS_SOURCE_DIR = _REPO_ROOT / "host-scripts"
+SYSTEMD_SOURCE_DIR = _REPO_ROOT / "systemd"
+SYSTEMD_UNIT_DIR = "/etc/systemd/system"
+QUOTA_ENFORCER_SERVICE = "openvpn-quota-enforcer.service"
+QUOTA_ENFORCER_TIMER = "openvpn-quota-enforcer.timer"
 
 # Delimiters bracketing the block installer.py appends to server.conf --
 # lets install_host_scripts() (and a re-run of install() itself) detect
@@ -58,16 +63,26 @@ SERVER_CONF_MARKER_END = "# --- END openvpn-toolkit per-client restriction hooks
 
 def render_server_conf_additions(paths: OpenVPNPaths) -> str:
     """The extra server.conf lines needed to activate MAC-binding + every
-    per-client restriction check -- `script-security 2` (required for
-    OpenVPN to run any client-connect/disconnect script at all) plus the
-    two hook directives themselves. Returned as a standalone, marker-
-    delimited block; callers decide whether/how to append it (see
-    installer.py's install() and install_host_scripts() below)."""
+    per-client restriction check (`script-security 2` plus the two hook
+    directives) AND the management interface (see management_client.py --
+    live session listing + forced disconnect, and the quota-enforcer
+    poller). Returned as a standalone, marker-delimited block; callers
+    decide whether/how to append it (see installer.py's install() and
+    install_host_scripts() below).
+
+    The management socket is deliberately unauthenticated at the OpenVPN
+    protocol level (no third `pw-file` argument) -- see
+    management_client.py's module docstring for why the Unix socket's own
+    permissions (root-only, since OpenVPN creates it before dropping
+    privileges to `user nobody`/`group nogroup`) are the real trust
+    boundary here, not a password every root-run caller would need to
+    know anyway."""
     lines = [
         SERVER_CONF_MARKER_BEGIN,
         "script-security 2",
         f"client-connect {paths.mac_check_script}",
         f"client-disconnect {paths.disconnect_script}",
+        f"management {paths.management_socket} unix",
         SERVER_CONF_MARKER_END,
     ]
     return "\n".join(lines) + "\n"
@@ -212,11 +227,13 @@ def install_host_scripts(paths: OpenVPNPaths, *, os_info: package_manager.OSInfo
     subdirectory and its JSON files (+ .lock files) with nobody-writable
     permissions, ensures openvpn_db.txt/openvpn.log exist, ensures the
     geoip2 Python package is installed and vpn-tools.conf (if present) is
-    nobody-group-readable, and appends the script-security/client-connect/
-    client-disconnect block to server.conf if it isn't already there.
-    Returns a list of short human-readable change descriptions (for
-    CLI/log output) -- entries are only added for things that actually
-    changed, so a fully-idempotent repeat call can return an empty list.
+    nobody-group-readable, appends the script-security/client-connect/
+    client-disconnect/management block to server.conf if it isn't already
+    there, and deploys+enables the quota-enforcer systemd timer (see
+    install_quota_enforcer below -- Hard Enforcement's poller). Returns a
+    list of short human-readable change descriptions (for CLI/log output)
+    -- entries are only added for things that actually changed, so a
+    fully-idempotent repeat call can return an empty list.
 
     Everything here is meant to be run completely unattended (no manual
     "now go apt-get/pip install X" or "now go chmod Y" follow-up step,
@@ -280,4 +297,33 @@ def install_host_scripts(paths: OpenVPNPaths, *, os_info: package_manager.OSInfo
         changes.append(f"appended client-connect/client-disconnect block to {paths.server_conf} -- "
                         f"NOT yet active until the OpenVPN service is restarted")
 
+    quota_enforcer_change = install_quota_enforcer(paths)
+    if quota_enforcer_change:
+        changes.append(quota_enforcer_change)
+
     return changes
+
+
+def install_quota_enforcer(paths: OpenVPNPaths) -> str | None:
+    """Deploys quota_enforcer.py (root-owned/executed -- see that file's
+    own systemd unit for why, unlike the nobody-run connect/disconnect
+    scripts) and its systemd service+timer, then enables+starts the
+    timer. Idempotent: re-copying identical files and re-running
+    `enable --now` on an already-enabled timer are both no-ops.
+
+    Returns a short change description if the timer had to be
+    (re-)enabled, None if it was already active -- distinguishing "just
+    activated" from "already running" the same way the rest of this
+    module's change-tracking does."""
+    shutil.copyfile(HOST_SCRIPTS_SOURCE_DIR / "quota_enforcer.py", paths.quota_enforcer_script)
+    os.chmod(paths.quota_enforcer_script, 0o700)  # root-only -- see this function's docstring
+
+    for unit_name in (QUOTA_ENFORCER_SERVICE, QUOTA_ENFORCER_TIMER):
+        shutil.copyfile(SYSTEMD_SOURCE_DIR / unit_name, f"{SYSTEMD_UNIT_DIR}/{unit_name}")
+
+    was_active = service_manager.is_active(QUOTA_ENFORCER_TIMER)
+    service_manager.daemon_reload()
+    service_manager.enable_and_start(QUOTA_ENFORCER_TIMER)
+    if was_active:
+        return None
+    return f"installed and started {QUOTA_ENFORCER_TIMER} (hard-enforcement polling)"

@@ -137,6 +137,14 @@
 				<p class="field-hint">Applied to a new user's VPN profile only when the Add User form's own quota field is left blank.</p>
 			</div>
 		</div>
+		<div class="field" style="margin-top:6px">
+			<label>Bandwidth Quota Enforcement Policy</label>
+			<div class="checkbox-row" style="flex-direction:column;align-items:flex-start;gap:10px">
+				<label class="checkbox-label"><input type="radio" name="s-quota-policy" value="soft" checked> Soft Enforcement <span class="muted">-- an already-connected session keeps running once its quota is exhausted; only the next connection attempt is refused</span></label>
+				<label class="checkbox-label"><input type="radio" name="s-quota-policy" value="hard"> Hard Enforcement <span class="muted">-- an active session is disconnected immediately once its quota is exhausted, and new connections stay refused until the quota resets or is increased</span></label>
+			</div>
+			<p class="field-hint">Applies to every client with a quota set, unless overridden per-profile from the Clients page's Manage Restrictions dialog.</p>
+		</div>
 	</div>
 
 	<div class="card">
@@ -357,6 +365,8 @@ async function loadSettings() {
 		setVal("s-audit-retention", s.audit_retention_days);
 		document.getElementById("s-log-failed-logins").checked = s.log_failed_login_attempts !== false;
 		setVal("s-default-bandwidth", s.default_bandwidth_monthly_gb);
+		const quotaPolicyEl = document.querySelector(`input[name="s-quota-policy"][value="${s.default_quota_enforcement_policy || "soft"}"]`);
+		if (quotaPolicyEl) quotaPolicyEl.checked = true;
 		setVal("s-admin-notify-email", s.admin_notification_email);
 		document.getElementById("s-notify-user-created").checked = !!s.notify_admin_on_user_created;
 		document.getElementById("s-notify-client-revoked").checked = !!s.notify_admin_on_client_revoked;
@@ -419,6 +429,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		log_failed_login_attempts: document.getElementById("s-log-failed-logins").checked,
 		default_new_user_role: document.getElementById("s-default-role").value || null,
 		default_bandwidth_monthly_gb: val("s-default-bandwidth") ? Number(val("s-default-bandwidth")) : null,
+		default_quota_enforcement_policy: document.querySelector('input[name="s-quota-policy"]:checked')?.value || "soft",
 		admin_notification_email: val("s-admin-notify-email") || null,
 		notify_admin_on_user_created: document.getElementById("s-notify-user-created").checked,
 		notify_admin_on_client_revoked: document.getElementById("s-notify-client-revoked").checked,

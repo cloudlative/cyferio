@@ -376,6 +376,19 @@ class AppSettings(Base):
     # in routes/users.py.
     default_bandwidth_monthly_gb = Column(Float, nullable=True)
 
+    # VPN Management: global default for what happens when a client's
+    # bandwidth_monthly_gb quota is exhausted -- "soft" (the connect-time-
+    # only behavior this app has always had: an already-connected session
+    # keeps running, only the next connection attempt is refused) or
+    # "hard" (host-scripts/quota_enforcer.py actively kills an in-progress
+    # session the moment it crosses quota). NULL/unset falls back to
+    # "soft" (see app_settings.py's refresh_runtime_cache) -- a fresh
+    # install's behavior never silently changes. Per-client override lives
+    # on client_policy.json's own quota_enforcement_policy field (see
+    # policy_store.set_policy), same "global default, profile-level
+    # override" shape as default_bandwidth_monthly_gb above.
+    default_quota_enforcement_policy = Column(String(8), nullable=True)
+
     # Notifications: admin-facing (not per-user) event emails, sent via the
     # same SMTP config as .ovpn delivery -- see mailer.py's
     # send_admin_notification. All three are opt-in (default off) so a

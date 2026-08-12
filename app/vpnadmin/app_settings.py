@@ -30,6 +30,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from . import policy_store
 from .config import settings as env_settings
 from .models import AppSettings
 
@@ -137,6 +138,7 @@ class _RuntimeSettings:
         self.log_failed_login_attempts = True
         self.default_new_user_role = "user"
         self.default_bandwidth_monthly_gb = None  # None = unlimited
+        self.default_quota_enforcement_policy = "soft"  # pre-existing, only-ever behavior until Phase 2's hard mode
         self.admin_notification_email = None
         self.notify_admin_on_user_created = False
         self.notify_admin_on_client_revoked = False
@@ -187,6 +189,7 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.log_failed_login_attempts = row.log_failed_login_attempts if row.log_failed_login_attempts is not None else True
     runtime.default_new_user_role = row.default_new_user_role or "user"
     runtime.default_bandwidth_monthly_gb = row.default_bandwidth_monthly_gb
+    runtime.default_quota_enforcement_policy = row.default_quota_enforcement_policy or "soft"
     runtime.admin_notification_email = row.admin_notification_email
     runtime.notify_admin_on_user_created = bool(row.notify_admin_on_user_created)
     runtime.notify_admin_on_client_revoked = bool(row.notify_admin_on_client_revoked)
@@ -197,6 +200,11 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.login_theme = row.login_theme or env_settings.LOGIN_THEME
     runtime.timezone = row.timezone or env_settings.APP_TIMEZONE
     runtime.time_format = row.time_format or env_settings.APP_TIME_FORMAT
+
+    # Mirrors the one setting host-scripts/quota_enforcer.py needs but has
+    # no DB access to read directly -- see policy_store.write_global_defaults
+    # and config.py's GLOBAL_DEFAULTS_FILE docstring.
+    policy_store.write_global_defaults(quota_enforcement_policy=runtime.default_quota_enforcement_policy)
 
 
 def apply_settings_globals(templates) -> None:

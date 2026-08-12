@@ -31,8 +31,10 @@ if _REPO_ROOT not in sys.path:
 from app.services.openvpn import client_manager, host_scripts_manager, installer  # noqa: E402
 from app.services.openvpn.config_manager import InstallOptions  # noqa: E402
 from app.services.openvpn.exceptions import OpenVPNError, ValidationError  # noqa: E402
+from app.services.openvpn.management_client import ManagementClient  # noqa: E402
 from app.services.openvpn.paths import OpenVPNPaths  # noqa: E402
 from app.services.openvpn import service_manager  # noqa: E402
+from app.services.openvpn.validator import sanitize_client_name  # noqa: E402
 from app.services.system import network_manager  # noqa: E402
 
 
@@ -157,6 +159,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("lint-db")
     sub.add_parser("status")
 
+    sub.add_parser("list-sessions", help="List currently-connected clients with live session byte counts")
+
+    p = sub.add_parser("kill-session", help="Immediately terminate a client's active VPN session")
+    p.add_argument("name")
+
     p = sub.add_parser(
         "install-host-scripts",
         help="Deploy/repair the MAC-binding + per-client-restriction enforcement scripts "
@@ -244,6 +251,15 @@ def main(argv: list[str] | None = None) -> int:
         elif args.action == "status":
             active, raw = service_manager.status(paths.service_name)
             return _ok({"service": paths.service_name, "active": active, "raw": raw})
+        elif args.action == "list-sessions":
+            with ManagementClient(paths.management_socket) as mc:
+                sessions = mc.list_sessions()
+            return _ok([vars(s) for s in sessions])
+        elif args.action == "kill-session":
+            name = sanitize_client_name(args.name)
+            with ManagementClient(paths.management_socket) as mc:
+                result = mc.kill(name)
+            return _ok({"name": name, "result": result})
         elif args.action == "install-host-scripts":
             changes = host_scripts_manager.install_host_scripts(paths)
             restarted = False

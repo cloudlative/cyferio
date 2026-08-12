@@ -46,6 +46,7 @@ def _ctx(user: User, db: Session, **extra) -> dict:
         "can_view_dashboard": has_permission_any_scope(db, user, "dashboard", "view"),
         "can_view_clients": has_permission_any_scope(db, user, "vpn_profiles", "view"),
         "can_view_health": has_permission_any_scope(db, user, "health", "view"),
+        "can_view_reports": has_permission_any_scope(db, user, "reports", "view"),
         # Phase 1 Python service layer's web-triggered install/uninstall
         # page (see routes/openvpn_install.py) -- own object, admin-only by
         # default (see permissions.py's OBJECTS comment for why). Also
@@ -103,6 +104,15 @@ def health_page(request: Request, user: User | None = Depends(get_current_user),
     if not has_permission_any_scope(db, user, "health", "view"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "health.html", _ctx(user, db))
+
+
+@router.get("/reports")
+def reports_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    if not has_permission_any_scope(db, user, "reports", "view"):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "reports.html", _ctx(user, db))
 
 
 @router.get("/connection-history")

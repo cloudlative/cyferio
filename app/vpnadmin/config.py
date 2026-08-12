@@ -195,6 +195,16 @@ class Settings:
     # `mkdir`/`chown`/`chmod` this depends on.
     CLIENT_POLICY_FILE: str = os.environ.get("CLIENT_POLICY_FILE", "/etc/openvpn/server/policy/client_policy.json")
     CLIENT_USAGE_FILE: str = os.environ.get("CLIENT_USAGE_FILE", "/etc/openvpn/server/policy/client_usage.json")
+    # Small, same-directory JSON cache of the handful of AppSettings values
+    # host-scripts/quota_enforcer.py (which has no DB access -- it runs
+    # standalone as `nobody`, no app dependency, same posture as every
+    # other host-scripts/ file) needs to know about -- currently just
+    # default_quota_enforcement_policy. Written by
+    # policy_store.write_global_defaults() whenever the runtime settings
+    # cache is refreshed (see app_settings.py's refresh_runtime_cache);
+    # read with the same fail-open ("missing/unreadable -> built-in
+    # default") stance as every other file in this directory.
+    GLOBAL_DEFAULTS_FILE: str = os.environ.get("GLOBAL_DEFAULTS_FILE", "/etc/openvpn/server/policy/global_defaults.json")
 
     # Same GeoLite2-Country mmdb used by the VPN client country-restriction
     # feature (see host-scripts/policy_lib.py's geoip_lookup_country and

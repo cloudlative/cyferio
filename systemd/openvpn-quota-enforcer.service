@@ -1,0 +1,17 @@
+[Unit]
+Description=Hard-enforcement check for OpenVPN Toolkit bandwidth quotas
+After=openvpn-server@server.service
+Wants=openvpn-server@server.service
+
+[Service]
+# Deliberately root (no User=/Group= override), matching the same trust
+# boundary as every other host-namespace action this app already runs as
+# root (see host_executor.py) -- the management socket is created by
+# OpenVPN itself while still running as root, before it drops to
+# `nobody`/`nogroup` for the tunnel, so it's the one file in this whole
+# feature that only root can reliably reach regardless of exact socket
+# permission bits.
+Type=oneshot
+ExecStart=/usr/bin/python3 /etc/openvpn/server/quota_enforcer.py
+StandardOutput=append:/var/log/openvpn-quota-enforcer.log
+StandardError=append:/var/log/openvpn-quota-enforcer.log

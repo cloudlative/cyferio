@@ -1,0 +1,15 @@
+[Unit]
+Description=Periodic hard-enforcement check for OpenVPN Toolkit bandwidth quotas
+
+[Timer]
+# See this feature's architecture review for the overshoot-window
+# trade-off this interval represents -- a hard-enforced client can
+# overshoot its quota by up to this much throughput before being killed.
+# 45s is a middle ground between prompt enforcement and management-socket
+# round-trip frequency; adjust here if that trade-off needs revisiting.
+OnBootSec=45
+OnUnitActiveSec=45
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

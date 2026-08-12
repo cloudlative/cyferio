@@ -33,6 +33,7 @@ from .config import settings
 from .geo_validators import valid_asn_list, valid_city_list, valid_country_list, valid_ip_list
 
 VALID_OS = {"windows", "linux", "mac"}
+VALID_QUOTA_ENFORCEMENT_POLICIES = {"soft", "hard"}
 
 
 def _ensure_dir_writable_by_nobody(d: str) -> None:
@@ -197,7 +198,8 @@ def set_policy(name: str, *,
                allowed_countries: list[str] | None | object = ...,
                allowed_cities: list[str] | None | object = ...,
                allowed_asns: list[str] | None | object = ...,
-               allowed_ips: list[str] | None | object = ...) -> dict:
+               allowed_ips: list[str] | None | object = ...,
+               quota_enforcement_policy: str | None | object = ...) -> dict:
     """Partial update of one client's policy -- any parameter left at its
     `...` sentinel default is untouched; pass an explicit `None` (or `[]`
     for the list fields) to clear that field. A resulting policy with no
@@ -223,6 +225,18 @@ def set_policy(name: str, *,
     routes/users.py's create_user/update_user for how a User's own
     restrictions now sync onto these same four fields for its linked VPN
     profile.
+
+    quota_enforcement_policy: "soft" (the pre-existing, only-ever behavior --
+    an already-connected session that crosses its bandwidth_monthly_gb
+    quota is left alone until it naturally disconnects; only the NEXT
+    connection attempt is refused, see openvpn-mac-addr-check.py's gate 7)
+    or "hard" (host-scripts/quota_enforcer.py's poller actively kills an
+    in-progress session the moment it crosses quota, via the OpenVPN
+    management interface -- see management_client.py). None/absent means
+    "use app_settings.runtime.default_quota_enforcement_policy" -- this
+    field is meaningless for a client with no bandwidth_monthly_gb set at
+    all (nothing to enforce), but is not rejected in that case; it simply
+    has no effect until a quota is also set.
     """
     if allowed_os is not ...:
         if allowed_os is not None:
@@ -264,6 +278,13 @@ def set_policy(name: str, *,
             allowed_ips = valid_ip_list(allowed_ips) or None
         except ValueError as e:
             raise PolicyValidationError(str(e))
+    if quota_enforcement_policy is not ... and quota_enforcement_policy is not None:
+        quota_enforcement_policy = quota_enforcement_policy.strip().lower()
+        if quota_enforcement_policy not in VALID_QUOTA_ENFORCEMENT_POLICIES:
+            raise PolicyValidationError(
+                f"Invalid quota enforcement policy: '{quota_enforcement_policy}' -- "
+                f"expected one of: {', '.join(sorted(VALID_QUOTA_ENFORCEMENT_POLICIES))}."
+            )
 
     with _locked(settings.CLIENT_POLICY_FILE):
         all_policies = _read_json(settings.CLIENT_POLICY_FILE)
@@ -299,6 +320,11 @@ def set_policy(name: str, *,
                 entry.pop("allowed_ips", None)
             else:
                 entry["allowed_ips"] = allowed_ips
+        if quota_enforcement_policy is not ...:
+            if quota_enforcement_policy is None:
+                entry.pop("quota_enforcement_policy", None)
+            else:
+                entry["quota_enforcement_policy"] = quota_enforcement_policy
         # Legacy singular key never persists past a write, even if this
         # particular call didn't touch country-restriction fields at all --
         # _normalize_policy_shape above already lifted it onto
@@ -321,6 +347,26 @@ def remove_policy(name: str) -> None:
         if name in all_policies:
             del all_policies[name]
             _atomic_write_json(settings.CLIENT_POLICY_FILE, all_policies)
+
+
+def write_global_defaults(*, quota_enforcement_policy: str) -> None:
+    """Writes GLOBAL_DEFAULTS_FILE -- see config.py's docstring on that
+    setting for why this small cache exists at all (host-scripts/
+    quota_enforcer.py has no DB access). Called from
+    app_settings.py's refresh_runtime_cache() on every settings save/
+    startup, so it's always kept in sync with whatever's actually
+    effective, not just what's explicitly configured.
+
+    Fails silently (logs nothing, raises nothing) on OSError -- same
+    fail-open stance as every read in this module: a bind-mount hiccup
+    here must never be able to break a settings save. The consequence is
+    narrow (quota_enforcer.py falls back to its own built-in "soft"
+    default until the next successful write), not a security or
+    correctness issue for anything else."""
+    try:
+        _atomic_write_json(settings.GLOBAL_DEFAULTS_FILE, {"quota_enforcement_policy": quota_enforcement_policy})
+    except OSError:
+        pass
 
 
 def _current_month_start() -> str:

@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session, selectinload
 
+from services.openvpn.exceptions import OpenVPNError
 from services.openvpn.exceptions import ValidationError as MacFormatError
 from services.openvpn.validator import normalize_mac
+from services.system.host_executor import HostExecutorConfig, run_host_command
 
 from .. import app_settings
 from .. import cli_wrapper as cli
@@ -14,6 +16,7 @@ from .. import policy_store
 from .. import vpn_identity_sync
 from ..audit import log_action
 from ..cli_wrapper import ScriptError
+from ..config import settings
 from ..db import get_db
 from ..geo_validators import valid_asn_list as _valid_asn_list
 from ..geo_validators import valid_city_list as _valid_city_list
@@ -255,6 +258,112 @@ def revoke_client(name: str, user: User = Depends(_require_client_manager), db: 
     return {"message": f"Client '{name}' revoked successfully."}
 
 
+def _host_executor_config() -> HostExecutorConfig:
+    """Same shape as routes/openvpn_install.py's own copy -- not shared
+    code between the two routers (each is a thin, independently-readable
+    wrapper around config.settings, matching this app's general tolerance
+    for this kind of small duplication over introducing a shared module
+    for two call sites)."""
+    if not settings.HOST_SSH_TARGET or not settings.HOST_SSH_KEY_PATH:
+        raise HTTPException(
+            status_code=400,
+            detail="Host executor is not configured -- set HOST_SSH_TARGET and "
+            "HOST_SSH_KEY_PATH (see .env.example) before session actions can run.",
+        )
+    return HostExecutorConfig(
+        ssh_key_path=settings.HOST_SSH_KEY_PATH,
+        ssh_target=settings.HOST_SSH_TARGET,
+        remote_script_path=settings.HOST_SSH_REMOTE_SCRIPT_PATH,
+        use_sudo=settings.HOST_SSH_USE_SUDO,
+        timeout_seconds=settings.HOST_SSH_TIMEOUT_SECONDS,
+        ssh_port=settings.HOST_SSH_PORT,
+    )
+
+
+class DisconnectRequest(BaseModel):
+    """Optional reason, shown nowhere except the audit log -- an admin
+    disconnecting a session isn't required to explain why, but can."""
+    reason: str | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_length(cls, v: str | None) -> str | None:
+        v = (v or "").strip() or None
+        if v and len(v) > 256:
+            raise ValueError("Reason must be 256 characters or fewer.")
+        return v
+
+
+@router.get("/sessions")
+def get_active_sessions(_: User = Depends(_require_client_viewer)):
+    """Live, currently-connected-clients list straight from OpenVPN's
+    management interface (see management_client.py) -- distinct from
+    GET /api/status/all (cli_wrapper's own connected-clients view, sourced
+    from the periodic status FILE, not this live socket query). Used by
+    the Clients page to know which rows can show a Disconnect Session
+    button. Read-only, so view-scoped (editor AND viewer), unlike the
+    disconnect actions below."""
+    config = _host_executor_config()
+    try:
+        data = run_host_command(config, "list-sessions")
+    except OpenVPNError as e:
+        raise HTTPException(status_code=502, detail=e.detail)
+    return data
+
+
+@router.post("/{name}/disconnect")
+def disconnect_client(name: str, body: DisconnectRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
+    """Forcibly ends `name`'s currently-active VPN session, if it has one
+    -- via OpenVPN's management interface `kill` command (see
+    management_client.py), the only way to act on an in-progress session
+    (client-connect/disconnect scripts only fire at session start/end).
+    Does NOT revoke the certificate or touch the client's policy -- the
+    client can reconnect immediately unless something else (an exhausted
+    hard-enforced bandwidth quota, a revoked cert, ...) blocks it. That's
+    the intended distinction from Revoke, which is permanent."""
+    if not NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid client name.")
+    config = _host_executor_config()
+    try:
+        data = run_host_command(config, "kill-session", name)
+    except OpenVPNError as e:
+        log_action(db, user, "disconnect_session", target=name, detail=body.reason or e.detail, success=False)
+        raise HTTPException(status_code=502, detail=e.detail)
+    log_action(db, user, "disconnect_session", target=name, detail=body.reason, success=True)
+    return {"message": f"'{name}' has been disconnected.", **data}
+
+
+@router.post("/disconnect-all")
+def disconnect_all_clients(body: DisconnectRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
+    """Disconnects every currently-connected client, one kill command at a
+    time. Best-effort per-client -- one failure (e.g. a client that
+    disconnected on its own in the split second between the session list
+    and the kill attempt) doesn't stop the rest; the response reports
+    which names actually got disconnected vs. failed."""
+    config = _host_executor_config()
+    try:
+        sessions = run_host_command(config, "list-sessions")
+    except OpenVPNError as e:
+        raise HTTPException(status_code=502, detail=e.detail)
+    disconnected, failed = [], []
+    for session in sessions:
+        name = session.get("common_name")
+        if not name:
+            continue
+        try:
+            run_host_command(config, "kill-session", name)
+            disconnected.append(name)
+        except OpenVPNError as e:
+            failed.append({"name": name, "error": e.detail})
+    log_action(
+        db, user, "disconnect_all_sessions",
+        detail=f"{body.reason + '; ' if body.reason else ''}disconnected: {', '.join(disconnected) or 'none'}"
+               + (f"; failed: {', '.join(f['name'] for f in failed)}" if failed else ""),
+        success=not failed,
+    )
+    return {"disconnected": disconnected, "failed": failed}
+
+
 @router.get("/{name}/ovpn")
 def get_client_ovpn(name: str, _: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     """Returns an existing client's .ovpn config content on demand.
@@ -414,6 +523,17 @@ class PolicyRequest(BaseModel):
     allowed_cities: list[str] | None = None
     allowed_asns: list[str] | None = None
     allowed_ips: list[str] | None = None
+    # "soft"/"hard"/None ("use the system default" -- see Settings ->
+    # VPN Management). Meaningless without bandwidth_monthly_gb also set,
+    # but not rejected in that case; see policy_store.set_policy's docstring.
+    quota_enforcement_policy: str | None = None
+
+    @field_validator("quota_enforcement_policy")
+    @classmethod
+    def _quota_policy(cls, v: str | None) -> str | None:
+        if v is not None and v not in policy_store.VALID_QUOTA_ENFORCEMENT_POLICIES:
+            raise ValueError(f"Quota enforcement policy must be one of: {', '.join(sorted(policy_store.VALID_QUOTA_ENFORCEMENT_POLICIES))}.")
+        return v
 
     @field_validator("allowed_countries")
     @classmethod
@@ -474,6 +594,7 @@ def update_client_policy(name: str, body: PolicyRequest, user: User = Depends(_r
             allowed_cities=body.allowed_cities if "allowed_cities" in fields_set else ...,
             allowed_asns=body.allowed_asns if "allowed_asns" in fields_set else ...,
             allowed_ips=body.allowed_ips if "allowed_ips" in fields_set else ...,
+            quota_enforcement_policy=body.quota_enforcement_policy if "quota_enforcement_policy" in fields_set else ...,
         )
     except PolicyValidationError as e:
         log_action(db, user, "update_client_policy", target=name, detail=str(e), success=False)
@@ -492,5 +613,7 @@ def update_client_policy(name: str, body: PolicyRequest, user: User = Depends(_r
         detail_bits.append(f"allowed_asns={','.join(body.allowed_asns) if body.allowed_asns else 'ANY'}")
     if "allowed_ips" in fields_set:
         detail_bits.append(f"allowed_ips={','.join(body.allowed_ips) if body.allowed_ips else 'ANY'}")
+    if "quota_enforcement_policy" in fields_set:
+        detail_bits.append(f"quota_enforcement_policy={body.quota_enforcement_policy or 'default'}")
     log_action(db, user, "update_client_policy", target=name, detail="; ".join(detail_bits) or "no changes", success=True)
     return {"policy": result}

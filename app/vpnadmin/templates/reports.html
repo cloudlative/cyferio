@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Reports — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">Bandwidth Reports</h1></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Quota-relative bandwidth consumption -- "as of last disconnect" per client, same as the Clients page's own usage bars, not a live mid-session total. Only users with a linked VPN profile are included.</p>
+
+<div class="card">
+	<h2>Global Summary</h2>
+	<div class="form-grid" id="global-summary"><p class="muted">Loading…</p></div>
+	<div class="stat-grid" style="margin-top:18px">
+		<div class="card" style="margin-bottom:0">
+			<h3 style="margin-top:0">Top Consumers</h3>
+			<div id="global-top-consumers"><p class="muted">Loading…</p></div>
+		</div>
+		<div class="card" style="margin-bottom:0">
+			<h3 style="margin-top:0">Approaching Quota <span class="muted" style="font-weight:500;font-size:0.8rem">(80-99% used)</span></h3>
+			<div id="global-approaching"><p class="muted">Loading…</p></div>
+		</div>
+		<div class="card" style="margin-bottom:0">
+			<h3 style="margin-top:0">Exceeding Quota <span class="muted" style="font-weight:500;font-size:0.8rem">(100%+ used)</span></h3>
+			<div id="global-exceeding"><p class="muted">Loading…</p></div>
+		</div>
+	</div>
+</div>
+
+<div class="card">
+	<h2>Team-Based Reporting</h2>
+	<div id="team-report"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card">
+	<div class="toolbar">
+		<h2 style="margin:0">Per User</h2>
+		<div class="field" style="max-width:280px;margin-bottom:0">
+			<input type="text" id="user-search" placeholder="Search by name, username, or team…">
+		</div>
+	</div>
+	<div id="user-report"><p class="muted">Loading…</p></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function fmtGb(v) { return v == null ? "—" : `${v}GB`; }
+function fmtPct(v) { return v == null ? "—" : `${v}%`; }
+
+let lastUserRows = [];
+let userSearchTerm = "";
+
+function renderGlobalSummary(g) {
+	document.getElementById("global-summary").innerHTML = `
+		<div><label>Users Reported</label><div class="mono">${g.total_users_reported}</div></div>
+		<div><label>Total Allocated</label><div class="mono">${fmtGb(g.total_quota_gb)}</div></div>
+		<div><label>Total Consumed</label><div class="mono">${fmtGb(g.total_used_gb)}</div></div>
+		<div><label>Overall Utilization</label><div>${g.pct_used == null ? '<span class="muted">—</span>' : `<span class="mono">${fmtPct(g.pct_used)}</span> ${usageBar(g.pct_used)}`}</div></div>
+	`;
+
+	function personRow(r) {
+		return `<div class="metric-row">
+			<span>${escapeHtml(r.display_name)} <span class="muted mono" style="font-size:0.8rem">${escapeHtml(r.vpn_client_name)}</span></span>
+			<span class="mono">${fmtGb(r.used_gb)}${r.pct_used != null ? ` <span class="muted">(${fmtPct(r.pct_used)})</span>` : ""}</span>
+		</div>`;
+	}
+
+	document.getElementById("global-top-consumers").innerHTML = g.top_consumers.length
+		? g.top_consumers.map(personRow).join("")
+		: '<p class="muted">No usage recorded yet.</p>';
+	document.getElementById("global-approaching").innerHTML = g.approaching_threshold.length
+		? g.approaching_threshold.map(personRow).join("")
+		: '<p class="muted">Nobody is currently in this range.</p>';
+	document.getElementById("global-exceeding").innerHTML = g.exceeding_threshold.length
+		? g.exceeding_threshold.map(personRow).join("")
+		: '<p class="muted">Nobody is currently over quota.</p>';
+}
+
+function renderTeamReport(teams) {
+	const el = document.getElementById("team-report");
+	if (!teams.length) {
+		el.innerHTML = '<p class="muted">No teams or unassigned users with a linked VPN profile yet.</p>';
+		return;
+	}
+	el.innerHTML = `<div class="table-scroll"><table>
+		<thead><tr><th>Team</th><th>Members</th><th>Allocated</th><th>Consumed</th><th>Utilization</th><th>Top Consumer</th></tr></thead>
+		<tbody>${teams.map(t => `
+			<tr>
+				<td><strong>${escapeHtml(t.team)}</strong></td>
+				<td>${t.member_count}</td>
+				<td class="mono">${fmtGb(t.total_quota_gb)}</td>
+				<td class="mono">${fmtGb(t.total_used_gb)}</td>
+				<td>${t.pct_used == null ? '<span class="muted">—</span>' : `<span class="mono">${fmtPct(t.pct_used)}</span> ${usageBar(t.pct_used)}`}</td>
+				<td>${t.top_consumers[0] ? `${escapeHtml(t.top_consumers[0].display_name)} <span class="muted mono">(${fmtGb(t.top_consumers[0].used_gb)})</span>` : '<span class="muted">—</span>'}</td>
+			</tr>
+		`).join("")}</tbody>
+	</table></div>`;
+}
+
+function renderUserReport() {
+	const el = document.getElementById("user-report");
+	const term = userSearchTerm.toLowerCase();
+	const filtered = term
+		? lastUserRows.filter(r =>
+			r.username.toLowerCase().includes(term) ||
+			r.display_name.toLowerCase().includes(term) ||
+			r.team_names.some(t => t.toLowerCase().includes(term)))
+		: lastUserRows;
+	if (!filtered.length) {
+		el.innerHTML = `<p class="muted">${lastUserRows.length ? "No users match this search." : "No users with a linked VPN profile yet."}</p>`;
+		return;
+	}
+	el.innerHTML = `<div class="table-scroll"><table>
+		<thead><tr><th>Username</th><th>VPN Profile</th><th>Team(s)</th><th>Quota</th><th>Used</th><th>Remaining</th><th>% Used</th></tr></thead>
+		<tbody>${filtered.map(r => `
+			<tr>
+				<td>${escapeHtml(r.display_name)} <span class="muted">(${escapeHtml(r.username)})</span></td>
+				<td class="mono">${escapeHtml(r.vpn_client_name)}</td>
+				<td>${r.team_names.length ? r.team_names.map(escapeHtml).join(", ") : '<span class="muted">—</span>'}</td>
+				<td class="mono">${fmtGb(r.quota_gb)}</td>
+				<td class="mono">${fmtGb(r.used_gb)}</td>
+				<td class="mono">${fmtGb(r.remaining_gb)}</td>
+				<td>${r.pct_used == null ? '<span class="muted">Unlimited</span>' : `<span class="mono">${fmtPct(r.pct_used)}</span> ${usageBar(r.pct_used)}`}</td>
+			</tr>
+		`).join("")}</tbody>
+	</table></div>`;
+}
+
+async function loadReports() {
+	try {
+		const [users, teams, global_] = await Promise.all([
+			apiFetch("/api/reports/users"),
+			apiFetch("/api/reports/teams"),
+			apiFetch("/api/reports/global"),
+		]);
+		lastUserRows = users;
+		renderUserReport();
+		renderTeamReport(teams);
+		renderGlobalSummary(global_);
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+document.getElementById("user-search").addEventListener("input", (ev) => {
+	userSearchTerm = ev.target.value.trim();
+	renderUserReport();
+});
+document.getElementById("refresh-btn").addEventListener("click", loadReports);
+loadReports();
+</script>
+{% endblock %}

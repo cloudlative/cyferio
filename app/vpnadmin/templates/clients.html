@@ -19,7 +19,12 @@
 			<h2 style="margin:0">All Clients</h2>
 			<span class="count-badge" id="client-count">— clients</span>
 		</div>
-		<button class="btn-secondary" id="refresh-btn">Refresh</button>
+		<div style="display:flex;gap:8px">
+			{% if can_manage_clients %}
+			<button class="btn-danger btn-sm" id="disconnect-all-btn" disabled>Disconnect All Sessions</button>
+			{% endif %}
+			<button class="btn-secondary" id="refresh-btn">Refresh</button>
+		</div>
 	</div>
 	<div class="filter-bar">
 		<button class="filter-chip active" data-filter="all">All</button>
@@ -89,6 +94,14 @@
 						<input type="text" id="policy-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)" style="max-width:280px">
 						<p class="muted" style="margin:6px 0 0;font-size:0.82rem" id="policy-usage-note"></p>
 					</div>
+					<div class="field">
+						<label for="policy-quota-enforcement">Quota Enforcement Policy <span class="muted">(only applies once a quota is set above)</span></label>
+						<select id="policy-quota-enforcement" style="max-width:280px">
+							<option value="" id="policy-quota-default-option">Use system default (Soft)</option>
+							<option value="soft">Soft -- let an active session finish, block the next connection</option>
+							<option value="hard">Hard -- disconnect immediately once quota is exhausted</option>
+						</select>
+					</div>
 				</div>
 			</fieldset>
 			<fieldset>
@@ -147,6 +160,23 @@ const isAdmin = {{ "true" if can_manage_clients else "false" }};
 // (CODE)" label format as the Users page's login-restriction country
 // picker (app.js's ISO_3166_COUNTRIES), for consistency.
 const clientCountryOptions = ISO_3166_COUNTRIES.map(([code, name]) => ({ id: code, label: `${name} (${code})` }));
+
+// Best-effort only: GET /api/settings is settings-manage-gated, a
+// narrower permission than what got this page loaded at all -- an editor
+// managing restrictions won't necessarily have it, so a 403 here just
+// leaves the "(Soft)" fallback label in place rather than surfacing an
+// error toast (same pattern as users.html's default-role lookup).
+(async function loadQuotaDefaultLabel() {
+	try {
+		const s = await apiFetch("/api/settings");
+		const label = s.default_quota_enforcement_policy === "hard" ? "Hard" : "Soft";
+		// <option> elements can't contain child tags (a browser silently
+		// strips any nested <span>, so it could never be targeted by id) --
+		// set the whole option's text directly instead.
+		const opt = document.getElementById("policy-quota-default-option");
+		if (opt) opt.textContent = `Use system default (${label})`;
+	} catch (e) { /* not settings-manage -- keep the "Soft" fallback */ }
+})();
 const _initialParams = new URLSearchParams(location.search);
 let currentFilter = _initialParams.get("online") === "1" ? "online"
 	: _initialParams.get("missing_mac") === "1" ? "missing_mac"
@@ -178,6 +208,8 @@ async function loadClients() {
 		document.getElementById("client-count").innerHTML =
 			`${clients.length} client${clients.length === 1 ? "" : "s"} — ` +
 			`<span class="status-pill status-online" style="margin-left:2px">${onlineCount} online</span>`;
+		const disconnectAllBtn = document.getElementById("disconnect-all-btn");
+		if (disconnectAllBtn) disconnectAllBtn.disabled = onlineCount === 0;
 		renderClients();
 	} catch (e) {
 		toast(e.message, "error");
@@ -231,7 +263,7 @@ function renderClients() {
 		<thead><tr>
 			<th>Name</th><th>Status</th><th>Portal User</th><th>In MAC DB</th><th>MAC Addresses</th><th>Last Seen</th><th>Restrictions</th>
 			${isAdmin ? "<th>Bandwidth (this month)</th>" : ""}
-			<th></th>${isAdmin ? "<th></th><th></th><th></th><th></th>" : ""}
+			<th></th>${isAdmin ? "<th></th><th></th><th></th><th></th><th></th>" : ""}
 		</tr></thead>
 		<tbody>${filtered.map(({ c, s, online }) => {
 			const policy = lastPoliciesByName[c.name];
@@ -249,6 +281,7 @@ function renderClients() {
 				${isAdmin ? `<td><button class="btn-secondary btn-sm policy-btn">Manage Restrictions</button></td>` : ""}
 				${isAdmin ? `<td><button class="btn-secondary btn-sm ovpn-btn">View / Copy .ovpn</button></td>` : ""}
 				${isAdmin ? `<td><button class="btn-secondary btn-sm email-btn">Email Profile</button></td>` : ""}
+				${isAdmin ? `<td>${online ? '<button class="btn-danger btn-sm disconnect-btn">Disconnect</button>' : ""}</td>` : ""}
 				${isAdmin ? `<td class="text-right"><button class="btn-danger btn-sm revoke-btn">Revoke</button></td>` : ""}
 			</tr>`;
 		}).join("")}</tbody>
@@ -258,6 +291,9 @@ function renderClients() {
 		btn.addEventListener("click", () => showMacs(btn.closest("tr").dataset.name));
 	});
 	if (isAdmin) {
+		el.querySelectorAll(".disconnect-btn").forEach(btn => {
+			btn.addEventListener("click", () => disconnectClient(btn.closest("tr").dataset.name));
+		});
 		el.querySelectorAll(".revoke-btn").forEach(btn => {
 			btn.addEventListener("click", () => revokeClient(btn.closest("tr").dataset.name));
 		});
@@ -586,6 +622,7 @@ if (isAdmin) {
 			const allowedOs = data.policy.allowed_os || [];
 			document.querySelectorAll(".policy-os-check").forEach(cb => { cb.checked = allowedOs.includes(cb.value); });
 			document.getElementById("policy-bandwidth").value = data.policy.bandwidth_monthly_gb ?? "";
+			document.getElementById("policy-quota-enforcement").value = data.policy.quota_enforcement_policy || "";
 			if (data.policy.bandwidth_monthly_gb) {
 				const used = data.usage.bytes_used || 0;
 				const quota = data.policy.bandwidth_monthly_gb;
@@ -641,6 +678,7 @@ if (isAdmin) {
 					allowed_cities: policyCitiesMs.getSelected(),
 					allowed_asns: policyAsnsMs.getSelected(),
 					allowed_ips: parseLineList(document.getElementById("policy-allowed-ips").value),
+					quota_enforcement_policy: document.getElementById("policy-quota-enforcement").value || null,
 				},
 			});
 			document.getElementById("policy-dialog").close();
@@ -664,6 +702,40 @@ async function revokeClient(name) {
 		toast(e.message, "error");
 	}
 }
+
+// Disconnect Session -- ends the client's CURRENT session only (via
+// OpenVPN's management interface), unlike Revoke: the client can
+// reconnect immediately afterward unless something else blocks it. See
+// routes/clients.py's disconnect_client for the full distinction.
+async function disconnectClient(name) {
+	const ok = await confirmDialog(`Disconnect <strong>${escapeHtml(name)}</strong>'s active session? They can reconnect immediately afterward -- this doesn't revoke their certificate.`, { confirmLabel: "Disconnect" });
+	if (!ok) return;
+	try {
+		const result = await apiFetch(`/api/clients/${encodeURIComponent(name)}/disconnect`, { method: "POST", body: {} });
+		toast(result.message, "success");
+		loadClients();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+async function disconnectAllClients() {
+	const ok = await confirmDialog("Disconnect every currently-connected client's active session? They can each reconnect immediately afterward -- this doesn't revoke anyone's certificate.", { confirmLabel: "Disconnect All" });
+	if (!ok) return;
+	try {
+		const result = await apiFetch("/api/clients/disconnect-all", { method: "POST", body: {} });
+		if (result.failed && result.failed.length) {
+			toast(`Disconnected ${result.disconnected.length}, ${result.failed.length} failed -- see audit log.`, "error");
+		} else {
+			toast(`Disconnected ${result.disconnected.length} session(s).`, "success");
+		}
+		loadClients();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+const disconnectAllBtnEl = document.getElementById("disconnect-all-btn");
+if (disconnectAllBtnEl) disconnectAllBtnEl.addEventListener("click", disconnectAllClients);
 
 document.getElementById("refresh-btn").addEventListener("click", loadClients);
 loadClients();

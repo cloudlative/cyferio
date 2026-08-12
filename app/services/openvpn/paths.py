@@ -156,3 +156,23 @@ class OpenVPNPaths:
     @property
     def client_usage_file(self) -> str:
         return f"{self.policy_dir}/client_usage.json"
+
+    @property
+    def quota_enforcer_script(self) -> str:
+        """Hard Enforcement's poller (host-scripts/quota_enforcer.py, see
+        host_scripts_manager.py) -- deployed as a sibling of the other
+        host-scripts/ files, but run as root by its own systemd timer
+        (systemd/openvpn-quota-enforcer.{service,timer}), not invoked
+        per-connection like mac_check_script/disconnect_script."""
+        return f"{self.openvpn_dir}/quota_enforcer.py"
+
+    @property
+    def management_socket(self) -> str:
+        """OpenVPN's management-interface Unix socket (see
+        management_client.py, host_scripts_manager.py's
+        render_server_conf_additions) -- created by OpenVPN itself at
+        startup while still running as root (before it drops to
+        `user nobody`/`group nogroup` for the tunnel), so it ends up
+        root-owned by construction, not something this app chmods
+        after the fact."""
+        return f"{self.openvpn_dir}/mgmt.sock"

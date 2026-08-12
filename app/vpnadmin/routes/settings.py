@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
-from .. import mailer
+from .. import mailer, policy_store
 from ..app_settings import ACTIVE_THEME_IDS, SMTP_PASSWORD_PLACEHOLDER, THEME_CHOICES, get_settings_row, refresh_runtime_cache, runtime
 from ..audit import log_action
 from ..db import get_db
@@ -49,6 +49,7 @@ class UpdateSettingsRequest(BaseModel):
 
     default_new_user_role: str | None = None
     default_bandwidth_monthly_gb: float | None = None
+    default_quota_enforcement_policy: str | None = None
 
     admin_notification_email: str | None = None
     notify_admin_on_user_created: bool | None = None
@@ -133,6 +134,13 @@ class UpdateSettingsRequest(BaseModel):
             raise ValueError("Default monthly bandwidth quota must be at least 0.1 GB, or left blank for unlimited.")
         return v
 
+    @field_validator("default_quota_enforcement_policy")
+    @classmethod
+    def _default_quota_policy(cls, v: str | None) -> str | None:
+        if v is not None and v not in policy_store.VALID_QUOTA_ENFORCEMENT_POLICIES:
+            raise ValueError(f"Quota enforcement policy must be one of: {', '.join(sorted(policy_store.VALID_QUOTA_ENFORCEMENT_POLICIES))}.")
+        return v
+
     @field_validator("admin_notification_email")
     @classmethod
     def _admin_email(cls, v: str | None) -> str | None:
@@ -214,6 +222,7 @@ def _serialize() -> dict:
         "log_failed_login_attempts": s.log_failed_login_attempts,
         "default_new_user_role": s.default_new_user_role,
         "default_bandwidth_monthly_gb": s.default_bandwidth_monthly_gb,
+        "default_quota_enforcement_policy": s.default_quota_enforcement_policy,
         "admin_notification_email": s.admin_notification_email,
         "notify_admin_on_user_created": s.notify_admin_on_user_created,
         "notify_admin_on_client_revoked": s.notify_admin_on_client_revoked,
@@ -256,7 +265,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                    "smtp_username", "smtp_from", "smtp_use_tls", "min_password_length",
                    "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
                    "audit_retention_days", "log_failed_login_attempts", "default_new_user_role",
-                   "default_bandwidth_monthly_gb", "admin_notification_email",
+                   "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "admin_notification_email",
                    "notify_admin_on_user_created", "notify_admin_on_client_revoked",
                    "reports_default_range_days", "maintenance_mode", "maintenance_message",
                    "notification_duration_ms", "login_theme", "timezone", "time_format"):
