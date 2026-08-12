@@ -124,6 +124,69 @@ def send_ovpn_profile(*, to_address: str, client_name: str, ovpn_content: str, r
     )
 
 
+def send_welcome_email(*, to_address: str, username: str, password: str, client_name: str,
+                        ovpn_content: str, recipient_name: str | None = None) -> None:
+    """Onboarding email for the "Send VPN Profile via Email" checkbox
+    (routes/users.py's create_user) -- unlike send_ovpn_profile above
+    (which the standalone "Email Profile" button also uses, and which
+    never has portal credentials to send since the plaintext password
+    only exists in-request at creation time, never afterward), this one
+    additionally includes the portal login URL, the new username, and the
+    plaintext password the admin just set, alongside the same .ovpn
+    attachment. Deliberately a SEPARATE function/template from
+    send_ovpn_profile rather than an optional-credentials parameter on
+    it -- these two emails have genuinely different content and only one
+    of the two call sites ever has credentials to include at all.
+
+    Emailing a plaintext password is a real, deliberate tradeoff (not an
+    oversight) -- this is the ONLY way to get a freshly-admin-set password
+    to a new user out of band, since it's hashed immediately after this
+    request and never recoverable again. The template itself recommends
+    changing it after first login. Raises MailerNotConfigured/
+    smtplib.SMTPException same as send_ovpn_profile -- caller decides how
+    to handle a failed send (see create_user's own fire-and-forget
+    handling)."""
+    if not is_configured():
+        raise MailerNotConfigured("SMTP is not configured.")
+
+    s = app_settings.runtime
+    app_name = s.app_name
+    msg = EmailMessage()
+    msg["Subject"] = f"Welcome to {app_name} — your account is ready"
+    greeting = f"Hi {recipient_name}," if recipient_name else "Hello,"
+    portal_line = f"Portal: {s.portal_url}\n" if s.portal_url else ""
+    msg.set_content(
+        f"{greeting}\n\n"
+        f"An account has been created for you on {app_name}.\n\n"
+        f"{portal_line}"
+        f"Username: {username}\n"
+        f"Password: {password}\n"
+        f"(We recommend changing this password after your first login.)\n\n"
+        f"Your VPN configuration profile is attached ({client_name}.ovpn). Import it into your "
+        f"OpenVPN client to connect.\n\n"
+        f"Keep this email, your password, and the attached file private.\n\n"
+        f"— {app_name}"
+    )
+    msg.add_alternative(
+        _render_email_template(
+            "welcome.html", username=username, password=password, client_name=client_name,
+            recipient_name=recipient_name, portal_url=s.portal_url,
+        ),
+        subtype="html",
+    )
+    msg.add_attachment(
+        ovpn_content.encode("utf-8"),
+        maintype="application",
+        subtype="octet-stream",
+        filename=f"{client_name}.ovpn",
+    )
+
+    _send(
+        host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
+        use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=to_address, msg=msg,
+    )
+
+
 def send_test_email(*, to_address: str, host: str, port: int, username: str, password: str,
                      from_address: str, use_tls: bool) -> None:
     """Sends a short plain test message using whatever SMTP values are

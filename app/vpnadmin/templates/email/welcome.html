@@ -1,0 +1,59 @@
+{% extends "base_email.html" %}
+{% block content %}
+<h2 style="margin:0 0 12px;font-size:1.2rem;">Welcome{% if recipient_name %}, {{ recipient_name }}{% endif %}</h2>
+<p style="color:#aab2cc;line-height:1.6;margin:0 0 18px;">
+	An account has been created for you on {{ app_name }}, giving you access to both the admin portal and the VPN network.
+	Everything you need to get started is below.
+</p>
+
+<div style="background:#151a29;border:1px solid #3a4460;border-radius:12px;padding:18px 20px;margin:0 0 18px;">
+	<p style="margin:0 0 12px;font-weight:700;font-size:0.9rem;color:#f1f3fa;">Your portal login</p>
+	<table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
+		{% if portal_url %}
+		<tr>
+			<td style="color:#757fa0;padding:4px 0;width:90px;">Portal</td>
+			<td style="padding:4px 0;"><a href="{{ portal_url }}" style="color:#8b9cf7;">{{ portal_url }}</a></td>
+		</tr>
+		{% endif %}
+		<tr>
+			<td style="color:#757fa0;padding:4px 0;width:90px;">Username</td>
+			<td style="padding:4px 0;"><code style="background:#1e2436;padding:2px 6px;border-radius:5px;color:#f1f3fa;">{{ username }}</code></td>
+		</tr>
+		<tr>
+			<td style="color:#757fa0;padding:4px 0;width:90px;">Password</td>
+			<td style="padding:4px 0;"><code style="background:#1e2436;padding:2px 6px;border-radius:5px;color:#f1f3fa;">{{ password }}</code></td>
+		</tr>
+	</table>
+	<p style="margin:12px 0 0;color:#757fa0;font-size:0.8rem;line-height:1.5;">
+		We recommend signing in and changing this password as soon as possible.
+	</p>
+</div>
+
+<p style="color:#aab2cc;line-height:1.6;margin:0 0 18px;">
+	Attached is your OpenVPN configuration profile, <code style="background:#151a29;padding:2px 6px;border-radius:5px;color:#f1f3fa;">{{ client_name }}.ovpn</code> --
+	a single file containing everything needed to connect to the VPN, separate from your portal login above.
+</p>
+
+<div style="background:#151a29;border:1px solid #3a4460;border-radius:12px;padding:18px 20px;margin:0 0 18px;">
+	<p style="margin:0 0 10px;font-weight:700;font-size:0.9rem;color:#f1f3fa;">Getting connected to the VPN</p>
+	<ol style="margin:0;padding-left:20px;color:#aab2cc;line-height:1.7;font-size:0.9rem;">
+		<li>Install an OpenVPN client if you don't already have one -- <a href="https://openvpn.net/client/" style="color:#8b9cf7;">OpenVPN Connect</a> works on Windows, macOS, Linux, iOS, and Android.</li>
+		<li>Save the attached <code style="background:#1e2436;padding:1px 5px;border-radius:4px;">{{ client_name }}.ovpn</code> file somewhere you'll remember.</li>
+		<li>Open your OpenVPN client and import/add the profile -- most clients let you just drag the file in, or use an "Import Profile" option.</li>
+		<li>Connect. You're on the VPN.</li>
+	</ol>
+</div>
+
+<div style="background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:12px;padding:16px 20px;margin:0 0 18px;">
+	<p style="margin:0 0 8px;font-weight:700;font-size:0.85rem;color:#fcd34d;">Keep both of these private</p>
+	<p style="margin:0;color:#d7c9a0;font-size:0.85rem;line-height:1.6;">
+		Your portal password and your <code style="background:#1e2436;padding:1px 5px;border-radius:4px;color:#fcd34d;">.ovpn</code> file (which contains a private key)
+		each independently authenticate you -- treat them like any other credential. Don't forward this email, and don't share the .ovpn file.
+		If you ever suspect either has been exposed, let us know right away so they can be reset/revoked.
+	</p>
+</div>
+
+<p style="color:#aab2cc;line-height:1.6;margin:0;">
+	Questions about logging in or connecting? See the contact below -- we're happy to help.
+</p>
+{% endblock %}

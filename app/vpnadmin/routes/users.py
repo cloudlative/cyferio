@@ -786,14 +786,20 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         recipient_name = f"{body.first_name} {body.last_name}".strip() if body.last_name else body.first_name
         try:
             ovpn_content = cli.show_ovpn(body.username)
-            mailer.send_ovpn_profile(
-                to_address=body.email, client_name=body.username,
-                ovpn_content=ovpn_content, recipient_name=recipient_name,
+            # send_welcome_email, not send_ovpn_profile -- this is the only
+            # request-scoped moment body.password (plaintext) exists at
+            # all; it's hashed above and never recoverable again, so the
+            # portal-credentials-inclusive welcome email can only ever be
+            # sent from here, never as a later "resend" (see mailer.py's
+            # send_welcome_email docstring for the full reasoning).
+            mailer.send_welcome_email(
+                to_address=body.email, username=body.username, password=body.password,
+                client_name=body.username, ovpn_content=ovpn_content, recipient_name=recipient_name,
             )
-            log_action(db, admin, "email_ovpn", target=body.username, detail=f"sent to {body.email} (on creation)", success=True)
+            log_action(db, admin, "email_ovpn", target=body.username, detail=f"welcome email sent to {body.email} (on creation)", success=True)
         except Exception as e:
-            email_warning = f"User created, but the VPN profile email could not be sent: {e}"
-            log_action(db, admin, "email_ovpn", target=body.username, detail=f"send to {body.email} failed (on creation): {e}", success=False)
+            email_warning = f"User created, but the welcome email could not be sent: {e}"
+            log_action(db, admin, "email_ovpn", target=body.username, detail=f"welcome email to {body.email} failed (on creation): {e}", success=False)
 
     result = _serialize(user, {body.username: policy})
     if email_warning:

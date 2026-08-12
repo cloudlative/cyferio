@@ -124,6 +124,7 @@ class _RuntimeSettings:
         self.app_name = env_settings.APP_NAME
         self.app_tagline = env_settings.APP_TAGLINE
         self.app_footer_credit = env_settings.APP_FOOTER_CREDIT
+        self.portal_url = f"https://{env_settings.APP_DOMAIN}" if env_settings.APP_DOMAIN else None
         self.smtp_host = env_settings.SMTP_HOST
         self.smtp_port = env_settings.SMTP_PORT
         self.smtp_username = env_settings.SMTP_USERNAME
@@ -179,6 +180,7 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.app_name = row.app_name or env_settings.APP_NAME
     runtime.app_tagline = row.app_tagline or env_settings.APP_TAGLINE
     runtime.app_footer_credit = row.app_footer_credit if row.app_footer_credit is not None else env_settings.APP_FOOTER_CREDIT
+    runtime.portal_url = row.portal_url or (f"https://{env_settings.APP_DOMAIN}" if env_settings.APP_DOMAIN else None)
     runtime.smtp_host = row.smtp_host if row.smtp_host is not None else env_settings.SMTP_HOST
     runtime.smtp_port = row.smtp_port if row.smtp_port is not None else env_settings.SMTP_PORT
     runtime.smtp_username = row.smtp_username if row.smtp_username is not None else env_settings.SMTP_USERNAME

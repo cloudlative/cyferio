@@ -24,6 +24,11 @@
 				<input type="text" id="s-app-footer" maxlength="256" placeholder="e.g. Operated by Example Corp">
 				<p class="field-hint">Shown in small text in the page footer's right-hand corner on every logged-in page. Leave blank to show nothing.</p>
 			</div>
+			<div class="field">
+				<label for="s-portal-url">Portal URL <span class="muted">(optional)</span></label>
+				<input type="text" id="s-portal-url" maxlength="512" placeholder="https://vpn.example.com">
+				<p class="field-hint">Where new users are told to log in (welcome email). Leave blank to use this deployment's own routing domain automatically.</p>
+			</div>
 		</div>
 	</div>
 
@@ -410,6 +415,7 @@ async function loadSettings() {
 		setVal("s-app-name", s.app_name);
 		setVal("s-app-tagline", s.app_tagline);
 		setVal("s-app-footer", s.app_footer_credit);
+		setVal("s-portal-url", s.portal_url);
 		setVal("s-smtp-host", s.smtp_host);
 		setVal("s-smtp-port", s.smtp_port);
 		setVal("s-smtp-username", s.smtp_username);
@@ -492,6 +498,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		app_name: val("s-app-name") || null,
 		app_tagline: val("s-app-tagline") || null,
 		app_footer_credit: val("s-app-footer"),
+		portal_url: val("s-portal-url") || null,
 		smtp_host: val("s-smtp-host"),
 		smtp_port: intOrNull(val("s-smtp-port")),
 		smtp_username: val("s-smtp-username"),

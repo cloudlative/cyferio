@@ -143,6 +143,16 @@ class Settings:
     APP_TAGLINE: str = os.environ.get("APP_TAGLINE", "Sign in to manage clients, MACs & live status")
     APP_FOOTER_CREDIT: str = os.environ.get("APP_FOOTER_CREDIT", "")
 
+    # The same domain docker-compose.yml's traefik-config service already
+    # requires in .env for routing (see that file's APP_DOMAIN comment) --
+    # read here too so app_settings.py's runtime.portal_url can default to
+    # "https://{APP_DOMAIN}" without asking an admin to re-enter a value
+    # already configured elsewhere. Settings -> Organization's Portal URL
+    # field can still override this per-deployment (e.g. a different
+    # public URL than the routing domain), same "env default, DB override"
+    # shape as every other branding/SMTP setting in this app.
+    APP_DOMAIN: str = os.environ.get("APP_DOMAIN", "")
+
     # IANA timezone name (e.g. "UTC", "Asia/Karachi") used to DISPLAY
     # timestamps in the browser -- every timestamp this app stores/emits is
     # already UTC (see e.g. host-scripts/openvpn-client-disconnect.py's

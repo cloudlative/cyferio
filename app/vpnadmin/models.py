@@ -336,6 +336,13 @@ class AppSettings(Base):
     app_name = Column(String(128), nullable=True)
     app_tagline = Column(String(256), nullable=True)
     app_footer_credit = Column(String(256), nullable=True)
+    # The portal's own public URL, e.g. "https://vpn.example.com" -- used
+    # by the welcome email (mailer.send_welcome_email) so a new user knows
+    # where to log in. NULL falls back to "https://{APP_DOMAIN}" (see
+    # config.py's APP_DOMAIN, already required for Traefik routing) --
+    # only needs setting explicitly here if the public URL differs from
+    # that routing domain.
+    portal_url = Column(String(512), nullable=True)
 
     # Outbound email (see config.py's SMTP_* / mailer.py)
     smtp_host = Column(String(255), nullable=True)

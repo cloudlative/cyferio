@@ -31,6 +31,7 @@ class UpdateSettingsRequest(BaseModel):
     app_name: str | None = None
     app_tagline: str | None = None
     app_footer_credit: str | None = None
+    portal_url: str | None = None
 
     smtp_host: str | None = None
     smtp_port: int | None = None
@@ -74,6 +75,14 @@ class UpdateSettingsRequest(BaseModel):
     @classmethod
     def _port_range(cls, v):
         return _valid_port(v)
+
+    @field_validator("portal_url")
+    @classmethod
+    def _portal_url_format(cls, v: str | None) -> str | None:
+        v = (v or "").strip() or None
+        if v and not (v.startswith("http://") or v.startswith("https://")):
+            raise ValueError("Portal URL must start with http:// or https://.")
+        return v.rstrip("/") if v else v
 
     @field_validator("smtp_from")
     @classmethod
@@ -241,6 +250,7 @@ def _serialize() -> dict:
         "app_name": s.app_name,
         "app_tagline": s.app_tagline,
         "app_footer_credit": s.app_footer_credit,
+        "portal_url": s.portal_url,
         "smtp_host": s.smtp_host,
         "smtp_port": s.smtp_port,
         "smtp_username": s.smtp_username,
@@ -300,7 +310,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
     fields_set = body.model_fields_set
     changes = []
 
-    for field in ("app_name", "app_tagline", "app_footer_credit", "smtp_host", "smtp_port",
+    for field in ("app_name", "app_tagline", "app_footer_credit", "portal_url", "smtp_host", "smtp_port",
                    "smtp_username", "smtp_from", "smtp_use_tls", "min_password_length",
                    "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
                    "audit_retention_days", "log_failed_login_attempts", "default_new_user_role",
