@@ -616,15 +616,19 @@ def whoami(user: User = Depends(require_user)):
 @router.patch("/me")
 def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_user), db: Session = Depends(get_db)):
     changes = []
+    # Bug fix: this used to check `value is not None`, which can't tell
+    # "field omitted from the request" apart from "explicitly cleared to
+    # null" -- and profile.html's own form DOES send `last_name: ... ||
+    # null` when the field is blanked out (same as Edit User's admin-side
+    # form), so clearing your own Last Name silently did nothing while
+    # typing a different value worked fine. model_fields_set is the
+    # correct check here too, same as email/phone right below.
     for field in ("first_name", "last_name", "gender"):
-        value = getattr(body, field)
-        if value is not None and value != getattr(user, field):
-            setattr(user, field, value)
-            changes.append(field)
-    # email/phone use model_fields_set (not "is not None") so an explicit ""
-    # submitted from the form clears the field instead of being ignored --
-    # unlike first_name/last_name/gender above, which have no "unset" UI
-    # affordance and where None simply means "this request didn't touch it".
+        if field in body.model_fields_set:
+            value = getattr(body, field)
+            if value != getattr(user, field):
+                setattr(user, field, value)
+                changes.append(field)
     for field in ("email", "phone"):
         if field in body.model_fields_set:
             value = getattr(body, field)
@@ -891,11 +895,18 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         # (not the account holder) is the one who just set this password.
         target.must_reset_password = True
         changes.append("password reset")
+    # Bug fix: this used to check `value is not None` -- indistinguishable
+    # from "field omitted from the request" -- so an explicit `null` (e.g.
+    # clearing Last Name in the Edit User form) was silently ignored
+    # instead of clearing the column, while typing a NEW value worked fine
+    # (that path isn't None either way). model_fields_set is the correct
+    # check, same pattern the email/phone loop right below already uses.
     for field in ("first_name", "last_name", "gender"):
-        value = getattr(body, field)
-        if value is not None and value != getattr(target, field):
-            setattr(target, field, value)
-            changes.append(field)
+        if field in body.model_fields_set:
+            value = getattr(body, field)
+            if value != getattr(target, field):
+                setattr(target, field, value)
+                changes.append(field)
     for field in ("email", "phone"):
         if field in body.model_fields_set:
             value = getattr(body, field)

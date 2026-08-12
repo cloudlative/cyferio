@@ -1,8 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — {{ app_settings.app_name }}{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
-<p class="page-subtitle">Live overview of who's connected to the VPN right now.</p>
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">Dashboard</h1></div>
+	{% if is_admin %}
+	<a class="btn btn-secondary" href="/users">Go to Users</a>
+	{% endif %}
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Live overview of who's connected to the VPN right now.</p>
 
 <div class="stat-grid" id="stat-grid">
 	<a class="stat-card accent-online" href="/clients?online=1">
