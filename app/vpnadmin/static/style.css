@@ -712,7 +712,7 @@ label { display: block; font-weight: 700; font-size: 0.82rem; margin-bottom: 6px
    alone needs ~170px to avoid truncating a country name, leaving too
    little for the local number input otherwise. Widens just this one
    column; siblings (Email/Teams) keep their normal share. */
-.field-wide-phone { flex: 1.6; min-width: 260px; }
+.field-wide-phone { flex: 1.8; min-width: 340px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 /* Vertically-stacked fields, each taking the FULL width of its container
    (users.html's Device & Access Policy / Location & Network Restrictions
@@ -822,14 +822,26 @@ input[type="radio"]:disabled { opacity: 0.5; cursor: not-allowed; }
 .checkbox-row { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 4px; }
 
 /* --- Phone input (dial-code <select> + local-number field), see app.js's
-   createPhoneInput -- used anywhere a User.phone is entered/edited. Country
-   select width was a fixed 130px, truncating longer names ("United Arab
-   Emirates +971") -- now a wider, still-bounded flex value, with the
-   overall row's max-width raised to match so the local-number field isn't
-   squeezed out. */
-.phone-input { display: flex; gap: 8px; max-width: 400px; }
-.phone-input .phone-dial-select { flex: 0 1 220px; min-width: 170px; }
-.phone-input .phone-local-input { flex: 1; min-width: 0; }
+   createPhoneInput -- used anywhere a User.phone is entered/edited.
+   Previous pass widened the OUTER .field wrapper but left
+   .phone-local-input's min-width at 0 -- under real layout pressure
+   flexbox honored the select's min-width floor first and shrank the
+   number input toward that 0 floor instead, which is the actual bug (the
+   number being typed wasn't fully visible). Fixed by giving the local
+   input its own firm minimum (160px, comfortable for 10-14 digits) so it
+   can never be squeezed away, and joining the two controls into one
+   visually-grouped unit (shared border, no gap, radius only on the outer
+   edges) rather than two separate fields with daylight between them. */
+.phone-input { display: flex; max-width: 460px; }
+.phone-input .phone-dial-select {
+	flex: 0 1 190px; min-width: 150px;
+	border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: none;
+}
+.phone-input .phone-local-input {
+	flex: 1 1 180px; min-width: 160px;
+	border-top-left-radius: 0; border-bottom-left-radius: 0;
+}
+.phone-input .phone-dial-select:focus, .phone-input .phone-local-input:focus { z-index: 1; position: relative; }
 
 /* --- Password field + its "Generate" button (Add/Edit User forms). */
 .password-field-row { display: flex; gap: 8px; align-items: center; }
