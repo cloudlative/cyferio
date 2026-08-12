@@ -56,8 +56,11 @@
 	<form id="ovi-install-form" class="form-grid">
 		<div class="field">
 			<label for="ovi-port">Port</label>
-			<input type="number" id="ovi-port" value="1194" min="1" max="65535" required>
-			<p class="field-hint">The UDP/TCP port OpenVPN listens on.</p>
+			<div class="input-with-action">
+				<input type="text" id="ovi-port" inputmode="numeric" pattern="[0-9]*" value="1194" required>
+				<button type="button" class="btn-secondary btn-sm" id="ovi-port-reset">Default</button>
+			</div>
+			<p class="field-hint">The UDP/TCP port OpenVPN listens on. Valid range: 1-65535 (default 1194).</p>
 		</div>
 		<div class="field">
 			<label for="ovi-protocol">Protocol</label>
@@ -83,22 +86,24 @@
 		</div>
 	</form>
 
-	<h3 class="ovi-section-heading">First client</h3>
+	<h3 class="ovi-section-heading">First client <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></h3>
 	<p class="muted" style="margin-top:0">
-		A first client certificate is created as part of install, following the same
-		workflow as adding a client from the VPN Clients page: a MAC address is required
-		and a portal account is automatically linked (or created) for it.
+		Optionally create a first client certificate as part of install, following the
+		same workflow as adding a client from the VPN Clients page: a MAC address is
+		required for it and a portal account is automatically linked (or created).
+		Leave both fields below blank to install OpenVPN with no first client -- one can
+		always be added afterward from the Users or VPN Clients page.
 	</p>
 	<div class="form-grid">
 		<div class="field">
-			<label for="ovi-client-name">Client name</label>
-			<input type="text" id="ovi-client-name" value="client" required pattern="[A-Za-z0-9_-]{1,64}">
+			<label for="ovi-client-name">Client name <span class="muted">(optional)</span></label>
+			<input type="text" id="ovi-client-name" placeholder="e.g. client" pattern="[A-Za-z0-9_-]{1,64}">
 			<p class="field-hint">Letters, numbers, underscore, or hyphen only.</p>
 		</div>
 		<div class="field">
-			<label for="ovi-client-mac">Device MAC address</label>
-			<input type="text" id="ovi-client-mac" required placeholder="aa:bb:cc:dd:ee:ff">
-			<p class="field-hint">Any common format (colons, dashes, or none) -- normalized automatically.</p>
+			<label for="ovi-client-mac">Device MAC address <span class="muted">(required if a client name is given)</span></label>
+			<input type="text" id="ovi-client-mac" placeholder="aa:bb:cc:dd:ee:ff">
+			<p class="field-hint">Standard MAC format, e.g. AA:BB:CC:DD:EE:FF (colons, dashes, or none -- normalized automatically).</p>
 		</div>
 	</div>
 
@@ -163,10 +168,32 @@ document.getElementById("ovi-uninstall-confirm-text").addEventListener("input", 
 	document.getElementById("ovi-uninstall-btn").disabled = ev.target.value.trim() !== "UNINSTALL";
 });
 
+document.getElementById("ovi-port-reset").addEventListener("click", () => {
+	document.getElementById("ovi-port").value = "1194";
+	document.getElementById("ovi-port").dispatchEvent(new Event("input", { bubbles: true }));
+});
+
+function portError(v) {
+	v = (v || "").trim();
+	if (!v || !/^\d+$/.test(v)) return "Port must be a number.";
+	const n = Number(v);
+	if (n < 1 || n > 65535) return "Port must be between 1 and 65535.";
+	return null;
+}
+const oviPortValidation = attachInlineValidation(document.getElementById("ovi-port"), portError);
+const oviMacValidation = attachInlineValidation(document.getElementById("ovi-client-mac"), macError);
+
 document.getElementById("ovi-install-btn").addEventListener("click", async () => {
 	const mac = document.getElementById("ovi-client-mac").value.trim();
 	const clientName = document.getElementById("ovi-client-name").value.trim();
-	if (!mac) { toast("A MAC address is required for the first client.", "error"); return; }
+	if (!oviPortValidation.check()) { toast("Please fix the Port field before installing.", "error"); return; }
+	// First client is optional (task feedback: "OpenVPN installation can
+	// proceed without creating an initial client") -- blank+blank is fine,
+	// but a partially-filled pair (name with no MAC, or vice versa) is
+	// ambiguous and rejected client-side same as server-side.
+	if (clientName && !mac) { toast("A MAC address is required when a client name is given (or leave both blank).", "error"); return; }
+	if (mac && !clientName) { toast("A client name is required when a MAC address is given (or leave both blank).", "error"); return; }
+	if (mac && !oviMacValidation.check()) { toast("Please fix the Device MAC address field before installing.", "error"); return; }
 	const ok = await confirmDialog(
 		"This installs OpenVPN on the host machine (real systemd service, real firewall rules). Continue?",
 		{ confirmLabel: "Install", danger: false }
@@ -176,9 +203,9 @@ document.getElementById("ovi-install-btn").addEventListener("click", async () =>
 		port: document.getElementById("ovi-port").value,
 		protocol: document.getElementById("ovi-protocol").value,
 		dns: document.getElementById("ovi-dns").value,
-		client_name: clientName,
-		mac,
 	});
+	if (clientName) params.set("client_name", clientName);
+	if (mac) params.set("mac", mac);
 	const publicIp = document.getElementById("ovi-public-ip").value.trim();
 	if (publicIp) params.set("public_ip", publicIp);
 

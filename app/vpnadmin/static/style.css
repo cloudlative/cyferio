@@ -581,6 +581,15 @@ fieldset legend { padding: 0 8px; color: var(--text-muted); font-weight: 700; fo
 .password-field-row input { flex: 1; min-width: 0; }
 .password-field-row button { flex: 0 0 auto; white-space: nowrap; }
 
+/* Generic input+button row -- same flex layout as .password-field-row
+   above, just not password-specific (e.g. the OpenVPN Install page's Port
+   field + "Default" reset button). Kept as its own class rather than
+   reusing .password-field-row so the name isn't misleading wherever it's
+   applied. */
+.input-with-action { display: flex; gap: 8px; align-items: center; }
+.input-with-action input { flex: 1; min-width: 0; }
+.input-with-action button { flex: 0 0 auto; white-space: nowrap; }
+
 /* --- Inline field validation (email/phone), see app.js's
    attachInlineValidation -- this app's first use of this pattern, so it's
    reused as-is anywhere else inline validation is added later. */

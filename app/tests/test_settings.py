@@ -111,7 +111,7 @@ class TestUpdateSettings:
         assert r.status_code == 422
 
         r = app_client.post("/api/users", json={
-            "username": "longenough", "password": "longenoughpassword", "first_name": "Long",
+            "username": "longenough", "password": "Longenoughpassword123!", "first_name": "Long",
             "email": "longenough@example.com", "mac": "aa:bb:cc:dd:ee:ff",
         })
         assert r.status_code == 201

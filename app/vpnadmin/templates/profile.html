@@ -79,7 +79,7 @@
 			</div>
 			<button type="submit" class="btn-primary">Update Password</button>
 		</div>
-		<p class="muted" style="margin-top:10px">At least 8 characters. You'll stay logged in on this device.</p>
+		<p class="muted" style="margin-top:10px">At least 8 characters, including 1 uppercase letter, 1 number, and 1 special character. You'll stay logged in on this device.</p>
 	</form>
 </div>
 {% endblock %}
@@ -118,6 +118,10 @@ function phoneError(combined) {
 }
 const pEmailValidation = attachInlineValidation(document.getElementById("p-email"), emailError);
 const pPhoneValidation = attachInlineValidation(profilePhone.getLocalInputEl(), () => phoneError(profilePhone.getValue()));
+// passwordPolicyError() is the shared helper in app.js (mirrors routes/
+// users.py's _valid_password) -- also used by users.html's Add/Edit User
+// and Reset Password forms via wirePasswordConfirm.
+const pNewPwValidation = attachInlineValidation(document.getElementById("p-new-pw"), passwordPolicyError);
 
 async function loadTeamOptions() {
 	try {
@@ -190,6 +194,10 @@ document.getElementById("password-form").addEventListener("submit", async (ev) =
 	ev.preventDefault();
 	const current = document.getElementById("p-current-pw").value;
 	const next = document.getElementById("p-new-pw").value;
+	if (!pNewPwValidation.check()) {
+		toast("Please fix the highlighted field before saving.", "error");
+		return;
+	}
 	try {
 		await apiFetch("/api/users/me", {
 			method: "PATCH",

@@ -34,7 +34,7 @@ class TestClientUserLinksEndpoint:
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
         app_client.post("/api/users", json={
-            "username": "linkeduser", "password": "somepass123", "first_name": "Linked",
+            "username": "linkeduser", "password": "Somepass123!", "first_name": "Linked",
             "email": "linkeduser@example.com", "mac": "aa:bb:cc:dd:ee:01",
         })
         r = app_client.get("/api/clients/user-links")
@@ -70,7 +70,7 @@ class TestUserCreateUpdateSyncsVpnPolicy:
         monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
-            "username": "policieduser", "password": "somepass123", "first_name": "Policied",
+            "username": "policieduser", "password": "Somepass123!", "first_name": "Policied",
             "email": "policieduser@example.com", "mac": "aa:bb:cc:dd:ee:02",
             "allowed_os": ["windows", "mac"], "bandwidth_monthly_gb": 2.5,
         })
@@ -86,7 +86,7 @@ class TestUserCreateUpdateSyncsVpnPolicy:
         monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
         login(app_client, "admin", "adminpass123")
         app_client.post("/api/users", json={
-            "username": "policieduser2", "password": "somepass123", "first_name": "Policied2",
+            "username": "policieduser2", "password": "Somepass123!", "first_name": "Policied2",
             "email": "policieduser2@example.com", "mac": "aa:bb:cc:dd:ee:03",
         })
         user_id = db_session.query(User).filter(User.username == "policieduser2").one().id
@@ -123,7 +123,7 @@ class TestSuperAdminRole:
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
-            "username": "wannabesuper", "password": "somepass123", "first_name": "W",
+            "username": "wannabesuper", "password": "Somepass123!", "first_name": "W",
             "email": "wannabesuper@example.com", "mac": "aa:bb:cc:dd:ee:04", "role": "super_admin",
         })
         assert r.status_code == 400

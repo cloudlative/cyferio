@@ -15,7 +15,7 @@ class TestCreateUserProvisionsVpnProfile:
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: calls.setdefault("add_client", (name, mac)) or f"{name} added.")
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
-            "username": "newvpnuser", "password": "somepass123", "first_name": "New",
+            "username": "newvpnuser", "password": "Somepass123!", "first_name": "New",
             "email": "newvpnuser@example.com", "mac": "aa:bb:cc:dd:ee:ff",
         })
         assert r.status_code == 201
@@ -36,7 +36,7 @@ class TestCreateUserProvisionsVpnProfile:
         monkeypatch.setattr(users_mod.cli, "add_client", fake_add_client)
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
-            "username": "failedvpnuser", "password": "somepass123", "first_name": "Failed",
+            "username": "failedvpnuser", "password": "Somepass123!", "first_name": "Failed",
             "email": "failedvpnuser@example.com", "mac": "aa:bb:cc:dd:ee:ff",
         })
         assert r.status_code == 400
@@ -45,7 +45,7 @@ class TestCreateUserProvisionsVpnProfile:
     def test_missing_mac_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
-            "username": "nomacuser", "password": "somepass123", "first_name": "No",
+            "username": "nomacuser", "password": "Somepass123!", "first_name": "No",
             "email": "nomacuser@example.com",
         })
         assert r.status_code == 422

@@ -308,14 +308,14 @@ class TestFirstNameRequired:
     def test_create_user_without_first_name_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
-            "username": "nofirstname", "password": "somepass123", "email": "nofirstname@example.com",
+            "username": "nofirstname", "password": "Somepass123!", "email": "nofirstname@example.com",
         })
         assert r.status_code == 422
 
     def test_create_user_with_blank_first_name_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
-            "username": "blankfirstname", "password": "somepass123", "first_name": "   ",
+            "username": "blankfirstname", "password": "Somepass123!", "first_name": "   ",
             "email": "blankfirstname@example.com",
         })
         assert r.status_code == 422
@@ -325,7 +325,7 @@ class TestFirstNameRequired:
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
-            "username": "hasfirstname", "password": "somepass123", "first_name": "Alex",
+            "username": "hasfirstname", "password": "Somepass123!", "first_name": "Alex",
             "email": "hasfirstname@example.com", "mac": "aa:bb:cc:dd:ee:ff",
         })
         assert r.status_code == 201
@@ -334,14 +334,14 @@ class TestFirstNameRequired:
     def test_create_user_without_email_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
-            "username": "noemail", "password": "somepass123", "first_name": "Noel",
+            "username": "noemail", "password": "Somepass123!", "first_name": "Noel",
         })
         assert r.status_code == 422
 
     def test_create_user_with_blank_email_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
-            "username": "blankemail", "password": "somepass123", "first_name": "Blank", "email": "   ",
+            "username": "blankemail", "password": "Somepass123!", "first_name": "Blank", "email": "   ",
         })
         assert r.status_code == 422
 
@@ -395,35 +395,35 @@ class TestSelfServiceProfile:
 
     def test_self_password_change_requires_current_password(self, app_client):
         login(app_client, "viewer", "viewerpass123")
-        r = app_client.patch("/api/users/me", json={"new_password": "brandnewpass123"})
+        r = app_client.patch("/api/users/me", json={"new_password": "Brandnewpass123!"})
         assert r.status_code == 400
 
     def test_self_password_change_wrong_current_password_rejected(self, app_client):
         login(app_client, "viewer", "viewerpass123")
         r = app_client.patch("/api/users/me", json={
-            "current_password": "wrongpass", "new_password": "brandnewpass123",
+            "current_password": "wrongpass", "new_password": "Brandnewpass123!",
         })
         assert r.status_code == 400
 
     def test_self_password_change_succeeds_and_new_password_works(self, app_client):
         login(app_client, "viewer", "viewerpass123")
         r = app_client.patch("/api/users/me", json={
-            "current_password": "viewerpass123", "new_password": "brandnewpass123",
+            "current_password": "viewerpass123", "new_password": "Brandnewpass123!",
         })
         assert r.status_code == 200
 
         app_client.post("/logout")
-        r = login(app_client, "viewer", "brandnewpass123")
+        r = login(app_client, "viewer", "Brandnewpass123!")
         assert r.status_code == 200
 
     def test_admin_can_reset_another_users_password_without_current_password(self, app_client, db_session):
         login(app_client, "admin", "adminpass123")
         viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
-        r = app_client.patch(f"/api/users/{viewer_id}", json={"password": "resetbyadmin123"})
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"password": "Resetbyadmin123!"})
         assert r.status_code == 200
 
         app_client.post("/logout")
-        r = login(app_client, "viewer", "resetbyadmin123")
+        r = login(app_client, "viewer", "Resetbyadmin123!")
         assert r.status_code == 200
 
     def test_admin_edit_cannot_change_created_at(self, app_client, db_session):

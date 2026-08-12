@@ -20,10 +20,56 @@ class _FakeInstallResult:
         self.protocol = "udp"
 
 
-def test_install_action_requires_client_mac_flag():
+def test_install_action_with_client_name_requires_mac(monkeypatch, capsys):
+    # --client-mac is no longer required=True at the argparse level (a first
+    # client is optional -- see installer.py/routes/openvpn_install.py), but
+    # main() itself still enforces the "MAC required if a client name is
+    # given" pairing and reports it the same structured-JSON way every other
+    # validation failure in this module does (see build_parser()'s own
+    # updated --client-mac help text for the rationale).
     parser = openvpn_admin.build_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args(["install", "--client-name=client"])  # no --client-mac
+    args = parser.parse_args(["install", "--client-name=client"])  # no --client-mac
+    assert args.client_mac is None
+
+    monkeypatch.setattr(openvpn_admin.network_manager, "resolve_install_ip", lambda ip: "203.0.113.10")
+    rc = openvpn_admin.main(["--openvpn-dir=/tmp/scratch-openvpn", "install", "--client-name=client", "--no-packages"])
+    assert rc == 1  # OpenVPNError-family failure, not the unexpected-exception path (rc == 2)
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is False
+    assert "client-mac" in out["error"]["detail"].lower()
+
+
+def test_install_action_with_no_client_fields_skips_add_mac(monkeypatch, capsys):
+    calls = {}
+
+    class _NoClientInstallResult:
+        def __init__(self):
+            self.client_name = None
+            self.ovpn_path = None
+            self.port = 1194
+            self.protocol = "udp"
+
+    def fake_install(paths, opts, client_name, install_packages=True):
+        calls["install"] = client_name
+        return _NoClientInstallResult()
+
+    def fake_add_mac(paths, name, mac):
+        calls["add_mac_called"] = True
+        return mac
+
+    monkeypatch.setattr(openvpn_admin.network_manager, "resolve_install_ip", lambda ip: "203.0.113.10")
+    monkeypatch.setattr(openvpn_admin.installer, "install", fake_install)
+    monkeypatch.setattr(openvpn_admin.client_manager, "add_mac", fake_add_mac)
+
+    rc = openvpn_admin.main(["--openvpn-dir=/tmp/scratch-openvpn", "install", "--no-packages"])
+    assert rc == 0
+    assert calls["install"] is None  # no --client-name -> installer.install() gets None
+    assert "add_mac_called" not in calls  # never called -- no client to register
+
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is True
+    assert out["data"]["mac"] is None
+    assert out["data"]["client_name"] is None
 
 
 def test_install_action_calls_add_mac_after_install(monkeypatch, capsys):

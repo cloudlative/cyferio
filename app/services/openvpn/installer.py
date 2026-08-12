@@ -40,7 +40,7 @@ _STEP_SERVICE = "service"
 
 
 class InstallResult:
-    def __init__(self, client_name: str, ovpn_path: str, port: int, protocol: str) -> None:
+    def __init__(self, client_name: str | None, ovpn_path: str | None, port: int, protocol: str) -> None:
         self.client_name = client_name
         self.ovpn_path = ovpn_path
         self.port = port
@@ -53,13 +53,24 @@ class InstallResult:
 def install(
     paths: OpenVPNPaths,
     opts: InstallOptions,
-    first_client_name: str = "client",
+    first_client_name: str | None = "client",
     *,
     install_packages: bool = True,
 ) -> InstallResult:
     """Mirrors :1064-1411. Raises AlreadyInstalledError (a no-op signal, not
     a failure) if paths.server_conf already exists -- this is the sole
     install-marker check the bash script itself uses (:1064, :1412).
+
+    `first_client_name=None` (or an empty string) skips creating a first
+    client entirely -- unlike the bash script (which always prompts for and
+    creates one, defaulting to "client" on a blank answer), a first client
+    is optional here: the server/firewall/systemd steps below never read or
+    depend on `client`/`InstallResult.client_name`/`.ovpn_path` being set,
+    so skipping it just means InstallResult.client_name/ovpn_path come back
+    None and no cert/.ovpn is generated. A client can always be added
+    afterward through the ordinary add-client path, identical to any other
+    client -- there is nothing structurally special about "the first one"
+    once install() returns.
 
     `install_packages=False` skips the OS package-manager step (used by the
     parity test harness, which runs against a scratch PKI dir without
@@ -70,7 +81,7 @@ def install(
         )
 
     completed: list[str] = []
-    client = sanitize_client_name(first_client_name)
+    client = sanitize_client_name(first_client_name) if first_client_name else None
     try:
         if install_packages:
             os_info = package_manager.detect_os()
@@ -83,7 +94,8 @@ def install(
         certificate_manager.pki_init(paths)
         certificate_manager.build_ca(paths)
         certificate_manager.build_server_cert(paths)
-        certificate_manager.build_client_cert(paths, client)
+        if client:
+            certificate_manager.build_client_cert(paths, client)
         certificate_manager.gen_crl(paths)
         certificate_manager.install_pki_files(paths)
         completed.append(_STEP_PKI)
@@ -117,13 +129,17 @@ def install(
         # first client in DB_FILE here (unlike do_add_client) -- ported
         # faithfully: the first client needs a separate add_mac/restore
         # call before it can actually connect through the MAC check, same
-        # gap that exists in the bash original.
-        ovpn_content = config_manager.generate_ovpn(paths, client)
-        os.makedirs(paths.ovpn_output_dir, exist_ok=True)
-        ovpn_path = paths.ovpn_output(client)
-        with open(ovpn_path, "w", encoding="utf-8") as f:
-            f.write(ovpn_content)
-        os.chmod(ovpn_path, int(paths.ovpn_output_mode, 8))
+        # gap that exists in the bash original. Skipped entirely when no
+        # first client was requested (client is None) -- see this
+        # function's docstring.
+        ovpn_path = None
+        if client:
+            ovpn_content = config_manager.generate_ovpn(paths, client)
+            os.makedirs(paths.ovpn_output_dir, exist_ok=True)
+            ovpn_path = paths.ovpn_output(client)
+            with open(ovpn_path, "w", encoding="utf-8") as f:
+                f.write(ovpn_content)
+            os.chmod(ovpn_path, int(paths.ovpn_output_mode, 8))
 
         return InstallResult(client_name=client, ovpn_path=ovpn_path, port=opts.port, protocol=opts.protocol)
     except Exception as e:

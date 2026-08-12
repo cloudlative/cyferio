@@ -7,6 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session, selectinload
 
+from services.openvpn.exceptions import ValidationError as MacFormatError
+from services.openvpn.validator import normalize_mac
+
 from .. import app_settings, geo_lists, policy_store, vpn_identity_sync
 from .. import cli_wrapper as cli
 from ..audit import log_action
@@ -47,14 +50,40 @@ def _resolve_creatable_role(db: Session, slug: str) -> RoleDef:
     return role
 
 
+_PW_UPPER_RE = re.compile(r"[A-Z]")
+_PW_DIGIT_RE = re.compile(r"[0-9]")
+# "Special character" == anything that isn't a letter or digit -- matches
+# generateStrongPassword's own "!@#$%^&*-_=+?" class in app.js (a subset of
+# this, not the full set), so every password that helper generates already
+# satisfies this check, and this check itself doesn't require any specific
+# symbol, just at least one from outside [A-Za-z0-9].
+_PW_SPECIAL_RE = re.compile(r"[^A-Za-z0-9]")
+
+
 def _valid_password(v: str) -> str:
-    # Minimum length is admin-configurable (Settings page -> Security);
-    # read live off the runtime cache rather than a hardcoded 8, so a
-    # changed policy applies to the very next request, not just after a
-    # restart. See app_settings.py.
+    """Enforces this app's password complexity policy: minimum length
+    (admin-configurable via Settings -> Security, read live off the runtime
+    cache rather than hardcoded, so a changed policy applies to the very
+    next request, not just after a restart -- see app_settings.py) plus a
+    fixed set of complexity rules (uppercase, digit, special character)
+    that apply regardless of the configured length. Used for account
+    creation, admin password resets, and self-service password changes
+    alike -- every path that ever sets a User.password_hash goes through
+    this one function. Lists every unmet requirement in a single message
+    (not just the first one hit) so a user isn't stuck fixing one problem
+    at a time across repeated failed submits."""
     min_len = app_settings.runtime.min_password_length
+    problems = []
     if len(v) < min_len:
-        raise ValueError(f"Password must be at least {min_len} characters.")
+        problems.append(f"at least {min_len} characters")
+    if not _PW_UPPER_RE.search(v):
+        problems.append("at least 1 uppercase letter")
+    if not _PW_DIGIT_RE.search(v):
+        problems.append("at least 1 number")
+    if not _PW_SPECIAL_RE.search(v):
+        problems.append("at least 1 special character")
+    if problems:
+        raise ValueError("Password must contain " + ", ".join(problems) + ".")
     return v
 
 
@@ -291,6 +320,28 @@ def _valid_bandwidth_gb(v: float | None) -> float | None:
     return v
 
 
+# Reuses services.openvpn.validator.normalize_mac -- the exact same
+# MAC-format check/normalization openvpn-install.sh's do_add_mac performs
+# (see that module's docstring) -- rather than duplicating a second regex
+# here that could quietly drift out of sync with what the CLI layer
+# actually accepts. Accepts any of the common separator styles (colon,
+# dash, dot, or none) and normalizes to lowercase colon-separated form
+# (e.g. "AA:BB:CC:DD:EE:FF" -> "aa:bb:cc:dd:ee:ff") so what's stored/sent
+# to cli.add_client is always in one consistent shape regardless of how
+# the admin typed it.
+def _valid_mac_format(v: str) -> str:
+    v = (v or "").strip()
+    if not v:
+        raise ValueError("Device MAC Address is required.")
+    try:
+        return normalize_mac(v)
+    except MacFormatError:
+        raise ValueError(
+            f"'{v}' isn't a valid MAC address -- expected 6 hex byte pairs, "
+            "e.g. AA:BB:CC:DD:EE:FF or aa:bb:cc:dd:ee:ff (colons, dashes, or no separator all work)."
+        )
+
+
 def _resolve_teams(db: Session, team_ids: list[int]) -> list[Team]:
     """Validates every id in team_ids references an existing Team, and
     returns the Team rows themselves (for assigning to User.teams). Used by
@@ -346,10 +397,7 @@ class CreateUserRequest(BaseModel):
     @field_validator("mac")
     @classmethod
     def _valid_mac(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Device MAC Address is required.")
-        return v
+        return _valid_mac_format(v)
 
     restrict_login_by_country: bool = False
     allowed_login_countries: list[str] = []

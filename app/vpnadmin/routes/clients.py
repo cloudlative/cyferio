@@ -4,6 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session, selectinload
 
+from services.openvpn.exceptions import ValidationError as MacFormatError
+from services.openvpn.validator import normalize_mac
+
 from .. import cli_wrapper as cli
 from .. import mailer
 from .. import policy_store
@@ -57,6 +60,26 @@ def _friendly_ovpn_error(name: str, e: ScriptError) -> str:
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
+# Reuses services.openvpn.validator.normalize_mac (the same MAC-format
+# check/normalization openvpn-install.sh's do_add_mac performs) instead of
+# duplicating a second regex here -- see routes/users.py's identical
+# _valid_mac_format for the fuller rationale. Every mac field below
+# (AddClientRequest, MacRequest, RestoreClientRequest) uses this, so a MAC
+# typo gets a clear 422 up front instead of only surfacing once the script
+# itself rejects it.
+def _valid_mac_format(v: str) -> str:
+    v = (v or "").strip()
+    if not v:
+        raise ValueError("MAC address is required.")
+    try:
+        return normalize_mac(v)
+    except MacFormatError:
+        raise ValueError(
+            f"'{v}' isn't a valid MAC address -- expected 6 hex byte pairs, "
+            "e.g. AA:BB:CC:DD:EE:FF or aa:bb:cc:dd:ee:ff (colons, dashes, or no separator all work)."
+        )
+
+
 class AddClientRequest(BaseModel):
     name: str
     mac: str
@@ -72,13 +95,8 @@ class AddClientRequest(BaseModel):
 
     @field_validator("mac")
     @classmethod
-    def _nonempty_mac(cls, v: str) -> str:
-        # Deliberately not re-validating the MAC format here -- the script
-        # normalizes/validates it robustly already (any separator style,
-        # any case) and is the single source of truth for that logic.
-        if not v.strip():
-            raise ValueError("MAC address is required.")
-        return v.strip()
+    def _valid_mac(cls, v: str) -> str:
+        return _valid_mac_format(v)
 
 
 @router.get("")
@@ -154,12 +172,8 @@ class MacRequest(BaseModel):
 
     @field_validator("mac")
     @classmethod
-    def _nonempty_mac(cls, v: str) -> str:
-        # Not re-validating the format here either -- see AddClientRequest
-        # above, same reasoning: the script normalizes/validates.
-        if not v.strip():
-            raise ValueError("MAC address is required.")
-        return v.strip()
+    def _valid_mac(cls, v: str) -> str:
+        return _valid_mac_format(v)
 
 
 @router.post("/{name}/macs", status_code=201)
@@ -338,10 +352,8 @@ class RestoreClientRequest(BaseModel):
 
     @field_validator("mac")
     @classmethod
-    def _nonempty_mac(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("MAC address is required.")
-        return v.strip()
+    def _valid_mac(cls, v: str) -> str:
+        return _valid_mac_format(v)
 
 
 @router.post("/revoked/{name}/restore")

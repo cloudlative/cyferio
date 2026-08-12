@@ -81,20 +81,48 @@ class TestStepUpReauth:
         assert resp.status_code == 403
 
 
-class TestInstallRequiresMac:
+class TestInstallFirstClientOptional:
+    """First client is now optional (task feedback: "OpenVPN installation
+    can proceed without creating an initial client") -- see
+    routes/openvpn_install.py's post_install. mac/client_name are only
+    cross-required of each other, never unconditionally required."""
+
     def _elevated_client(self, app_client, db_session, username="boot_admin5"):
         _make_admin(db_session, username, is_bootstrap_admin=True)
         login(app_client, username, "somepass123")
         assert app_client.post("/api/openvpn/verify-access", json={"password": "somepass123"}).status_code == 200
         return app_client
 
-    def test_install_without_mac_query_param_is_422(self, app_client, db_session):
+    def test_install_with_no_client_fields_passes_validation(self, app_client, db_session):
+        # No mac/client_name at all -- valid (no first client requested).
+        # HOST_SSH_TARGET is unset in tests, so this reaches (and stops at)
+        # the host-executor-not-configured 400, proving mac/client_name
+        # validation itself didn't reject the request.
         client = self._elevated_client(app_client, db_session)
         resp = client.post("/api/openvpn/install")
-        assert resp.status_code == 422
+        assert resp.status_code == 400
+        assert "host executor is not configured" in resp.json()["detail"].lower()
 
-    def test_install_with_blank_mac_is_400(self, app_client, db_session):
+    def test_client_name_without_mac_is_400(self, app_client, db_session):
         client = self._elevated_client(app_client, db_session, "boot_admin6")
-        resp = client.post("/api/openvpn/install?mac=%20%20")
+        resp = client.post("/api/openvpn/install?client_name=client")
         assert resp.status_code == 400
         assert "mac address is required" in resp.json()["detail"].lower()
+
+    def test_blank_mac_with_client_name_is_400(self, app_client, db_session):
+        client = self._elevated_client(app_client, db_session, "boot_admin6b")
+        resp = client.post("/api/openvpn/install?client_name=client&mac=%20%20")
+        assert resp.status_code == 400
+        assert "mac address is required" in resp.json()["detail"].lower()
+
+    def test_mac_without_client_name_is_400(self, app_client, db_session):
+        client = self._elevated_client(app_client, db_session, "boot_admin7")
+        resp = client.post("/api/openvpn/install?mac=aa:bb:cc:dd:ee:ff")
+        assert resp.status_code == 400
+        assert "client name is required" in resp.json()["detail"].lower()
+
+    def test_invalid_mac_format_with_client_name_is_400(self, app_client, db_session):
+        client = self._elevated_client(app_client, db_session, "boot_admin8")
+        resp = client.post("/api/openvpn/install?client_name=client&mac=not-a-mac")
+        assert resp.status_code == 400
+        assert "invalid mac address" in resp.json()["detail"].lower()

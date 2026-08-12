@@ -23,6 +23,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from services.openvpn.exceptions import OpenVPNError
+from services.openvpn.exceptions import ValidationError as MacFormatError
+from services.openvpn.validator import normalize_mac
 from services.system.host_executor import HostExecutorConfig, run_host_command
 
 from .. import vpn_identity_sync
@@ -130,29 +132,42 @@ def get_install_status(user: User = Depends(_require_elevated)):
 
 @router.post("/install")
 def post_install(
-    mac: str,
+    mac: str | None = None,
     port: int = 1194,
     protocol: str = "udp",
     dns: int = 1,
-    client_name: str = "client",
+    client_name: str | None = None,
     public_ip: str | None = None,
     user: User = Depends(_require_elevated),
     db: Session = Depends(get_db),
 ):
-    # mac is required (no default) -- the first client now goes through the
-    # exact same workflow routes/clients.py::add_client does: a MAC is
-    # mandatory and the client gets linked/created as a portal account
-    # below. See openvpn_admin.py's install action -- it registers this MAC
-    # in DB_FILE right after cert creation, closing installer.py's own
-    # documented gap (the bash-script-parity behavior of an unregistered
-    # first client that can't pass the MAC check).
-    if not mac.strip():
-        raise HTTPException(status_code=400, detail="MAC address is required for the first client.")
+    # First client is optional (task feedback: "OpenVPN installation can
+    # proceed without creating an initial client") -- leave both client_name
+    # and mac unset/blank to install with none at all; a client can always
+    # be added afterward through the ordinary Add User / Clients-page flow,
+    # identical to any other client. If a client_name IS given, mac is still
+    # mandatory for it (same reasoning as before: the first client goes
+    # through the same workflow routes/clients.py::add_client does, and
+    # openvpn_admin.py's install action registers this MAC in DB_FILE right
+    # after cert creation, closing installer.py's own documented gap -- the
+    # bash-script-parity behavior of an unregistered first client that
+    # can't pass the MAC check).
+    client_name = (client_name or "").strip() or None
+    mac_provided = bool(mac and mac.strip())
+    if client_name and not mac_provided:
+        raise HTTPException(status_code=400, detail="MAC address is required when creating a first client.")
+    if mac_provided and not client_name:
+        raise HTTPException(status_code=400, detail="Client name is required when a MAC address is given.")
+    normalized_mac = None
+    if client_name:
+        try:
+            normalized_mac = normalize_mac(mac)
+        except MacFormatError as e:
+            raise HTTPException(status_code=400, detail=e.detail)
     config = _host_executor_config()
-    args = [
-        f"--port={port}", f"--protocol={protocol}", f"--dns={dns}",
-        f"--client-name={client_name}", f"--client-mac={mac.strip()}",
-    ]
+    args = [f"--port={port}", f"--protocol={protocol}", f"--dns={dns}"]
+    if client_name:
+        args += [f"--client-name={client_name}", f"--client-mac={normalized_mac}"]
     if public_ip:
         args.append(f"--public-ip={public_ip}")
     try:
@@ -160,14 +175,16 @@ def post_install(
     except OpenVPNError as e:
         log_action(db, user, "openvpn_install", detail=e.detail, success=False)
         raise HTTPException(status_code=502, detail=e.detail)
-    log_action(db, user, "openvpn_install", target=str(data.get("client_name")), success=True)
+    log_action(db, user, "openvpn_install", target=str(data.get("client_name") or "(no first client)"), success=True)
     # Identity lifecycle sync (see vpn_identity_sync.py), same call
     # routes/clients.py::add_client makes -- links this first client to a
     # portal account, creating a "User"-role one if none exists. Never
     # allowed to fail post_install itself; the server/cert already exist.
-    new_account = vpn_identity_sync.auto_link_new_client(db, str(data.get("client_name")))
-    if new_account is not None:
-        data["portal_account_created"] = new_account  # {"username","temp_password"} -- shown once
+    # Skipped entirely when there's no first client to link.
+    if data.get("client_name"):
+        new_account = vpn_identity_sync.auto_link_new_client(db, str(data["client_name"]))
+        if new_account is not None:
+            data["portal_account_created"] = new_account  # {"username","temp_password"} -- shown once
     return data
 
 

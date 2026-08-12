@@ -1006,6 +1006,48 @@ function generateStrongPassword(length = 16) {
  * actually readable/copyable the one time it's shown (never re-shown, and
  * never sent anywhere except in the form's own submit body).
  */
+/**
+ * Real-time mirror of routes/users.py's _valid_password complexity rules
+ * (min length, 1 uppercase, 1 number, 1 special character) -- server-side
+ * is still the real check (and its min-length is admin-configurable via
+ * Settings -> Security, which this client-side copy doesn't know about, so
+ * it always checks against the fixed default of 8 -- a false-negative
+ * here, e.g. an admin who lowered the requirement to 6, just means the
+ * server accepts something this warns about unnecessarily, never the
+ * reverse). Returns null if `v` satisfies every rule.
+ */
+/**
+ * Real-time mirror of services.openvpn.validator.normalize_mac's tolerance
+ * (the same MAC-format check the Python service layer -- and, by
+ * extension, openvpn-install.sh's do_add_mac -- actually enforces): 12 hex
+ * digits, with colon, dash, dot, or no separator at all, any case. Used by
+ * users.html's Add/Edit User MAC field, openvpn_install.html's first-client
+ * MAC field, and clients.html's Manage MACs add-MAC field. Server-side
+ * (routes/users.py's/routes/clients.py's shared _valid_mac_format) is
+ * still the real check; this is just real-time UX feedback so a typo is
+ * caught before submit instead of only after a round-trip.
+ */
+function macError(v) {
+	v = (v || "").trim();
+	if (!v) return null;
+	const hexOnly = v.replace(/[:.\-]/g, "");
+	if (!/^[0-9A-Fa-f]{12}$/.test(hexOnly)) {
+		return "Enter a valid MAC address, e.g. AA:BB:CC:DD:EE:FF (colons, dashes, or no separator all work).";
+	}
+	return null;
+}
+
+function passwordPolicyError(v) {
+	v = v || "";
+	const problems = [];
+	if (v.length < 8) problems.push("at least 8 characters");
+	if (!/[A-Z]/.test(v)) problems.push("1 uppercase letter");
+	if (!/[0-9]/.test(v)) problems.push("1 number");
+	if (!/[^A-Za-z0-9]/.test(v)) problems.push("1 special character");
+	if (!problems.length) return null;
+	return `Password must contain ${problems.join(", ")}.`;
+}
+
 function wirePasswordConfirm(pwEl, confirmEl, generateBtnEl, { required = false } = {}) {
 	if (generateBtnEl) {
 		generateBtnEl.addEventListener("click", () => {
@@ -1029,6 +1071,11 @@ function wirePasswordConfirm(pwEl, confirmEl, generateBtnEl, { required = false 
 		const pw = pwEl.value;
 		const confirm = confirmEl.value;
 		if (!pw && !confirm) return required ? "Password is required." : null;
+		// Policy is checked even when this pair is optional (e.g. Edit User's
+		// "leave blank to keep current" reset) -- once a password IS being
+		// set, it must comply, same as a brand-new account's would.
+		const policyError = passwordPolicyError(pw);
+		if (policyError) return policyError;
 		if (pw !== confirm) return "Passwords don't match.";
 		return null;
 	}

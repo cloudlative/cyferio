@@ -30,7 +30,7 @@ if _REPO_ROOT not in sys.path:
 
 from app.services.openvpn import client_manager, installer  # noqa: E402
 from app.services.openvpn.config_manager import InstallOptions  # noqa: E402
-from app.services.openvpn.exceptions import OpenVPNError  # noqa: E402
+from app.services.openvpn.exceptions import OpenVPNError, ValidationError  # noqa: E402
 from app.services.openvpn.paths import OpenVPNPaths  # noqa: E402
 from app.services.openvpn import service_manager  # noqa: E402
 from app.services.system import network_manager  # noqa: E402
@@ -95,15 +95,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=1194)
     p.add_argument("--protocol", default="udp", choices=["udp", "tcp"])
     p.add_argument("--dns", type=int, default=1, choices=[1, 2, 3, 4, 5, 6])
-    p.add_argument("--client-name", default="client")
     p.add_argument(
-        "--client-mac", required=True,
-        help="MAC address to register the first client's cert under -- required. "
-        "installer.install() deliberately mirrors the bash script's own gap of "
-        "generating the first client's cert without registering it in DB_FILE "
-        "(see installer.py); this CLI layer closes that gap immediately after "
-        "install by calling the same add_mac() do_add_client/do_add_mac use, so "
-        "the first client can actually pass the MAC check like every other one.",
+        "--client-name", default=None,
+        help="Name for an optional first client. Omit (or pass an empty string) to "
+        "install OpenVPN with no first client at all -- installer.install() then "
+        "skips client-cert/.ovpn generation entirely, and this command never calls "
+        "add_mac(). A client can always be added afterward via the ordinary "
+        "add-client action, exactly like every other client.",
+    )
+    p.add_argument(
+        "--client-mac", default=None,
+        help="MAC address to register the first client's cert under -- required only "
+        "when --client-name is given (validated in main() below, not here, so the "
+        "'X requires Y' relationship stays in one place rather than split across "
+        "argparse's own required= mechanics). installer.install() deliberately "
+        "mirrors the bash script's own gap of generating the first client's cert "
+        "without registering it in DB_FILE (see installer.py); this CLI layer "
+        "closes that gap immediately after install by calling the same add_mac() "
+        "do_add_client/do_add_mac use, so the first client can actually pass the "
+        "MAC check like every other one.",
     )
     p.add_argument("--no-packages", action="store_true", help="Skip OS package install (test/dev only)")
 
@@ -173,12 +183,15 @@ def main(argv: list[str] | None = None) -> int:
             # left blank on install resulted in `remote 10.138.0.2 1194`).
             if not public_ip and network_manager.is_private_ipv4(ip):
                 public_ip = network_manager.detect_public_ip()
+            client_name = (args.client_name or "").strip() or None
+            if client_name and not args.client_mac:
+                raise ValidationError("--client-mac is required when --client-name is given.")
             opts = InstallOptions(
                 ip=ip, port=args.port, protocol=args.protocol, dns=args.dns,
                 public_ip=public_ip, group_name=paths.group_name,
             )
-            result = installer.install(paths, opts, args.client_name, install_packages=not args.no_packages)
-            mac = client_manager.add_mac(paths, result.client_name, args.client_mac)
+            result = installer.install(paths, opts, client_name, install_packages=not args.no_packages)
+            mac = client_manager.add_mac(paths, result.client_name, args.client_mac) if client_name else None
             return _ok({**_to_jsonable(result), "mac": mac, "public_ip": public_ip})
         elif args.action == "uninstall":
             installer.uninstall(paths)
