@@ -25,12 +25,12 @@ class TestPolicyRoundTrip:
         assert policy_store.get_policy("alice") == {}
 
     def test_set_and_get_country(self):
-        policy_store.set_policy("alice", country="PK")
-        assert policy_store.get_policy("alice") == {"country": "PK"}
+        policy_store.set_policy("alice", allowed_countries=["PK"])
+        assert policy_store.get_policy("alice") == {"allowed_countries": ["PK"]}
 
     def test_set_and_clear_country(self):
-        policy_store.set_policy("alice", country="PK")
-        policy_store.set_policy("alice", country=None)
+        policy_store.set_policy("alice", allowed_countries=["PK"])
+        policy_store.set_policy("alice", allowed_countries=None)
         assert policy_store.get_policy("alice") == {}
 
     def test_set_allowed_os_normalizes_and_sorts(self):
@@ -48,7 +48,7 @@ class TestPolicyRoundTrip:
 
     def test_invalid_country_code_rejected(self):
         with pytest.raises(policy_store.PolicyValidationError):
-            policy_store.set_policy("bob", country="PAK")
+            policy_store.set_policy("bob", allowed_countries=["PAK"])
 
     def test_bandwidth_quota_round_trip(self):
         policy_store.set_policy("carol", bandwidth_monthly_gb=5)
@@ -61,15 +61,15 @@ class TestPolicyRoundTrip:
             policy_store.set_policy("carol", bandwidth_monthly_gb=-5)
 
     def test_partial_update_leaves_other_fields_untouched(self):
-        policy_store.set_policy("dave", country="PK", allowed_os=["linux"], bandwidth_monthly_gb=10)
+        policy_store.set_policy("dave", allowed_countries=["PK"], allowed_os=["linux"], bandwidth_monthly_gb=10)
         policy_store.set_policy("dave", bandwidth_monthly_gb=20)
         assert policy_store.get_policy("dave") == {
-            "country": "PK", "allowed_os": ["linux"], "bandwidth_monthly_gb": 20.0,
+            "allowed_countries": ["PK"], "allowed_os": ["linux"], "bandwidth_monthly_gb": 20.0,
         }
 
     def test_clearing_every_field_removes_the_entry_entirely(self):
-        policy_store.set_policy("erin", country="PK")
-        policy_store.set_policy("erin", country=None)
+        policy_store.set_policy("erin", allowed_countries=["PK"])
+        policy_store.set_policy("erin", allowed_countries=None)
         all_policies = policy_store.get_all_policies()
         assert "erin" not in all_policies
 
@@ -79,10 +79,28 @@ class TestPolicyRoundTrip:
         assert policy_store.get_policy("frank") == {}
 
     def test_written_file_is_valid_json_on_disk(self):
-        policy_store.set_policy("grace", country="PK")
+        policy_store.set_policy("grace", allowed_countries=["PK"])
         with open(settings.CLIENT_POLICY_FILE) as f:
             data = json.load(f)
-        assert data == {"grace": {"country": "PK"}}
+        assert data == {"grace": {"allowed_countries": ["PK"]}}
+
+    def test_legacy_single_country_entry_normalizes_on_read(self):
+        """An entry written before the Location & Network Restrictions
+        sync (a bare `country` string, no allowed_countries list) is lifted
+        onto the new shape on every read -- see policy_store.py's
+        _normalize_policy_shape -- without needing a rewrite first."""
+        with open(settings.CLIENT_POLICY_FILE, "w") as f:
+            json.dump({"henry": {"country": "AE"}}, f)
+        assert policy_store.get_policy("henry") == {"allowed_countries": ["AE"]}
+        assert policy_store.get_all_policies() == {"henry": {"allowed_countries": ["AE"]}}
+
+    def test_city_asn_ip_round_trip(self):
+        policy_store.set_policy(
+            "ivan", allowed_cities=["Karachi"], allowed_asns=["AS15169"], allowed_ips=["203.0.113.5", "10.0.0.0/24"],
+        )
+        assert policy_store.get_policy("ivan") == {
+            "allowed_cities": ["Karachi"], "allowed_asns": ["AS15169"], "allowed_ips": ["203.0.113.5", "10.0.0.0/24"],
+        }
 
 
 class TestUsage:

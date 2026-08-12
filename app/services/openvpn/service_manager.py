@@ -43,6 +43,20 @@ def enable_and_start(unit: str) -> None:
     _run_systemctl("enable", "--now", unit)
 
 
+def restart(unit: str) -> None:
+    """No bash-script equivalent -- OpenVPN only rereads server.conf
+    (including a newly-added/changed client-connect/client-disconnect
+    directive) on a full restart, not a reload. Used by
+    host_scripts_manager.install_host_scripts() when wiring the per-client
+    restriction hooks onto an ALREADY-installed, already-running server
+    (a fresh install's own enable_and_start() above already starts it with
+    the hooks in place, so no restart is needed there). Genuinely
+    disruptive -- drops every currently-connected client -- so callers
+    must opt in explicitly (see openvpn_admin.py's --restart flag), never
+    triggered as a side effect."""
+    _run_systemctl("restart", unit)
+
+
 def disable_and_stop(unit: str) -> None:
     """Mirrors `systemctl disable --now $unit` (:1575, :1569)."""
     _run_systemctl("disable", "--now", unit)

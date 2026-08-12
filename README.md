@@ -137,17 +137,25 @@ Every one of the above is entirely optional per client (an unset/empty list for 
 
 ### How it's enforced
 
-Enforcement happens **on the OpenVPN host itself**, in two scripts under `host-scripts/` in this repo (installed to `/etc/openvpn/server/`, alongside — not replacing the concept of — `openvpn-mac-addr-check.py`, which this repo's copy *is* that script, now extended):
+Enforcement happens **on the OpenVPN host itself**, in scripts under `host-scripts/` in this repo (installed to `/etc/openvpn/server/`, alongside — not replacing the concept of — `openvpn-mac-addr-check.py`, which this repo's copy *is* that script, now extended):
 
 | File (deploy to `/etc/openvpn/server/`) | server.conf directive |
 |---|---|
-| `host-scripts/openvpn-mac-addr-check.py` | `client-connect /etc/openvpn/server/openvpn-mac-addr-check.py` (already required) |
-| `host-scripts/openvpn-client-disconnect.py` | `client-disconnect /etc/openvpn/server/openvpn-client-disconnect.py` (new) |
+| `host-scripts/openvpn-mac-addr-check.py` | `client-connect /etc/openvpn/server/openvpn-mac-addr-check.py` |
+| `host-scripts/openvpn-client-disconnect.py` | `client-disconnect /etc/openvpn/server/openvpn-client-disconnect.py` |
 | `host-scripts/policy_lib.py` | (imported by both of the above — deploy as a sibling file, no server.conf entry needed) |
 
-Both scripts need `chown nobody:nogroup` + `chmod +x`, same as the original `openvpn-mac-addr-check.py`. After adding the `client-disconnect` line to `server.conf`, restart the OpenVPN server service (**this drops all currently-connected clients** — pick a maintenance window).
+**Automated (recommended):** the Python installer (`app/services/openvpn/host_scripts_manager.py`) now handles all of this itself:
 
-**Before that restart**, create the `policy/` subdirectory the two JSON files below live in, owned by `nobody`:
+- A **fresh install** (`app/cli/openvpn_admin.py install`, or the web app's OpenVPN Install page) deploys and wires everything above automatically, before the OpenVPN service's first start — no separate step, no restart needed, fully enforcing from boot.
+- An **already-installed server** (predating this change, or one that skipped this before) can be brought up to date with:
+  ```bash
+  sudo python3 app/cli/openvpn_admin.py install-host-scripts          # stage files + server.conf change only
+  sudo python3 app/cli/openvpn_admin.py install-host-scripts --restart # ...and restart the service now
+  ```
+  Both forms are idempotent — safe to re-run, self-healing on ownership/permissions. Without `--restart`, the server.conf change is staged but **not yet active** (OpenVPN only rereads it on the next restart) — restart at a chosen maintenance window, since **it drops every currently-connected client**. The web app can also invoke this remotely the same way it invokes `install`/`uninstall` (see `services/system/host_executor.py`).
+
+**Manual (equivalent, if you're not using the Python installer at all):** copy the three files above with `chown nobody:nogroup` + `chmod +x` on the two scripts, add the `script-security 2`/`client-connect`/`client-disconnect` lines to `server.conf`, and create the `policy/` subdirectory the two JSON files below live in, owned by `nobody`:
 
 ```bash
 mkdir -p /etc/openvpn/server/policy
@@ -159,7 +167,7 @@ chown nobody:nogroup /etc/openvpn/server/policy/client_policy.json /etc/openvpn/
 chmod 664 /etc/openvpn/server/policy/client_policy.json /etc/openvpn/server/policy/client_usage.json
 ```
 
-This lives in its own subdirectory rather than directly in `/etc/openvpn/server/` (which is root-owned) because the connect/disconnect scripts run as `nobody` and need to atomically write-then-rename `client_usage.json` — which requires *write permission on the containing directory itself*, not just the file; owning the file alone isn't enough. `policy_lib.py` also makes a best-effort attempt to create/chown this directory itself if it's missing and the caller happens to be running as root (the app, or `openvpn-install.sh`/`client_policy_cli.py` via sudo) — but do the above explicitly rather than relying on that fallback, same reasoning as the original installer's own setup steps `touch`-ing + `chown`-ing `openvpn_db.txt`/`openvpn.log` up front. Skipping this doesn't break the MAC-binding check or take down the VPN — a policy-file read failure fails *open* (treated as unrestricted, loudly logged) rather than rejecting connections — but restrictions and usage tracking silently won't work until it's done.
+This lives in its own subdirectory rather than directly in `/etc/openvpn/server/` (which is root-owned) because the connect/disconnect scripts run as `nobody` and need to atomically write-then-rename `client_usage.json` — which requires *write permission on the containing directory itself*, not just the file; owning the file alone isn't enough. Skipping this doesn't break the MAC-binding check or take down the VPN — a policy-file read failure fails *open* (treated as unrestricted, loudly logged) rather than rejecting connections — but restrictions and usage tracking silently won't work until it's done.
 
 The connect script checks, in order, once identity is established by the MAC check: OS → country → city → ASN → IP address → bandwidth quota. Each rejection is logged to `openvpn.log` with a machine-readable `reason` (`mac_mismatch`, `os_not_allowed`, `country_not_allowed`, `country_lookup_failed`, `city_not_allowed`, `city_lookup_failed`, `asn_not_allowed`, `asn_lookup_failed`, `ip_not_allowed`, `bandwidth_exceeded`), visible via `vpn-status.py --rejected-connections` and the web app's Diagnostics page.
 

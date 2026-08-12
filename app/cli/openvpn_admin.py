@@ -28,7 +28,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(_THIS_DIR))  # parent of app/
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from app.services.openvpn import client_manager, installer  # noqa: E402
+from app.services.openvpn import client_manager, host_scripts_manager, installer  # noqa: E402
 from app.services.openvpn.config_manager import InstallOptions  # noqa: E402
 from app.services.openvpn.exceptions import OpenVPNError, ValidationError  # noqa: E402
 from app.services.openvpn.paths import OpenVPNPaths  # noqa: E402
@@ -157,6 +157,20 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("lint-db")
     sub.add_parser("status")
 
+    p = sub.add_parser(
+        "install-host-scripts",
+        help="Deploy/repair the MAC-binding + per-client-restriction enforcement scripts "
+        "(host-scripts/) on an ALREADY-installed server -- a fresh `install` already does "
+        "this automatically. Idempotent, safe to re-run.",
+    )
+    p.add_argument(
+        "--restart", action="store_true",
+        help="Also restart the OpenVPN service so a newly-appended server.conf hook block "
+        "takes effect immediately. DISRUPTIVE -- drops every currently-connected client. "
+        "Omit to only stage the files/server.conf change for a restart at a chosen "
+        "maintenance window.",
+    )
+
     return parser
 
 
@@ -230,6 +244,13 @@ def main(argv: list[str] | None = None) -> int:
         elif args.action == "status":
             active, raw = service_manager.status(paths.service_name)
             return _ok({"service": paths.service_name, "active": active, "raw": raw})
+        elif args.action == "install-host-scripts":
+            changes = host_scripts_manager.install_host_scripts(paths)
+            restarted = False
+            if args.restart:
+                service_manager.restart(paths.service_name)
+                restarted = True
+            return _ok({"changes": changes, "restarted": restarted})
         else:  # pragma: no cover - argparse `required=True` already prevents this
             parser.error(f"Unknown action: {args.action}")
             return 2

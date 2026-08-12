@@ -120,3 +120,39 @@ class OpenVPNPaths:
 
     def ovpn_output(self, name: str) -> str:
         return f"{self.ovpn_output_dir}/{name}.ovpn"
+
+    # --- host-scripts/ (client-connect/disconnect + per-client policy
+    # enforcement -- see host_scripts_manager.py) -------------------------
+    # Deployed as siblings of server.conf under OPENVPN_DIR, same directory
+    # every other "installed" file above (ca.crt, dh.pem, ...) lives in.
+    @property
+    def mac_check_script(self) -> str:
+        return f"{self.openvpn_dir}/openvpn-mac-addr-check.py"
+
+    @property
+    def disconnect_script(self) -> str:
+        return f"{self.openvpn_dir}/openvpn-client-disconnect.py"
+
+    @property
+    def policy_lib_script(self) -> str:
+        return f"{self.openvpn_dir}/policy_lib.py"
+
+    @property
+    def conn_log(self) -> str:
+        return f"{self.openvpn_dir}/openvpn.log"
+
+    # Matches policy_lib.py's own DEFAULTS -- a "policy/" subdirectory
+    # rather than directly in OPENVPN_DIR (root-owned) so the nobody-run
+    # connect/disconnect scripts can atomically write-then-rename inside it
+    # (needs write permission on the directory itself, not just the file).
+    @property
+    def policy_dir(self) -> str:
+        return f"{self.openvpn_dir}/policy"
+
+    @property
+    def client_policy_file(self) -> str:
+        return f"{self.policy_dir}/client_policy.json"
+
+    @property
+    def client_usage_file(self) -> str:
+        return f"{self.policy_dir}/client_usage.json"

@@ -38,11 +38,11 @@ class TestBulkPolicies:
 
     def test_reflects_set_policy(self, app_client):
         login(app_client, "admin", "adminpass123")
-        r = app_client.put("/api/clients/zz-bulktest/policy", json={"country": "PK"})
+        r = app_client.put("/api/clients/zz-bulktest/policy", json={"allowed_countries": ["PK"]})
         assert r.status_code == 200
         r2 = app_client.get("/api/clients/policies")
         assert r2.status_code == 200
-        assert r2.json()["policies"] == {"zz-bulktest": {"country": "PK"}}
+        assert r2.json()["policies"] == {"zz-bulktest": {"allowed_countries": ["PK"]}}
 
     def test_only_clients_with_a_restriction_appear(self, app_client):
         login(app_client, "admin", "adminpass123")
@@ -65,18 +65,18 @@ class TestCreateThenPolicySequencing:
 
         r2 = app_client.put(
             "/api/clients/zz-newclient/policy",
-            json={"country": "PK", "allowed_os": ["windows", "linux"], "bandwidth_monthly_gb": 5},
+            json={"allowed_countries": ["PK"], "allowed_os": ["windows", "linux"], "bandwidth_monthly_gb": 5},
         )
         assert r2.status_code == 200
         assert r2.json()["policy"] == {
-            "country": "PK",
+            "allowed_countries": ["PK"],
             "allowed_os": ["linux", "windows"],
             "bandwidth_monthly_gb": 5.0,
         }
 
         r3 = app_client.get("/api/clients/zz-newclient/policy")
         assert r3.status_code == 200
-        assert r3.json()["policy"]["country"] == "PK"
+        assert r3.json()["policy"]["allowed_countries"] == ["PK"]
 
     def test_policy_put_failure_does_not_undo_the_create(self, app_client, monkeypatch):
         """If the follow-up policy PUT fails (e.g. bad input), the client
@@ -89,8 +89,14 @@ class TestCreateThenPolicySequencing:
         r1 = app_client.post("/api/clients", json={"name": "zz-badpolicy", "mac": "aa:bb:cc:dd:ee:ff"})
         assert r1.status_code == 201
 
-        r2 = app_client.put("/api/clients/zz-badpolicy/policy", json={"country": "INVALID"})
-        assert r2.status_code == 400
+        # 422, not 400: unlike the old `country` field (validated only
+        # deep inside policy_store.set_policy), allowed_countries is now
+        # validated at the Pydantic layer too (PolicyRequest's own
+        # field_validator, same geo_validators.py rules) -- same 422
+        # convention every other Pydantic-validated field in this app uses
+        # (see test_password_policy_and_mac_validation.py).
+        r2 = app_client.put("/api/clients/zz-badpolicy/policy", json={"allowed_countries": ["INVALID"]})
+        assert r2.status_code == 422
 
         # No restriction was actually persisted for this client.
         r3 = app_client.get("/api/clients/zz-badpolicy/policy")
@@ -100,5 +106,5 @@ class TestCreateThenPolicySequencing:
         login(app_client, "viewer", "viewerpass123")
         r1 = app_client.post("/api/clients", json={"name": "zz-viewer", "mac": "aa:bb:cc:dd:ee:ff"})
         assert r1.status_code == 403
-        r2 = app_client.put("/api/clients/zz-viewer/policy", json={"country": "PK"})
+        r2 = app_client.put("/api/clients/zz-viewer/policy", json={"allowed_countries": ["PK"]})
         assert r2.status_code == 403

@@ -15,7 +15,7 @@ import os
 import shutil
 
 from ..system import package_manager
-from . import certificate_manager, config_manager, firewall_manager, service_manager
+from . import certificate_manager, config_manager, firewall_manager, host_scripts_manager, service_manager
 from .config_manager import InstallOptions
 from .exceptions import AlreadyInstalledError, InstallError, OpenVPNError
 from .paths import OpenVPNPaths
@@ -33,6 +33,7 @@ _STEP_PKI = "pki"  # covers init-pki through gen-crl + install_pki_files -- all 
 _STEP_TC_KEY = "tc_key"
 _STEP_DH = "dh"
 _STEP_SERVER_CONF = "server_conf"
+_STEP_HOST_SCRIPTS = "host_scripts"
 _STEP_IP_FORWARD = "ip_forward"
 _STEP_FIREWALL = "firewall"
 _STEP_CLIENT_COMMON = "client_common"
@@ -109,6 +110,18 @@ def install(
             f.write(config_manager.render_server_conf(paths, opts))
         completed.append(_STEP_SERVER_CONF)
 
+        # Installs the MAC-binding/per-client-restriction enforcement layer
+        # (host-scripts/) and appends its server.conf hook block -- BEFORE
+        # the service's first start below, so a fresh install is
+        # fully-enforcing from boot with no separate restart/maintenance
+        # window needed (unlike wiring this onto an ALREADY-running server,
+        # see host_scripts_manager's own docstring and the
+        # `install-host-scripts` CLI action for that case). Previously this
+        # entire step was a manual, README-documented process, entirely
+        # outside this installer.
+        host_scripts_manager.install_host_scripts(paths)
+        completed.append(_STEP_HOST_SCRIPTS)
+
         firewall_manager.enable_ip_forward(ipv6=bool(opts.ip6))
         completed.append(_STEP_IP_FORWARD)
         firewall_manager.install_iptables_firewall(
@@ -164,6 +177,17 @@ def _rollback(paths: OpenVPNPaths, completed: list[str]) -> None:
                 firewall_manager.remove_iptables_firewall()
             elif step == _STEP_IP_FORWARD:
                 firewall_manager.disable_ip_forward()
+            elif step == _STEP_HOST_SCRIPTS:
+                # Best-effort teardown of what install_host_scripts() added
+                # -- server.conf itself is removed wholesale by the
+                # _STEP_SERVER_CONF branch below (which runs AFTER this one
+                # in reverse order, i.e. next), so there's nothing to undo
+                # there; just the extra files this step created.
+                for p in (paths.mac_check_script, paths.disconnect_script, paths.policy_lib_script):
+                    _rm(p)
+                for p in (paths.client_policy_file, paths.client_usage_file,
+                          f"{paths.client_policy_file}.lock", f"{paths.client_usage_file}.lock"):
+                    _rm(p)
             elif step == _STEP_SERVER_CONF:
                 _rm(paths.server_conf)
             elif step == _STEP_DH:
