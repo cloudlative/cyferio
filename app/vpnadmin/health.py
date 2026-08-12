@@ -153,7 +153,7 @@ def get_top_tables(limit: int = 10) -> list[dict]:
         return []
     with engine.connect() as conn:
         rows = conn.execute(text(
-            "SELECT relname, pg_total_relation_size(c.oid) AS size_bytes "
+            "SELECT c.relname, pg_total_relation_size(c.oid) AS size_bytes "
             "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
             "JOIN pg_stat_user_tables s ON s.relid = c.oid "
             "WHERE n.nspname = 'public' AND c.relkind = 'r' "
