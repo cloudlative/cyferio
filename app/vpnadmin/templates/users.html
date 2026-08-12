@@ -54,7 +54,7 @@
 					<label for="u-email">Email</label>
 					<input type="email" id="u-email" required placeholder="e.g. asif@example.com">
 				</div>
-				<div class="field">
+				<div class="field field-wide-phone">
 					<label for="u-phone-mount">Phone <span class="muted">(optional)</span></label>
 					<div id="u-phone-mount"></div>
 				</div>
@@ -63,6 +63,10 @@
 					<div id="u-team-ms"></div>
 				</div>
 			</div>
+			<div class="checkbox-row" style="margin-top:10px">
+				<label class="checkbox-label"><input type="checkbox" id="u-send-vpn-email"> Send VPN Profile via Email</label>
+			</div>
+			<p class="field-hint">Emails the generated .ovpn profile and connection instructions to the address above once the account is created.</p>
 			<!-- Row 3: New Password, Confirm Password, Generate (aligned to row end) -->
 			<div class="form-row password-row" style="margin-top:16px">
 				<div class="field">
@@ -172,7 +176,7 @@
 			<!-- Row 2: Email, Phone, Team(s) -->
 			<div class="form-row" style="margin-top:14px">
 				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email" required></div>
-				<div class="field"><label for="e-phone-mount">Phone</label><div id="e-phone-mount"></div></div>
+				<div class="field field-wide-phone"><label for="e-phone-mount">Phone</label><div id="e-phone-mount"></div></div>
 				<div class="field"><label for="e-team-toggle">Teams <span class="muted">(select several)</span></label><div id="e-team-ms"></div></div>
 			</div>
 			<!-- Row 3: New Password, Confirm Password, Generate (aligned to row end) -->
@@ -846,7 +850,7 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 	const pwCheckError = uPasswordConfirm.check();
 	if (pwCheckError) { toast(pwCheckError, "error"); return; }
 	try {
-		await apiFetch("/api/users", {
+		const result = await apiFetch("/api/users", {
 			method: "POST",
 			body: {
 				username, password, role, mac,
@@ -868,6 +872,7 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 					const raw = document.getElementById("u-bandwidth").value.trim();
 					return raw ? Number(raw) : null;
 				})(),
+				send_vpn_profile_email: document.getElementById("u-send-vpn-email").checked,
 			},
 		});
 		// Close before toasting -- see the Edit User submit handler's own
@@ -875,7 +880,13 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 		// first, not after, keeps it visible for its whole lifetime instead
 		// of hidden inside the now-closed dialog).
 		document.getElementById("add-user-dialog").close();
+		// The account is created either way by this point (per create_user's
+		// own fire-and-forget stance on the email step) -- a `warning` in
+		// the response means the email specifically didn't go out, shown as
+		// its own toast rather than silently swallowed or blocking the
+		// "created" success toast.
 		toast(`User '${username}' created.`);
+		if (result.warning) toast(result.warning, "error");
 		resetAddUserForm();
 		loadUsers();
 	} catch (e) {

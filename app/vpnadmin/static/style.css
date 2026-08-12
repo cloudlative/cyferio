@@ -707,6 +707,12 @@ label { display: block; font-weight: 700; font-size: 0.82rem; margin-bottom: 6px
 .field { margin-bottom: 18px; }
 .form-row { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
 .form-row .field { flex: 1; min-width: 180px; margin-bottom: 0; }
+/* The phone field (.phone-input, below) needs more room than an equal
+   three-up split gives it in a 920px dialog -- the country-code <select>
+   alone needs ~170px to avoid truncating a country name, leaving too
+   little for the local number input otherwise. Widens just this one
+   column; siblings (Email/Teams) keep their normal share. */
+.field-wide-phone { flex: 1.6; min-width: 260px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 /* Vertically-stacked fields, each taking the FULL width of its container
    (users.html's Device & Access Policy / Location & Network Restrictions

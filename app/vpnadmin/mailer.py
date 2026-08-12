@@ -7,10 +7,41 @@ new pip dependency for what's a small, well-trodden piece of functionality.
 import re
 import smtplib
 from email.message import EmailMessage
+from pathlib import Path
+
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import app_settings
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# A separate, dedicated Jinja2 Environment for EMAIL templates
+# (templates/email/*.html) -- deliberately not the same Jinja2Templates
+# instances routes/pages.py and routes/auth.py each create for PAGE
+# rendering (this module has no existing coupling to either, and an email
+# template inheriting from base_email.html has nothing in common with
+# base.html's page layout). autoescape stays on for .html -- these are
+# real HTML emails (multipart/alternative), so untrusted values (a
+# client/user name) must be escaped same as any other HTML render.
+_EMAIL_TEMPLATES_DIR = Path(__file__).parent / "templates" / "email"
+_email_env = Environment(
+    loader=FileSystemLoader(str(_EMAIL_TEMPLATES_DIR)),
+    autoescape=select_autoescape(["html"]),
+)
+
+
+def _render_email_template(name: str, **context) -> str:
+    """Renders one templates/email/*.html file with `app_name`/
+    `support_email` (from runtime settings) always available, plus
+    whatever page-specific context the caller passes -- the shared
+    defaults every email template's base_email.html footer reads, so
+    individual send_* functions don't each have to remember to pass them."""
+    s = app_settings.runtime
+    return _email_env.get_template(name).render(
+        app_name=s.app_name,
+        support_email=s.admin_notification_email or None,
+        **context,
+    )
 
 
 class MailerNotConfigured(Exception):
@@ -45,12 +76,21 @@ def _send(*, host: str, port: int, username: str, password: str, use_tls: bool,
         server.send_message(msg)
 
 
-def send_ovpn_profile(*, to_address: str, client_name: str, ovpn_content: str) -> None:
+def send_ovpn_profile(*, to_address: str, client_name: str, ovpn_content: str, recipient_name: str | None = None) -> None:
     """Sends `client_name`'s .ovpn profile as an attachment to `to_address`,
-    using a small branded HTML template and the currently-effective SMTP
+    using the templates/email/vpn_profile.html template (extends
+    base_email.html -- see that pair's own docstring for why this is a
+    reusable framework, not a one-off) and the currently-effective SMTP
     settings (Settings-page override, falling back to env vars -- see
     app_settings.py). Raises MailerNotConfigured if SMTP isn't set up, or
-    smtplib.SMTPException (propagated as-is) on a real delivery failure."""
+    smtplib.SMTPException (propagated as-is) on a real delivery failure.
+
+    `recipient_name`, if given, personalizes the greeting ("Welcome,
+    Alice -- ...") -- optional because the existing "Email Profile" button
+    (routes/clients.py) sends to an admin-typed address that isn't
+    necessarily tied to a portal account with a known name; the new
+    create-user "send VPN profile via email" checkbox (routes/users.py)
+    does have one and passes it through."""
     if not is_configured():
         raise MailerNotConfigured("SMTP is not configured.")
 
@@ -58,35 +98,17 @@ def send_ovpn_profile(*, to_address: str, client_name: str, ovpn_content: str) -
     app_name = s.app_name
     msg = EmailMessage()
     msg["Subject"] = f"Your VPN profile for {client_name} — {app_name}"
+    greeting = f"Hi {recipient_name}," if recipient_name else "Hello,"
     msg.set_content(
-        f"Hello,\n\n"
+        f"{greeting}\n\n"
         f"Your VPN configuration profile for \"{client_name}\" is attached "
         f"({client_name}.ovpn). Import it into your OpenVPN client to connect.\n\n"
+        f"This file contains a private key -- keep it confidential and don't forward it.\n\n"
         f"If you weren't expecting this email, you can safely ignore it.\n\n"
         f"— {app_name}"
     )
     msg.add_alternative(
-        f"""\
-<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-            max-width:480px;margin:0 auto;padding:32px 28px;
-            background:#1e2436;color:#f1f3fa;border-radius:16px;border:1px solid #3a4460;">
-  <div style="display:inline-flex;align-items:center;gap:10px;margin-bottom:22px;">
-    <div style="width:32px;height:32px;border-radius:10px;
-                background:linear-gradient(135deg,#6366f1,#8b5cf6,#22d3ee);
-                display:inline-block;text-align:center;line-height:32px;">⚡</div>
-    <strong style="font-size:1.05rem;">{app_name}</strong>
-  </div>
-  <h2 style="margin:0 0 12px;font-size:1.2rem;">Your VPN profile is ready</h2>
-  <p style="color:#aab2cc;line-height:1.6;margin:0 0 14px;">
-    Attached is the OpenVPN configuration profile for <strong style="color:#f1f3fa;">{client_name}</strong>.
-    Import <code>{client_name}.ovpn</code> into your OpenVPN client (Tunnelblick, OpenVPN
-    Connect, the official OpenVPN GUI, etc.) to connect.
-  </p>
-  <p style="color:#757fa0;font-size:0.85rem;line-height:1.5;margin:22px 0 0;">
-    This file contains a private key -- keep it confidential and don't forward it.
-    If you weren't expecting this email, you can safely ignore it.
-  </p>
-</div>""",
+        _render_email_template("vpn_profile.html", client_name=client_name, recipient_name=recipient_name),
         subtype="html",
     )
     msg.add_attachment(

@@ -1452,7 +1452,7 @@ function passwordPolicyError(v) {
 
 function wirePasswordConfirm(pwEl, confirmEl, generateBtnEl, { required = false } = {}) {
 	if (generateBtnEl) {
-		generateBtnEl.addEventListener("click", () => {
+		generateBtnEl.addEventListener("click", async () => {
 			const pw = generateStrongPassword();
 			pwEl.type = "text";
 			confirmEl.type = "text";
@@ -1466,7 +1466,15 @@ function wirePasswordConfirm(pwEl, confirmEl, generateBtnEl, { required = false 
 			// dirty/Save-enabled immediately.
 			pwEl.dispatchEvent(new Event("input", { bubbles: true }));
 			confirmEl.dispatchEvent(new Event("input", { bubbles: true }));
-			toast("Password generated -- copy it now, it won't be shown again.");
+			// Copy to clipboard automatically -- same copyTextToClipboard()
+			// helper/fallback-to-selection behavior clients.html's .ovpn copy
+			// button already uses. This single fix covers all 4 dialogs that
+			// call wirePasswordConfirm (Add User, Edit User, Reset Password,
+			// Profile password-change) since they all funnel through here.
+			const copied = await copyTextToClipboard(pw, pwEl);
+			toast(copied
+				? "Password generated and copied to clipboard."
+				: "Password generated -- copy it now, it won't be shown again (automatic copy failed).", copied ? "success" : "error");
 		});
 	}
 	function check() {

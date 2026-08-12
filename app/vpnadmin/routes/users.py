@@ -293,6 +293,12 @@ class CreateUserRequest(BaseModel):
     mac: str
     team_ids: list[int] = []
 
+    # "Send VPN Profile via Email" checkbox (Add User form) -- best-effort,
+    # fire-and-forget: see create_user()'s own handling below for why a
+    # failed send never rolls back the just-created user (matches this
+    # app's existing stance on notify_admin_on_user_created/similar).
+    send_vpn_profile_email: bool = False
+
     # VPN-profile-level restrictions, applied to the just-created client
     # (see create_user() below) the same way Manage Restrictions on the
     # Clients page would -- these were previously only settable AFTER
@@ -767,7 +773,32 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
                 f"VPN profile: {body.username}\n"
             ),
         )
-    return _serialize(user, {body.username: policy})
+
+    # "Send VPN Profile via Email" checkbox -- deliberately runs LAST,
+    # after the user/link/cert and restrictions are all already committed:
+    # an email failure here must never roll back or fail the request for
+    # an account that otherwise finished creating successfully, same
+    # fire-and-forget stance as notify_admin_on_user_created above. Best-
+    # effort recipient name for the greeting -- falls back to a generic
+    # one inside the template if blank.
+    email_warning = None
+    if body.send_vpn_profile_email:
+        recipient_name = f"{body.first_name} {body.last_name}".strip() if body.last_name else body.first_name
+        try:
+            ovpn_content = cli.show_ovpn(body.username)
+            mailer.send_ovpn_profile(
+                to_address=body.email, client_name=body.username,
+                ovpn_content=ovpn_content, recipient_name=recipient_name,
+            )
+            log_action(db, admin, "email_ovpn", target=body.username, detail=f"sent to {body.email} (on creation)", success=True)
+        except Exception as e:
+            email_warning = f"User created, but the VPN profile email could not be sent: {e}"
+            log_action(db, admin, "email_ovpn", target=body.username, detail=f"send to {body.email} failed (on creation): {e}", success=False)
+
+    result = _serialize(user, {body.username: policy})
+    if email_warning:
+        result["warning"] = email_warning
+    return result
 
 
 @router.patch("/{user_id}")

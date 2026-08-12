@@ -368,7 +368,7 @@ function renderClientDetailPanel() {
 			<div><label>Last Seen</label><div class="muted">${escapeHtml(s ? s.last_seen : "—")}</div></div>
 		</div>
 		<div style="margin-top:14px">
-			<label class="muted" style="font-size:0.78rem">MAC Addresses (<span class="count-badge">${c.mac_count ?? 0}</span>) -- use "Manage MACs" above to add/remove</label>
+			<label class="muted" style="font-size:0.78rem">MAC Addresses (<span class="count-badge">${c.mac_count ?? 0}</span>)</label>
 			<div id="client-detail-macs" style="margin-top:6px"><p class="muted">Loading…</p></div>
 		</div>`;
 	apiFetch(`/api/clients/${encodeURIComponent(selectedClientName)}/macs`).then(data => {

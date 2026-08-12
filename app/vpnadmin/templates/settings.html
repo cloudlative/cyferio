@@ -28,7 +28,10 @@
 	</div>
 
 	<div class="card">
-		<h2>Outbound Email (SMTP)</h2>
+		<div class="toolbar">
+			<h2 style="margin:0">Outbound Email (SMTP)</h2>
+			<button type="button" class="btn-secondary btn-sm" id="smtp-edit-btn" style="display:none">Edit SMTP Settings</button>
+		</div>
 		<p class="muted" style="margin-top:0">Used to email VPN client .ovpn profiles. Leave the host blank to keep this feature disabled.</p>
 		<div class="form-grid">
 			<div class="field">
@@ -61,6 +64,7 @@
 		</div>
 		<div class="form-row" style="margin-top:6px">
 			<button type="button" class="btn-secondary" id="smtp-test-btn">Send Test Email</button>
+			<button type="button" class="btn-secondary" id="smtp-cancel-btn" style="display:none">Cancel</button>
 			<span class="muted" id="smtp-status" style="font-size:0.85rem"></span>
 		</div>
 	</div>
@@ -380,6 +384,26 @@ function populateTimezoneSelect(current) {
 	select.value = current || "UTC";
 }
 
+// SMTP lock/edit UX -- a new pattern for this app (no existing "locked
+// until Edit is clicked" precedent elsewhere), kept deliberately simple:
+// disabled inputs (still readable via .value for both the save-body
+// builder below and the Test Email button, confirmed disabled doesn't
+// block JS property reads, only native form serialization/typing) plus
+// one Edit button to unlock and one Cancel to discard in-progress edits
+// by just re-fetching from the server (also re-locks, since nothing was
+// actually saved).
+const SMTP_FIELD_IDS = ["s-smtp-host", "s-smtp-port", "s-smtp-username", "s-smtp-password", "s-smtp-from", "s-smtp-tls"];
+function setSmtpLocked(locked) {
+	SMTP_FIELD_IDS.forEach((id) => {
+		const el = document.getElementById(id);
+		if (el) el.disabled = locked;
+	});
+	document.getElementById("smtp-edit-btn").style.display = locked ? "" : "none";
+	document.getElementById("smtp-cancel-btn").style.display = locked ? "none" : "";
+}
+document.getElementById("smtp-edit-btn").addEventListener("click", () => setSmtpLocked(false));
+document.getElementById("smtp-cancel-btn").addEventListener("click", () => loadSettings());
+
 async function loadSettings() {
 	try {
 		const s = await apiFetch("/api/settings");
@@ -416,6 +440,13 @@ async function loadSettings() {
 		roleSelect.value = s.default_new_user_role || "user";
 		setVal("s-notification-duration", s.notification_duration_ms != null ? (s.notification_duration_ms / 1000) : 1);
 		document.getElementById("smtp-status").textContent = s.smtp_configured ? "Currently configured." : "Not configured -- email features are disabled.";
+		// Locked-until-Edit-clicked: once SMTP is actually saved (not just
+		// tested -- see smtp-test-btn's own dialog copy, "even if not saved
+		// yet"), the fields go read-only so it's unambiguous whether this
+		// card reflects real, persisted settings or an in-progress edit.
+		// Unconfigured (first-time setup) always starts unlocked -- nothing
+		// to protect against accidental edits yet.
+		setSmtpLocked(!!s.smtp_configured);
 
 		_themeChoices = s.theme_choices || [];
 		window._savedLoginTheme = s.login_theme || DEFAULT_THEME_ID;
