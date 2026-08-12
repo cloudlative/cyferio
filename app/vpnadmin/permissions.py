@@ -152,28 +152,53 @@ def rename_legacy_vpn_self_service_role(db: Session) -> None:
 def seed_system_roles(db: Session) -> None:
     """Idempotent -- safe to call on every startup (same pattern as
     auth.bootstrap_admin/ensure_bootstrap_admin_flag). Creates the 4 system
-    RoleDef rows + their permission/scope rows if missing; never touches an
-    already-existing row's permissions (an admin may have deliberately
-    edited a system role's grants since -- this only fills in what's
-    missing at creation time, it doesn't re-assert defaults every boot)."""
+    RoleDef rows if missing, then backfills any (role, object) permission/
+    scope row a system role's spec grants but doesn't yet have -- never
+    touches a row that already exists (an admin may have deliberately
+    edited a system role's grants since; a backfill only fills genuine
+    gaps, it doesn't re-assert defaults every boot).
+
+    The backfill (not just "create if the whole role is missing") matters
+    because OBJECTS grows over time -- e.g. "db_reporting" was added in
+    Phase 3, well after most deployments' admin/super_admin RoleDef rows
+    were already seeded. The OLD version of this function (`if role is
+    not None: continue`) skipped an existing role entirely, so those
+    already-seeded roles never picked up the new object's permission row
+    at all -- confirmed live: admin/super_admin accounts on an
+    already-running deployment had zero ObjectPermission row for
+    "db_reporting", so Database Reporting silently never appeared for
+    anyone, despite the feature being fully shipped and deployed. Per
+    OBJECTS' own module docstring, fail-closed-with-no-row is the CORRECT
+    behavior for a custom, admin-edited role (an admin's own role
+    shouldn't retroactively gain access to a module they never granted),
+    but a stock SYSTEM role should still pick up new registry entries on
+    next startup -- same self-healing-migration spirit as db.py's
+    _sync_missing_columns for schema columns, just for permission rows."""
     for slug, spec in _SYSTEM_ROLES.items():
         role = db.query(RoleDef).filter(RoleDef.slug == slug).first()
-        if role is not None:
-            continue
-        role = RoleDef(
-            slug=slug,
-            name=spec["name"],
-            description=spec["description"],
-            kind=RoleKind.system,
-            is_system=True,
-        )
-        db.add(role)
-        db.flush()  # get role.id without a full commit yet
+        if role is None:
+            role = RoleDef(
+                slug=slug,
+                name=spec["name"],
+                description=spec["description"],
+                kind=RoleKind.system,
+                is_system=True,
+            )
+            db.add(role)
+            db.flush()  # get role.id without a full commit yet
+
+        existing_perm_objects = {p.object_key for p in db.query(ObjectPermission).filter_by(role_id=role.id).all()}
         for object_key, actions in spec["permissions"].items():
+            if object_key in existing_perm_objects:
+                continue
             db.add(ObjectPermission(role_id=role.id, object_key=object_key, **{
                 f"can_{a}": actions.get(a, False) for a in ACTIONS
             }))
+
+        existing_scope_objects = {s.object_key for s in db.query(RoleApiScope).filter_by(role_id=role.id).all()}
         for object_key, scope in spec["scopes"].items():
+            if object_key in existing_scope_objects:
+                continue
             db.add(RoleApiScope(role_id=role.id, object_key=object_key, scope=scope))
     db.commit()
 
