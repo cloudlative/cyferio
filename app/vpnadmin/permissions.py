@@ -35,6 +35,13 @@ OBJECTS: dict[str, str] = {
     "audit_log": "Audit Logs",
     "settings": "Settings",
     "reports": "Reports",
+    # Deliberately its OWN object, not folded into "reports" -- per-table
+    # sizes (reveal schema/data-volume), live lock/long-running-query
+    # counts, and connection details are more operationally sensitive than
+    # anything else "reports" exposes today. Excluded from the "viewer"
+    # role's blanket grant below (unlike "reports"/"health", which viewer
+    # already has) -- admin/super_admin only, by default.
+    "db_reporting": "Database Reporting",
     # Phase 1 Python service layer's web-triggered install/uninstall (see
     # routes/openvpn_install.py) -- deliberately its own object, not folded
     # into "vpn_profiles", since it's a host-namespace action (SSH-executed,
@@ -94,7 +101,7 @@ _SYSTEM_ROLES: dict[str, dict] = {
         "Matches the pre-RBAC 'viewer' role exactly.",
         "permissions": {
             obj: {"view": True} for obj in OBJECTS
-            if obj not in ("settings", "roles", "openvpn_install")
+            if obj not in ("settings", "roles", "openvpn_install", "db_reporting")
         },
         "scopes": {},
     },

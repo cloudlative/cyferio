@@ -16,6 +16,7 @@ unhealthy rather than just "not applicable here".
 """
 import importlib.metadata
 import json
+import logging
 import os
 import platform
 import time
@@ -27,6 +28,8 @@ from sqlalchemy import text
 
 from .config import settings
 from .db import engine, get_db_engine_info
+
+logger = logging.getLogger(__name__)
 
 # Recorded once, at import time (which happens once per worker process, at
 # startup) -- the simplest possible "how long has this process been up"
@@ -95,6 +98,95 @@ def get_database_health() -> dict:
     except Exception as e:
         result["error"] = str(e)
     return result
+
+
+def gather_db_stats(conn) -> dict:
+    """The raw, whole-database Postgres numbers both write_db_stat_snapshot
+    (below, persisted) and routes/reports.py's live "current" reading
+    (not persisted) need -- kept as one function so the two call sites
+    can't silently drift apart on what "active"/"idle" or "long-running"
+    mean. Callers are responsible for the `engine.dialect.name ==
+    "postgresql"` guard -- this assumes it's already true."""
+    stats: dict = {
+        "db_size_bytes": None, "active_connections": None, "idle_connections": None,
+        "xact_commit": None, "xact_rollback": None, "blks_hit": None, "blks_read": None,
+        "waiting_locks_count": None, "long_running_query_count": None,
+    }
+    stats["db_size_bytes"] = conn.execute(text("SELECT pg_database_size(current_database())")).scalar()
+
+    state_counts = dict(conn.execute(text(
+        "SELECT state, count(*) FROM pg_stat_activity WHERE datname = current_database() GROUP BY state"
+    )).all())
+    stats["active_connections"] = state_counts.get("active", 0)
+    # Every non-"active" state (idle, idle in transaction, idle in
+    # transaction (aborted), etc.) counted as "idle" here -- a coarser
+    # split than pg_stat_activity's own state enum, but "active vs
+    # everything else" is the operationally meaningful distinction for
+    # the Connections chart.
+    stats["idle_connections"] = sum(v for k, v in state_counts.items() if k != "active")
+
+    pgstat_row = conn.execute(text(
+        "SELECT xact_commit, xact_rollback, blks_hit, blks_read FROM pg_stat_database "
+        "WHERE datname = current_database()"
+    )).one_or_none()
+    if pgstat_row:
+        stats["xact_commit"], stats["xact_rollback"], stats["blks_hit"], stats["blks_read"] = pgstat_row
+
+    stats["waiting_locks_count"] = conn.execute(text("SELECT count(*) FROM pg_locks WHERE NOT granted")).scalar()
+
+    # Fixed 5-second threshold -- a reasonable first cut, not yet an admin
+    # setting (same stance reports.py's 80%-quota-approaching-threshold
+    # constant already takes).
+    stats["long_running_query_count"] = conn.execute(text(
+        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+        "AND state = 'active' AND now() - query_start > interval '5 seconds'"
+    )).scalar()
+    return stats
+
+
+def get_top_tables(limit: int = 10) -> list[dict]:
+    """Live, point-in-time only -- deliberately NOT part of DbStatSnapshot's
+    time series (see that model's docstring for why). Postgres-only;
+    returns [] on SQLite (there's no equivalent system view, and this
+    app's SQLite usage is dev-only anyway)."""
+    if engine.dialect.name != "postgresql":
+        return []
+    with engine.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT relname, pg_total_relation_size(c.oid) AS size_bytes "
+            "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "JOIN pg_stat_user_tables s ON s.relid = c.oid "
+            "WHERE n.nspname = 'public' AND c.relkind = 'r' "
+            "ORDER BY size_bytes DESC LIMIT :limit"
+        ), {"limit": limit}).all()
+    return [{"table": r[0], "size_bytes": r[1]} for r in rows]
+
+
+def write_db_stat_snapshot(db) -> None:
+    """Takes one point-in-time sample of whole-database Postgres statistics
+    and inserts a DbStatSnapshot row -- called periodically by main.py's
+    _db_snapshot_loop(), roughly every DB_SNAPSHOT_INTERVAL_SECONDS. `db`
+    is a SQLAlchemy ORM Session (not a raw Connection like the other
+    functions in this file use) -- the caller owns its lifecycle (opening/
+    closing), matching every other place in this app that writes via a
+    Session rather than through cli_wrapper's subprocess calls.
+
+    Always inserts a row, even on SQLite or if a stat query fails --
+    every numeric field just stays None -- so the time series has no
+    silent gaps to explain later; same "NULL, not missing/broken" stance
+    get_database_health() already takes for non-Postgres engines."""
+    from .models import DbStatSnapshot
+
+    row = DbStatSnapshot()
+    if engine.dialect.name == "postgresql":
+        try:
+            stats = gather_db_stats(db.connection())
+            for key, value in stats.items():
+                setattr(row, key, value)
+        except Exception:
+            logger.exception("Failed gathering one or more DB stats for this snapshot -- inserting a partial/empty row rather than skipping it entirely")
+    db.add(row)
+    db.commit()
 
 
 def _read_file(path: str) -> str | None:

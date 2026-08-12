@@ -143,6 +143,7 @@ class _RuntimeSettings:
         self.notify_admin_on_user_created = False
         self.notify_admin_on_client_revoked = False
         self.reports_default_range_days = 7
+        self.db_snapshot_retention_days = 90  # None/0 (if explicitly set) = keep forever
         self.maintenance_mode = False
         self.maintenance_message = None
         self.notification_duration_ms = 1000  # 1 second default, admin-configurable (Settings -> Notifications)
@@ -194,6 +195,12 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.notify_admin_on_user_created = bool(row.notify_admin_on_user_created)
     runtime.notify_admin_on_client_revoked = bool(row.notify_admin_on_client_revoked)
     runtime.reports_default_range_days = row.reports_default_range_days if row.reports_default_range_days is not None else 7
+    # Unlike audit_retention_days above (default = keep forever), this
+    # defaults to 90 days when never explicitly set -- a continuously-
+    # growing time-series table is more likely to need a retention bound
+    # out of the box than the audit log is. An admin can still explicitly
+    # set 0 for "keep forever", same as audit_retention_days.
+    runtime.db_snapshot_retention_days = row.db_snapshot_retention_days if row.db_snapshot_retention_days is not None else 90
     runtime.maintenance_mode = bool(row.maintenance_mode)
     runtime.maintenance_message = row.maintenance_message
     runtime.notification_duration_ms = row.notification_duration_ms or 1000
@@ -240,5 +247,22 @@ def prune_audit_log(db: Session) -> int:
         return 0
     cutoff = datetime.now(timezone.utc) - timedelta(days=runtime.audit_retention_days)
     deleted = db.query(AuditLog).filter(AuditLog.timestamp < cutoff).delete(synchronize_session=False)
+    db.commit()
+    return deleted
+
+
+def prune_db_stat_snapshots(db: Session) -> int:
+    """Same shape as prune_audit_log() above, against DbStatSnapshot
+    instead -- see runtime.db_snapshot_retention_days' own comment in
+    refresh_runtime_cache() for why this one defaults to 90 days rather
+    than "keep forever" when never explicitly set."""
+    from datetime import timedelta
+
+    from .models import DbStatSnapshot
+
+    if not runtime.db_snapshot_retention_days:
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=runtime.db_snapshot_retention_days)
+    deleted = db.query(DbStatSnapshot).filter(DbStatSnapshot.timestamp < cutoff).delete(synchronize_session=False)
     db.commit()
     return deleted

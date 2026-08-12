@@ -47,6 +47,11 @@ def _ctx(user: User, db: Session, **extra) -> dict:
         "can_view_clients": has_permission_any_scope(db, user, "vpn_profiles", "view"),
         "can_view_health": has_permission_any_scope(db, user, "health", "view"),
         "can_view_reports": has_permission_any_scope(db, user, "reports", "view"),
+        # Database Reporting -- a stricter, separate gate than "reports"
+        # itself (see permissions.py's OBJECTS entry for "db_reporting"),
+        # so Reports' own nav link/page stays visible under "can_view_reports"
+        # even to accounts that can't see this specific section within it.
+        "can_view_db_reporting": has_permission_any_scope(db, user, "db_reporting", "view"),
         # Phase 1 Python service layer's web-triggered install/uninstall
         # page (see routes/openvpn_install.py) -- own object, admin-only by
         # default (see permissions.py's OBJECTS comment for why). Also

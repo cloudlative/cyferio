@@ -17,15 +17,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 
 from .. import cli_wrapper as cli
-from .. import geoip, policy_store
+from .. import geoip, health, policy_store
 from ..cli_wrapper import ScriptError
-from ..db import get_db
-from ..models import AuditLog, Team, User, VpnProfileLink
+from ..db import engine, get_db
+from ..models import AuditLog, DbStatSnapshot, Team, User, VpnProfileLink
 from ..permissions import require_permission_any_scope
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 require_reports_view = require_permission_any_scope("reports", "view")
+# Deliberately a separate, stricter gate than require_reports_view above --
+# see permissions.py's OBJECTS entry for "db_reporting" for why (per-table
+# sizes, live lock/long-running-query counts, and connection details are
+# more sensitive than anything else "reports" exposes; excluded from the
+# Viewer role by default, unlike "reports" itself).
+require_db_reporting_view = require_permission_any_scope("db_reporting", "view")
 
 
 def _per_client_row(user: User, client_name: str | None, policies: dict, usage: dict) -> dict:
@@ -276,3 +282,90 @@ def get_login_activity(
         .all()
     )
     return [{"timestamp": ts.isoformat() if ts else None, "username": username} for ts, username in rows]
+
+
+# --- Database Reporting (Phase 3) -----------------------------------------
+
+def _history_with_deltas(rows: list[DbStatSnapshot]) -> list[dict]:
+    """Converts consecutive DbStatSnapshot rows' RAW CUMULATIVE
+    xact_commit/xact_rollback/blks_hit/blks_read counters into what the
+    Transaction Rate / Cache Hit Ratio charts actually need per point:
+    commits/rollbacks per minute and a cache-hit percentage, each computed
+    against the PREVIOUS row in this same result set. The everything-else
+    fields (db_size_bytes, connections, locks, long-running-query count)
+    are already point-in-time facts, not counters, so they pass through
+    as-is -- no delta needed.
+
+    The first row in the returned list always has rate/ratio fields of
+    None (there is no earlier row within this window to diff against --
+    same "can't rate the very first point" limitation any rate-over-a-
+    windowed-fetch computation has). A negative delta (Postgres stats
+    reset, or the snapshot rows are somehow out of order) is floored at 0
+    rather than shown as a negative rate, which would misread as "the
+    database went backwards" rather than "the counter reset"."""
+    result = []
+    prev = None
+    for row in rows:
+        entry = {
+            "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+            "db_size_bytes": row.db_size_bytes,
+            "active_connections": row.active_connections,
+            "idle_connections": row.idle_connections,
+            "waiting_locks_count": row.waiting_locks_count,
+            "long_running_query_count": row.long_running_query_count,
+            "commits_per_min": None,
+            "rollbacks_per_min": None,
+            "cache_hit_ratio": None,
+        }
+        if prev is not None and row.timestamp and prev.timestamp:
+            elapsed_min = (row.timestamp - prev.timestamp).total_seconds() / 60
+            if elapsed_min > 0 and row.xact_commit is not None and prev.xact_commit is not None:
+                d_commit = max(0, row.xact_commit - prev.xact_commit)
+                d_rollback = max(0, (row.xact_rollback or 0) - (prev.xact_rollback or 0))
+                entry["commits_per_min"] = round(d_commit / elapsed_min, 2)
+                entry["rollbacks_per_min"] = round(d_rollback / elapsed_min, 2)
+            if row.blks_hit is not None and prev.blks_hit is not None:
+                d_hit = max(0, row.blks_hit - prev.blks_hit)
+                d_read = max(0, (row.blks_read or 0) - (prev.blks_read or 0))
+                total = d_hit + d_read
+                if total > 0:
+                    entry["cache_hit_ratio"] = round(100 * d_hit / total, 2)
+        result.append(entry)
+        prev = row
+    return result
+
+
+@router.get("/database")
+def get_database_report(
+    days: int = Query(30, ge=1, le=365),
+    _: User = Depends(require_db_reporting_view),
+    db: Session = Depends(get_db),
+):
+    """Database Reporting's data source -- "current" is a live,
+    point-in-time reading (health.py's gather_db_stats/get_top_tables,
+    the same functions the periodic snapshot writer uses for consistency,
+    see that module), "history" is DbStatSnapshot rows written
+    periodically by main.py's _db_snapshot_loop, pre-differenced into
+    rates/ratios (see _history_with_deltas above). Postgres-only --
+    available=False on SQLite, same "not applicable here" convention
+    health.py's get_host_health()/get_traefik_health() already use."""
+    if engine.dialect.name != "postgresql":
+        return {
+            "available": False,
+            "reason": "Database Reporting requires PostgreSQL (this deployment is running SQLite).",
+            "current": None,
+            "history": [],
+        }
+
+    with engine.connect() as conn:
+        current = health.gather_db_stats(conn)
+    current["top_tables"] = health.get_top_tables(10)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (
+        db.query(DbStatSnapshot)
+        .filter(DbStatSnapshot.timestamp >= cutoff)
+        .order_by(DbStatSnapshot.timestamp)
+        .all()
+    )
+    return {"available": True, "reason": None, "current": current, "history": _history_with_deltas(rows)}

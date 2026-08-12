@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, Float, ForeignKey, Table, UniqueConstraint, event
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, Enum, Text, Float, ForeignKey, Table, UniqueConstraint, event
 from sqlalchemy.orm import backref, validates, relationship
 
 from .db import Base
@@ -403,6 +403,14 @@ class AppSettings(Base):
     # spirit as default_new_user_role above; an admin can still change the
     # dropdown per-visit.
     reports_default_range_days = Column(Integer, nullable=True)
+    # Database Reporting: how long to keep DbStatSnapshot rows -- NULL/0
+    # means "keep forever" (no pruning), same convention as
+    # audit_retention_days above. See app_settings.py's
+    # prune_db_stat_snapshots() and main.py's lifespan() for where this is
+    # enforced. Does NOT control how often a snapshot is taken (that's a
+    # fixed code constant, main.py's DB_SNAPSHOT_INTERVAL_SECONDS) -- only
+    # how much history is retained.
+    db_snapshot_retention_days = Column(Integer, nullable=True)
 
     # System Administration: when true, login is blocked for every role
     # except admin/super_admin, with `maintenance_message` (falls back to a
@@ -449,6 +457,48 @@ class AuditLog(Base):
     target = Column(String(128), nullable=True)  # e.g. the client name affected
     detail = Column(Text, nullable=True)  # short human-readable outcome/error
     success = Column(Boolean, nullable=False, default=True)
+
+
+class DbStatSnapshot(Base):
+    """One row per periodic sample of whole-database Postgres statistics --
+    written by health.py's write_db_stat_snapshot(), on a fixed interval
+    (main.py's DB_SNAPSHOT_INTERVAL_SECONDS), for Database Reporting's
+    trend charts (routes/reports.py's GET /api/reports/database). Exists
+    because health.py's get_database_health() is a live, point-in-time
+    reading with no history -- "table growth"/"connection trends"/"peak
+    connections" can't be answered from a single live query.
+
+    Deliberately whole-database aggregates only -- no per-table rows here
+    (per-table size breakdown stays live/point-in-time, computed fresh on
+    every GET /api/reports/database call, not tracked historically; storing
+    N tables x every snapshot would multiply row count for a "current
+    state" fact that doesn't need a time series).
+
+    xact_commit/xact_rollback/blks_hit/blks_read are stored as the RAW
+    CUMULATIVE counters pg_stat_database reports (since server start/stats
+    reset) -- not deltas. Rates (commits/min, cache hit ratio) are computed
+    by diffing consecutive rows when a report is read, not pre-computed
+    here, so the raw numbers stay available if that differencing logic
+    ever needs to change.
+
+    NULL on every numeric column (not just at write time, but structurally
+    nullable) mirrors get_database_health()'s own "N/A on SQLite dev, not
+    an error" stance -- a snapshot taken against a non-Postgres engine
+    still gets a row (so the time series has no silent gaps), just with
+    every stat left NULL."""
+    __tablename__ = "db_stat_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    db_size_bytes = Column(BigInteger, nullable=True)
+    active_connections = Column(Integer, nullable=True)
+    idle_connections = Column(Integer, nullable=True)
+    xact_commit = Column(BigInteger, nullable=True)
+    xact_rollback = Column(BigInteger, nullable=True)
+    blks_hit = Column(BigInteger, nullable=True)
+    blks_read = Column(BigInteger, nullable=True)
+    waiting_locks_count = Column(Integer, nullable=True)
+    long_running_query_count = Column(Integer, nullable=True)
 
 
 class VpnProfileLink(Base):

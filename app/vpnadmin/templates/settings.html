@@ -195,6 +195,13 @@
 				</select>
 				<p class="field-hint">The range the Dashboard's Usage Analytics chart opens with -- still changeable per-visit there.</p>
 			</div>
+			{% if can_view_db_reporting %}
+			<div class="field">
+				<label for="s-db-snapshot-retention">Keep Database Reporting History For <span class="muted">(days; blank or 0 = keep forever)</span></label>
+				<input type="text" id="s-db-snapshot-retention" inputmode="numeric" placeholder="90">
+				<p class="field-hint">How long Database Reporting's trend charts keep historical snapshots -- a new sample is taken every 10 minutes regardless of this setting, which only controls how much history is retained.</p>
+			</div>
+			{% endif %}
 		</div>
 	</div>
 
@@ -236,8 +243,14 @@
 
 {% block scripts %}
 <script>
-function val(id) { return document.getElementById(id).value.trim(); }
-function setVal(id, v) { document.getElementById(id).value = v == null ? "" : v; }
+// Both null-safe: a handful of fields (e.g. Database Reporting's
+// retention field below) are only rendered for accounts with a specific
+// permission (can_view_db_reporting) narrower than what gets someone onto
+// this admin-only page at all -- a custom role with settings:manage but
+// not db_reporting:view would otherwise hit a hard crash on load/submit
+// over one missing element, wiping out the rest of this form.
+function val(id) { return document.getElementById(id)?.value.trim() ?? ""; }
+function setVal(id, v) { const el = document.getElementById(id); if (el) el.value = v == null ? "" : v; }
 function intOrNull(s) {
 	if (!s) return null;
 	const n = Number(s);
@@ -314,6 +327,14 @@ const sAdminNotifyEmailValidation = attachInlineValidation(document.getElementBy
 	return null;
 });
 const sAuditRetentionValidation = attachInlineValidation(document.getElementById("s-audit-retention"), (v) => numberRangeError(v, { min: 0, label: "Audit log retention", emptyOk: true }));
+// Guarded on element presence -- this field only renders for
+// can_view_db_reporting accounts (see the conditional block around this
+// field further up this template), narrower than what gets someone onto
+// this admin-only page at all.
+const sDbSnapshotRetentionEl = document.getElementById("s-db-snapshot-retention");
+const sDbSnapshotRetentionValidation = sDbSnapshotRetentionEl
+	? attachInlineValidation(sDbSnapshotRetentionEl, (v) => numberRangeError(v, { min: 0, label: "Database Reporting history retention", emptyOk: true }))
+	: null;
 const sNotificationDurationValidation = attachInlineValidation(document.getElementById("s-notification-duration"), (v) => numberRangeError(v, { min: 0.2, max: 30, label: "Notification duration", emptyOk: true, allowDecimal: true }));
 
 // A curated fallback list, only used if the browser doesn't support
@@ -371,6 +392,7 @@ async function loadSettings() {
 		document.getElementById("s-notify-user-created").checked = !!s.notify_admin_on_user_created;
 		document.getElementById("s-notify-client-revoked").checked = !!s.notify_admin_on_client_revoked;
 		document.getElementById("s-reports-range").value = String(s.reports_default_range_days != null ? s.reports_default_range_days : 7);
+		setVal("s-db-snapshot-retention", s.db_snapshot_retention_days);
 		document.getElementById("s-maintenance-mode").checked = !!s.maintenance_mode;
 		setVal("s-maintenance-message", s.maintenance_message);
 		const roleSelect = document.getElementById("s-default-role");
@@ -402,7 +424,8 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		sSmtpPortValidation, sMinPwLenValidation, sSessionTimeoutValidation,
 		sLockoutThresholdValidation, sLockoutMinutesValidation, sDefaultBandwidthValidation,
 		sAdminNotifyEmailValidation, sAuditRetentionValidation, sNotificationDurationValidation,
-	];
+		sDbSnapshotRetentionValidation, // null (and filtered out) if this field isn't rendered
+	].filter(Boolean);
 	if (!numericChecks.every((v) => v.check())) {
 		toast("Please fix the highlighted field(s) before saving.", "error");
 		return;
@@ -434,6 +457,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		notify_admin_on_user_created: document.getElementById("s-notify-user-created").checked,
 		notify_admin_on_client_revoked: document.getElementById("s-notify-client-revoked").checked,
 		reports_default_range_days: intOrNull(document.getElementById("s-reports-range").value),
+		db_snapshot_retention_days: intOrNull(val("s-db-snapshot-retention")),
 		maintenance_mode: document.getElementById("s-maintenance-mode").checked,
 		maintenance_message: val("s-maintenance-message") || null,
 		notification_duration_ms: (() => {

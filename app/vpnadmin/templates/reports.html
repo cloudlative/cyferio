@@ -158,6 +158,54 @@
 	</div>
 </div>
 
+{% if can_view_db_reporting %}
+<div class="card" id="db-reporting">
+	<div class="toolbar">
+		<h2 style="margin:0">Database Reporting</h2>
+		<div class="form-row" style="gap:10px;align-items:center">
+			<select id="dbr-range" style="width:auto">
+				<option value="7">Last 7 days</option>
+				<option value="14">Last 14 days</option>
+				<option value="30" selected>Last 30 days</option>
+				<option value="90">Last 3 months</option>
+				<option value="365">Last year</option>
+			</select>
+			<button class="btn-secondary" id="dbr-refresh">Refresh</button>
+		</div>
+	</div>
+	<p class="page-subtitle" style="margin:-6px 0 18px" id="dbr-subtitle">Loading…</p>
+
+	<div class="ua-summary-row" id="dbr-summary"></div>
+
+	<div class="ua-grid">
+		<div class="ua-chart-card">
+			<h3>Largest Tables</h3>
+			<div id="dbr-top-tables"><p class="muted">Loading…</p></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Database Size Trend</h3>
+			<div class="chart-canvas-mount"><canvas id="dbr-size-trend"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<div class="ua-chart-card-head"><h3>Connections</h3><div id="dbr-connections-type"></div></div>
+			<div class="chart-canvas-mount"><canvas id="dbr-connections"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<div class="ua-chart-card-head"><h3>Transaction Rate</h3><div id="dbr-txn-type"></div></div>
+			<div class="chart-canvas-mount"><canvas id="dbr-txn-rate"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Cache Hit Ratio</h3>
+			<div class="chart-canvas-mount"><canvas id="dbr-cache-hit"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Locks &amp; Slow Queries</h3>
+			<div class="chart-canvas-mount"><canvas id="dbr-locks"></canvas></div>
+		</div>
+	</div>
+</div>
+{% endif %}
+
 <div class="card">
 	<h2>Global Summary</h2>
 	<div class="form-grid" id="global-summary"><p class="muted">Loading…</p></div>
@@ -735,6 +783,129 @@ uaaChartType.login = chartTypeSelector(document.getElementById("uaa-login-type")
 document.getElementById("uaa-granularity").addEventListener("change", renderActiveUsersChart);
 document.getElementById("ua-range").addEventListener("change", loadLoginActivity);
 loadLoginActivity();
+
+// --- Database Reporting ---------------------------------------------------
+// Wrapped in this existence check (rather than running unconditionally)
+// since the whole card is server-side gated on can_view_db_reporting --
+// a stricter permission than seeing this page at all, so most visitors
+// have none of these elements in the DOM.
+if (document.getElementById("db-reporting")) {
+	let dbrData = null;
+	const dbrChartType = {};
+
+	// Snapshots are taken every 10 minutes (see main.py's
+	// DB_SNAPSHOT_INTERVAL_SECONDS) -- charting every raw point over a
+	// multi-week range would be thousands of points, slow to render and
+	// unreadable. Bucketing to one point per day: point-in-time fields
+	// (size/connections/cache-hit) are averaged across the day's samples;
+	// "problem indicator" fields (waiting locks, long-running queries)
+	// take the day's PEAK rather than its average, since a brief spike is
+	// exactly the thing an average would hide.
+	// Averages each field over only the rows that actually have a value for
+	// IT specifically -- not over every row in the day. Matters because
+	// commits_per_min/rollbacks_per_min/cache_hit_ratio are null on
+	// whichever row is the first-ever snapshot in the whole history (no
+	// prior row to diff against, see reports.py's _history_with_deltas) --
+	// averaging that null in as 0 would silently drag down the very first
+	// day's rate averages.
+	function dbrAvgField(rows, key) {
+		let sum = 0, count = 0;
+		for (const r of rows) {
+			if (r[key] != null) { sum += r[key]; count += 1; }
+		}
+		return count ? sum / count : null;
+	}
+
+	function dbrBucketByDay(history) {
+		const byDay = new Map();
+		for (const row of history) {
+			const parts = uaLocalParts(row.timestamp);
+			if (!parts) continue;
+			if (!byDay.has(parts.dateKey)) byDay.set(parts.dateKey, []);
+			byDay.get(parts.dateKey).push(row);
+		}
+		return [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([dateKey, rows]) => ({
+			label: uaShortDateLabel(dateKey),
+			db_size_bytes: dbrAvgField(rows, "db_size_bytes"),
+			active_connections: dbrAvgField(rows, "active_connections"),
+			idle_connections: dbrAvgField(rows, "idle_connections"),
+			commits_per_min: dbrAvgField(rows, "commits_per_min"),
+			rollbacks_per_min: dbrAvgField(rows, "rollbacks_per_min"),
+			cache_hit_ratio: dbrAvgField(rows, "cache_hit_ratio"),
+			// Problem-indicator fields take the day's PEAK, not its
+			// average -- a brief lock-contention/slow-query spike is
+			// exactly the thing an average would hide.
+			waiting_locks_count: Math.max(0, ...rows.map(r => r.waiting_locks_count || 0)),
+			long_running_query_count: Math.max(0, ...rows.map(r => r.long_running_query_count || 0)),
+		}));
+	}
+
+	function renderDbReport() {
+		if (!dbrData) return;
+		if (!dbrData.available) {
+			document.getElementById("dbr-subtitle").textContent = dbrData.reason || "Not available.";
+			document.getElementById("dbr-summary").innerHTML = "";
+			document.getElementById("dbr-top-tables").innerHTML = '<p class="muted">Not available.</p>';
+			return;
+		}
+		document.getElementById("dbr-subtitle").textContent = "Live database statistics and historical trends (PostgreSQL only).";
+		const c = dbrData.current;
+		// Lifetime-average cache hit ratio (from raw cumulative counters,
+		// since server start/stats reset) -- distinct from the Cache Hit
+		// Ratio CHART below, which shows the more meaningful RECENT ratio
+		// per interval (see reports.py's _history_with_deltas).
+		const lifetimeCacheHit = (c.blks_hit != null && c.blks_read != null && (c.blks_hit + c.blks_read) > 0)
+			? Math.round(10000 * c.blks_hit / (c.blks_hit + c.blks_read)) / 100
+			: null;
+		document.getElementById("dbr-summary").innerHTML = `
+			<div class="ua-summary-stat"><div class="ua-summary-value">${fmtBytes(c.db_size_bytes || 0)}</div><div class="ua-summary-label">Database Size</div></div>
+			<div class="ua-summary-stat"><div class="ua-summary-value">${c.active_connections ?? "—"}</div><div class="ua-summary-label">Active Connections</div></div>
+			<div class="ua-summary-stat"><div class="ua-summary-value">${c.idle_connections ?? "—"}</div><div class="ua-summary-label">Idle Connections</div></div>
+			<div class="ua-summary-stat"><div class="ua-summary-value">${lifetimeCacheHit != null ? lifetimeCacheHit + "%" : "—"}</div><div class="ua-summary-label">Cache Hit Ratio (lifetime)</div></div>
+		`;
+		document.getElementById("dbr-top-tables").innerHTML = (c.top_tables || []).length
+			? c.top_tables.map(t => `<div class="metric-row"><span class="mono">${escapeHtml(t.table)}</span><span class="muted">${fmtBytes(t.size_bytes)}</span></div>`).join("")
+			: '<p class="muted">No tables found.</p>';
+
+		const buckets = dbrBucketByDay(dbrData.history || []);
+		renderChart(document.getElementById("dbr-size-trend"),
+			buildChartJsConfig("line", buckets.map(b => ({ label: b.label, value: b.db_size_bytes })), { valueFormatter: (v) => v != null ? fmtBytes(v) : "—" }));
+		renderChart(document.getElementById("dbr-connections"),
+			buildChartJsConfig(dbrChartType.connections, buckets.map(b => ({ label: b.label, values: [b.active_connections, b.idle_connections] })),
+				{ seriesLabels: ["Active", "Idle"], valueFormatter: (v) => v != null ? Math.round(v) : "—" }));
+		renderChart(document.getElementById("dbr-txn-rate"),
+			buildChartJsConfig(dbrChartType.txn, buckets.map(b => ({ label: b.label, values: [b.commits_per_min, b.rollbacks_per_min] })),
+				{ seriesLabels: ["Commits/min", "Rollbacks/min"], valueFormatter: (v) => v != null ? v.toFixed(1) : "—" }));
+		renderChart(document.getElementById("dbr-cache-hit"),
+			buildChartJsConfig("line", buckets.map(b => ({ label: b.label, value: b.cache_hit_ratio })), { valueFormatter: (v) => v != null ? `${v.toFixed(1)}%` : "—" }));
+		renderChart(document.getElementById("dbr-locks"),
+			buildChartJsConfig("stacked-bar", buckets.map(b => ({ label: b.label, values: [b.waiting_locks_count, b.long_running_query_count] })),
+				{ seriesLabels: ["Waiting Locks", "Long-Running Queries"], valueFormatter: (v) => String(v) }));
+	}
+
+	async function loadDbReport() {
+		const days = document.getElementById("dbr-range").value;
+		try {
+			dbrData = await apiFetch(`/api/reports/database?days=${days}`);
+			renderDbReport();
+		} catch (e) {
+			document.getElementById("dbr-subtitle").textContent = `Could not load: ${e.message}`;
+		}
+	}
+
+	dbrChartType.connections = chartTypeSelector(document.getElementById("dbr-connections-type"), {
+		types: ["stacked-bar", "line", "area"], current: "stacked-bar", storageKey: "chart-type:dbr-connections",
+		onChange: (t) => { dbrChartType.connections = t; renderDbReport(); },
+	});
+	dbrChartType.txn = chartTypeSelector(document.getElementById("dbr-txn-type"), {
+		types: ["line", "area", "bar"], current: "line", storageKey: "chart-type:dbr-txn-rate",
+		onChange: (t) => { dbrChartType.txn = t; renderDbReport(); },
+	});
+
+	document.getElementById("dbr-range").addEventListener("change", loadDbReport);
+	document.getElementById("dbr-refresh").addEventListener("click", loadDbReport);
+	loadDbReport();
+}
 
 // --- Bandwidth/quota tables (unchanged from before this round) ----------
 function fmtGb(v) { return v == null ? "—" : `${v}GB`; }

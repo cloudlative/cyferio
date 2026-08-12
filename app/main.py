@@ -13,8 +13,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from vpnadmin import cli_wrapper
-from vpnadmin.app_settings import prune_audit_log, refresh_runtime_cache
+from vpnadmin import cli_wrapper, health
+from vpnadmin.app_settings import prune_audit_log, prune_db_stat_snapshots, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_admin
@@ -33,6 +33,18 @@ logger = logging.getLogger(__name__)
 # request path and onto a timer).
 DASHBOARD_REFRESH_INTERVAL_SECONDS = 10
 
+# How often the background task takes one Postgres stats sample for
+# Database Reporting's trend charts (routes/reports.py's GET
+# /api/reports/database, health.write_db_stat_snapshot) -- 10 minutes:
+# frequent enough for meaningful trend granularity on charts spanning
+# days/weeks, infrequent enough that ~144 rows/day is a non-issue for
+# storage or the retention pruning below. A fixed code constant, not an
+# admin setting -- unlike how LONG snapshots are kept
+# (runtime.db_snapshot_retention_days, Settings-page-configurable), how
+# OFTEN they're taken isn't, matching DASHBOARD_REFRESH_INTERVAL_SECONDS's
+# own precedent of not being admin-configurable either.
+DB_SNAPSHOT_INTERVAL_SECONDS = 600
+
 
 async def _dashboard_refresh_loop():
     # Despite the name, this one snapshot now backs the Dashboard, Clients,
@@ -50,6 +62,27 @@ async def _dashboard_refresh_loop():
             # never been one yet).
             logger.exception("Background snapshot refresh failed; will retry next tick")
         await asyncio.sleep(DASHBOARD_REFRESH_INTERVAL_SECONDS)
+
+
+async def _db_snapshot_loop():
+    # Independent of _dashboard_refresh_loop above -- a much longer
+    # interval, and writes to the DB itself (via a real ORM Session) rather
+    # than spawning a subprocess, so it doesn't share cli_wrapper's
+    # _script_lock/cache machinery at all.
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                await asyncio.to_thread(health.write_db_stat_snapshot, db)
+            finally:
+                db.close()
+        except Exception:
+            # Same fail-soft stance as _dashboard_refresh_loop -- a
+            # transient DB hiccup should never kill the loop; the next
+            # tick just tries again, leaving a gap in the time series
+            # rather than crashing the whole app.
+            logger.exception("DB stat snapshot write failed; will retry next tick")
+        await asyncio.sleep(DB_SNAPSHOT_INTERVAL_SECONDS)
 
 
 @asynccontextmanager
@@ -71,6 +104,7 @@ async def lifespan(_app: FastAPI):
         # See app_settings.py's docstring for the full env->DB->cache chain.
         refresh_runtime_cache(db)
         prune_audit_log(db)
+        prune_db_stat_snapshots(db)
     finally:
         db.close()
     # Kick the City/ASN pick-list build (or a disk-cache load) off in a
@@ -81,14 +115,17 @@ async def lifespan(_app: FastAPI):
     # finishes starting up normally.
     geo_lists.ensure_fresh()
     refresh_task = asyncio.create_task(_dashboard_refresh_loop())
+    db_snapshot_task = asyncio.create_task(_db_snapshot_loop())
     try:
         yield
     finally:
         refresh_task.cancel()
-        try:
-            await refresh_task
-        except asyncio.CancelledError:
-            pass
+        db_snapshot_task.cancel()
+        for task in (refresh_task, db_snapshot_task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(title="OpenVPN Toolkit Admin", docs_url="/api/docs", redoc_url=None, lifespan=lifespan)

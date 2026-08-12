@@ -56,6 +56,7 @@ class UpdateSettingsRequest(BaseModel):
     notify_admin_on_client_revoked: bool | None = None
 
     reports_default_range_days: int | None = None
+    db_snapshot_retention_days: int | None = None
 
     maintenance_mode: bool | None = None
     maintenance_message: str | None = None
@@ -157,6 +158,17 @@ class UpdateSettingsRequest(BaseModel):
             raise ValueError("Default report range must be 0 (all history), 7, 14, 30, 60, or 90 days.")
         return v
 
+    @field_validator("db_snapshot_retention_days")
+    @classmethod
+    def _db_snapshot_retention(cls, v):
+        # Same "0/None = keep forever" convention as audit_retention_days
+        # above -- no fixed enum of allowed values (unlike
+        # reports_default_range_days, which mirrors a fixed <select>),
+        # just a plain non-negative day count.
+        if v is not None and v < 0:
+            raise ValueError("Database snapshot retention can't be negative.")
+        return v
+
     @field_validator("maintenance_message")
     @classmethod
     def _maintenance_msg(cls, v: str | None) -> str | None:
@@ -227,6 +239,7 @@ def _serialize() -> dict:
         "notify_admin_on_user_created": s.notify_admin_on_user_created,
         "notify_admin_on_client_revoked": s.notify_admin_on_client_revoked,
         "reports_default_range_days": s.reports_default_range_days,
+        "db_snapshot_retention_days": s.db_snapshot_retention_days,
         "maintenance_mode": s.maintenance_mode,
         "maintenance_message": s.maintenance_message,
         "notification_duration_ms": s.notification_duration_ms,
@@ -267,7 +280,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                    "audit_retention_days", "log_failed_login_attempts", "default_new_user_role",
                    "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "admin_notification_email",
                    "notify_admin_on_user_created", "notify_admin_on_client_revoked",
-                   "reports_default_range_days", "maintenance_mode", "maintenance_message",
+                   "reports_default_range_days", "db_snapshot_retention_days", "maintenance_mode", "maintenance_message",
                    "notification_duration_ms", "login_theme", "timezone", "time_format"):
         if field in fields_set:
             value = getattr(body, field)
