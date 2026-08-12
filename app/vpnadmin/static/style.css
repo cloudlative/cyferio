@@ -1042,14 +1042,58 @@ tr.team-row:hover .team-row-view, tr.team-row:focus-visible .team-row-view { opa
 .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; margin-bottom: 22px; }
 .health-grid .card { margin-bottom: 0; min-width: 0; }
 
-/* --- Dashboard's Usage Analytics section (see dashboard.html) -- one
-   tile per chart, same responsive-grid-of-cards shape as .health-grid
-   above but nested inside a single outer .card rather than being the
-   page's own top-level grid (this section is one card among several on
-   the Dashboard, not the whole page). */
+/* --- Reports' Analytics section (see reports.html; moved here from the
+   Dashboard) -- one tile per chart, same responsive-grid-of-cards shape as
+   .health-grid above but nested inside a single outer .card rather than
+   being the page's own top-level grid (this section is one card among
+   several on the Reports page, not the whole page). */
 .ua-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 18px; }
 .ua-chart-card { background: var(--surface-alt); border: 1px solid var(--border-light); border-radius: var(--radius-lg); padding: 16px 18px; min-width: 0; }
 .ua-chart-card h3 { margin: 0 0 14px; font-size: 0.92rem; font-weight: 700; color: var(--text); }
+
+/* Chart card header row: title (h3, above) on the left, an optional
+   chart-type <select> (app.js's chartTypeSelector()) on the right. Not
+   every chart card has one (Peak Usage Hours' heatmap and Session
+   Duration's fixed histogram don't render a .ua-chart-type-mount at all
+   in that case, so this row silently collapses to just the title). */
+.ua-chart-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.ua-chart-card-head h3 { margin: 0; }
+.chart-type-select { font-size: 0.8rem; padding: 4px 26px 4px 10px; height: auto; }
+
+/* Fixed-height mount for a Chart.js canvas -- Chart.js's
+   maintainAspectRatio:false (see buildChartJsConfig() in app.js) makes the
+   canvas fill its parent's size exactly, so that parent needs an explicit
+   height or the chart collapses to 0px. */
+.chart-canvas-mount { position: relative; height: 260px; }
+
+/* Summary stat row above the Analytics charts (total sessions/bandwidth/
+   avg duration/peak hour in the selected range) -- same visual language
+   as .stat-grid's cards elsewhere in the app, just smaller/denser since
+   these sit inside a single card rather than being the page's own
+   top-level stat row. */
+.ua-summary-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.ua-summary-stat { background: var(--surface-alt); border: 1px solid var(--border-light); border-radius: var(--radius-lg); padding: 12px 16px; }
+.ua-summary-stat .ua-summary-value { font-size: 1.4rem; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.ua-summary-stat .ua-summary-label { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+
+/* Peak Usage Hours heatmap (app.js's renderHeatmapGrid()) -- a CSS-grid
+   layout with 4 regions: an empty corner, hour labels along the top, day
+   labels down the left, and the cell matrix itself, so labels never
+   scroll independently of the cells they annotate. */
+/* .heatmap-row-labels and .heatmap-cells both use the same grid-auto-rows
+   (22px) + gap (3px) so their rows line up exactly regardless of column
+   count/width -- deliberately NOT aspect-ratio-based cells (which would
+   size row height off the column width instead, and could drift out of
+   sync with an independently-flexed label column). */
+.heatmap-grid { display: grid; grid-template-columns: 46px 1fr; grid-template-rows: 20px auto; gap: 4px; }
+.heatmap-corner { grid-column: 1; grid-row: 1; }
+.heatmap-col-labels { grid-column: 2; grid-row: 1; display: grid; gap: 3px; }
+.heatmap-col-labels span { font-size: 0.68rem; color: var(--text-muted); text-align: center; }
+.heatmap-row-labels { grid-column: 1; grid-row: 2; display: grid; grid-auto-rows: 22px; gap: 3px; }
+.heatmap-row-labels span { font-size: 0.72rem; color: var(--text-muted); display: flex; align-items: center; }
+.heatmap-cells { grid-column: 2; grid-row: 2; display: grid; grid-auto-rows: 22px; gap: 3px; }
+.heatmap-cell { border-radius: 3px; transition: transform 0.1s; }
+.heatmap-cell:hover { transform: scale(1.15); }
 
 /* Wide/unbreakable content (e.g. Traefik's router-rule table below) inside
    a narrow health-grid tile: a horizontal-scroll fallback for anything

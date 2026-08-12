@@ -2,10 +2,76 @@
 {% block title %}Reports — {{ app_settings.app_name }}{% endblock %}
 {% block content %}
 <div class="toolbar" style="margin-bottom:6px">
-	<div class="toolbar-title"><h1 style="margin:0">Bandwidth Reports</h1></div>
+	<div class="toolbar-title"><h1 style="margin:0">Reports</h1></div>
 	<button class="btn-secondary" id="refresh-btn">Refresh</button>
 </div>
-<p class="page-subtitle" style="margin-top:-10px">Quota-relative bandwidth consumption -- "as of last disconnect" per client, same as the Clients page's own usage bars, not a live mid-session total. Only users with a linked VPN profile are included.</p>
+<p class="page-subtitle" style="margin-top:-10px">Usage trends, connection analytics, and quota-relative bandwidth consumption. Only users with a linked VPN profile appear in the quota-based sections below.</p>
+
+{# Usage Analytics -- moved here from the Dashboard so Reports is the one
+   central place for analytics/trends/insights, per the "Move Usage
+   Analytics to Reports" request. Data source, permission gate (this
+   fetches /api/status/session-history, gated on vpn_profiles:view, NOT
+   reports:view), and bucketing logic are otherwise unchanged from the
+   Dashboard's old #usage-analytics card -- only the chart RENDERING layer
+   changed (Chart.js + a heatmap, see app.js's buildChartJsConfig/
+   renderHeatmapGrid, instead of renderBarChart's plain div bars).
+   Every system role that currently has reports:view (admin, viewer) also
+   already has vpn_profiles:view, so this fetch succeeds for everyone who
+   can reach this page today -- a custom role granted reports:view but NOT
+   vpn_profiles:view would see this section fail to load (the rest of the
+   page is unaffected, each fetch below is independent). #}
+<div class="card" id="usage-analytics">
+	<div class="toolbar">
+		<h2 style="margin:0">Analytics</h2>
+		<div class="form-row" style="gap:10px;align-items:center">
+			<select id="ua-range" style="width:auto">
+				<option value="7">Last 7 days</option>
+				<option value="14">Last 14 days</option>
+				<option value="30">Last 30 days</option>
+				<option value="60">Last 2 months</option>
+				<option value="90">Last 3 months</option>
+				<option value="all">All history</option>
+			</select>
+			<a class="btn-secondary btn-sm" href="/connection-history">View full history →</a>
+			<button class="btn-secondary" id="ua-refresh">Refresh</button>
+		</div>
+	</div>
+	<p class="page-subtitle" style="margin:-6px 0 18px">Built from past connection sessions -- see Connection History for the raw per-session table.</p>
+
+	<div class="ua-summary-row" id="ua-summary"></div>
+
+	<div class="ua-grid">
+		<div class="ua-chart-card">
+			<div class="ua-chart-card-head">
+				<h3>Bandwidth Trend</h3>
+				<div id="ua-bandwidth-type"></div>
+			</div>
+			<div class="chart-canvas-mount"><canvas id="ua-bandwidth"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<div class="ua-chart-card-head">
+				<h3>Sessions Per Day</h3>
+				<div id="ua-sessions-per-day-type"></div>
+			</div>
+			<div class="chart-canvas-mount"><canvas id="ua-sessions-per-day"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<div class="ua-chart-card-head">
+				<h3>Top Clients by Data Usage</h3>
+				<div id="ua-top-clients-type"></div>
+			</div>
+			<div class="chart-canvas-mount"><canvas id="ua-top-clients"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Peak Usage Hours</h3>
+			<div id="ua-peak-hours"><p class="muted">Loading…</p></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Session Duration</h3>
+			<div class="chart-canvas-mount"><canvas id="ua-duration"></canvas></div>
+		</div>
+	</div>
+</div>
 
 <div class="card">
 	<h2>Global Summary</h2>
@@ -44,6 +110,208 @@
 
 {% block scripts %}
 <script>
+// --- Usage Analytics (moved here from dashboard.html; see app.js's
+// buildChartJsConfig/renderChart/chartTypeSelector/renderHeatmapGrid) -----
+let uaEntries = [];
+const UA_DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// Local (app-timezone-aware) date-key + hour-of-day + day-of-week for one
+// ISO timestamp -- mirrors fmtTimestamp's own use of window.APP_TIMEZONE,
+// so "day"/"hour" bucketing here means the same calendar day/hour an admin
+// sees everywhere else in this app, not a raw UTC slice. dayOfWeek (0=Sun)
+// is new here vs. the Dashboard's original version -- needed for Peak
+// Usage Hours' day x hour heatmap, which the old flat 24-bucket bar chart
+// didn't have.
+function uaLocalParts(iso) {
+	const d = new Date(iso);
+	if (isNaN(d)) return null;
+	const opts = { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false, weekday: "short" };
+	if (window.APP_TIMEZONE) opts.timeZone = window.APP_TIMEZONE;
+	const parts = new Intl.DateTimeFormat("en-US", opts).formatToParts(d);
+	const get = (t) => (parts.find(p => p.type === t) || {}).value;
+	let hour = parseInt(get("hour"), 10);
+	if (hour === 24) hour = 0; // some engines render midnight as "24" under hour12:false
+	const dayOfWeek = Math.max(0, UA_DAY_NAMES.indexOf(get("weekday")));
+	return { dateKey: `${get("year")}-${get("month")}-${get("day")}`, hour, dayOfWeek };
+}
+
+function uaShortDateLabel(dateKey) {
+	const [y, m, d] = dateKey.split("-").map(Number);
+	return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function uaSessionCountLabel(v) {
+	return `${v} session${v === 1 ? "" : "s"}`;
+}
+
+function uaHourLabel(h) {
+	if (window.APP_TIME_FORMAT === "12h") {
+		const period = h < 12 ? "AM" : "PM";
+		return `${h % 12 === 0 ? 12 : h % 12} ${period}`;
+	}
+	return `${String(h).padStart(2, "0")}:00`;
+}
+
+// Per-chart-card state: which type is currently selected (chartTypeSelector
+// in app.js seeds this from localStorage on first render). Populated once
+// below, then read/written on every chart-type change.
+const uaChartType = {};
+
+function renderUsageAnalytics() {
+	const range = document.getElementById("ua-range").value;
+	let rows = uaEntries.filter(r => r.connected_at);
+	if (range !== "all") {
+		const cutoff = Date.now() - parseInt(range, 10) * 86400000;
+		rows = rows.filter(r => new Date(r.connected_at).getTime() >= cutoff);
+	}
+
+	const summaryEl = document.getElementById("ua-summary");
+	if (rows.length === 0) {
+		summaryEl.innerHTML = "";
+		["ua-peak-hours"].forEach(id => {
+			document.getElementById(id).innerHTML = '<p class="muted">No sessions in this range yet.</p>';
+		});
+		["ua-bandwidth", "ua-sessions-per-day", "ua-top-clients", "ua-duration"].forEach(id => {
+			const existing = Chart.getChart(id);
+			if (existing) existing.destroy();
+		});
+		return;
+	}
+
+	// Bandwidth Trend + Sessions Per Day share the same per-day grouping.
+	const byDate = new Map(); // dateKey -> {rx, tx, count}
+	for (const r of rows) {
+		const parts = uaLocalParts(r.connected_at);
+		if (!parts) continue;
+		const e = byDate.get(parts.dateKey) || { rx: 0, tx: 0, count: 0 };
+		e.rx += r.bytes_received || 0;
+		e.tx += r.bytes_sent || 0;
+		e.count += 1;
+		byDate.set(parts.dateKey, e);
+	}
+	const sortedDates = [...byDate.keys()].sort();
+
+	renderChart(
+		document.getElementById("ua-bandwidth"),
+		buildChartJsConfig(uaChartType.bandwidth, sortedDates.map(k => ({ label: uaShortDateLabel(k), values: [byDate.get(k).rx, byDate.get(k).tx] })),
+			{ seriesLabels: ["Received", "Sent"], valueFormatter: fmtBytes }),
+	);
+	renderChart(
+		document.getElementById("ua-sessions-per-day"),
+		buildChartJsConfig(uaChartType.sessionsPerDay, sortedDates.map(k => ({ label: uaShortDateLabel(k), value: byDate.get(k).count })),
+			{ valueFormatter: uaSessionCountLabel }),
+	);
+
+	// Top Clients by Data Usage.
+	const byClient = new Map();
+	for (const r of rows) {
+		const total = (r.bytes_received || 0) + (r.bytes_sent || 0);
+		byClient.set(r.client, (byClient.get(r.client) || 0) + total);
+	}
+	const topClients = [...byClient.entries()]
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, 8)
+		.map(([label, value]) => ({ label, value }));
+	renderChart(
+		document.getElementById("ua-top-clients"),
+		buildChartJsConfig(uaChartType.topClients, topClients, { horizontal: true, valueFormatter: fmtBytes }),
+	);
+
+	// Peak Usage Hours -- day-of-week x hour-of-day heatmap (0-23 x Sun-Sat),
+	// richer than the old flat 24-bucket bar chart at identifying e.g.
+	// "weekday evenings" as a distinct peak from "weekend afternoons".
+	const heatMatrix = Array.from({ length: 7 }, () => new Array(24).fill(0));
+	let peakHourTotals = new Array(24).fill(0);
+	for (const r of rows) {
+		const parts = uaLocalParts(r.connected_at);
+		if (!parts) continue;
+		heatMatrix[parts.dayOfWeek][parts.hour] += 1;
+		peakHourTotals[parts.hour] += 1;
+	}
+	renderHeatmapGrid(
+		document.getElementById("ua-peak-hours"),
+		heatMatrix,
+		{
+			rowLabels: UA_DAY_NAMES,
+			colLabels: Array.from({ length: 24 }, (_, h) => h % 3 === 0 ? String(h) : ""),
+			valueFormatter: uaSessionCountLabel,
+		},
+	);
+
+	// Session Duration Distribution (fixed buckets -- a bar chart is the
+	// only shape that makes sense for arbitrary duration ranges, so this
+	// card has no chart-type selector, same as Peak Usage Hours' heatmap).
+	const buckets = [
+		{ label: "<5m", max: 5 * 60 },
+		{ label: "5-30m", max: 30 * 60 },
+		{ label: "30m-2h", max: 2 * 3600 },
+		{ label: "2h-8h", max: 8 * 3600 },
+		{ label: "8h+", max: Infinity },
+	];
+	const durCounts = buckets.map(() => 0);
+	for (const r of rows) {
+		const d = r.duration_seconds || 0;
+		const idx = buckets.findIndex(b => d < b.max);
+		durCounts[idx === -1 ? buckets.length - 1 : idx] += 1;
+	}
+	renderChart(
+		document.getElementById("ua-duration"),
+		buildChartJsConfig("bar", buckets.map((b, i) => ({ label: b.label, value: durCounts[i] })), { valueFormatter: uaSessionCountLabel }),
+	);
+
+	// Summary stat row (per the "summary cards above charts" ask) -- all
+	// computed client-side from the same already-fetched/filtered `rows`,
+	// no extra API calls.
+	const totalBytes = rows.reduce((sum, r) => sum + (r.bytes_received || 0) + (r.bytes_sent || 0), 0);
+	const avgDurationSeconds = rows.reduce((sum, r) => sum + (r.duration_seconds || 0), 0) / rows.length;
+	const peakHour = peakHourTotals.reduce((best, v, h) => v > peakHourTotals[best] ? h : best, 0);
+	summaryEl.innerHTML = `
+		<div class="ua-summary-stat"><div class="ua-summary-value">${rows.length}</div><div class="ua-summary-label">Total Sessions</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${fmtBytes(totalBytes)}</div><div class="ua-summary-label">Total Bandwidth</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${fmtDuration(avgDurationSeconds)}</div><div class="ua-summary-label">Avg. Session Duration</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${uaHourLabel(peakHour)}</div><div class="ua-summary-label">Peak Hour</div></div>
+	`;
+}
+
+async function loadUsageAnalytics() {
+	try {
+		uaEntries = await apiFetch("/api/status/session-history?limit=500");
+		renderUsageAnalytics();
+	} catch (e) {
+		["ua-peak-hours"].forEach(id => {
+			document.getElementById(id).innerHTML = `<p class="muted">Could not load: ${escapeHtml(e.message)}</p>`;
+		});
+		document.getElementById("ua-summary").innerHTML = "";
+	}
+}
+
+// Chart-type selectors -- one per switchable card, each remembering its
+// choice in localStorage (app.js's chartTypeSelector) so a chart-type
+// switch survives a page reload. Wired before the first loadUsageAnalytics()
+// call so the very first render already uses whatever was last chosen.
+uaChartType.bandwidth = chartTypeSelector(document.getElementById("ua-bandwidth-type"), {
+	types: ["stacked-bar", "line", "area"], current: "stacked-bar", storageKey: "chart-type:bandwidth-trend",
+	onChange: (t) => { uaChartType.bandwidth = t; renderUsageAnalytics(); },
+});
+uaChartType.sessionsPerDay = chartTypeSelector(document.getElementById("ua-sessions-per-day-type"), {
+	types: ["bar", "line", "area"], current: "bar", storageKey: "chart-type:sessions-per-day",
+	onChange: (t) => { uaChartType.sessionsPerDay = t; renderUsageAnalytics(); },
+});
+uaChartType.topClients = chartTypeSelector(document.getElementById("ua-top-clients-type"), {
+	types: ["bar", "donut", "pie"], current: "bar", storageKey: "chart-type:top-clients",
+	onChange: (t) => { uaChartType.topClients = t; renderUsageAnalytics(); },
+});
+
+// Default selected range comes from Settings -> Reporting (falls back to
+// 7 days, matching app_settings.py's runtime default) -- an admin can
+// still change it per-visit via the dropdown itself, this only sets where
+// it starts.
+document.getElementById("ua-range").value = {{ (app_settings.reports_default_range_days or 7) | tojson }} === 0 ? "all" : String({{ (app_settings.reports_default_range_days or 7) | tojson }});
+document.getElementById("ua-range").addEventListener("change", renderUsageAnalytics);
+document.getElementById("ua-refresh").addEventListener("click", loadUsageAnalytics);
+loadUsageAnalytics();
+
+// --- Bandwidth/quota tables (unchanged from before this round) ----------
 function fmtGb(v) { return v == null ? "—" : `${v}GB`; }
 function fmtPct(v) { return v == null ? "—" : `${v}%`; }
 

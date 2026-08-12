@@ -275,6 +275,250 @@ function renderBarChart(mountEl, entries, {
 	mountEl.innerHTML = `${legend}<div style="display:flex;align-items:flex-end;gap:6px;overflow-x:auto;padding-bottom:2px">${bars}</div>`;
 }
 
+// --- Chart.js-backed charts (Reports -> Analytics) -----------------------
+//
+// renderBarChart/renderDonutChart above stay exactly as they are (still
+// used elsewhere, e.g. Diagnostics' rejection breakdowns) -- these are a
+// separate, additive layer for the 5 Usage Analytics charts specifically,
+// which need real chart-type switching (bar/line/area/donut/pie/stacked)
+// and richer tooltips than a plain div/SVG chart can give cheaply. Backed
+// by the vendored Chart.js UMD build (static/vendor/chart.umd.min.js,
+// loaded in base.html before this file) -- see that file's own README.md
+// for version/provenance.
+//
+// Known limitation: Chart.js bakes resolved colors into canvas draw calls
+// at render time, unlike renderBarChart/renderDonutChart's raw CSS
+// var(--...) references (which repaint live on a theme switch for free).
+// Switching themes via the header's quick-switch while viewing a Chart.js
+// chart does NOT recolor it until the next explicit re-render (e.g.
+// clicking Reports' own Refresh button, or a range-selector change) --
+// an accepted, documented trade-off for this phase, not a bug.
+
+/**
+ * Resolves a CSS custom property to its current computed value (Chart.js
+ * draws on a <canvas>, so it needs a literal color string -- it can't
+ * understand "var(--text)" the way an SVG/div's `style` attribute can).
+ */
+function cssVar(name) {
+	return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/**
+ * Chart.js color helpers built from the same CHART_COLORS palette every
+ * other chart in this app uses, so a chart doesn't look like it belongs to
+ * a different product depending on which rendering path drew it.
+ */
+const CHART_JS_PALETTE = {
+	line: (i) => CHART_COLORS[i % CHART_COLORS.length],
+	fill: (i, alpha = 0.55) => {
+		const hex = CHART_COLORS[i % CHART_COLORS.length];
+		const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+		return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+	},
+};
+
+// One Chart.js instance per <canvas>, so a chart-type switch or a range
+// change can safely re-render into the same mount without ever leaking a
+// prior instance (Chart.js does not garbage-collect an old chart on its
+// own if you just construct a new one over the same canvas -- explicit
+// destroy() is required, this is the one place that happens).
+const _chartJsInstances = new WeakMap();
+
+/**
+ * Thin wrapper around `new Chart(canvasEl, config)` -- destroys whatever
+ * was previously mounted on this canvas first. `config` is a full Chart.js
+ * config object; callers build it via buildChartJsConfig() below rather
+ * than constructing one by hand every time.
+ */
+function renderChart(canvasEl, config) {
+	const existing = _chartJsInstances.get(canvasEl);
+	if (existing) existing.destroy();
+	const chart = new Chart(canvasEl, config);
+	_chartJsInstances.set(canvasEl, chart);
+	return chart;
+}
+
+/**
+ * Builds a Chart.js config for one of this app's 6 supported chart kinds,
+ * from the same `entries` shape renderBarChart already uses:
+ *   single-series: [{label, value}, ...]
+ *   multi-series (stacked-bar/area-stacked only): [{label, values: [...]}, ...] + seriesLabels
+ *
+ * `kind`: "bar" | "stacked-bar" | "line" | "area" | "donut" | "pie".
+ * `valueFormatter`: controls tooltip value text (e.g. fmtBytes).
+ * `horizontal`: bar-only, ranked horizontal bars (Top Clients style).
+ */
+function buildChartJsConfig(kind, entries, { seriesLabels = null, valueFormatter = (v) => String(v), horizontal = false } = {}) {
+	const labels = entries.map(e => e.label);
+	const gridColor = cssVar("--border-light");
+	const tickColor = cssVar("--text-muted");
+	const tooltipBg = cssVar("--surface-alt");
+	const tooltipBorder = cssVar("--border-light");
+	const tooltipText = cssVar("--text");
+
+	const commonScales = {
+		x: { grid: { color: gridColor }, ticks: { color: tickColor } },
+		y: { grid: { color: gridColor }, ticks: { color: tickColor }, beginAtZero: true },
+	};
+	const commonPlugins = {
+		legend: { display: !!seriesLabels, labels: { color: tickColor } },
+		tooltip: {
+			backgroundColor: tooltipBg, borderColor: tooltipBorder, borderWidth: 1, titleColor: tooltipText, bodyColor: tooltipText,
+			callbacks: { label: (ctx) => `${ctx.dataset.label ? ctx.dataset.label + ": " : ""}${valueFormatter(ctx.parsed.y ?? ctx.parsed ?? ctx.raw)}` },
+		},
+	};
+
+	if (kind === "donut" || kind === "pie") {
+		return {
+			type: kind === "donut" ? "doughnut" : "pie",
+			data: {
+				labels,
+				datasets: [{
+					data: entries.map(e => e.value),
+					backgroundColor: entries.map((_, i) => CHART_JS_PALETTE.fill(i, 0.85)),
+					borderColor: entries.map((_, i) => CHART_JS_PALETTE.line(i)),
+					borderWidth: 1,
+				}],
+			},
+			options: {
+				responsive: true, maintainAspectRatio: false,
+				plugins: {
+					legend: { display: true, position: "right", labels: { color: tickColor } },
+					tooltip: {
+						backgroundColor: tooltipBg, borderColor: tooltipBorder, borderWidth: 1, titleColor: tooltipText, bodyColor: tooltipText,
+						callbacks: { label: (ctx) => `${ctx.label}: ${valueFormatter(ctx.parsed)}` },
+					},
+				},
+			},
+		};
+	}
+
+	if (kind === "bar" && horizontal) {
+		return {
+			type: "bar",
+			data: {
+				labels,
+				datasets: [{
+					data: entries.map(e => e.value),
+					backgroundColor: entries.map((_, i) => CHART_JS_PALETTE.fill(i, 0.85)),
+					borderColor: entries.map((_, i) => CHART_JS_PALETTE.line(i)),
+					borderWidth: 1,
+				}],
+			},
+			options: {
+				indexAxis: "y", responsive: true, maintainAspectRatio: false,
+				scales: commonScales,
+				plugins: { ...commonPlugins, legend: { display: false } },
+			},
+		};
+	}
+
+	const isArea = kind === "area";
+	const isStacked = kind === "stacked-bar";
+	const isLineFamily = kind === "line" || isArea;
+	const datasets = seriesLabels
+		? seriesLabels.map((label, i) => ({
+			label,
+			data: entries.map(e => e.values[i]),
+			backgroundColor: isLineFamily ? CHART_JS_PALETTE.fill(i, isArea ? 0.35 : 0.85) : CHART_JS_PALETTE.fill(i, 0.85),
+			borderColor: CHART_JS_PALETTE.line(i),
+			borderWidth: isLineFamily ? 2 : 1,
+			fill: isArea,
+			tension: isLineFamily ? 0.3 : 0,
+			pointRadius: isLineFamily ? 2 : 0,
+		}))
+		: [{
+			label: null,
+			data: entries.map(e => e.value),
+			backgroundColor: isLineFamily ? CHART_JS_PALETTE.fill(0, isArea ? 0.35 : 0.85) : CHART_JS_PALETTE.fill(0, 0.85),
+			borderColor: CHART_JS_PALETTE.line(0),
+			borderWidth: isLineFamily ? 2 : 1,
+			fill: isArea,
+			tension: isLineFamily ? 0.3 : 0,
+			pointRadius: isLineFamily ? 2 : 0,
+		}];
+
+	return {
+		type: isLineFamily ? "line" : "bar",
+		data: { labels, datasets },
+		options: {
+			responsive: true, maintainAspectRatio: false,
+			scales: isStacked
+				? { x: { ...commonScales.x, stacked: true }, y: { ...commonScales.y, stacked: true } }
+				: commonScales,
+			plugins: commonPlugins,
+		},
+	};
+}
+
+/**
+ * Renders a small chart-type <select> into `mountEl`, calling
+ * `onChange(newType)` whenever the user picks a different one. If
+ * `storageKey` is given, the choice is persisted to localStorage and
+ * restored on the next visit (this is the one client-side UI-preference
+ * convention in this app -- narrowly scoped to "which chart type did this
+ * card last show", nothing broader). Returns the type that should be used
+ * for the very first render (the stored one if valid, else `current`).
+ */
+function chartTypeSelector(mountEl, { types, current, onChange, storageKey = null }) {
+	const CHART_TYPE_LABELS = { bar: "Bar", "stacked-bar": "Stacked Bar", line: "Line", area: "Area", donut: "Donut", pie: "Pie" };
+	const stored = storageKey ? localStorage.getItem(storageKey) : null;
+	const initial = stored && types.includes(stored) ? stored : current;
+	mountEl.innerHTML = `<select class="chart-type-select">${
+		types.map(t => `<option value="${t}"${t === initial ? " selected" : ""}>${CHART_TYPE_LABELS[t] || t}</option>`).join("")
+	}</select>`;
+	mountEl.querySelector("select").addEventListener("change", (e) => {
+		if (storageKey) localStorage.setItem(storageKey, e.target.value);
+		onChange(e.target.value);
+	});
+	return initial;
+}
+
+/**
+ * Bespoke day-of-week x hour-of-day heatmap grid (7 rows x however many
+ * columns `colLabels` has, 24 for Peak Usage Hours) -- NOT Chart.js
+ * (Chart.js 4's core has no native heatmap chart type without an extra
+ * plugin), plain CSS grid + `color-mix()` instead, matching this app's
+ * existing zero-extra-dependency posture for anything Chart.js itself
+ * doesn't cover. `color-mix(in srgb, var(--surface-alt) X%, var(--accent) Y%)`
+ * means the color ramp is derived from whichever of this app's 6 themes is
+ * currently active (see style.css's [data-theme="..."] blocks) -- no
+ * hardcoded hex, so it's correct under every theme without special-casing
+ * any of them, and (unlike the Chart.js charts above) DOES repaint live on
+ * a theme switch, since it's a plain CSS custom-property reference, not a
+ * baked canvas draw.
+ *
+ * `matrix`: 2D array, matrix[row][col] = a count/value. `rowLabels`/
+ * `colLabels`: display labels for each axis (colLabels may contain empty
+ * strings for columns that shouldn't show a tick label, e.g. every 3rd
+ * hour only, to avoid 24 crowded labels).
+ */
+function renderHeatmapGrid(mountEl, matrix, { rowLabels, colLabels, valueFormatter = (v) => String(v) } = {}) {
+	const max = Math.max(1, ...matrix.flat());
+	if (matrix.length === 0 || matrix.every(row => row.every(v => v === 0))) {
+		mountEl.innerHTML = '<p class="muted">Not enough data yet.</p>';
+		return;
+	}
+	const cellsHtml = matrix.map((row, r) => row.map((v, c) => {
+		const pct = Math.round((v / max) * 100);
+		const bg = v === 0 ? "var(--surface-alt)" : `color-mix(in srgb, var(--surface-alt) ${100 - pct}%, var(--accent) ${pct}%)`;
+		// `title` as an ATTRIBUTE here, not a child <title> element -- <title>
+		// is only a valid child of <svg>, not a plain <div> (unlike
+		// renderDonutChart's SVG circles above, which is a real element there).
+		return `<div class="heatmap-cell" style="background:${bg}" title="${escapeHtml(rowLabels[r])}, ${escapeHtml(colLabels[c] || "")}: ${escapeHtml(valueFormatter(v))}"></div>`;
+	}).join("")).join("");
+
+	mountEl.innerHTML = `
+		<div class="heatmap-grid">
+			<div class="heatmap-corner"></div>
+			<div class="heatmap-col-labels" style="grid-template-columns:repeat(${colLabels.length}, 1fr)">
+				${colLabels.map(l => `<span>${escapeHtml(l)}</span>`).join("")}
+			</div>
+			<div class="heatmap-row-labels">${rowLabels.map(l => `<span>${escapeHtml(l)}</span>`).join("")}</div>
+			<div class="heatmap-cells" style="grid-template-columns:repeat(${colLabels.length}, 1fr)">${cellsHtml}</div>
+		</div>`;
+}
+
 /**
  * A dependency-free "closed by default, expands into checkable options"
  * multiselect dropdown -- used everywhere this app lets someone pick

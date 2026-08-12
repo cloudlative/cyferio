@@ -129,6 +129,12 @@
 		// unconditionally.
 		window.SAVED_LOGIN_THEME = {{ app_settings.login_theme | tojson }};
 	</script>
+	{# Vendored, self-hosted (no runtime CDN dependency) -- see
+	   static/vendor/README.md for version/provenance/upgrade notes. Loaded
+	   app-wide (not just on Reports) so any future page can add a chart
+	   without its own <script> tag; ~200KB, negligible next to app.js
+	   already loading unconditionally on every page. #}
+	<script src="/static/vendor/chart.umd.min.js?v={{ static_version }}"></script>
 	<script src="/static/app.js?v={{ static_version }}"></script>
 	{% block scripts %}{% endblock %}
 </body>
