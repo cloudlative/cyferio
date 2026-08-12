@@ -660,6 +660,22 @@ label { display: block; font-weight: 700; font-size: 0.82rem; margin-bottom: 6px
 .form-row { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
 .form-row .field { flex: 1; min-width: 180px; margin-bottom: 0; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+/* Vertically-stacked fields, each taking the FULL width of its container
+   (users.html's Device & Access Policy / Location & Network Restrictions
+   fieldsets) -- unlike .form-grid's multi-column layout, this is for
+   fields whose controls need real horizontal room to not truncate (a
+   country <select> plus a multiselect side by side, a MAC/bandwidth
+   input, a multi-line IP textarea) rather than fields that are fine
+   sharing a row. */
+.field-stack { display: flex; flex-direction: column; gap: 18px; }
+.field-stack .field { margin-bottom: 0; }
+/* The Generate-password button sits in its own .field-shaped slot at the
+   end of the New/Confirm Password row (users.html's Row 3) so it lines up
+   with the two input baselines via .form-row's align-items:flex-end --
+   the invisible label above it (see users.html's `&nbsp;` label) reserves
+   the same vertical space a real label would. */
+.password-row-generate { flex: 0 0 auto; min-width: 0; }
+.password-row-generate button { white-space: nowrap; }
 fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin: 0 0 18px; }
 fieldset legend { padding: 0 8px; color: var(--text-muted); font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
 

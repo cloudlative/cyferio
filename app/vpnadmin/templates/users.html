@@ -7,29 +7,12 @@
 <div class="card">
 	<h2>Add a User</h2>
 	<form id="add-user-form">
+		<!-- Row 1: Username, First Name, Last Name, Role -->
 		<div class="form-row">
 			<div class="field">
 				<label for="u-username">Username</label>
 				<input type="text" id="u-username" required minlength="3">
 			</div>
-			<div class="field">
-				<label for="u-password">Password</label>
-				<div class="password-field-row">
-					<input type="password" id="u-password" required minlength="8">
-					<button type="button" class="btn-secondary btn-sm" id="u-password-generate">Generate</button>
-				</div>
-			</div>
-			<div class="field">
-				<label for="u-password-confirm">Confirm Password</label>
-				<input type="password" id="u-password-confirm" required minlength="8">
-			</div>
-			<div class="field">
-				<label for="u-role">Role</label>
-				<select id="u-role"></select>
-			</div>
-		</div>
-		<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Password must be at least 8 characters and include at least 1 uppercase letter, 1 number, and 1 special character.</p>
-		<div class="form-row" style="margin-top:16px">
 			<div class="field">
 				<label for="u-first">First Name</label>
 				<input type="text" id="u-first" required>
@@ -39,10 +22,11 @@
 				<input type="text" id="u-last">
 			</div>
 			<div class="field">
-				<label for="u-team-toggle">Teams <span class="muted">(optional, select several)</span></label>
-				<div id="u-team-ms"></div>
+				<label for="u-role">Role</label>
+				<select id="u-role"></select>
 			</div>
 		</div>
+		<!-- Row 2: Email, Phone, Team(s) -->
 		<div class="form-row" style="margin-top:16px">
 			<div class="field">
 				<label for="u-email">Email</label>
@@ -53,33 +37,67 @@
 				<div id="u-phone-mount"></div>
 			</div>
 			<div class="field">
-				<label for="u-mac">Device MAC Address</label>
-				<input type="text" id="u-mac" required placeholder="aa:bb:cc:dd:ee:ff">
-				<p class="field-hint">Provisions the VPN profile -- any common format, normalized automatically.</p>
+				<label for="u-team-toggle">Teams <span class="muted">(optional, select several)</span></label>
+				<div id="u-team-ms"></div>
 			</div>
 		</div>
-		<div class="form-row" style="margin-top:16px">
+		<!-- Row 3: New Password, Confirm Password, Generate (aligned to row end) -->
+		<div class="form-row password-row" style="margin-top:16px">
 			<div class="field">
-				<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
-				<div class="checkbox-row">
-					<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="windows"> Windows</label>
-					<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="linux"> Linux</label>
-					<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="mac"> macOS</label>
-				</div>
+				<label for="u-password">New Password</label>
+				<input type="password" id="u-password" required minlength="8">
 			</div>
 			<div class="field">
-				<label for="u-bandwidth">Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited, min 0.1)</span></label>
-				<input type="text" id="u-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)">
+				<label for="u-password-confirm">Confirm Password</label>
+				<input type="password" id="u-password-confirm" required minlength="8">
+			</div>
+			<div class="field password-row-generate">
+				<label aria-hidden="true">&nbsp;</label>
+				<button type="button" class="btn-secondary" id="u-password-generate">Generate</button>
 			</div>
 		</div>
+		<p class="muted" style="margin:6px 0 0;font-size:0.82rem">Password must be at least 8 characters and include at least 1 uppercase letter, 1 number, and 1 special character.</p>
 
 		<fieldset style="margin-top:16px">
-			<legend>Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
-			<div class="form-grid">
+			<legend>Device &amp; Access Policy</legend>
+			<div class="field-stack">
+				<div class="field">
+					<label for="u-mac">Device MAC Address</label>
+					<input type="text" id="u-mac" required placeholder="aa:bb:cc:dd:ee:ff">
+					<p class="field-hint">Provisions the VPN profile -- any common format, normalized automatically.</p>
+				</div>
+				<div class="field">
+					<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
+					<div class="checkbox-row">
+						<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="windows"> Windows</label>
+						<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="linux"> Linux</label>
+						<label class="checkbox-label"><input type="checkbox" class="u-os-check" value="mac"> macOS</label>
+					</div>
+				</div>
+				<div class="field">
+					<label for="u-bandwidth">Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited, min 0.1)</span></label>
+					<input type="text" id="u-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)" style="max-width:280px">
+				</div>
+			</div>
+		</fieldset>
+
+		<fieldset style="margin-top:16px">
+			<legend>Location &amp; Network Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+			<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees.</p>
+			<div class="field-stack">
 				<div class="field">
 					<label class="checkbox-label"><input type="checkbox" id="u-restrict-country"> Restrict by country</label>
-					<p class="field-hint">GeoIP on the sign-in IP. Empty list = any country.</p>
+					<p class="field-hint">Empty list = any country.</p>
 					<div id="u-countries-ms"></div>
+				</div>
+				<div class="field">
+					<label class="checkbox-label"><input type="checkbox" id="u-restrict-city"> Restrict by city</label>
+					<p class="field-hint">Pick a country, then select any number of cities. Empty list = any city.</p>
+					<p class="field-hint" id="u-cities-building" style="display:none">City list is still building -- try again shortly.</p>
+					<div class="geo-picker-row">
+						<select id="u-city-country"><option value="">Loading countries…</option></select>
+						<div id="u-cities-ms"></div>
+					</div>
 				</div>
 				<div class="field">
 					<label class="checkbox-label"><input type="checkbox" id="u-restrict-asn"> Restrict by network (ASN)</label>
@@ -91,18 +109,9 @@
 					</div>
 				</div>
 				<div class="field">
-					<label class="checkbox-label"><input type="checkbox" id="u-restrict-city"> Restrict by city</label>
-					<p class="field-hint">Approximate (GeoIP). Pick a country, then select any number of cities.</p>
-					<p class="field-hint" id="u-cities-building" style="display:none">City list is still building -- try again shortly.</p>
-					<div class="geo-picker-row">
-						<select id="u-city-country"><option value="">Loading countries…</option></select>
-						<div id="u-cities-ms"></div>
-					</div>
-				</div>
-				<div class="field">
 					<label class="checkbox-label"><input type="checkbox" id="u-restrict-ip"> Restrict by IP address</label>
 					<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
-					<textarea id="u-allowed-ips" rows="2" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
+					<textarea id="u-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
 				</div>
 			</div>
 		</fieldset>
@@ -136,10 +145,46 @@
 	<div class="dialog-body">
 		<h2>Edit User</h2>
 		<form id="edit-form">
+			<!-- Row 1: Username (read-only), First Name, Last Name, Role -- plus
+			     Status, which has no home in the requested 3-row layout (Create
+			     has no equivalent concept -- a new account always starts
+			     Active) but still needs to live somewhere admin-visible. -->
 			<div class="form-row">
+				<div class="field"><label for="e-username">Username</label><input type="text" id="e-username" disabled class="mono"></div>
 				<div class="field"><label for="e-first">First Name</label><input type="text" id="e-first" required></div>
 				<div class="field"><label for="e-last">Last Name</label><input type="text" id="e-last"></div>
+				<div class="field">
+					<label for="e-role">Role</label>
+					<select id="e-role"></select>
+					<p class="muted" id="e-role-note" style="margin:6px 0 0;font-size:0.8rem;display:none">The bootstrap admin account can't be demoted, deactivated, or deleted.</p>
+				</div>
+				<div class="field">
+					<label for="e-active">Status</label>
+					<select id="e-active"><option value="true">Active</option><option value="false">Disabled</option></select>
+				</div>
 			</div>
+			<!-- Row 2: Email, Phone, Team(s) -->
+			<div class="form-row" style="margin-top:14px">
+				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email" required></div>
+				<div class="field"><label for="e-phone-mount">Phone</label><div id="e-phone-mount"></div></div>
+				<div class="field"><label for="e-team-toggle">Teams <span class="muted">(select several)</span></label><div id="e-team-ms"></div></div>
+			</div>
+			<!-- Row 3: New Password, Confirm Password, Generate (aligned to row end) -->
+			<div class="form-row password-row" style="margin-top:14px">
+				<div class="field">
+					<label for="e-password">New Password <span class="muted">(optional)</span></label>
+					<input type="password" id="e-password" minlength="8" placeholder="Leave blank to keep current password">
+				</div>
+				<div class="field">
+					<label for="e-password-confirm">Confirm Password</label>
+					<input type="password" id="e-password-confirm" minlength="8" placeholder="Leave blank to keep current password">
+				</div>
+				<div class="field password-row-generate">
+					<label aria-hidden="true">&nbsp;</label>
+					<button type="button" class="btn-secondary" id="e-password-generate">Generate</button>
+				</div>
+			</div>
+			<p class="muted" style="margin:6px 0 0;font-size:0.82rem">If set, the new password must be at least 8 characters and include at least 1 uppercase letter, 1 number, and 1 special character.</p>
 			<div class="form-row" style="margin-top:14px">
 				<div class="field">
 					<label for="e-gender">Gender</label>
@@ -150,29 +195,9 @@
 						<option value="other">Other</option>
 					</select>
 				</div>
-				<div class="field"><label for="e-team-toggle">Teams <span class="muted">(select several)</span></label><div id="e-team-ms"></div></div>
 			</div>
-			<div class="form-row" style="margin-top:14px">
-				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email" required></div>
-			</div>
-			<div class="form-row" style="margin-top:14px">
-				<div class="field"><label for="e-phone-mount">Phone</label><div id="e-phone-mount"></div></div>
-			</div>
-			<fieldset style="margin-top:16px">
-				<legend>Access</legend>
-				<div class="form-row">
-					<div class="field">
-						<label for="e-role">Role</label>
-						<select id="e-role"></select>
-						<p class="muted" id="e-role-note" style="margin:6px 0 0;font-size:0.8rem;display:none">The bootstrap admin account can't be demoted, deactivated, or deleted.</p>
-					</div>
-					<div class="field">
-						<label for="e-active">Status</label>
-						<select id="e-active"><option value="true">Active</option><option value="false">Disabled</option></select>
-					</div>
-				</div>
-			</fieldset>
-			<fieldset id="e-vpn-fieldset">
+
+			<fieldset id="e-vpn-fieldset" style="margin-top:16px">
 				<legend>VPN Profile</legend>
 				<div id="e-vpn-linked" style="display:none">
 					<p class="muted" style="margin:0">Linked to VPN profile <strong id="e-vpn-linked-name" class="mono"></strong>.</p>
@@ -187,7 +212,10 @@
 						<button type="button" class="btn-secondary" id="e-vpn-attach-btn" disabled>Attach</button>
 					</div>
 				</div>
-				<div id="e-vpn-policy" style="display:none;margin-top:14px">
+			</fieldset>
+			<fieldset id="e-device-policy-fieldset">
+				<legend>Device &amp; Access Policy</legend>
+				<div id="e-vpn-policy" style="display:none" class="field-stack">
 					<div class="field">
 						<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
 						<div class="checkbox-row">
@@ -196,19 +224,30 @@
 							<label class="checkbox-label"><input type="checkbox" class="e-os-check" value="mac"> macOS</label>
 						</div>
 					</div>
-					<div class="field" style="margin-top:10px">
+					<div class="field">
 						<label for="e-bandwidth">Monthly Bandwidth Quota (GB) <span class="muted">(blank = unlimited, min 0.1)</span></label>
-						<input type="text" id="e-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)">
+						<input type="text" id="e-bandwidth" inputmode="decimal" placeholder="Unlimited (e.g. 0.5, 2.5, 10)" style="max-width:280px">
 					</div>
 				</div>
+				<p class="muted" id="e-device-policy-no-mac" style="margin:0">Device MAC Address is set when the VPN profile is provisioned and isn't editable here -- manage it from the Clients page.</p>
 			</fieldset>
 			<fieldset>
-				<legend>Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
-				<div class="form-grid">
+				<legend>Location &amp; Network Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees.</p>
+				<div class="field-stack">
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="e-restrict-country"> Restrict by country</label>
-						<p class="field-hint">GeoIP on the sign-in IP. Empty list = any country.</p>
+						<p class="field-hint">Empty list = any country.</p>
 						<div id="e-countries-ms"></div>
+					</div>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="e-restrict-city"> Restrict by city</label>
+						<p class="field-hint">Pick a country, then select any number of cities. Empty list = any city.</p>
+						<p class="field-hint" id="e-cities-building" style="display:none">City list is still building -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="e-city-country"><option value="">Loading countries…</option></select>
+							<div id="e-cities-ms"></div>
+						</div>
 					</div>
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="e-restrict-asn"> Restrict by network (ASN)</label>
@@ -220,37 +259,11 @@
 						</div>
 					</div>
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="e-restrict-city"> Restrict by city</label>
-						<p class="field-hint">Approximate (GeoIP). Pick a country, then select any number of cities.</p>
-						<p class="field-hint" id="e-cities-building" style="display:none">City list is still building -- try again shortly.</p>
-						<div class="geo-picker-row">
-							<select id="e-city-country"><option value="">Loading countries…</option></select>
-							<div id="e-cities-ms"></div>
-						</div>
-					</div>
-					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="e-restrict-ip"> Restrict by IP address</label>
 						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
-						<textarea id="e-allowed-ips" rows="2" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
+						<textarea id="e-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
 					</div>
 				</div>
-			</fieldset>
-			<fieldset>
-				<legend>Reset Password <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
-				<div class="form-row">
-					<div class="field">
-						<label for="e-password">New Password</label>
-						<div class="password-field-row">
-							<input type="password" id="e-password" minlength="8" placeholder="Leave blank to keep current password">
-							<button type="button" class="btn-secondary btn-sm" id="e-password-generate">Generate</button>
-						</div>
-					</div>
-					<div class="field">
-						<label for="e-password-confirm">Confirm Password</label>
-						<input type="password" id="e-password-confirm" minlength="8" placeholder="Leave blank to keep current password">
-					</div>
-				</div>
-				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">If set, the new password must be at least 8 characters and include at least 1 uppercase letter, 1 number, and 1 special character.</p>
 			</fieldset>
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="edit-cancel">Cancel</button>
@@ -787,6 +800,7 @@ function openEdit(u) {
 	editingUserId = u.id;
 	editingUserIsBootstrapAdmin = !!u.is_bootstrap_admin;
 	refreshVpnLinkSection(u);
+	document.getElementById("e-username").value = u.username;
 	document.getElementById("e-first").value = u.first_name || "";
 	document.getElementById("e-last").value = u.last_name || "";
 	document.getElementById("e-gender").value = u.gender || "unspecified";
