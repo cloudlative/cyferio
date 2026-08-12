@@ -161,6 +161,16 @@ def _health_status_summary() -> dict:
     return {"ok": len(failing) == 0, "failing_checks": failing}
 
 
+def _parseable_timestamp(iso: str | None) -> bool:
+    if not iso:
+        return False
+    try:
+        datetime.fromisoformat(iso)
+        return True
+    except ValueError:
+        return False
+
+
 def _is_today(iso: str | None) -> bool:
     if not iso:
         return False
@@ -276,10 +286,25 @@ def get_dashboard_overview(user: User = Depends(_require_dashboard_viewer), db: 
         },
         "system_insights": {
             "recent_alerts": recent_alerts,  # null (not []) if the caller lacks audit_log:manage -- distinguishes "no permission" from "no alerts"
+            # vpn-status.py's rejected-connections snapshot legitimately
+            # includes non-timestamped "unknown"/"n/a" aggregate entries
+            # (e.g. a rolled-up bucket for a name/MAC seen many times) mixed
+            # in with real per-attempt rows that DO have a real ISO
+            # timestamp -- sorting naively by the raw string would put
+            # "unknown" above every real "2026-..." timestamp (plain
+            # alphabetical: 'u' > '2'), burying genuinely recent violations
+            # under bogus "most recent" entries. Only rows with a real,
+            # parseable timestamp are eligible for this "recent" list at
+            # all -- the unparseable aggregate rows are simply excluded
+            # here (they have no real "when" to rank against), not just
+            # sorted last.
             "recent_violations": [
                 {"timestamp": r.get("timestamp"), "claimed_name": r.get("claimed_name"), "reason": r.get("reason")}
-                for r in sorted(rejected, key=lambda r: r.get("timestamp") or "", reverse=True)[:10]
-            ],
+                for r in sorted(
+                    (r for r in rejected if _parseable_timestamp(r.get("timestamp"))),
+                    key=lambda r: r["timestamp"], reverse=True,
+                )
+            ][:10],
             "quota_warnings": _recent_quota_warnings(db, 5),
             "health_status": _health_status_summary(),
         },
