@@ -65,15 +65,30 @@ DEFAULTS = {
 
 
 def load_config():
+    """Falls back to bare DEFAULTS on any OSError reading CONFIG_FILE, not
+    just a missing file -- found live (2026-08-12): CONFIG_FILE is
+    root:root 0640 (it can hold MAXMIND_LICENSE_KEY, a credential worth
+    keeping root-only-readable), but this whole module runs as `nobody`
+    (OpenVPN's unprivileged runtime user). Before this fix, that
+    permission mismatch raised PermissionError at IMPORT time -- since
+    every caller (openvpn-mac-addr-check.py, openvpn-client-disconnect.py)
+    imports this module before doing anything else, that meant EVERY
+    connection attempt failed outright, not just policy-lookup-dependent
+    ones. Same fail-open stance this module already takes for the JSON
+    policy files themselves (see _locked()'s docstring) -- an unreadable
+    config file means "use the built-in defaults", not "crash"."""
     cfg = dict(DEFAULTS)
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, v = line.split("=", 1)
-                cfg[k.strip()] = v.strip()
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    cfg[k.strip()] = v.strip()
+    except OSError:
+        pass
     return cfg
 
 
