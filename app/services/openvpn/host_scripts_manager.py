@@ -289,13 +289,32 @@ def install_host_scripts(paths: OpenVPNPaths, *, os_info: package_manager.OSInfo
 
     with open(paths.server_conf, encoding="utf-8") as f:
         server_conf = f.read()
+    desired_block = render_server_conf_additions(paths)
     if SERVER_CONF_MARKER_BEGIN not in server_conf:
         with open(paths.server_conf, "a", encoding="utf-8") as f:
             if not server_conf.endswith("\n"):
                 f.write("\n")
-            f.write(render_server_conf_additions(paths))
-        changes.append(f"appended client-connect/client-disconnect block to {paths.server_conf} -- "
+            f.write(desired_block)
+        changes.append(f"appended restriction-enforcement block to {paths.server_conf} -- "
                         f"NOT yet active until the OpenVPN service is restarted")
+    else:
+        # The block already exists, but its CONTENT can still be stale --
+        # found live (2026-08-12): a server.conf from before this feature
+        # added the `management` directive already had the marker block
+        # from an earlier version, so a naive "marker present -> skip"
+        # check silently left `management` (and anything else a future
+        # version adds to this block) out forever. Replace the whole
+        # marked region in place whenever it doesn't match what this
+        # version would render, rather than only ever appending once.
+        start = server_conf.index(SERVER_CONF_MARKER_BEGIN)
+        end = server_conf.index(SERVER_CONF_MARKER_END) + len(SERVER_CONF_MARKER_END)
+        existing_block = server_conf[start:end] + "\n"
+        if existing_block.rstrip("\n") != desired_block.rstrip("\n"):
+            new_conf = server_conf[:start] + desired_block + server_conf[end:].lstrip("\n")
+            with open(paths.server_conf, "w", encoding="utf-8") as f:
+                f.write(new_conf)
+            changes.append(f"updated the restriction-enforcement block in {paths.server_conf} (was out of date) -- "
+                            f"NOT yet active until the OpenVPN service is restarted")
 
     quota_enforcer_change = install_quota_enforcer(paths)
     if quota_enforcer_change:
