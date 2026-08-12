@@ -29,6 +29,11 @@ from ..cli_wrapper import ScriptError
 from ..db import get_db
 from ..models import User
 from ..permissions import require_permission
+# _source_ip_summary is a pure, user-agnostic helper (takes a plain session
+# list, does its own geoip resolution) -- reused verbatim rather than
+# duplicated. reports.py doesn't import anything from this module, so this
+# is a plain one-way import, not a cycle.
+from .reports import _source_ip_summary
 
 router = APIRouter(prefix="/api/me/vpn-profile", tags=["me"])
 
@@ -72,6 +77,42 @@ def get_my_vpn_profile(user: User = Depends(require_permission("vpn_profiles", "
         # controls here -- this router doesn't expose a policy PUT.
         "policy": policy_store.get_policy(link.vpn_client_name),
         "usage": policy_store.get_usage(link.vpn_client_name),
+    }
+
+
+@router.get("/report")
+def get_my_vpn_report(user: User = Depends(require_permission("vpn_profiles", "view")), db: Session = Depends(get_db)):
+    """Self-service analytics -- the "My Reports" page's data source.
+    Deliberately mirrors routes/reports.py's get_user_analytics() (Per-User
+    Analytics' admin-facing equivalent) field-for-field, minus the user_id
+    lookup step: same require_permission("vpn_profiles", "view") gate and
+    "always resolve request.user's own VpnProfileLink" pattern as every
+    other endpoint in this router (see module docstring) -- there's no id
+    param to mis-scope, so no separate scope check is needed here, unlike
+    get_user_analytics()'s require_permission_any_scope("reports", "view")
+    gate for the analogous admin view."""
+    link = _require_link(user)
+    client_name = link.vpn_client_name
+    try:
+        sessions = cli.status_session_history(500, client_name)
+    except ScriptError as e:
+        raise HTTPException(status_code=502, detail=e.message)
+    # Same claimed_name filter as get_user_analytics() -- see that
+    # function's docstring for why matching on claimed_name is safe/
+    # non-spoofable (mutual TLS already succeeded by the time a rejection
+    # gets logged, so claimed_name is the cert's own verified common_name).
+    try:
+        rejected_all = cli.get_status_rejected_snapshot(500)
+    except ScriptError as e:
+        raise HTTPException(status_code=502, detail=e.message)
+    rejected = [r for r in rejected_all if r.get("claimed_name") == client_name]
+    return {
+        "vpn_client_name": client_name,
+        "policy": policy_store.get_policy(client_name),
+        "usage": policy_store.get_usage(client_name),
+        "sessions": sessions,
+        "rejected": rejected,
+        "source_ip_summary": _source_ip_summary(sessions),
     }
 
 

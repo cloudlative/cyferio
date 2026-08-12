@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}My Reports — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">My Reports</h1></div>
+	<div class="form-row" style="gap:10px;align-items:center">
+		<select id="mr-range" style="width:auto">
+			<option value="7">Last 7 days</option>
+			<option value="14">Last 14 days</option>
+			<option value="30">Last 30 days</option>
+			<option value="60">Last 2 months</option>
+			<option value="90">Last 3 months</option>
+			<option value="all">All history</option>
+		</select>
+		<button class="btn-secondary" id="mr-refresh">Refresh</button>
+	</div>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Your own bandwidth, connection, source IP, and session-duration history -- the same analytics an admin sees on your account in Reports' Per-User Analytics, scoped to just you.</p>
+
+<div class="card" id="my-reports-card">
+	<div class="ua-summary-row" id="mr-summary"></div>
+	<div class="ua-grid">
+		<div class="ua-chart-card">
+			<div class="ua-chart-card-head"><h3>Bandwidth</h3><div id="mr-bandwidth-type"></div></div>
+			<div class="chart-canvas-mount"><canvas id="mr-bandwidth"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Top Usage Days</h3>
+			<div id="mr-top-days"><p class="muted">No data in range.</p></div>
+		</div>
+		<div class="ua-chart-card">
+			<div class="ua-chart-card-head"><h3>Connections</h3><div id="mr-connections-type"></div></div>
+			<div class="chart-canvas-mount"><canvas id="mr-connections"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Successful vs Failed Connections</h3>
+			<div class="chart-canvas-mount"><canvas id="mr-success-fail"></canvas></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Top Source IPs</h3>
+			<div id="mr-top-ips"><p class="muted">No data in range.</p></div>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Country Distribution</h3>
+			<div class="chart-canvas-mount"><canvas id="mr-country-dist"></canvas></div>
+			<p class="muted" style="font-size:0.78rem;margin:8px 0 0">Requires MaxMind GeoLite2 databases to be present on the server -- shows nothing if they aren't.</p>
+		</div>
+		<div class="ua-chart-card">
+			<h3>Session Duration</h3>
+			<div id="mr-duration-summary" style="display:flex;gap:20px;margin-bottom:12px;flex-wrap:wrap"></div>
+			<div class="chart-canvas-mount"><canvas id="mr-duration-trend"></canvas></div>
+		</div>
+	</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// A handful of small helpers duplicated from reports.html's own script
+// block (this app has no JS module system -- every page's script tag is
+// self-contained, same convention every other template here follows)
+// rather than shared, since only these few are needed here.
+const MR_DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function mrLocalParts(iso) {
+	const d = new Date(iso);
+	if (isNaN(d)) return null;
+	const opts = { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false, weekday: "short" };
+	if (window.APP_TIMEZONE) opts.timeZone = window.APP_TIMEZONE;
+	const parts = new Intl.DateTimeFormat("en-US", opts).formatToParts(d);
+	const get = (t) => (parts.find(p => p.type === t) || {}).value;
+	return { dateKey: `${get("year")}-${get("month")}-${get("day")}` };
+}
+
+function mrShortDateLabel(dateKey) {
+	const [y, m, d] = dateKey.split("-").map(Number);
+	return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function mrSessionCountLabel(v) {
+	return `${v} session${v === 1 ? "" : "s"}`;
+}
+
+let mrData = null; // last-loaded /api/me/vpn-profile/report response
+const mrChartType = {};
+
+function mrRangeFilteredSessions() {
+	const range = document.getElementById("mr-range").value;
+	let rows = (mrData.sessions || []).filter(r => r.connected_at);
+	if (range !== "all") {
+		const cutoff = Date.now() - parseInt(range, 10) * 86400000;
+		rows = rows.filter(r => new Date(r.connected_at).getTime() >= cutoff);
+	}
+	return rows;
+}
+
+async function loadMyReports() {
+	try {
+		mrData = await apiFetch("/api/me/vpn-profile/report");
+		renderMrCharts();
+	} catch (e) {
+		mrData = null;
+		document.getElementById("mr-summary").innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+function renderMrCharts() {
+	if (!mrData) return;
+	const rows = mrRangeFilteredSessions();
+	const range = document.getElementById("mr-range").value;
+	// Same bytes/quotaGb math as my_vpn_profile.html's own Bandwidth Usage
+	// card -- kept consistent between the two self-service pages rather
+	// than introducing a second rounding convention here.
+	const policy = mrData.policy || {};
+	const usage = mrData.usage || {};
+	const quotaGb = policy.bandwidth_monthly_gb;
+	const usedBytesThisMonth = usage.bytes_used || 0;
+
+	const totalBytes = rows.reduce((sum, r) => sum + (r.bytes_received || 0) + (r.bytes_sent || 0), 0);
+	document.getElementById("mr-summary").innerHTML = `
+		<div class="ua-summary-stat"><div class="ua-summary-value">${quotaGb != null ? `${fmtBytes(usedBytesThisMonth)} / ${quotaGb}GB` : "Unlimited"}</div><div class="ua-summary-label">This Month's Quota Usage</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${rows.length}</div><div class="ua-summary-label">Sessions In Range</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${fmtBytes(totalBytes)}</div><div class="ua-summary-label">Bandwidth In Range</div></div>
+	`;
+
+	// Bandwidth per day + Top Usage Days.
+	const byDate = new Map();
+	for (const r of rows) {
+		const parts = mrLocalParts(r.connected_at);
+		if (!parts) continue;
+		const e = byDate.get(parts.dateKey) || { rx: 0, tx: 0, count: 0 };
+		e.rx += r.bytes_received || 0;
+		e.tx += r.bytes_sent || 0;
+		e.count += 1;
+		byDate.set(parts.dateKey, e);
+	}
+	const sortedDates = [...byDate.keys()].sort();
+	renderChart(
+		document.getElementById("mr-bandwidth"),
+		buildChartJsConfig(mrChartType.bandwidth, sortedDates.map(k => ({ label: mrShortDateLabel(k), values: [byDate.get(k).rx, byDate.get(k).tx] })),
+			{ seriesLabels: ["Received", "Sent"], valueFormatter: fmtBytes }),
+	);
+	const topDays = [...byDate.entries()]
+		.map(([k, v]) => ({ label: mrShortDateLabel(k), value: v.rx + v.tx }))
+		.sort((a, b) => b.value - a.value)
+		.slice(0, 5);
+	document.getElementById("mr-top-days").innerHTML = topDays.length
+		? topDays.map(d => `<div class="metric-row"><span>${escapeHtml(d.label)}</span><span class="mono">${fmtBytes(d.value)}</span></div>`).join("")
+		: '<p class="muted">No data in range.</p>';
+
+	// Connections per day + successful vs failed.
+	renderChart(
+		document.getElementById("mr-connections"),
+		buildChartJsConfig(mrChartType.connections, sortedDates.map(k => ({ label: mrShortDateLabel(k), value: byDate.get(k).count })),
+			{ valueFormatter: mrSessionCountLabel }),
+	);
+	const rejectedInRange = (mrData.rejected || []).filter(r => {
+		const t = new Date(r.timestamp);
+		if (isNaN(t)) return false;
+		return range === "all" || t.getTime() >= Date.now() - parseInt(range, 10) * 86400000;
+	});
+	const byDateFail = new Map();
+	for (const r of rejectedInRange) {
+		const parts = mrLocalParts(r.timestamp);
+		if (parts) byDateFail.set(parts.dateKey, (byDateFail.get(parts.dateKey) || 0) + 1);
+	}
+	const successFailDates = [...new Set([...sortedDates, ...byDateFail.keys()])].sort();
+	renderChart(
+		document.getElementById("mr-success-fail"),
+		buildChartJsConfig("stacked-bar", successFailDates.map(k => ({ label: mrShortDateLabel(k), values: [byDate.get(k)?.count || 0, byDateFail.get(k) || 0] })),
+			{ seriesLabels: ["Successful", "Failed"], valueFormatter: mrSessionCountLabel }),
+	);
+
+	// Source IP Analytics -- computed server-side (see me_vpn.py's
+	// get_my_vpn_report reusing reports.py's _source_ip_summary) against
+	// the full session-history fetch (up to the 500-row cap), not
+	// range-filtered here, same "most frequently used, all-time" framing
+	// as the admin Per-User Analytics card uses for this same chart.
+	const ipSummary = mrData.source_ip_summary || {};
+	document.getElementById("mr-top-ips").innerHTML = (ipSummary.top_ips || []).length
+		? ipSummary.top_ips.map(r => `<div class="metric-row"><span class="mono">${escapeHtml(r.ip)}</span><span class="muted">${mrSessionCountLabel(r.count)}</span></div>`).join("")
+		: '<p class="muted">No data yet.</p>';
+	renderChart(
+		document.getElementById("mr-country-dist"),
+		buildChartJsConfig("donut", (ipSummary.country_distribution || []).map(r => ({ label: countryName(r.country), value: r.count })), { valueFormatter: mrSessionCountLabel }),
+	);
+
+	// Session Duration Analytics.
+	const durations = rows.map(r => r.duration_seconds || 0).filter(d => d > 0);
+	const totalDuration = durations.reduce((s, d) => s + d, 0);
+	document.getElementById("mr-duration-summary").innerHTML = durations.length ? `
+		<div><label class="muted" style="font-size:0.78rem">Average</label><div class="mono">${fmtDuration(totalDuration / durations.length)}</div></div>
+		<div><label class="muted" style="font-size:0.78rem">Longest</label><div class="mono">${fmtDuration(Math.max(...durations))}</div></div>
+		<div><label class="muted" style="font-size:0.78rem">Shortest</label><div class="mono">${fmtDuration(Math.min(...durations))}</div></div>
+		<div><label class="muted" style="font-size:0.78rem">Total Connected Time</label><div class="mono">${fmtDuration(totalDuration)}</div></div>
+	` : '<p class="muted">No sessions in range.</p>';
+	const avgDurByDate = new Map();
+	for (const r of rows) {
+		const parts = mrLocalParts(r.connected_at);
+		if (!parts || !r.duration_seconds) continue;
+		const e = avgDurByDate.get(parts.dateKey) || { sum: 0, count: 0 };
+		e.sum += r.duration_seconds;
+		e.count += 1;
+		avgDurByDate.set(parts.dateKey, e);
+	}
+	const avgDurDates = [...avgDurByDate.keys()].sort();
+	renderChart(
+		document.getElementById("mr-duration-trend"),
+		buildChartJsConfig("line", avgDurDates.map(k => ({ label: mrShortDateLabel(k), value: Math.round(avgDurByDate.get(k).sum / avgDurByDate.get(k).count) })), { valueFormatter: fmtDuration }),
+	);
+}
+
+mrChartType.bandwidth = chartTypeSelector(document.getElementById("mr-bandwidth-type"), {
+	types: ["stacked-bar", "line", "area"], current: "stacked-bar", storageKey: "chart-type:mr-bandwidth",
+	onChange: (t) => { mrChartType.bandwidth = t; renderMrCharts(); },
+});
+mrChartType.connections = chartTypeSelector(document.getElementById("mr-connections-type"), {
+	types: ["bar", "line", "area"], current: "bar", storageKey: "chart-type:mr-connections",
+	onChange: (t) => { mrChartType.connections = t; renderMrCharts(); },
+});
+
+document.getElementById("mr-range").addEventListener("change", renderMrCharts);
+document.getElementById("mr-refresh").addEventListener("click", loadMyReports);
+loadMyReports();
+</script>
+{% endblock %}

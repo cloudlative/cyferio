@@ -181,6 +181,23 @@ def my_vpn_profile_page(request: Request, user: User | None = Depends(get_curren
     return templates.TemplateResponse(request, "my_vpn_profile.html", _ctx(user, db))
 
 
+@router.get("/my-reports")
+def my_reports_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    # Same gate as /my-vpn-profile above -- plain has_permission (not
+    # any_scope), since this is inherently "own" data by construction (the
+    # backing endpoint, GET /api/me/vpn-profile/report, never takes an id
+    # param -- see me_vpn.py's module docstring). No linked profile means
+    # nothing to report, so fall back to /my-vpn-profile, which already
+    # handles that same "no profile yet" case with its own empty state.
+    if not has_permission(db, user, "vpn_profiles", "view"):
+        return RedirectResponse("/", status_code=303)
+    if user.vpn_profile_link is None:
+        return RedirectResponse("/my-vpn-profile", status_code=303)
+    return templates.TemplateResponse(request, "my_reports.html", _ctx(user, db))
+
+
 @router.get("/roles")
 def roles_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:

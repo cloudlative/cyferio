@@ -29,6 +29,7 @@
 			{% endif %}
 			{% if has_own_vpn_profile %}
 			<a href="/my-vpn-profile" class="{{ 'active' if request.url.path == '/my-vpn-profile' }}"><span class="nav-icon">⚡</span>My VPN Profile</a>
+			<a href="/my-reports" class="{{ 'active' if request.url.path == '/my-reports' }}"><span class="nav-icon">▦</span>My Reports</a>
 			{% endif %}
 			{% if can_view_clients %}
 			<a href="/clients" class="{{ 'active' if request.url.path == '/clients' }}"><span class="nav-icon">◇</span>VPN Clients</a>
