@@ -404,7 +404,20 @@ function buildChartJsConfig(kind, entries, { seriesLabels = null, valueFormatter
 					legend: { display: true, position: "right", labels: { color: tickColor } },
 					tooltip: {
 						backgroundColor: tooltipBg, borderColor: tooltipBorder, borderWidth: 1, titleColor: tooltipText, bodyColor: tooltipText,
-						callbacks: { label: (ctx) => `${ctx.label}: ${valueFormatter(ctx.parsed)}` },
+						// A donut/pie's whole point is share-of-whole, but the label
+						// callback only ever showed the raw formatted value with no
+						// sense of how big a slice it actually is -- added the
+						// percentage-of-total alongside it (e.g. country-distribution
+						// donuts on Reports/My Reports), computed from this dataset's
+						// own values rather than assuming entries/valueFormatter
+						// already carry a percentage anywhere.
+						callbacks: {
+							label: (ctx) => {
+								const total = ctx.dataset.data.reduce((sum, v) => sum + (v || 0), 0);
+								const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : "0.0";
+								return `${ctx.label}: ${valueFormatter(ctx.parsed)} (${pct}%)`;
+							},
+						},
 					},
 				},
 			},
@@ -426,7 +439,22 @@ function buildChartJsConfig(kind, entries, { seriesLabels = null, valueFormatter
 			options: {
 				indexAxis: "y", responsive: true, maintainAspectRatio: false,
 				scales: horizontalScales,
-				plugins: { ...commonPlugins, legend: { display: false } },
+				plugins: {
+					...commonPlugins,
+					legend: { display: false },
+					// commonPlugins.tooltip's callback reads ctx.parsed.y, which is
+					// correct for a normal vertical chart but WRONG here: indexAxis:
+					// "y" swaps which parsed field holds the value (Chart.js puts it
+					// in .x for a horizontal bar, .y becomes the category index) --
+					// found while auditing every chart's tooltip content, this was
+					// showing a raw category index (0, 1, 2...) instead of the
+					// formatted byte value on e.g. Reports' "Top Clients by Data
+					// Usage" chart.
+					tooltip: {
+						...commonPlugins.tooltip,
+						callbacks: { label: (ctx) => `${ctx.label}: ${valueFormatter(ctx.parsed.x)}` },
+					},
+				},
 			},
 		};
 	}
@@ -1765,6 +1793,29 @@ const THEME_QUICK_LABELS = {
 		});
 	});
 })();
+
+/**
+ * Shared app-wide "(i)" info tooltip (see .info-tip in style.css) -- the
+ * hover/keyboard-focus display is pure CSS (:hover/:focus-visible), so
+ * this handler only exists for the tap case: touch devices don't fire
+ * :hover reliably, so a tap toggles a `.tip-open` class instead (the CSS
+ * shows the popover for that class too). One delegated listener covers
+ * every .info-tip on every page, present or added later, with no per-page
+ * wiring -- same "just works everywhere" shape as apiFetch/toast. Toggling
+ * one tip closes any other that was left open by a previous tap, mirroring
+ * the notif-bell/theme-quick-switch panels' own single-panel-open
+ * convention above.
+ */
+document.addEventListener("click", (e) => {
+	const tip = e.target.closest(".info-tip");
+	document.querySelectorAll(".info-tip.tip-open").forEach((t) => {
+		if (t !== tip) t.classList.remove("tip-open");
+	});
+	if (tip) {
+		tip.classList.toggle("tip-open");
+		e.preventDefault(); // .info-tip is a <button> -- stop it submitting a parent <form>
+	}
+});
 
 /**
  * Notification bell (sidebar header) -- backs QuotaNotification rows

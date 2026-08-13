@@ -403,6 +403,63 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 .theme-quick-option.active { background: var(--surface-alt); }
 .theme-quick-option.active .theme-quick-check { opacity: 1; }
 
+/* --- Info tooltip -------------------------------------------------------
+   Shared app-wide "(i)" affordance for explaining a label/setting/column
+   that isn't self-evident, without permanently taking up space the way
+   .field-hint's always-visible caption does. CSS-only show/hide via
+   :hover/:focus-visible (the trigger is a real <button>, so it's tab-
+   focusable and gets this for free -- no JS needed for desktop/keyboard
+   use). app.js's initInfoTips() only handles the tap case, where CSS
+   :hover doesn't fire reliably on touch devices. Positioned/styled to
+   match the notif-bell-panel/theme-quick-panel "floating surface"
+   convention above rather than inventing a new visual language. */
+.info-tip {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 15px;
+	height: 15px;
+	border-radius: 50%;
+	background: var(--surface-alt);
+	color: var(--text-muted);
+	font-size: 0.68rem;
+	font-weight: 700;
+	font-style: italic;
+	font-family: Georgia, "Times New Roman", serif;
+	border: 1px solid var(--border-light);
+	cursor: help;
+	position: relative;
+	margin-left: 4px;
+	padding: 0;
+	line-height: 1;
+	vertical-align: middle;
+}
+.info-tip:hover, .info-tip:focus-visible { color: var(--accent); border-color: var(--accent); }
+.info-tip::after {
+	content: attr(data-tip);
+	display: none;
+	position: absolute;
+	bottom: calc(100% + 8px);
+	left: 50%;
+	transform: translateX(-50%);
+	width: max-content;
+	max-width: 260px;
+	background: var(--surface);
+	color: var(--text);
+	border: 1.5px solid var(--border-light);
+	border-radius: 9px;
+	box-shadow: var(--shadow-lg);
+	padding: 8px 10px;
+	font-size: 0.78rem;
+	font-weight: 400;
+	font-style: normal;
+	font-family: inherit;
+	text-align: left;
+	z-index: 60;
+	white-space: normal;
+}
+.info-tip:hover::after, .info-tip:focus-visible::after, .info-tip.tip-open::after { display: block; }
+
 /* --- Content footer ----------------------------------------------------
    Full-width within the content column, 3 zones (left/center/right) --
    center is deliberately left as a real, styled, empty slot (trademark

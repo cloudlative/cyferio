@@ -58,13 +58,18 @@
 			<span class="muted">This role can view, modify, or manage every record of that type, regardless of who owns it -- the normal admin-style scope.</span>
 		</div>
 	</div>
-	<p class="muted" style="margin-top:10px">"Manage" grants every action on that module, including on records that aren't the caller's own, and implies View/Create/Update/Delete/Execute even if those boxes are left unchecked. Use the Scope column on the right to choose between "Own Records Only" and "Any Records" per module.</p>
+	<p class="muted" style="margin-top:10px">Hover the (i) icons in the table header below for what "Manage" and "Scope" mean.</p>
 	<div class="table-scroll">
 		<table id="matrix-table">
 			<thead>
 				<tr>
-					<th>Module</th><th>View</th><th>Create</th><th>Update</th><th>Delete</th><th>Execute</th><th>Manage</th>
-					<th title="Own Records Only: limited to records this role owns/is assigned to. Any Records: every record of this type, regardless of owner.">Scope ⓘ</th>
+					<th>Module</th><th>View</th><th>Create</th><th>Update</th><th>Delete</th><th>Execute</th>
+					<th>Manage
+						<button type="button" class="info-tip" data-tip="Grants every action on that module, including on records that aren't the caller's own, and implies View/Create/Update/Delete/Execute even if those boxes are left unchecked." aria-label="More info on Manage">i</button>
+					</th>
+					<th>Scope
+						<button type="button" class="info-tip" data-tip="Own Records Only: limited to records this role owns/is assigned to. Any Records: every record of this type, regardless of owner." aria-label="More info on Scope">i</button>
+					</th>
 				</tr>
 			</thead>
 			<tbody id="matrix-body"></tbody>

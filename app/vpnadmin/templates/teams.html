@@ -23,7 +23,9 @@
 				<input type="text" id="new-team-name" required maxlength="64" placeholder="e.g. Infrastructure">
 			</div>
 			<div class="field">
-				<label for="new-team-slug">Slug <span class="muted">(auto-filled, editable — permanent)</span></label>
+				<label for="new-team-slug">Slug <span class="muted">(auto-filled, editable — permanent)</span>
+					<button type="button" class="info-tip" data-tip="Used to identify this team in future reporting views. Auto-fills from the team name and can be edited now, but can't be changed once the team is created -- pick it carefully." aria-label="More info on Slug">i</button>
+				</label>
 				<input type="text" id="new-team-slug" maxlength="64" placeholder="e.g. infrastructure">
 			</div>
 		</div>

@@ -60,7 +60,9 @@
 				<input type="email" id="s-smtp-from" placeholder="vpn@example.com">
 			</div>
 			<div class="field">
-				<label for="s-smtp-tls">Connection Security</label>
+				<label for="s-smtp-tls">Connection Security
+					<button type="button" class="info-tip" data-tip="STARTTLS upgrades a plain connection to encrypted after connecting (typically port 587) -- the right choice for almost every SMTP provider. No TLS sends credentials and mail unencrypted; only use it on a trusted private network." aria-label="More info on Connection Security">i</button>
+				</label>
 				<select id="s-smtp-tls">
 					<option value="true">Use STARTTLS</option>
 					<option value="false">No TLS (not recommended)</option>
@@ -148,7 +150,9 @@
 			</div>
 		</div>
 		<div class="field" style="margin-top:6px">
-			<label>Bandwidth Quota Enforcement Policy</label>
+			<label>Bandwidth Quota Enforcement Policy
+				<button type="button" class="info-tip" data-tip="Soft only blocks new connections once a quota is exhausted -- an already-connected session is left alone. Hard also force-disconnects an active session the moment its quota is crossed." aria-label="More info on Bandwidth Quota Enforcement Policy">i</button>
+			</label>
 			<div class="checkbox-row" style="flex-direction:column;align-items:flex-start;gap:10px">
 				<label class="checkbox-label"><input type="radio" name="s-quota-policy" value="soft" checked> Soft Enforcement <span class="muted">-- an already-connected session keeps running once its quota is exhausted; only the next connection attempt is refused</span></label>
 				<label class="checkbox-label"><input type="radio" name="s-quota-policy" value="hard"> Hard Enforcement <span class="muted">-- an active session is disconnected immediately once its quota is exhausted, and new connections stay refused until the quota resets or is increased</span></label>
@@ -170,11 +174,15 @@
 				<input type="email" id="s-admin-notify-email" placeholder="admin@example.com">
 			</div>
 			<div class="field">
-				<label for="s-quota-warning-pct">Bandwidth Quota Warning Threshold <span class="muted">(%)</span></label>
+				<label for="s-quota-warning-pct">Bandwidth Quota Warning Threshold <span class="muted">(%)</span>
+					<button type="button" class="info-tip" data-tip="Sends a warning notification once a user's bandwidth usage crosses this percentage of their quota. Must be lower than the Critical threshold below." aria-label="More info on Warning Threshold">i</button>
+				</label>
 				<input type="text" id="s-quota-warning-pct" inputmode="numeric" placeholder="80">
 			</div>
 			<div class="field">
-				<label for="s-quota-critical-pct">Bandwidth Quota Critical Threshold <span class="muted">(%)</span></label>
+				<label for="s-quota-critical-pct">Bandwidth Quota Critical Threshold <span class="muted">(%)</span>
+					<button type="button" class="info-tip" data-tip="The final warning before enforcement acts (see Bandwidth Quota Enforcement Policy above) -- Hard policy disconnects at 100% usage regardless of this setting, so keep this below 100 to give users advance notice." aria-label="More info on Critical Threshold">i</button>
+				</label>
 				<input type="text" id="s-quota-critical-pct" inputmode="numeric" placeholder="95">
 			</div>
 		</div>
