@@ -3,7 +3,7 @@ import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy.orm import Session, selectinload
 
 from services.openvpn.exceptions import ValidationError as MacFormatError
@@ -286,11 +286,26 @@ class CreateUserRequest(BaseModel):
     phone: str | None = None
     # User creation is now the single VPN-profile provisioning entry point
     # (task feedback: "Remove Add a New Client... User creation should
-    # become the primary onboarding workflow") -- required, same as the
-    # old standalone Add Client form's MAC field. See create_user() below:
-    # this creates the VPN cert (cli.add_client) BEFORE the User row, so a
-    # MAC/name conflict fails closed with no user created at all.
-    mac: str
+    # become the primary onboarding workflow") -- same as the old standalone
+    # Add Client form's MAC field. See create_user() below: this creates the
+    # VPN cert (cli.add_client) BEFORE the User row, so a MAC/name conflict
+    # fails closed with no user created at all.
+    #
+    # Optional as of link_existing_vpn_profile below (task feedback: "add an
+    # option during user creation to select an existing VPN profile... to
+    # support onboarding users who already have standalone VPN profiles and
+    # avoid creating duplicate profiles") -- exactly one of mac/
+    # link_existing_vpn_profile must be given, see _exactly_one_profile_source
+    # below. Kept as two separate fields (rather than a single "profile
+    # source" union) so each keeps its own existing validator and the two
+    # code paths in create_user() stay easy to read independently.
+    mac: str | None = None
+    # Name of an already-existing, not-yet-linked VPN profile (see
+    # routes/clients.py's get_unassigned_clients) to attach to this new
+    # user instead of provisioning a fresh one -- mirrors VpnLinkRequest's
+    # own field below, reusing the exact same "attach" semantics via
+    # create_user()'s own inlined version of link_vpn_profile()'s logic.
+    link_existing_vpn_profile: str | None = None
     team_ids: list[int] = []
 
     # "Send VPN Profile via Email" checkbox (Add User form) -- best-effort,
@@ -319,8 +334,22 @@ class CreateUserRequest(BaseModel):
 
     @field_validator("mac")
     @classmethod
-    def _valid_mac(cls, v: str) -> str:
-        return _valid_mac_format(v)
+    def _valid_mac(cls, v: str | None) -> str | None:
+        return _valid_mac_format(v) if v is not None else None
+
+    @field_validator("link_existing_vpn_profile")
+    @classmethod
+    def _link_existing(cls, v: str | None) -> str | None:
+        return v.strip() or None if v is not None else None
+
+    @model_validator(mode="after")
+    def _exactly_one_profile_source(self) -> "CreateUserRequest":
+        if bool(self.mac) == bool(self.link_existing_vpn_profile):
+            raise ValueError(
+                "Provide either a Device MAC Address (to create a new VPN profile) or an existing "
+                "VPN profile to link, not both and not neither."
+            )
+        return self
 
     restrict_login_by_country: bool = False
     allowed_login_countries: list[str] = []
@@ -669,18 +698,40 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     teams = _resolve_teams(db, body.team_ids)
     role_def = _resolve_creatable_role(db, body.role)
 
-    # VPN cert is created FIRST, before any DB write -- a MAC/name conflict
-    # (or any other cli.add_client failure) means no user is created at
-    # all, matching the approved failure-recovery design (see
-    # vpn_identity_sync.py's module comment, plan §7): a partial "user
-    # exists, cert doesn't" state should never happen. The reverse ("cert
-    # exists, user creation then fails") is the one accepted rare edge
-    # case -- see the except block below for the recovery path.
-    try:
-        cli.add_client(body.username, body.mac)
-    except ScriptError as e:
-        log_action(db, admin, "create_user", target=body.username, detail=e.message, success=False)
-        raise HTTPException(status_code=400, detail=e.message)
+    # Two mutually-exclusive ways to give this new user a VPN profile (see
+    # CreateUserRequest._exactly_one_profile_source): provision a brand new
+    # one (the original, still-default path), or attach an existing,
+    # not-yet-linked profile -- same "attach" semantics as VpnLinkRequest/
+    # link_vpn_profile() below, inlined here rather than called as a
+    # sub-request so the whole thing stays one transaction with the User
+    # row (link_vpn_profile() requires the user to already exist, which
+    # isn't true yet at this point in create_user()).
+    effective_client_name = body.username
+    link_source = "created_with_profile"
+    linked_by = None
+    if body.link_existing_vpn_profile:
+        effective_client_name = body.link_existing_vpn_profile
+        link_source = "manual_admin_link"
+        linked_by = admin.username
+        if db.query(VpnProfileLink).filter(VpnProfileLink.vpn_client_name == effective_client_name).first() is not None:
+            raise HTTPException(status_code=409, detail=f"'{effective_client_name}' is already linked to another user.")
+        existing_names = {c.get("name") for c in cli.get_clients_snapshot()}
+        if effective_client_name not in existing_names:
+            raise HTTPException(status_code=404, detail=f"No VPN profile named '{effective_client_name}' exists.")
+    else:
+        # VPN cert is created FIRST, before any DB write -- a MAC/name
+        # conflict (or any other cli.add_client failure) means no user is
+        # created at all, matching the approved failure-recovery design
+        # (see vpn_identity_sync.py's module comment, plan §7): a partial
+        # "user exists, cert doesn't" state should never happen. The
+        # reverse ("cert exists, user creation then fails") is the one
+        # accepted rare edge case -- see the except block below for the
+        # recovery path.
+        try:
+            cli.add_client(body.username, body.mac)
+        except ScriptError as e:
+            log_action(db, admin, "create_user", target=body.username, detail=e.message, success=False)
+            raise HTTPException(status_code=400, detail=e.message)
 
     # The legacy `role` enum column (Role: admin/editor/viewer only) can't
     # represent a custom or "User" self-service role -- role_id (below) is what
@@ -715,7 +766,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     try:
         db.add(user)
         db.flush()
-        db.add(VpnProfileLink(user_id=user.id, vpn_client_name=body.username, link_source="created_with_profile"))
+        db.add(VpnProfileLink(user_id=user.id, vpn_client_name=effective_client_name, link_source=link_source, linked_by=linked_by))
         db.commit()
     except Exception:
         db.rollback()
@@ -725,12 +776,22 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         # the admin's recovery path is Edit User -> "Attach existing VPN
         # profile" on whatever user this was meant for (or a fresh Add
         # User with the same MAC, since the name is now taken by the
-        # orphaned cert -- pick a different username, then attach).
+        # orphaned cert -- pick a different username, then attach). When
+        # link_existing_vpn_profile was used, the profile itself pre-dates
+        # this request entirely (nothing of ours to roll back besides the
+        # DB rows already handled above), so the message only talks about
+        # a freshly-created cert in the create-new case.
         log_action(db, admin, "create_user", target=body.username,
-                   detail=f"VPN profile '{body.username}' was created but the user record failed to save", success=False)
+                   detail=f"VPN profile '{effective_client_name}' was to be linked but the user record failed to save", success=False)
+        if body.link_existing_vpn_profile:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Saving the user account failed. '{effective_client_name}' was NOT linked -- try again, or use "
+                       f"Edit User's \"Attach existing VPN profile\" once the account exists.",
+            )
         raise HTTPException(
             status_code=500,
-            detail=f"A VPN profile named '{body.username}' was created, but saving the user account failed. "
+            detail=f"A VPN profile named '{effective_client_name}' was created, but saving the user account failed. "
                    f"The VPN profile was NOT rolled back -- use Edit User's \"Attach existing VPN profile\" to link it "
                    f"to an account manually.",
         )
@@ -764,7 +825,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
             or body.restrict_login_by_asn or body.restrict_login_by_ip:
         try:
             policy = policy_store.set_policy(
-                body.username,
+                effective_client_name,
                 allowed_os=body.allowed_os or None,
                 bandwidth_monthly_gb=effective_bandwidth,
                 allowed_countries=body.allowed_login_countries if body.restrict_login_by_country else None,
@@ -784,7 +845,8 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
                 f"Username: {body.username}\n"
                 f"Role: {role_def.name}\n"
                 f"Email: {body.email}\n"
-                f"VPN profile: {body.username}\n"
+                f"VPN profile: {effective_client_name}"
+                f"{' (existing profile, linked)' if body.link_existing_vpn_profile else ''}\n"
             ),
         )
 
@@ -799,7 +861,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     if body.send_vpn_profile_email:
         recipient_name = f"{body.first_name} {body.last_name}".strip() if body.last_name else body.first_name
         try:
-            ovpn_content = cli.show_ovpn(body.username)
+            ovpn_content = cli.show_ovpn(effective_client_name)
             # send_welcome_email, not send_ovpn_profile -- this is the only
             # request-scoped moment body.password (plaintext) exists at
             # all; it's hashed above and never recoverable again, so the
@@ -808,14 +870,14 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
             # send_welcome_email docstring for the full reasoning).
             mailer.send_welcome_email(
                 to_address=body.email, username=body.username, password=body.password,
-                client_name=body.username, ovpn_content=ovpn_content, recipient_name=recipient_name,
+                client_name=effective_client_name, ovpn_content=ovpn_content, recipient_name=recipient_name,
             )
             log_action(db, admin, "email_ovpn", target=body.username, detail=f"welcome email sent to {body.email} (on creation)", success=True)
         except Exception as e:
             email_warning = f"User created, but the welcome email could not be sent: {e}"
             log_action(db, admin, "email_ovpn", target=body.username, detail=f"welcome email to {body.email} failed (on creation): {e}", success=False)
 
-    result = _serialize(user, {body.username: policy})
+    result = _serialize(user, {effective_client_name: policy})
     if email_warning:
         result["warning"] = email_warning
     return result

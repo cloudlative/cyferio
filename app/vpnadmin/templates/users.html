@@ -94,9 +94,23 @@
 				<legend>Device &amp; Access Policy</legend>
 				<div class="field-stack">
 					<div class="field">
+						<label>VPN Profile
+							<button type="button" class="info-tip" data-tip="Create a new VPN profile for this user's device, or link an existing standalone profile that was never tied to a portal account -- avoids provisioning a duplicate for someone who already has one." aria-label="More info on VPN Profile">i</button>
+						</label>
+						<div class="checkbox-row">
+							<label class="checkbox-label"><input type="radio" name="u-vpn-mode" id="u-vpn-mode-new" value="new" checked> Create new VPN profile</label>
+							<label class="checkbox-label"><input type="radio" name="u-vpn-mode" id="u-vpn-mode-link" value="link"> Link an existing profile</label>
+						</div>
+					</div>
+					<div class="field" id="u-mac-section">
 						<label for="u-mac">Device MAC Address</label>
 						<input type="text" id="u-mac" required placeholder="aa:bb:cc:dd:ee:ff">
 						<p class="field-hint">Provisions the VPN profile -- any common format, normalized automatically.</p>
+					</div>
+					<div class="field" id="u-vpn-link-section" style="display:none">
+						<label for="u-vpn-link-select">Unassigned VPN Profiles</label>
+						<select id="u-vpn-link-select"><option value="">Loading…</option></select>
+						<p class="field-hint">Only profiles not already linked to a portal user are shown.</p>
 					</div>
 					<div class="field">
 						<label>Allowed Device OS <span class="muted">(none checked = any OS allowed)</span></label>
@@ -118,7 +132,9 @@
 				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees.</p>
 				<div class="field-stack">
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="u-restrict-country"> Restrict by country</label>
+						<label class="checkbox-label"><input type="checkbox" id="u-restrict-country"> Restrict by country
+							<button type="button" class="info-tip" data-tip="Sign-in is only allowed from the countries you select below. Leave the list empty to allow any country." aria-label="More info on Restrict by country">i</button>
+						</label>
 						<p class="field-hint">Empty list = any country.</p>
 						<div id="u-countries-ms"></div>
 					</div>
@@ -141,7 +157,9 @@
 						</div>
 					</div>
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="u-restrict-ip"> Restrict by IP address</label>
+						<label class="checkbox-label"><input type="checkbox" id="u-restrict-ip"> Restrict by IP address
+							<button type="button" class="info-tip" data-tip="Sign-in is only allowed from the exact IPs or CIDR ranges listed below. Leave the list empty to allow any IP." aria-label="More info on Restrict by IP address">i</button>
+						</label>
 						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
 						<textarea id="u-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
 					</div>
@@ -431,6 +449,53 @@ function resetAddUserForm() {
 	addCountriesMs.reset();
 	addCitiesMs.reset();
 	addAsnsMs.reset();
+	// The form's own native .reset() above already puts the radios back to
+	// "new" (it's the one marked `checked` in the markup) -- this just
+	// syncs the two sections' visibility/required-ness to match, same as
+	// a fresh dialog open.
+	setAddUserVpnMode("new");
+}
+// Toggles between "Device MAC Address" (create a fresh VPN profile) and
+// "Unassigned VPN Profiles" (link an existing standalone one) -- mirrors
+// CreateUserRequest's own mutually-exclusive mac/link_existing_vpn_profile
+// fields (routes/users.py), including moving the `required` attribute so
+// the browser's own validation matches whichever field is actually live
+// (mac isn't required at all when linking, and vice versa).
+function setAddUserVpnMode(mode) {
+	const macSection = document.getElementById("u-mac-section");
+	const linkSection = document.getElementById("u-vpn-link-section");
+	const macInput = document.getElementById("u-mac");
+	const linkSelect = document.getElementById("u-vpn-link-select");
+	if (mode === "link") {
+		macSection.style.display = "none";
+		linkSection.style.display = "";
+		macInput.required = false;
+		linkSelect.required = true;
+		populateAddUserVpnLinkSelect();
+	} else {
+		macSection.style.display = "";
+		linkSection.style.display = "none";
+		macInput.required = true;
+		linkSelect.required = false;
+	}
+}
+document.getElementById("u-vpn-mode-new").addEventListener("change", () => setAddUserVpnMode("new"));
+document.getElementById("u-vpn-mode-link").addEventListener("change", () => setAddUserVpnMode("link"));
+// Fetched fresh every time "Link an existing profile" is selected, same
+// reasoning as Edit User's own refreshVpnLinkSection: the unassigned set
+// can change between one dialog-open and the next.
+async function populateAddUserVpnLinkSelect() {
+	const select = document.getElementById("u-vpn-link-select");
+	select.innerHTML = '<option value="">Loading…</option>';
+	try {
+		const unassigned = await apiFetch("/api/clients/unassigned");
+		select.innerHTML = unassigned.length
+			? '<option value="">Select a profile…</option>' + unassigned.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("")
+			: '<option value="">No unassigned profiles</option>';
+	} catch (e) {
+		select.innerHTML = '<option value="">Couldn\'t load</option>';
+		toast(e.message, "error");
+	}
 }
 function openAddUserDialog() {
 	resetAddUserForm();
@@ -850,10 +915,21 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 	const password = document.getElementById("u-password").value;
 	const role = document.getElementById("u-role").value;
 	const firstName = document.getElementById("u-first").value.trim();
+	const linkingExisting = document.getElementById("u-vpn-mode-link").checked;
 	const mac = document.getElementById("u-mac").value.trim();
+	const linkExistingVpnProfile = document.getElementById("u-vpn-link-select").value;
 	if (!firstName) { toast("First Name is required.", "error"); return; }
-	if (!uEmailValidation.check() || !uPhoneValidation.check() || !uMacValidation.check() || !uBandwidthValidation.check()) {
+	// uMacValidation only matters in "create new" mode -- skipped entirely
+	// when linking (the MAC field is hidden and not required there, see
+	// setAddUserVpnMode), same reasoning as every other conditionally-shown
+	// field's validation elsewhere in this file (e.g. the geo-restriction
+	// lists, only checked when their own toggle is on).
+	if (!uEmailValidation.check() || !uPhoneValidation.check() || !uBandwidthValidation.check() || (!linkingExisting && !uMacValidation.check())) {
 		toast("Please fix the highlighted field(s) before submitting.", "error");
+		return;
+	}
+	if (linkingExisting && !linkExistingVpnProfile) {
+		toast("Select an existing VPN profile to link, or switch to \"Create new VPN profile\".", "error");
 		return;
 	}
 	const pwCheckError = uPasswordConfirm.check();
@@ -873,7 +949,9 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 		const result = await apiFetch("/api/users", {
 			method: "POST",
 			body: {
-				username, password, role, mac,
+				username, password, role,
+				mac: linkingExisting ? null : mac,
+				link_existing_vpn_profile: linkingExisting ? linkExistingVpnProfile : null,
 				first_name: firstName,
 				last_name: document.getElementById("u-last").value.trim() || null,
 				email: document.getElementById("u-email").value.trim(),
