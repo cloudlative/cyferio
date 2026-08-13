@@ -318,7 +318,21 @@ def get_active_sessions(_: User = Depends(_require_client_viewer)):
     from the periodic status FILE, not this live socket query). Used by
     the Clients page to know which rows can show a Disconnect Session
     button. Read-only, so view-scoped (editor AND viewer), unlike the
-    disconnect actions below."""
+    disconnect actions below.
+
+    Degrades to an empty list -- rather than _host_executor_config()'s
+    usual 400 -- when the SSH host executor isn't configured. Found live
+    on a freshly-deployed box that never had HOST_SSH_TARGET/
+    HOST_SSH_KEY_PATH set up: the Clients page's loadClients() fetches
+    this in the same Promise.all as GET /api/clients (the actual profile
+    listing), so this endpoint hard-failing blanked the ENTIRE page --
+    profiles, policies, everything -- over a config gap that should only
+    disable session-specific UI (Disconnect button, live Source IP/RX/TX).
+    The write actions below (disconnect/disconnect-all) still hard-fail
+    via _host_executor_config() as before -- there's no meaningful
+    "degraded" behavior for an action that can't run at all."""
+    if not settings.HOST_SSH_TARGET or not settings.HOST_SSH_KEY_PATH:
+        return []
     config = _host_executor_config()
     try:
         data = run_host_command(config, "list-sessions")
