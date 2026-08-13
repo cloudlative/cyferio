@@ -27,3 +27,12 @@ app/data/
 app/pgdata/
 GeoLite2-Country/
 *.mmdb
+
+# Host-executor deploy key (see .env.example's "Host executor" section) --
+# per-install secret, same rationale as the block at the top of this file.
+# The private key has no file extension, so *.key above doesn't catch it.
+/secrets/
+
+# Per-host Compose overrides (e.g. mounting the host-executor deploy key
+# above only on the machines that have it) -- never shared across hosts.
+docker-compose.override.yml
