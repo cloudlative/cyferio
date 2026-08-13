@@ -1,5 +1,5 @@
 """
-Central configuration for the OpenVPN Toolkit web app.
+Central configuration for the Cyferio web app.
 
 Everything is read from environment variables (see ../.env.example), with
 sane defaults for a co-located deployment (app running directly on the same
@@ -139,7 +139,7 @@ class Settings:
     # Purely cosmetic, env-driven so a given deployment can relabel the app
     # (sidebar header, login page, footer credit) without touching templates
     # or committing anything person/org-specific to this open-source repo.
-    APP_NAME: str = os.environ.get("APP_NAME", "OpenVPN Toolkit")
+    APP_NAME: str = os.environ.get("APP_NAME", "Cyferio")
     APP_TAGLINE: str = os.environ.get("APP_TAGLINE", "Sign in to manage clients, MACs & live status")
     APP_FOOTER_CREDIT: str = os.environ.get("APP_FOOTER_CREDIT", "")
 

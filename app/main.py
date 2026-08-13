@@ -1,5 +1,5 @@
 """
-OpenVPN Toolkit web app -- entrypoint.
+Cyferio web app -- entrypoint.
 
 Run directly with:
     uvicorn main:app --host 0.0.0.0 --port 8000
@@ -225,7 +225,7 @@ async def lifespan(_app: FastAPI):
                 pass
 
 
-app = FastAPI(title="OpenVPN Toolkit Admin", docs_url="/api/docs", redoc_url=None, lifespan=lifespan)
+app = FastAPI(title="Cyferio Admin", docs_url="/api/docs", redoc_url=None, lifespan=lifespan)
 
 app.add_middleware(
     SessionMiddleware,

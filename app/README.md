@@ -1,14 +1,15 @@
-# OpenVPN Toolkit — Web App
+# Cyferio Admin
 
-A web admin UI for the [OpenVPN Toolkit](../README.md) CLI scripts, aimed at
+The web admin UI for the [Cyferio](../README.md) CLI scripts, aimed at
 non-technical users who need to add/revoke clients and check VPN status
 without touching a terminal. It's a thin FastAPI frontend over
 `openvpn-install.sh` and `vpn-status.py` — those two scripts remain the
 single source of truth for all VPN logic; this app doesn't reimplement any
 of it, only calls it and renders the result.
 
-> **Status**: deployed to production at https://vpn-mgmt.cloudlative.com,
-> fronted by Traefik (automatic Let's Encrypt TLS) and backed by PostgreSQL.
+> **Status**: production-ready — deploys behind Traefik (automatic Let's
+> Encrypt TLS) with a PostgreSQL backend; see `docker-compose.yml` and
+> `setup-new-machine.sh` for a full self-hosted install.
 
 ## Features
 

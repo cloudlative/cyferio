@@ -1,6 +1,8 @@
-# OpenVPN Toolkit
+# Cyferio
 
-A small, self-contained OpenVPN road-warrior installer and management toolkit for Ubuntu/Debian/CentOS/Fedora, extending the well-known [Nyr/Angristan-style installer](https://github.com/shahzadmasud/openvpn.git) lineage with:
+Self-hosted OpenVPN management: RBAC, MAC binding, geo/ASN restrictions, bandwidth quotas, and audit-logged administration. → [cyferio.com](https://cyferio.com)
+
+Cyferio started as, and still includes, a small self-contained OpenVPN road-warrior installer and management toolkit for Ubuntu/Debian/CentOS/Fedora, now built on a Python-based installer/CLI (`app/services/openvpn/`, `app/cli/openvpn_admin.py`) rather than a bash-script foundation, with:
 
 - **Device MAC-address binding** — every client connection is checked against a registered `name=mac` allowlist (`openvpn_db.txt`) in addition to normal certificate auth, via a `client-connect` script.
 - **A non-interactive CLI** alongside the original interactive menu, so clients can be added/revoked/listed from automation, not just a terminal prompt.
@@ -15,13 +17,13 @@ A small, self-contained OpenVPN road-warrior installer and management toolkit fo
 | `vpn-status.py` | Live connection status, all-clients view, bandwidth, rejected-attempt auditing |
 | `vpn-tools.conf.example` | Copy to `/etc/openvpn/vpn-tools.conf` to override any default path/setting |
 | `completions/*.bash` | Optional bash tab-completion for both tools' CLI flags |
-| `app/` | Optional web admin UI (FastAPI) for non-technical users — see [app/README.md](app/README.md) |
+| `app/` | Cyferio Admin — the full web admin UI (FastAPI): RBAC, MAC/geo/ASN restrictions, bandwidth quotas, reporting, and audit logging — see [app/README.md](app/README.md) |
 
 ## Quick start
 
 ```bash
-git clone https://github.com/cloudlative/openvpn-toolkit.git
-cd openvpn-toolkit
+git clone https://github.com/cloudlative/cyferio.git
+cd cyferio
 sudo bash openvpn-install.sh
 ```
 
