@@ -365,6 +365,20 @@ class TestSelfServiceProfile:
         assert r.json()["username"] == "viewer"
 
     def test_viewer_can_update_own_profile_fields(self, app_client, db_session):
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.patch("/api/users/me", json={"first_name": "Val"})
+        assert r.status_code == 200
+        assert r.json()["first_name"] == "Val"
+
+    def test_viewer_cannot_change_own_teams(self, app_client, db_session):
+        """Team membership is deliberately not self-service for anyone (see
+        update_my_profile's own comment) -- UpdateProfileRequest has no
+        team_ids field at all, so one included in the request body is
+        silently ignored (Pydantic's default extra="ignore" behavior),
+        never rejected and never applied. Previously (pre-f1d2e5d) this
+        endpoint DID accept team_ids -- see that commit's "Profile page:
+        removed the self-service Teams field entirely" note for why this
+        test's expected outcome flipped from "applies" to "ignored"."""
         team = Team(name="Support")
         db_session.add(team)
         db_session.commit()
@@ -374,9 +388,9 @@ class TestSelfServiceProfile:
         assert r.status_code == 200
         body = r.json()
         assert body["first_name"] == "Val"
-        assert body["teams"] == ["Support"]
+        assert body["teams"] == []
 
-    def test_viewer_can_belong_to_multiple_teams(self, app_client, db_session):
+    def test_viewer_cannot_change_own_teams_with_multiple_ids(self, app_client, db_session):
         t1 = Team(name="Support")
         t2 = Team(name="Infra")
         db_session.add_all([t1, t2])
@@ -385,7 +399,7 @@ class TestSelfServiceProfile:
         login(app_client, "viewer", "viewerpass123")
         r = app_client.patch("/api/users/me", json={"team_ids": [t1.id, t2.id]})
         assert r.status_code == 200
-        assert sorted(r.json()["teams"]) == ["Infra", "Support"]
+        assert r.json()["teams"] == []
 
     def test_profile_update_cannot_change_role(self, app_client, db_session):
         login(app_client, "viewer", "viewerpass123")
