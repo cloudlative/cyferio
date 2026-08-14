@@ -28,9 +28,6 @@ class UpdateSettingsRequest(BaseModel):
     to touch (see model_fields_set usage in the route below); this is a
     partial update, not a full replace. An explicit null clears that field
     back to its environment-variable default (see app_settings.py)."""
-    app_name: str | None = None
-    app_tagline: str | None = None
-    app_footer_credit: str | None = None
     portal_url: str | None = None
 
     smtp_host: str | None = None
@@ -247,9 +244,6 @@ class UpdateSettingsRequest(BaseModel):
 def _serialize() -> dict:
     s = runtime
     return {
-        "app_name": s.app_name,
-        "app_tagline": s.app_tagline,
-        "app_footer_credit": s.app_footer_credit,
         "portal_url": s.portal_url,
         "smtp_host": s.smtp_host,
         "smtp_port": s.smtp_port,
@@ -310,7 +304,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
     fields_set = body.model_fields_set
     changes = []
 
-    for field in ("app_name", "app_tagline", "app_footer_credit", "portal_url", "smtp_host", "smtp_port",
+    for field in ("portal_url", "smtp_host", "smtp_port",
                    "smtp_username", "smtp_from", "smtp_use_tls", "min_password_length",
                    "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
                    "audit_retention_days", "log_failed_login_attempts", "default_new_user_role",

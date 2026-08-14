@@ -341,10 +341,6 @@ class AppSettings(Base):
 
     id = Column(Integer, primary_key=True)
 
-    # Branding (see config.py's APP_NAME/APP_TAGLINE/APP_FOOTER_CREDIT)
-    app_name = Column(String(128), nullable=True)
-    app_tagline = Column(String(256), nullable=True)
-    app_footer_credit = Column(String(256), nullable=True)
     # The portal's own public URL, e.g. "https://vpn.example.com" -- used
     # by the welcome email (mailer.send_welcome_email) so a new user knows
     # where to log in. NULL falls back to "https://{APP_DOMAIN}" (see

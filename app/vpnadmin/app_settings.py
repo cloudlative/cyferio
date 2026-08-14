@@ -121,9 +121,12 @@ class _RuntimeSettings:
     auth.py actually read -- see this module's docstring for why."""
 
     def __init__(self):
-        self.app_name = env_settings.APP_NAME
-        self.app_tagline = env_settings.APP_TAGLINE
-        self.app_footer_credit = env_settings.APP_FOOTER_CREDIT
+        # Fixed brand identity -- not settings-backed, never reassigned
+        # anywhere else (see refresh_runtime_cache(), which no longer
+        # touches this). Kept as an attribute on `runtime` rather than a
+        # module-level constant purely so templates/mailer.py don't need to
+        # change: they already read `app_settings.app_name` everywhere.
+        self.app_name = "Cyferio"
         self.portal_url = f"https://{env_settings.APP_DOMAIN}" if env_settings.APP_DOMAIN else None
         self.smtp_host = env_settings.SMTP_HOST
         self.smtp_port = env_settings.SMTP_PORT
@@ -177,9 +180,6 @@ def refresh_runtime_cache(db: Session) -> None:
     defaults for anything left NULL). Called once at startup and again
     after every settings save."""
     row = get_settings_row(db)
-    runtime.app_name = row.app_name or env_settings.APP_NAME
-    runtime.app_tagline = row.app_tagline or env_settings.APP_TAGLINE
-    runtime.app_footer_credit = row.app_footer_credit if row.app_footer_credit is not None else env_settings.APP_FOOTER_CREDIT
     runtime.portal_url = row.portal_url or (f"https://{env_settings.APP_DOMAIN}" if env_settings.APP_DOMAIN else None)
     runtime.smtp_host = row.smtp_host if row.smtp_host is not None else env_settings.SMTP_HOST
     runtime.smtp_port = row.smtp_port if row.smtp_port is not None else env_settings.SMTP_PORT
@@ -226,8 +226,8 @@ def apply_settings_globals(templates) -> None:
     """Registers the live `runtime` object (not a snapshot of its current
     values) as a Jinja2 global -- there are two separate Jinja2Templates
     instances in this app (routes/pages.py and routes/auth.py each create
-    their own), so both need this applied, same as the branding globals it
-    replaces. Templates read e.g. `{{ app_settings.app_name }}`; because
+    their own), so both need this applied. Templates read e.g.
+    `{{ app_settings.app_name }}`; because
     `runtime` is a mutable object referenced by the globals dict (not a
     copied string), later changes to its attributes are visible on the
     very next render with no extra wiring."""

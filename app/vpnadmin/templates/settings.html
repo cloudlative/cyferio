@@ -9,21 +9,8 @@
 
 <form id="settings-form">
 	<div class="card">
-		<h2>Organization</h2>
+		<h2>Platform Settings</h2>
 		<div class="form-grid">
-			<div class="field">
-				<label for="s-app-name">App Name</label>
-				<input type="text" id="s-app-name" maxlength="128" placeholder="Cyferio">
-			</div>
-			<div class="field">
-				<label for="s-app-tagline">Login Tagline</label>
-				<input type="text" id="s-app-tagline" maxlength="256" placeholder="Sign in to manage clients, MACs &amp; live status">
-			</div>
-			<div class="field">
-				<label for="s-app-footer">Sidebar Footer Credit <span class="muted">(optional)</span></label>
-				<input type="text" id="s-app-footer" maxlength="256" placeholder="e.g. Operated by Example Corp">
-				<p class="field-hint">Shown in small text in the page footer's right-hand corner on every logged-in page. Leave blank to show nothing.</p>
-			</div>
 			<div class="field">
 				<label for="s-portal-url">Portal URL <span class="muted">(optional)</span></label>
 				<input type="text" id="s-portal-url" maxlength="512" placeholder="https://vpn.example.com">
@@ -420,9 +407,6 @@ document.getElementById("smtp-cancel-btn").addEventListener("click", () => loadS
 async function loadSettings() {
 	try {
 		const s = await apiFetch("/api/settings");
-		setVal("s-app-name", s.app_name);
-		setVal("s-app-tagline", s.app_tagline);
-		setVal("s-app-footer", s.app_footer_credit);
 		setVal("s-portal-url", s.portal_url);
 		setVal("s-smtp-host", s.smtp_host);
 		setVal("s-smtp-port", s.smtp_port);
@@ -503,9 +487,6 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		return;
 	}
 	const body = {
-		app_name: val("s-app-name") || null,
-		app_tagline: val("s-app-tagline") || null,
-		app_footer_credit: val("s-app-footer"),
 		portal_url: val("s-portal-url") || null,
 		smtp_host: val("s-smtp-host"),
 		smtp_port: intOrNull(val("s-smtp-port")),
