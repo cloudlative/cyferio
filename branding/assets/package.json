@@ -1,0 +1,13 @@
+{
+  "name": "cyferio-brand-assets",
+  "private": true,
+  "type": "module",
+  "description": "Regenerates png/ from the source SVGs in this directory -- see README.md",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "png-to-ico": "^3.0.2"
+  }
+}
