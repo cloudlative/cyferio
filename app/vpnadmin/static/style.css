@@ -320,10 +320,14 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	/* Chromium still counts a translateX(-100%)'d fixed element toward the
 	   document's horizontal scroll extent, even fully off-screen -- so the
 	   closed drawer alone was adding ~46px of page-level horizontal
-	   overflow with nothing visibly there to explain it. Since nothing on
-	   this breakpoint is meant to scroll sideways anyway, clip it at the
-	   root rather than fight the transform. */
-	body { overflow-x: hidden; }
+	   overflow with nothing visibly there to explain it. Has to be on
+	   <html> specifically, not <body> -- position:fixed elements are
+	   positioned against the viewport and escape a body-level overflow
+	   clip entirely (that's the defining behavior of "fixed"), so only
+	   clipping the true root scrolling element actually suppresses it.
+	   Since nothing at this breakpoint is meant to scroll sideways on
+	   purpose anyway, this costs nothing. */
+	html { overflow-x: hidden; }
 	.sidebar-toggle { display: flex; }
 	.sidebar {
 		position: fixed;
