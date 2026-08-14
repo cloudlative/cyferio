@@ -11,7 +11,7 @@
 <body class="{{ 'has-sidebar' if user }}">
 	<div id="page-progress"><span class="ring"></span></div>
 	{% if user %}
-	<aside class="sidebar">
+	<aside class="sidebar" id="sidebar">
 		<a href="/" class="brand">
 			{# White-on-gradient, not the brand-color mark -- the tile
 			   background (--accent-gradient) changes hue per active theme,
@@ -76,12 +76,17 @@
 			{% endif %}
 		</nav>
 	</aside>
+	<div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 	{% endif %}
 
 	<main class="content">
 		{% if user %}
 		<header class="content-header">
-			<div class="content-header-left"></div>
+			<div class="content-header-left">
+				<button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">
+					<span></span><span></span><span></span>
+				</button>
+			</div>
 			<div class="content-header-right">
 				<div class="notif-bell" id="notif-bell">
 					<button type="button" class="btn-secondary btn-sm notif-bell-toggle" id="notif-bell-toggle" aria-haspopup="true" aria-expanded="false">

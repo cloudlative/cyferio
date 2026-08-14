@@ -275,6 +275,61 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	background: linear-gradient(90deg, rgba(99,102,241,0.22), rgba(99,102,241,0.04));
 	box-shadow: inset 2px 0 0 var(--accent-2);
 }
+
+/* Hamburger toggle (base.html's #sidebar-toggle, .content-header-left) --
+   hidden by default, only shown once the sidebar itself goes off-canvas
+   below the --sidebar-breakpoint media query further down. Plain CSS
+   transform, no icon font/SVG needed for 3 bars. */
+.sidebar-toggle {
+	display: none;
+	flex-direction: column;
+	justify-content: center;
+	gap: 4px;
+	width: 36px;
+	height: 36px;
+	padding: 0;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--surface);
+	cursor: pointer;
+}
+.sidebar-toggle span { display: block; width: 16px; height: 2px; margin: 0 auto; background: var(--text); border-radius: 2px; }
+
+/* Backdrop behind the off-canvas sidebar on mobile (base.html's
+   #sidebar-backdrop) -- click-to-close target, also just visually
+   separates the open drawer from the page content behind it. */
+.sidebar-backdrop {
+	display: none;
+	position: fixed;
+	inset: 0;
+	z-index: 190;
+	background: rgba(0, 0, 0, 0.5);
+}
+.sidebar-backdrop.open { display: block; }
+
+/* Below this width there isn't room for a permanent 252px sidebar next to
+   real content (tables/forms already fight for space on a phone) -- same
+   breakpoint the marketing/docs sites collapse their own nav at, so the
+   whole product switches to a mobile layout at one consistent width.
+   The sidebar becomes a fixed, off-canvas drawer (translateX, not
+   display:none, so the slide transition has something to animate) toggled
+   by JS adding/removing .open (see app.js's initSidebarToggle()); because
+   position:fixed removes it from body.has-sidebar's flex flow entirely,
+   .content already reclaims the full width with no extra rule needed. */
+@media (max-width: 860px) {
+	.sidebar-toggle { display: flex; }
+	.sidebar {
+		position: fixed;
+		left: 0;
+		top: 0;
+		z-index: 200;
+		transform: translateX(-100%);
+		transition: transform 0.22s ease;
+		box-shadow: var(--shadow-lg);
+	}
+	.sidebar.open { transform: translateX(0); }
+}
+
 /* --- Content header ---------------------------------------------------
    Sits above every logged-in page's own content (see base.html) -- holds
    the admin-only quick theme switcher plus the "who"/logout controls that

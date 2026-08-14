@@ -1795,6 +1795,45 @@ const THEME_QUICK_LABELS = {
 })();
 
 /**
+ * Mobile sidebar toggle (base.html's #sidebar-toggle / #sidebar /
+ * #sidebar-backdrop) -- below the 860px breakpoint in style.css the
+ * sidebar is a fixed off-canvas drawer; this just adds/removes the
+ * `.open` class that CSS transition slides it in on. A no-op above that
+ * breakpoint since the toggle button itself is display:none there, but
+ * the listeners are harmless either way.
+ */
+(function initSidebarToggle() {
+	const toggle = document.getElementById("sidebar-toggle");
+	const sidebar = document.getElementById("sidebar");
+	const backdrop = document.getElementById("sidebar-backdrop");
+	if (!toggle || !sidebar || !backdrop) return;
+
+	function closeSidebar() {
+		sidebar.classList.remove("open");
+		backdrop.classList.remove("open");
+		toggle.setAttribute("aria-expanded", "false");
+	}
+	function openSidebar() {
+		sidebar.classList.add("open");
+		backdrop.classList.add("open");
+		toggle.setAttribute("aria-expanded", "true");
+	}
+
+	toggle.addEventListener("click", () => {
+		if (sidebar.classList.contains("open")) closeSidebar();
+		else openSidebar();
+	});
+	backdrop.addEventListener("click", closeSidebar);
+	// Closing on nav-link click (rather than leaving it open across a full
+	// page navigation) matches the marketing/docs sites' own mobile menus --
+	// the drawer's job is done once it's gotten you where you're going.
+	sidebar.querySelectorAll("nav a").forEach((a) => a.addEventListener("click", closeSidebar));
+	document.addEventListener("keydown", (e) => {
+		if (e.key === "Escape") closeSidebar();
+	});
+})();
+
+/**
  * Shared app-wide "(i)" info tooltip (see .info-tip in style.css) -- the
  * hover/keyboard-focus display is pure CSS (:hover/:focus-visible), so
  * this handler only exists for the tap case: touch devices don't fire
