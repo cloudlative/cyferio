@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="branding/assets/png/logo-horizontal-dark-bg.png">
+    <source media="(prefers-color-scheme: light)" srcset="branding/assets/png/logo-horizontal-light-bg.png">
+    <img alt="Cyferio" src="branding/assets/png/logo-horizontal-light-bg.png" width="360">
+  </picture>
+</p>
+
 # Cyferio
 
 *Pronounced "SY-fer-yo" (/ˈsaɪfəryoʊ/) — from "cipher".*
