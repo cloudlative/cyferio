@@ -263,6 +263,29 @@ Separate from VPN client restrictions above, an **admin login** to this web app 
 - Root (or passwordless sudo) to run `openvpn-install.sh`
 - Python 3 for `vpn-status.py`
 
+### Sizing
+
+Cyferio is a single-host architecture — OpenVPN, its PKI, and the web admin
+all run on one machine, so sizing is about choosing the right box, not a
+fleet. Numbers below are measured, not estimated, from two real
+deployments (a 1-vCPU/1GB production box running 19 clients for 143 days,
+and a 2-vCPU/8GB box with headroom to spare).
+
+| | Minimum | Recommended | Production-scale |
+|---|---|---|---|
+| vCPU | 1 | 2 | 2-4 |
+| RAM | 1 GB + 2 GB swap | 4 GB | 4-8 GB |
+| Disk | 20-25 GB SSD | 40 GB SSD | 80-100+ GB SSD |
+| Database | SQLite | SQLite or Postgres | PostgreSQL |
+| Good for | ~20-25 clients, small team | dozens-~100 clients | higher client counts/throughput, needs backups + external monitoring |
+
+CPU/RAM scale mainly with *encrypted throughput*, not client count —
+OpenVPN doesn't fork per client, so its own footprint barely moves between
+a handful of clients and a few dozen (measured: 7-12 MB RSS across 9-19
+clients tested). Full breakdown — component-by-component RAM/CPU/disk,
+networking, database, and monitoring guidance — in
+[Sizing & Infrastructure](https://docs.cyferio.com/sizing/).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

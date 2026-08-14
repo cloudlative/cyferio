@@ -44,6 +44,17 @@ Everything the CLI can do, plus more:
 - **Runs co-located** with the OpenVPN server: calls `openvpn-install.sh`/`vpn-status.py` via `subprocess` on the same box, not over SSH.
 - **No shell injection surface**: every subprocess call uses an explicit argument list (never `shell=True` or string-built commands) — see `vpnadmin/cli_wrapper.py` and `tests/test_cli_wrapper.py`, which specifically asserts a malicious-looking client name arrives as one inert argument, not something a shell could interpret.
 
+Measured footprint of the `app` container itself: 120-150 MB RAM steady
+state, negligible CPU except a one-time ~90-115s single-core spike at
+startup (and after any GeoIP database refresh) while building the
+city/ASN restriction pick-lists. Runs a single `uvicorn` worker by default
+(see `Dockerfile`'s `CMD`) — fine for typical admin/portal concurrency,
+but `--workers N` is the knob if a large self-service portal user base
+grows past that. Full CPU/RAM/storage/networking/database sizing guidance
+for the whole stack (this app + OpenVPN + Traefik + Postgres), across
+minimum/recommended/production-scale tiers, backed by real deployment
+measurements: [Sizing & Infrastructure](https://docs.cyferio.com/sizing/).
+
 ## Quick start (local, no Docker)
 
 ```bash
