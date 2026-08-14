@@ -70,6 +70,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY main.py .
 COPY migrate_vpn_profiles.py .
+COPY drop_legacy_branding_columns.py .
 COPY vpnadmin ./vpnadmin
 COPY scripts ./scripts
 # Phase 1 Python OpenVPN service layer (see
