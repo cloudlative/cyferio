@@ -242,8 +242,7 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	text-decoration: none;
 }
 .sidebar .brand:hover { color: #fff; text-decoration: none; opacity: 0.88; }
-.sidebar .brand::before {
-	content: url("/static/mark.svg");
+.sidebar .brand-icon {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -256,6 +255,7 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	background: var(--accent-gradient);
 	box-shadow: var(--accent-glow);
 }
+.sidebar .brand-icon svg { display: block; }
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .sidebar nav a {
 	display: flex;
