@@ -1,5 +1,6 @@
 """Team metadata (slug/description/tags), added for future reporting by
 team -- schema + basic CRUD only, see models.py's Team docstring."""
+
 from vpnadmin.db import _backfill_team_slugs
 from vpnadmin.models import Team
 
@@ -9,10 +10,15 @@ from .conftest import login
 class TestCreateTeamWithMetadata:
     def test_explicit_slug_description_tags_round_trip(self, app_client):
         login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/teams", json={
-            "name": "DevOps Team", "slug": "devops-team",
-            "description": "Infra and platform engineering.", "tags": ["infra", "on-call"],
-        })
+        r = app_client.post(
+            "/api/teams",
+            json={
+                "name": "DevOps Team",
+                "slug": "devops-team",
+                "description": "Infra and platform engineering.",
+                "tags": ["infra", "on-call"],
+            },
+        )
         assert r.status_code == 201
         body = r.json()
         assert body["slug"] == "devops-team"
@@ -43,9 +49,13 @@ class TestUpdateTeam:
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/teams", json={"name": "Security Team"})
         team_id = r.json()["id"]
-        r2 = app_client.patch(f"/api/teams/{team_id}", json={
-            "description": "AppSec + infra security.", "tags": ["security"],
-        })
+        r2 = app_client.patch(
+            f"/api/teams/{team_id}",
+            json={
+                "description": "AppSec + infra security.",
+                "tags": ["security"],
+            },
+        )
         assert r2.status_code == 200
         assert r2.json()["description"] == "AppSec + infra security."
         assert r2.json()["tags"] == ["security"]
@@ -86,6 +96,7 @@ class TestSlugBackfill:
         from sqlalchemy.orm import sessionmaker
 
         from vpnadmin import db as db_mod
+
         original_session_local = db_mod.SessionLocal
         db_mod.SessionLocal = sessionmaker(bind=db_session.get_bind())
         try:
@@ -105,6 +116,7 @@ class TestSlugBackfill:
         from sqlalchemy.orm import sessionmaker
 
         from vpnadmin import db as db_mod
+
         original_session_local = db_mod.SessionLocal
         db_mod.SessionLocal = sessionmaker(bind=db_session.get_bind())
         try:

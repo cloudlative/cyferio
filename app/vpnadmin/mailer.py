@@ -4,6 +4,7 @@ profile, and sending a Settings-page test email to verify SMTP config
 before saving it. Deliberately stdlib-only (smtplib + email.message) -- no
 new pip dependency for what's a small, well-trodden piece of functionality.
 """
+
 import re
 import smtplib
 from email.message import EmailMessage
@@ -57,8 +58,7 @@ def is_valid_email(address: str) -> bool:
     return bool(_EMAIL_RE.match(address.strip()))
 
 
-def _send(*, host: str, port: int, username: str, password: str, use_tls: bool,
-          from_address: str, to_address: str, msg: EmailMessage) -> None:
+def _send(*, host: str, port: int, username: str, password: str, use_tls: bool, from_address: str, to_address: str, msg: EmailMessage) -> None:
     """Low-level send shared by send_ovpn_profile (uses the saved/effective
     settings) and send_test_email (uses whatever's currently in the
     Settings-page form, not necessarily saved yet). Lets smtplib's own
@@ -101,7 +101,7 @@ def send_ovpn_profile(*, to_address: str, client_name: str, ovpn_content: str, r
     greeting = f"Hi {recipient_name}," if recipient_name else "Hello,"
     msg.set_content(
         f"{greeting}\n\n"
-        f"Your VPN configuration profile for \"{client_name}\" is attached "
+        f'Your VPN configuration profile for "{client_name}" is attached '
         f"({client_name}.ovpn). Import it into your OpenVPN client to connect.\n\n"
         f"This file contains a private key -- keep it confidential and don't forward it.\n\n"
         f"If you weren't expecting this email, you can safely ignore it.\n\n"
@@ -119,13 +119,18 @@ def send_ovpn_profile(*, to_address: str, client_name: str, ovpn_content: str, r
     )
 
     _send(
-        host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
-        use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=to_address, msg=msg,
+        host=s.smtp_host,
+        port=s.smtp_port,
+        username=s.smtp_username,
+        password=s.smtp_password,
+        use_tls=s.smtp_use_tls,
+        from_address=s.smtp_from,
+        to_address=to_address,
+        msg=msg,
     )
 
 
-def send_welcome_email(*, to_address: str, username: str, password: str, client_name: str,
-                        ovpn_content: str, recipient_name: str | None = None) -> None:
+def send_welcome_email(*, to_address: str, username: str, password: str, client_name: str, ovpn_content: str, recipient_name: str | None = None) -> None:
     """Onboarding email for the "Send VPN Profile via Email" checkbox
     (routes/users.py's create_user) -- unlike send_ovpn_profile above
     (which the standalone "Email Profile" button also uses, and which
@@ -169,8 +174,12 @@ def send_welcome_email(*, to_address: str, username: str, password: str, client_
     )
     msg.add_alternative(
         _render_email_template(
-            "welcome.html", username=username, password=password, client_name=client_name,
-            recipient_name=recipient_name, portal_url=s.portal_url,
+            "welcome.html",
+            username=username,
+            password=password,
+            client_name=client_name,
+            recipient_name=recipient_name,
+            portal_url=s.portal_url,
         ),
         subtype="html",
     )
@@ -182,13 +191,18 @@ def send_welcome_email(*, to_address: str, username: str, password: str, client_
     )
 
     _send(
-        host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
-        use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=to_address, msg=msg,
+        host=s.smtp_host,
+        port=s.smtp_port,
+        username=s.smtp_username,
+        password=s.smtp_password,
+        use_tls=s.smtp_use_tls,
+        from_address=s.smtp_from,
+        to_address=to_address,
+        msg=msg,
     )
 
 
-def send_test_email(*, to_address: str, host: str, port: int, username: str, password: str,
-                     from_address: str, use_tls: bool) -> None:
+def send_test_email(*, to_address: str, host: str, port: int, username: str, password: str, from_address: str, use_tls: bool) -> None:
     """Sends a short plain test message using whatever SMTP values are
     currently in the Settings-page form -- NOT necessarily what's already
     saved -- so an admin can verify a config before committing to it. Never
@@ -199,12 +213,17 @@ def send_test_email(*, to_address: str, host: str, port: int, username: str, pas
     msg = EmailMessage()
     msg["Subject"] = f"Test email from {app_name}"
     msg.set_content(
-        f"This is a test email from {app_name} to confirm your SMTP settings are working.\n\n"
-        f"If you received this, outbound email is configured correctly."
+        f"This is a test email from {app_name} to confirm your SMTP settings are working.\n\nIf you received this, outbound email is configured correctly."
     )
     _send(
-        host=host, port=port, username=username, password=password,
-        use_tls=use_tls, from_address=from_address, to_address=to_address, msg=msg,
+        host=host,
+        port=port,
+        username=username,
+        password=password,
+        use_tls=use_tls,
+        from_address=from_address,
+        to_address=to_address,
+        msg=msg,
     )
 
 
@@ -228,8 +247,14 @@ def send_admin_notification(*, subject: str, body: str) -> bool:
     msg.set_content(body)
     try:
         _send(
-            host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
-            use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=s.admin_notification_email, msg=msg,
+            host=s.smtp_host,
+            port=s.smtp_port,
+            username=s.smtp_username,
+            password=s.smtp_password,
+            use_tls=s.smtp_use_tls,
+            from_address=s.smtp_from,
+            to_address=s.admin_notification_email,
+            msg=msg,
         )
         return True
     except Exception:

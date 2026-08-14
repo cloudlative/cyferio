@@ -5,6 +5,7 @@ MAC normalization :209-220, port/protocol/DNS/menu selection :1083,:1127,
 than re-validating inline, so there is exactly one place that defines what a
 valid client name/MAC/port/protocol looks like.
 """
+
 from __future__ import annotations
 
 import re
@@ -47,7 +48,7 @@ def normalize_mac(raw: str) -> str:
             f"Invalid MAC address: expected 12 hex characters (e.g. aa:bb:cc:dd:ee:ff), got {raw!r}.",
             raw_mac=raw,
         )
-    return ":".join(hex_only[i:i + 2] for i in range(0, 12, 2))
+    return ":".join(hex_only[i : i + 2] for i in range(0, 12, 2))
 
 
 def validate_port(raw: str | int) -> int:

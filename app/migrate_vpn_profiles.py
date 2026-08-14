@@ -26,14 +26,15 @@ protected_from_auto_revoke=True (see VpnProfileLink's docstring in
 models.py) -- confirmed twice by the user as a hard production-safety
 constraint.
 """
+
 import argparse
 import getpass
 import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0] or ".")
 
-from vpnadmin.db import SessionLocal, init_db  # noqa: E402
 from vpnadmin import migration_engine  # noqa: E402
+from vpnadmin.db import SessionLocal, init_db  # noqa: E402
 
 
 def _print_report(report: dict) -> None:

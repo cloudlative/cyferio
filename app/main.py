@@ -5,6 +5,7 @@ Run directly with:
     uvicorn main:app --host 0.0.0.0 --port 8000
 or via the Dockerfile's CMD.
 """
+
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -14,7 +15,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from vpnadmin import cli_wrapper
+from vpnadmin import app_settings, cli_wrapper, geo_lists, mailer
+
 # Aliased to health_data -- routes/health.py (the API router module,
 # imported below via `from vpnadmin.routes import ... health ...`) and
 # vpnadmin/health.py (this data-gathering module) share the bare name
@@ -29,10 +31,9 @@ from vpnadmin.app_settings import prune_audit_log, prune_db_stat_snapshots, refr
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_admin
-from vpnadmin import geo_lists, mailer
-from vpnadmin import app_settings
 from vpnadmin.models import QuotaNotification
-from vpnadmin.routes import auth, clients, diagnostics, geo, health, me_vpn, notifications, openvpn_install, pages, reports, roles, settings as settings_routes, status, teams, users
+from vpnadmin.routes import auth, clients, diagnostics, geo, health, me_vpn, notifications, openvpn_install, pages, reports, roles, status, teams, users
+from vpnadmin.routes import settings as settings_routes
 from vpnadmin.routes.reports import _load_rows
 
 logger = logging.getLogger(__name__)
@@ -141,27 +142,25 @@ def _check_quota_notifications(db) -> None:
         for level, threshold in (("warning", warning_pct), ("critical", critical_pct)):
             if pct_used < threshold:
                 continue
-            already_exists = (
-                db.query(QuotaNotification)
-                .filter_by(user_id=row["user_id"], period_start=period_start, level=level)
-                .first()
-            )
+            already_exists = db.query(QuotaNotification).filter_by(user_id=row["user_id"], period_start=period_start, level=level).first()
             if already_exists is not None:
                 continue
-            message = (
-                f"Your VPN client '{row['vpn_client_name']}' has used {pct_used}% of its "
-                f"{row['quota_gb']}GB monthly quota."
+            message = f"Your VPN client '{row['vpn_client_name']}' has used {pct_used}% of its {row['quota_gb']}GB monthly quota."
+            db.add(
+                QuotaNotification(
+                    user_id=row["user_id"],
+                    vpn_client_name=row["vpn_client_name"],
+                    level=level,
+                    pct_used=pct_used,
+                    message=message,
+                    period_start=period_start,
+                )
             )
-            db.add(QuotaNotification(
-                user_id=row["user_id"], vpn_client_name=row["vpn_client_name"],
-                level=level, pct_used=pct_used, message=message, period_start=period_start,
-            ))
             db.commit()
             if level == "critical" and app_settings.runtime.notify_admin_on_quota_critical and app_settings.runtime.admin_notification_email:
                 mailer.send_admin_notification(
                     subject=f"Bandwidth quota critical: {row['username']}",
-                    body=f"{row['username']}'s VPN client '{row['vpn_client_name']}' has used "
-                         f"{pct_used}% of its {row['quota_gb']}GB monthly quota.",
+                    body=f"{row['username']}'s VPN client '{row['vpn_client_name']}' has used {pct_used}% of its {row['quota_gb']}GB monthly quota.",
                 )
 
 

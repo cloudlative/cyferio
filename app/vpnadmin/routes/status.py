@@ -1,12 +1,12 @@
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from .. import app_settings
+from .. import app_settings, policy_store
 from .. import cli_wrapper as cli
-from .. import policy_store
+
 # Aliased for the same reason main.py aliases this import -- routes/health.py
 # (the API router module) and vpnadmin/health.py (this data-gathering
 # module) share the bare name "health"; this file doesn't import
@@ -84,11 +84,7 @@ def get_session_history(
     except ScriptError as e:
         raise HTTPException(status_code=502, detail=e.message)
 
-    links = (
-        db.query(VpnProfileLink.vpn_client_name, User.username, User.first_name, User.last_name)
-        .join(User, User.id == VpnProfileLink.user_id)
-        .all()
-    )
+    links = db.query(VpnProfileLink.vpn_client_name, User.username, User.first_name, User.last_name).join(User, User.id == VpnProfileLink.user_id).all()
     by_client = {
         client_name: {"portal_username": username, "portal_display_name": f"{first} {last}".strip() if last else first}
         for client_name, username, first, last in links
@@ -179,15 +175,18 @@ def _is_today(iso: str | None) -> bool:
     except ValueError:
         return False
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).date() == datetime.now(timezone.utc).date()
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).date() == datetime.now(UTC).date()
 
 
 def _has_any_restriction(policy: dict) -> bool:
     return bool(
-        policy.get("allowed_os") or policy.get("bandwidth_monthly_gb")
-        or policy.get("allowed_countries") or policy.get("allowed_cities")
-        or policy.get("allowed_asns") or policy.get("allowed_ips")
+        policy.get("allowed_os")
+        or policy.get("bandwidth_monthly_gb")
+        or policy.get("allowed_countries")
+        or policy.get("allowed_cities")
+        or policy.get("allowed_asns")
+        or policy.get("allowed_ips")
     )
 
 
@@ -203,7 +202,7 @@ def get_dashboard_overview(user: User = Depends(_require_dashboard_viewer), db: 
     duplicating that math."""
     from datetime import timedelta
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recent_cutoff = now - timedelta(days=7)
 
     users_total = db.query(User).filter(User.deleted.is_(False)).count()
@@ -255,8 +254,13 @@ def get_dashboard_overview(user: User = Depends(_require_dashboard_viewer), db: 
     if has_permission(db, user, "audit_log", "manage"):  # same gate as GET /api/audit above
         entries = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(10).all()
         recent_alerts = [
-            {"timestamp": e.timestamp.isoformat() if e.timestamp else None, "username": e.username,
-             "action": e.action, "target": e.target, "success": e.success}
+            {
+                "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+                "username": e.username,
+                "action": e.action,
+                "target": e.target,
+                "success": e.success,
+            }
             for e in entries
         ]
 
@@ -302,7 +306,8 @@ def get_dashboard_overview(user: User = Depends(_require_dashboard_viewer), db: 
                 {"timestamp": r.get("timestamp"), "claimed_name": r.get("claimed_name"), "reason": r.get("reason")}
                 for r in sorted(
                     (r for r in rejected if _parseable_timestamp(r.get("timestamp"))),
-                    key=lambda r: r["timestamp"], reverse=True,
+                    key=lambda r: r["timestamp"],
+                    reverse=True,
                 )
             ][:10],
             "quota_warnings": _recent_quota_warnings(db, 5),
@@ -318,12 +323,7 @@ def get_audit_log(limit: int = Query(20, ge=1, le=200), admin: User = Depends(re
     retention setting on the Settings page. Powers the Dashboard's Recent
     Activity section; not cached like the CLI-backed endpoints above since
     it's a cheap indexed DB query, not a subprocess call."""
-    entries = (
-        db.query(AuditLog)
-        .order_by(AuditLog.timestamp.desc())
-        .limit(limit)
-        .all()
-    )
+    entries = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit).all()
     return [
         {
             "timestamp": e.timestamp.isoformat() if e.timestamp else None,

@@ -12,6 +12,7 @@ FastAPI routes in Phase 2) decide how to render it. Every mutating function
 raises a typed exception (exceptions.py) instead of printing to stderr and
 returning 1.
 """
+
 from __future__ import annotations
 
 import os
@@ -30,13 +31,14 @@ from .exceptions import (
     MacNotFoundError,
 )
 from .paths import OpenVPNPaths
-from .validator import normalize_mac, require_mac, require_name, sanitize_client_name
+from .validator import require_mac, require_name, sanitize_client_name
 
 _DB_LINE_RE = re.compile(r"^[A-Za-z0-9_.\-]+=([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
 _ASN1_TIME_RE = re.compile(r"^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$")
 
 
 # --- shared helpers ----------------------------------------------------------
+
 
 def ensure_trailing_newline(path: str) -> None:
     """Mirrors ensure_trailing_newline() at :175-182."""
@@ -104,7 +106,7 @@ def _index_txt_rows(paths: OpenVPNPaths) -> list[list[str]]:
 
 
 def _cn_from_index_field(field_value: str) -> str:
-    return field_value[len("/CN="):] if field_value.startswith("/CN=") else field_value
+    return field_value[len("/CN=") :] if field_value.startswith("/CN=") else field_value
 
 
 def format_asn1_time(raw: str) -> str:
@@ -118,6 +120,7 @@ def format_asn1_time(raw: str) -> str:
 
 # --- do_add_client / do_revoke_client / do_show_ovpn ------------------------
 
+
 @dataclass(frozen=True)
 class AddClientResult:
     client: str
@@ -130,14 +133,16 @@ def add_client(paths: OpenVPNPaths, raw_name: str, raw_mac: str) -> AddClientRes
     client = sanitize_client_name(raw_name)
     if os.path.exists(paths.issued_crt(client)):
         raise ClientAlreadyExistsError(
-            f"{client}: a client with this name already exists.", client=client,
+            f"{client}: a client with this name already exists.",
+            client=client,
         )
     mac = require_mac(raw_mac)
     existing_owner = find_mac_owner(paths, mac)
     if existing_owner:
         raise MacAlreadyRegisteredError(
             f"MAC address {mac} is already assigned to client '{existing_owner}'.",
-            mac=mac, existing_owner=existing_owner,
+            mac=mac,
+            existing_owner=existing_owner,
         )
 
     certificate_manager.build_client_cert(paths, client)
@@ -184,6 +189,7 @@ def _chown_output(path: str, owner: str) -> None:
     user, _, group = owner.partition(":")
     import grp
     import pwd
+
     try:
         uid = pwd.getpwnam(user).pw_uid
         gid = grp.getgrnam(group).gr_gid
@@ -228,6 +234,7 @@ def show_ovpn(paths: OpenVPNPaths, raw_name: str) -> str:
 
 # --- do_purge_revoked / do_clean_stale_db_entry / do_restore_client --------
 
+
 def _is_revoked(paths: OpenVPNPaths, name: str) -> bool:
     target = f"/CN={name}"
     for row in _index_txt_rows(paths):
@@ -243,7 +250,8 @@ def purge_revoked(paths: OpenVPNPaths, raw_name: str) -> None:
     name = require_name(raw_name)
     if not _is_revoked(paths, name):
         raise ClientNotRevokedError(
-            f"{name}: not a revoked client -- nothing to purge (use revoke_client first).", client=name,
+            f"{name}: not a revoked client -- nothing to purge (use revoke_client first).",
+            client=name,
         )
     for path in (paths.issued_crt(name), paths.private_key(name), paths.req_file(name), paths.ovpn_output(name)):
         if os.path.exists(path):
@@ -258,8 +266,7 @@ def clean_stale_db_entry(paths: OpenVPNPaths, raw_name: str) -> None:
         raise ClientNotFoundError(f"{paths.db_file} does not exist -- nothing to clean.", client=name)
     if os.path.exists(paths.issued_crt(name)):
         raise ClientAlreadyExistsError(
-            f"{name} has a currently-valid certificate -- refusing to remove its "
-            f"{paths.db_file} entry (use remove_mac for a specific MAC instead).",
+            f"{name} has a currently-valid certificate -- refusing to remove its {paths.db_file} entry (use remove_mac for a specific MAC instead).",
             client=name,
         )
     if not any(line.startswith(f"{name}=") for line in _read_db_lines(paths)):
@@ -282,6 +289,7 @@ def restore_client(paths: OpenVPNPaths, raw_name: str, raw_mac: str) -> AddClien
 
 # --- do_list_clients / do_list_macs / do_add_mac / do_remove_mac -----------
 
+
 @dataclass(frozen=True)
 class ClientSummary:
     name: str
@@ -292,11 +300,7 @@ class ClientSummary:
 def list_clients(paths: OpenVPNPaths) -> list[ClientSummary]:
     """Mirrors do_list_clients() at :442-479."""
     db_lines = _read_db_lines(paths)
-    names = [
-        _cn_from_index_field(row[5])
-        for row in _index_txt_rows(paths)
-        if row and row[0] == "V" and len(row) >= 6
-    ]
+    names = [_cn_from_index_field(row[5]) for row in _index_txt_rows(paths) if row and row[0] == "V" and len(row) >= 6]
     result = []
     for name in names:
         mac_count = sum(1 for line in db_lines if line.startswith(f"{name}="))
@@ -333,7 +337,8 @@ def add_mac(paths: OpenVPNPaths, raw_name: str, raw_mac: str) -> str:
     if existing_owner:
         raise MacAlreadyRegisteredError(
             f"MAC address {mac} is already assigned to client '{existing_owner}'.",
-            mac=mac, existing_owner=existing_owner,
+            mac=mac,
+            existing_owner=existing_owner,
         )
     _append_db_entry(paths, name, mac)
     return mac
@@ -373,6 +378,7 @@ def remove_mac(paths: OpenVPNPaths, raw_name: str, raw_mac: str) -> str:
 
 # --- do_list_revoked / do_check_consistency / do_lint_db -------------------
 
+
 @dataclass(frozen=True)
 class RevokedClient:
     name: str
@@ -390,11 +396,14 @@ def list_revoked(paths: OpenVPNPaths) -> list[RevokedClient]:
             continue
         name = _cn_from_index_field(row[5])
         revoked_at = format_asn1_time(row[2]) if len(row) > 2 else ""
-        result.append(RevokedClient(
-            name=name, revoked_at=revoked_at,
-            stale_db_entry=name in db_names,
-            files_present=os.path.exists(paths.issued_crt(name)),
-        ))
+        result.append(
+            RevokedClient(
+                name=name,
+                revoked_at=revoked_at,
+                stale_db_entry=name in db_names,
+                files_present=os.path.exists(paths.issued_crt(name)),
+            )
+        )
     return result
 
 
@@ -407,11 +416,7 @@ class ConsistencyReport:
 
 def check_consistency(paths: OpenVPNPaths) -> ConsistencyReport:
     """Mirrors do_check_consistency() at :667-715."""
-    pki_names = {
-        _cn_from_index_field(row[5])
-        for row in _index_txt_rows(paths)
-        if row and row[0] == "V" and len(row) >= 6
-    }
+    pki_names = {_cn_from_index_field(row[5]) for row in _index_txt_rows(paths) if row and row[0] == "V" and len(row) >= 6}
     db_names = {line.split("=", 1)[0] for line in _read_db_lines(paths)}
     orphan_pki = sorted(pki_names - db_names)
     orphan_db = sorted(db_names - pki_names)
@@ -476,11 +481,11 @@ def lint_db(paths: OpenVPNPaths) -> LintReport:
             if f.read(1) != b"\n":
                 trailing_ok = False
                 has_issues = True
-                problems.append(
-                    f"{paths.db_file} does not end with a trailing newline -- "
-                    "the next appended entry could get glued onto the last line."
-                )
+                problems.append(f"{paths.db_file} does not end with a trailing newline -- the next appended entry could get glued onto the last line.")
 
     return LintReport(
-        clean=not has_issues, entries=len(raw_lines), trailing_newline_ok=trailing_ok, issues=problems,
+        clean=not has_issues,
+        entries=len(raw_lines),
+        trailing_newline_ok=trailing_ok,
+        issues=problems,
     )

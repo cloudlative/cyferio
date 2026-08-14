@@ -6,6 +6,7 @@ client_manager/installer rather than each hardcoding these strings, so a
 test fixture can point the whole stack at a scratch directory (see
 app/tests/services/conftest.py) without touching the real /etc/openvpn.
 """
+
 from __future__ import annotations
 
 import os
@@ -26,7 +27,7 @@ class OpenVPNPaths:
     group_name: str = "nogroup"  # "nogroup" (Debian/Ubuntu) or "nobody" (CentOS/Fedora)
 
     @classmethod
-    def from_conf(cls, conf_path: str = "/etc/openvpn/vpn-tools.conf", **overrides: str) -> "OpenVPNPaths":
+    def from_conf(cls, conf_path: str = "/etc/openvpn/vpn-tools.conf", **overrides: str) -> OpenVPNPaths:
         """Mirrors openvpn-install.sh:147-151 -- optionally overridden by a
         plain KEY=VALUE file, no quoting, one assignment per line. Keys
         match this dataclass's field names uppercased (OPENVPN_DIR,

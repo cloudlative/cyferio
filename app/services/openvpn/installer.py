@@ -8,6 +8,7 @@ install here should never leave a half-configured host, which the bash
 script has no protection against at all. This is the "genuine improvement"
 called out in the Phase 1 plan's §4.
 """
+
 from __future__ import annotations
 
 import logging
@@ -126,7 +127,10 @@ def install(
         firewall_manager.enable_ip_forward(ipv6=bool(opts.ip6))
         completed.append(_STEP_IP_FORWARD)
         firewall_manager.install_iptables_firewall(
-            ip=opts.ip, port=opts.port, protocol=opts.protocol, ip6=opts.ip6,
+            ip=opts.ip,
+            port=opts.port,
+            protocol=opts.protocol,
+            ip6=opts.ip6,
         )
         completed.append(_STEP_FIREWALL)
 
@@ -186,8 +190,7 @@ def _rollback(paths: OpenVPNPaths, completed: list[str]) -> None:
                 # there; just the extra files this step created.
                 for p in (paths.mac_check_script, paths.disconnect_script, paths.policy_lib_script):
                     _rm(p)
-                for p in (paths.client_policy_file, paths.client_usage_file,
-                          f"{paths.client_policy_file}.lock", f"{paths.client_usage_file}.lock"):
+                for p in (paths.client_policy_file, paths.client_usage_file, f"{paths.client_policy_file}.lock", f"{paths.client_usage_file}.lock"):
                     _rm(p)
             elif step == _STEP_SERVER_CONF:
                 _rm(paths.server_conf)
@@ -197,9 +200,7 @@ def _rollback(paths: OpenVPNPaths, completed: list[str]) -> None:
                 _rm(paths.tc_key)
             elif step == _STEP_PKI:
                 shutil.rmtree(paths.easyrsa_dir, ignore_errors=True)
-                for p in (paths.installed_ca_crt, paths.installed_ca_key,
-                          paths.installed_server_crt, paths.installed_server_key,
-                          paths.installed_crl_pem):
+                for p in (paths.installed_ca_crt, paths.installed_ca_key, paths.installed_server_crt, paths.installed_server_key, paths.installed_crl_pem):
                     _rm(p)
             elif step == _STEP_LIMITNPROC:
                 service_manager.remove_limitnproc_dropin()

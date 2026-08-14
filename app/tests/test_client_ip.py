@@ -1,6 +1,7 @@
 """Unit tests for vpnadmin/client_ip.py's get_client_ip() -- header-selection
 and rightmost-hop logic, independent of the full app/DB fixtures (this
 module only needs a Request with headers, not a running app)."""
+
 from fastapi import Request
 
 from vpnadmin import config
@@ -20,10 +21,12 @@ def _make_request(headers: dict[str, str], client_host: str | None = "9.9.9.9") 
 class TestAutoMode:
     def test_prefers_cf_connecting_ip(self, monkeypatch):
         monkeypatch.setattr(config.settings, "CLIENT_IP_HEADER", "")
-        req = _make_request({
-            "cf-connecting-ip": "203.0.113.5",
-            "x-forwarded-for": "198.51.100.1, 203.0.113.9",
-        })
+        req = _make_request(
+            {
+                "cf-connecting-ip": "203.0.113.5",
+                "x-forwarded-for": "198.51.100.1, 203.0.113.9",
+            }
+        )
         assert get_client_ip(req) == "203.0.113.5"
 
     def test_falls_back_to_xff_rightmost(self, monkeypatch):
@@ -70,10 +73,12 @@ class TestExplicitXForwardedFor:
 
     def test_ignores_cf_header_when_pinned_to_xff(self, monkeypatch):
         monkeypatch.setattr(config.settings, "CLIENT_IP_HEADER", "X-Forwarded-For")
-        req = _make_request({
-            "cf-connecting-ip": "9.9.9.9",
-            "x-forwarded-for": "203.0.113.9",
-        })
+        req = _make_request(
+            {
+                "cf-connecting-ip": "9.9.9.9",
+                "x-forwarded-for": "203.0.113.9",
+            }
+        )
         assert get_client_ip(req) == "203.0.113.9"
 
 

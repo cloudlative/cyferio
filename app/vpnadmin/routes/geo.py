@@ -6,6 +6,7 @@ call these). Any authenticated user can read these -- city/ASN names
 aren't sensitive, same posture as ISO_3166_COUNTRIES already being
 shipped to every logged-in user for the country picker.
 """
+
 from fastapi import APIRouter, Depends
 
 from .. import geo_lists

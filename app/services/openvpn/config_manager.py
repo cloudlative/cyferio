@@ -7,6 +7,7 @@ loose positional args, but every emitted line matches the bash script's
 output for the equivalent choices -- this is what the Phase 1 parity check
 (§5b of the plan) diffs against the bash-reference install's real output.
 """
+
 from __future__ import annotations
 
 import os
@@ -181,10 +182,18 @@ def generate_ovpn(paths: OpenVPNPaths, name: str) -> str:
 
     parts = [
         common.rstrip("\n"),
-        "<ca>", ca.rstrip("\n"), "</ca>",
-        "<cert>", cert.rstrip("\n"), "</cert>",
-        "<key>", key.rstrip("\n"), "</key>",
-        "<tls-crypt>", tls_crypt.rstrip("\n"), "</tls-crypt>",
+        "<ca>",
+        ca.rstrip("\n"),
+        "</ca>",
+        "<cert>",
+        cert.rstrip("\n"),
+        "</cert>",
+        "<key>",
+        key.rstrip("\n"),
+        "</key>",
+        "<tls-crypt>",
+        tls_crypt.rstrip("\n"),
+        "</tls-crypt>",
     ]
     return "\n".join(parts) + "\n"
 

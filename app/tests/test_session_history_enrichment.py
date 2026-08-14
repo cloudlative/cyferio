@@ -3,6 +3,7 @@ user's identity (portal_username/portal_display_name), so Connection
 History's search box can match a portal user, not just the raw VPN profile
 name -- see routes/status.py's get_session_history and models.py's
 VpnProfileLink."""
+
 from vpnadmin.models import Role, User, VpnProfileLink
 
 from .conftest import login
@@ -12,8 +13,11 @@ def test_session_history_rows_carry_linked_portal_user(app_client, db_session, m
     from vpnadmin.routes import status as status_routes
 
     waleed = User(
-        username="waleed", password_hash="x", role=Role.viewer,
-        first_name="Waleed", last_name="Khan",
+        username="waleed",
+        password_hash="x",
+        role=Role.viewer,
+        first_name="Waleed",
+        last_name="Khan",
     )
     db_session.add(waleed)
     db_session.commit()

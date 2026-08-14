@@ -18,6 +18,8 @@ vpn-tools.conf
 __pycache__/
 *.pyc
 .venv/
+.coverage
+coverage.xml
 
 # Web app runtime artifacts, never the code itself. docker-compose.yml and
 # .env now live at the repo root (moved out of app/); app/data/ stays put

@@ -9,6 +9,7 @@ once (`_session_base_pki`), and each test gets its own isolated copy of it
 (`paths` fixture) via a plain directory copy, which is fast and keeps tests
 independent (an add_client in one test can't collide with another's).
 """
+
 from __future__ import annotations
 
 import shutil

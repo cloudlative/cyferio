@@ -2,12 +2,13 @@ import pytest
 
 from services.openvpn import certificate_manager, config_manager
 from services.openvpn.config_manager import InstallOptions
-from services.openvpn.exceptions import CertificateError
+from services.openvpn.exceptions import CertificateError, ValidationError
 
 
 def test_render_server_conf_udp_no_ip6():
     opts = InstallOptions(ip="203.0.113.10", port=1194, protocol="udp", dns=1, group_name="nogroup")
     from services.openvpn.paths import OpenVPNPaths
+
     conf = config_manager.render_server_conf(OpenVPNPaths(), opts)
     assert "local 203.0.113.10" in conf
     assert "port 1194" in conf
@@ -24,6 +25,7 @@ def test_render_server_conf_omits_legacy_cipher_directive():
     negotiation entirely when the server's kernel DCO fast-path is active
     (reproduced live on the 34.182.51.24 test box on 2026-08-11)."""
     from services.openvpn.paths import OpenVPNPaths
+
     opts = InstallOptions(ip="203.0.113.10", port=1194, protocol="udp", dns=1, group_name="nogroup")
     conf = config_manager.render_server_conf(OpenVPNPaths(), opts)
     assert "cipher AES-256-CBC" not in conf
@@ -37,6 +39,7 @@ def test_render_client_common_omits_legacy_cipher_directive():
 
 def test_render_server_conf_tcp_has_no_explicit_exit_notify():
     from services.openvpn.paths import OpenVPNPaths
+
     opts = InstallOptions(ip="203.0.113.10", port=443, protocol="tcp", dns=2, group_name="nogroup")
     conf = config_manager.render_server_conf(OpenVPNPaths(), opts)
     assert "proto tcp" in conf
@@ -47,6 +50,7 @@ def test_render_server_conf_tcp_has_no_explicit_exit_notify():
 
 def test_render_server_conf_with_ip6():
     from services.openvpn.paths import OpenVPNPaths
+
     opts = InstallOptions(ip="203.0.113.10", ip6="2001:db8::1", port=1194, protocol="udp", dns=1, group_name="nogroup")
     conf = config_manager.render_server_conf(OpenVPNPaths(), opts)
     assert "server-ipv6 fddd:1194:1194:1194::/64" in conf
@@ -67,7 +71,7 @@ def test_render_client_common_uses_ip_when_no_public_ip():
 
 
 def test_install_options_rejects_bad_port():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         InstallOptions(ip="1.2.3.4", port=99999)
 
 

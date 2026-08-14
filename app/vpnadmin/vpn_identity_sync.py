@@ -13,8 +13,10 @@ only a human clicking Revoke/Restore in the Clients UI (routes/clients.py's
 own require_permission-gated endpoints, unaffected by this module) can touch
 it. See VpnProfileLink's docstring in models.py for the full guarantee.
 """
+
 import secrets
 import string
+from datetime import UTC
 
 from sqlalchemy.orm import Session
 
@@ -45,22 +47,28 @@ def _log_sync_failure(db: Session, action: str, target: str, error: ScriptError)
     surfaced in the audit log for an admin to notice and reconcile by hand,
     not silently swallowed and not allowed to undo a portal action that
     already succeeded."""
-    db.add(AuditLog(
-        username=_SYSTEM_ACTOR, action="vpn_sync_failed", target=target,
-        detail=f"{action}: {error.message}"[:2000], success=False,
-    ))
+    db.add(
+        AuditLog(
+            username=_SYSTEM_ACTOR,
+            action="vpn_sync_failed",
+            target=target,
+            detail=f"{action}: {error.message}"[:2000],
+            success=False,
+        )
+    )
     db.commit()
 
 
 def _log_sync_skipped_protected(db: Session, action: str, target: str) -> None:
-    db.add(AuditLog(
-        username=_SYSTEM_ACTOR, action="vpn_revoke_skipped_protected", target=target,
-        detail=(
-            f"{action} was requested but this profile is protected_from_auto_revoke "
-            "-- the VPN cert was left running untouched."
-        )[:2000],
-        success=True,
-    ))
+    db.add(
+        AuditLog(
+            username=_SYSTEM_ACTOR,
+            action="vpn_revoke_skipped_protected",
+            target=target,
+            detail=(f"{action} was requested but this profile is protected_from_auto_revoke -- the VPN cert was left running untouched.")[:2000],
+            success=True,
+        )
+    )
     db.commit()
 
 
@@ -84,10 +92,14 @@ def auto_link_new_client(db: Session, client_name: str) -> dict | None:
     if existing_user is not None:
         if existing_user.vpn_profile_link is not None:
             return None  # already linked to a different profile -- leave it, don't touch add_client's success
-        db.add(VpnProfileLink(
-            user_id=existing_user.id, vpn_client_name=client_name,
-            link_source="created_with_profile", protected_from_auto_revoke=False,
-        ))
+        db.add(
+            VpnProfileLink(
+                user_id=existing_user.id,
+                vpn_client_name=client_name,
+                link_source="created_with_profile",
+                protected_from_auto_revoke=False,
+            )
+        )
         db.commit()
         return None
 
@@ -106,10 +118,14 @@ def auto_link_new_client(db: Session, client_name: str) -> dict | None:
     )
     db.add(user)
     db.flush()
-    db.add(VpnProfileLink(
-        user_id=user.id, vpn_client_name=client_name,
-        link_source="created_with_profile", protected_from_auto_revoke=False,
-    ))
+    db.add(
+        VpnProfileLink(
+            user_id=user.id,
+            vpn_client_name=client_name,
+            link_source="created_with_profile",
+            protected_from_auto_revoke=False,
+        )
+    )
     db.commit()
     return {"username": user.username, "temp_password": temp_password}
 
@@ -139,12 +155,13 @@ def sync_after_client_purge(db: Session, client_name: str) -> None:
     for good) -- mirrors with a soft-delete on the portal side, never a hard
     delete, matching this app's existing no-hard-delete-path policy for
     users."""
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     link = db.query(VpnProfileLink).filter_by(vpn_client_name=client_name).first()
     if link is None or link.user.deleted:
         return
     link.user.deleted = True
-    link.user.deleted_at = datetime.now(timezone.utc)
+    link.user.deleted_at = datetime.now(UTC)
     link.user.is_active = False
     db.commit()
 
@@ -183,7 +200,9 @@ def sync_after_portal_reactivate(db: Session, user: User) -> None:
         mac = registered[0] if registered else None
         if not mac:
             _log_sync_failure(
-                db, "reactivate->restore_client", link.vpn_client_name,
+                db,
+                "reactivate->restore_client",
+                link.vpn_client_name,
                 ScriptError("No MAC on file to restore with -- restore the client manually from the Clients page."),
             )
             return

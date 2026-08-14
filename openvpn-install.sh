@@ -103,7 +103,6 @@ EASYRSA_DIR=/etc/openvpn/server/easy-rsa
 DB_FILE=/etc/openvpn/server/openvpn_db.txt
 CLIENT_COMMON_FILE=/etc/openvpn/server/client-common.txt
 STATUS_LOG=/var/log/openvpn/openvpn-status.log
-CONN_LOG=/etc/openvpn/server/openvpn.log
 SERVICE_NAME=openvpn-server@server.service
 OVPN_OUTPUT_MODE=600
 
@@ -1203,7 +1202,7 @@ LimitNPROC=infinity" > /etc/systemd/system/openvpn-server@server.service.d/disab
 	mkdir -p "$EASYRSA_DIR/"
 	{ wget -qO- "$easy_rsa_url" 2>/dev/null || curl -sL "$easy_rsa_url" ; } | tar xz -C "$EASYRSA_DIR/" --strip-components 1
 	chown -R root:root "$EASYRSA_DIR/"
-	cd "$EASYRSA_DIR/"
+	cd "$EASYRSA_DIR/" || exit 1
 	# Create the PKI, set up the CA and the server and client certificates
 	./easyrsa --batch init-pki
 	./easyrsa --batch build-ca nopass

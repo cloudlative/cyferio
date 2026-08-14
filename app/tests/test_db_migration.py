@@ -7,17 +7,19 @@ deliberately old-shaped `users` table -- not the full ORM model -- so this
 actually exercises the "existing deployment, new code" scenario rather than
 a table that was always up to date.
 """
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
-from vpnadmin.db import Base, _sync_missing_columns as sync_missing_columns
+from vpnadmin.db import _sync_missing_columns as sync_missing_columns
 
 
 def _make_old_schema_engine():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     with engine.begin() as conn:
         # Mirrors the pre-profile-fields users table shape.
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY,
                 username VARCHAR(64) UNIQUE NOT NULL,
@@ -26,21 +28,23 @@ def _make_old_schema_engine():
                 is_active BOOLEAN NOT NULL,
                 created_at DATETIME NOT NULL
             )
-        """))
-        conn.execute(text(
-            "INSERT INTO users (username, password_hash, role, is_active, created_at) "
-            "VALUES ('legacyadmin', 'hash', 'admin', 1, '2026-01-01 00:00:00')"
-        ))
+        """)
+        )
+        conn.execute(
+            text("INSERT INTO users (username, password_hash, role, is_active, created_at) VALUES ('legacyadmin', 'hash', 'admin', 1, '2026-01-01 00:00:00')")
+        )
         conn.execute(text("CREATE TABLE audit_log (id INTEGER PRIMARY KEY)"))
     return engine
 
 
 def test_sync_adds_missing_columns(monkeypatch):
     import vpnadmin.db as db_mod
+
     engine = _make_old_schema_engine()
     monkeypatch.setattr(db_mod, "engine", engine)
 
     from sqlalchemy import inspect
+
     before = {c["name"] for c in inspect(engine).get_columns("users")}
     assert "gender" not in before
     assert "deleted" not in before
@@ -54,6 +58,7 @@ def test_sync_adds_missing_columns(monkeypatch):
 
 def test_sync_backfills_nonnull_defaults_on_existing_rows(monkeypatch):
     import vpnadmin.db as db_mod
+
     engine = _make_old_schema_engine()
     monkeypatch.setattr(db_mod, "engine", engine)
 
@@ -70,6 +75,7 @@ def test_sync_backfills_nonnull_defaults_on_existing_rows(monkeypatch):
 
 def test_sync_is_idempotent(monkeypatch):
     import vpnadmin.db as db_mod
+
     engine = _make_old_schema_engine()
     monkeypatch.setattr(db_mod, "engine", engine)
 

@@ -4,6 +4,7 @@ notification duration setting, the All Clients "Portal User" column's
 backing endpoint, bandwidth-quota decimal/minimum validation, Allowed
 OS/Bandwidth Quota fields synced onto the linked VPN profile at user
 create/update time, and the Super Admin system role."""
+
 from vpnadmin import policy_store
 from vpnadmin.config import settings
 from vpnadmin.models import RoleDef, User
@@ -31,12 +32,19 @@ class TestNotificationDurationSetting:
 class TestClientUserLinksEndpoint:
     def test_shows_linked_and_omits_unlinked(self, app_client, db_session, monkeypatch):
         from vpnadmin.routes import users as users_mod
+
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
-        app_client.post("/api/users", json={
-            "username": "linkeduser", "password": "Somepass123!", "first_name": "Linked",
-            "email": "linkeduser@example.com", "mac": "aa:bb:cc:dd:ee:01",
-        })
+        app_client.post(
+            "/api/users",
+            json={
+                "username": "linkeduser",
+                "password": "Somepass123!",
+                "first_name": "Linked",
+                "email": "linkeduser@example.com",
+                "mac": "aa:bb:cc:dd:ee:01",
+            },
+        )
         r = app_client.get("/api/clients/user-links")
         assert r.status_code == 200
         body = r.json()
@@ -52,7 +60,7 @@ class TestBandwidthQuotaPrecision:
 
         try:
             policy_store.set_policy("someclient", bandwidth_monthly_gb=0.05)
-            assert False, "expected PolicyValidationError"
+            raise AssertionError("expected PolicyValidationError")
         except policy_store.PolicyValidationError as e:
             assert "0.1" in str(e)
 
@@ -66,14 +74,22 @@ class TestBandwidthQuotaPrecision:
 class TestUserCreateUpdateSyncsVpnPolicy:
     def test_create_user_with_os_and_bandwidth_syncs_policy(self, app_client, db_session, monkeypatch, tmp_path):
         from vpnadmin.routes import users as users_mod
+
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
         login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/users", json={
-            "username": "policieduser", "password": "Somepass123!", "first_name": "Policied",
-            "email": "policieduser@example.com", "mac": "aa:bb:cc:dd:ee:02",
-            "allowed_os": ["windows", "mac"], "bandwidth_monthly_gb": 2.5,
-        })
+        r = app_client.post(
+            "/api/users",
+            json={
+                "username": "policieduser",
+                "password": "Somepass123!",
+                "first_name": "Policied",
+                "email": "policieduser@example.com",
+                "mac": "aa:bb:cc:dd:ee:02",
+                "allowed_os": ["windows", "mac"],
+                "bandwidth_monthly_gb": 2.5,
+            },
+        )
         assert r.status_code == 201
         body = r.json()
         assert sorted(body["allowed_os"]) == ["mac", "windows"]
@@ -82,13 +98,20 @@ class TestUserCreateUpdateSyncsVpnPolicy:
 
     def test_update_user_syncs_policy_onto_linked_profile(self, app_client, db_session, monkeypatch, tmp_path):
         from vpnadmin.routes import users as users_mod
+
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
         login(app_client, "admin", "adminpass123")
-        app_client.post("/api/users", json={
-            "username": "policieduser2", "password": "Somepass123!", "first_name": "Policied2",
-            "email": "policieduser2@example.com", "mac": "aa:bb:cc:dd:ee:03",
-        })
+        app_client.post(
+            "/api/users",
+            json={
+                "username": "policieduser2",
+                "password": "Somepass123!",
+                "first_name": "Policied2",
+                "email": "policieduser2@example.com",
+                "mac": "aa:bb:cc:dd:ee:03",
+            },
+        )
         user_id = db_session.query(User).filter(User.username == "policieduser2").one().id
 
         r = app_client.patch(f"/api/users/{user_id}", json={"allowed_os": ["linux"], "bandwidth_monthly_gb": 5})
@@ -104,10 +127,14 @@ class TestUserCreateUpdateSyncsVpnPolicy:
         profile to apply them to yet."""
         login(app_client, "admin", "adminpass123")
         viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
-        r = app_client.patch(f"/api/users/{viewer_id}", json={
-            "allowed_os": ["windows"], "bandwidth_monthly_gb": 1,
-            "first_name": "V",
-        })
+        r = app_client.patch(
+            f"/api/users/{viewer_id}",
+            json={
+                "allowed_os": ["windows"],
+                "bandwidth_monthly_gb": 1,
+                "first_name": "V",
+            },
+        )
         assert r.status_code == 200
         assert r.json()["vpn_client_name"] is None
 
@@ -120,12 +147,20 @@ class TestSuperAdminRole:
 
     def test_cannot_be_assigned_via_create_user(self, app_client, monkeypatch):
         from vpnadmin.routes import users as users_mod
+
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/users", json={
-            "username": "wannabesuper", "password": "Somepass123!", "first_name": "W",
-            "email": "wannabesuper@example.com", "mac": "aa:bb:cc:dd:ee:04", "role": "super_admin",
-        })
+        r = app_client.post(
+            "/api/users",
+            json={
+                "username": "wannabesuper",
+                "password": "Somepass123!",
+                "first_name": "W",
+                "email": "wannabesuper@example.com",
+                "mac": "aa:bb:cc:dd:ee:04",
+                "role": "super_admin",
+            },
+        )
         assert r.status_code == 400
 
     def test_roles_list_orders_super_admin_first(self, app_client, db_session):

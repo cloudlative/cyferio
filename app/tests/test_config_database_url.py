@@ -1,5 +1,6 @@
 """Tests for config.py's _default_database_url() -- Postgres-by-default
 fallback logic (see its own docstring for the full reasoning)."""
+
 from vpnadmin.config import _default_database_url
 
 

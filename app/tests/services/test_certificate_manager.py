@@ -18,7 +18,8 @@ def test_base_pki_fixture_produces_valid_files(paths):
 
     result = subprocess.run(
         ["openssl", "verify", "-CAfile", paths.installed_ca_crt, paths.installed_server_crt],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, result.stderr
 
@@ -38,7 +39,8 @@ def test_build_client_cert_and_verify(paths):
 
     result = subprocess.run(
         ["openssl", "verify", "-CAfile", paths.ca_crt, paths.issued_crt("alice")],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, result.stderr
 
@@ -47,7 +49,9 @@ def test_build_client_cert_and_verify(paths):
     # invocation was correct).
     cn = subprocess.run(
         ["openssl", "x509", "-noout", "-subject", "-in", paths.issued_crt("alice")],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     assert "CN = alice" in cn or "CN=alice" in cn
 
@@ -64,7 +68,9 @@ def test_revoke_client_cert_regenerates_crl(paths):
     # before/after timestamp diff can spuriously pass/fail).
     crl_text = subprocess.run(
         ["openssl", "crl", "-noout", "-text", "-in", paths.pki_crl_pem],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     assert bob_serial.upper() in crl_text.upper()
 
@@ -78,6 +84,8 @@ def test_revoke_client_cert_regenerates_crl(paths):
 def _cert_serial(cert_path: str) -> str:
     out = subprocess.run(
         ["openssl", "x509", "-noout", "-serial", "-in", cert_path],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     return out.strip().split("=", 1)[1]

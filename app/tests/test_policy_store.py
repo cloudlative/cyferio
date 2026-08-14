@@ -4,6 +4,7 @@ read/write access to client_policy.json and client_usage.json. Uses real
 temp files (atomic-write correctness is the point being tested), never the
 real /etc/openvpn paths.
 """
+
 import json
 from datetime import date
 
@@ -64,7 +65,9 @@ class TestPolicyRoundTrip:
         policy_store.set_policy("dave", allowed_countries=["PK"], allowed_os=["linux"], bandwidth_monthly_gb=10)
         policy_store.set_policy("dave", bandwidth_monthly_gb=20)
         assert policy_store.get_policy("dave") == {
-            "allowed_countries": ["PK"], "allowed_os": ["linux"], "bandwidth_monthly_gb": 20.0,
+            "allowed_countries": ["PK"],
+            "allowed_os": ["linux"],
+            "bandwidth_monthly_gb": 20.0,
         }
 
     def test_clearing_every_field_removes_the_entry_entirely(self):
@@ -96,10 +99,15 @@ class TestPolicyRoundTrip:
 
     def test_city_asn_ip_round_trip(self):
         policy_store.set_policy(
-            "ivan", allowed_cities=["Karachi"], allowed_asns=["AS15169"], allowed_ips=["203.0.113.5", "10.0.0.0/24"],
+            "ivan",
+            allowed_cities=["Karachi"],
+            allowed_asns=["AS15169"],
+            allowed_ips=["203.0.113.5", "10.0.0.0/24"],
         )
         assert policy_store.get_policy("ivan") == {
-            "allowed_cities": ["Karachi"], "allowed_asns": ["AS15169"], "allowed_ips": ["203.0.113.5", "10.0.0.0/24"],
+            "allowed_cities": ["Karachi"],
+            "allowed_asns": ["AS15169"],
+            "allowed_ips": ["203.0.113.5", "10.0.0.0/24"],
         }
 
 
@@ -129,10 +137,13 @@ class TestUsage:
         this_month_start = date.today().replace(day=1).isoformat()
         stale_month = date(2020, 1, 1).isoformat()
         with open(settings.CLIENT_USAGE_FILE, "w") as f:
-            json.dump({
-                "current": {"period_start": this_month_start, "bytes_used": 500},
-                "stale": {"period_start": stale_month, "bytes_used": 999999},
-            }, f)
+            json.dump(
+                {
+                    "current": {"period_start": this_month_start, "bytes_used": 500},
+                    "stale": {"period_start": stale_month, "bytes_used": 999999},
+                },
+                f,
+            )
         all_usage = policy_store.get_all_usage()
         assert all_usage["current"]["bytes_used"] == 500
         assert all_usage["stale"]["bytes_used"] == 0

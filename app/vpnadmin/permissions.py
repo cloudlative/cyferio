@@ -13,6 +13,7 @@ Design recap (full detail in docs/rbac_identity_design.md §1-3):
     pair means no access, including for objects added after a role was
     created.
 """
+
 from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, Request, status
@@ -97,18 +98,13 @@ _SYSTEM_ROLES: dict[str, dict] = {
     },
     "viewer": {
         "name": "Viewer",
-        "description": "Read-only: status/list/check, no add/revoke/user-management. "
-        "Matches the pre-RBAC 'viewer' role exactly.",
-        "permissions": {
-            obj: {"view": True} for obj in OBJECTS
-            if obj not in ("settings", "roles", "openvpn_install", "db_reporting")
-        },
+        "description": "Read-only: status/list/check, no add/revoke/user-management. Matches the pre-RBAC 'viewer' role exactly.",
+        "permissions": {obj: {"view": True} for obj in OBJECTS if obj not in ("settings", "roles", "openvpn_install", "db_reporting")},
         "scopes": {},
     },
     "user": {
         "name": "User",
-        "description": "Access to only their own VPN profile and account -- no visibility "
-        "into other users, teams, audit logs, or settings.",
+        "description": "Access to only their own VPN profile and account -- no visibility into other users, teams, audit logs, or settings.",
         "permissions": {
             "vpn_profiles": {"view": True, "update": True},
             "users": {"view": True, "update": True},  # scoped "own" below -- their own account/password only
@@ -191,9 +187,7 @@ def seed_system_roles(db: Session) -> None:
         for object_key, actions in spec["permissions"].items():
             if object_key in existing_perm_objects:
                 continue
-            db.add(ObjectPermission(role_id=role.id, object_key=object_key, **{
-                f"can_{a}": actions.get(a, False) for a in ACTIONS
-            }))
+            db.add(ObjectPermission(role_id=role.id, object_key=object_key, **{f"can_{a}": actions.get(a, False) for a in ACTIONS}))
 
         existing_scope_objects = {s.object_key for s in db.query(RoleApiScope).filter_by(role_id=role.id).all()}
         for object_key, scope in spec["scopes"].items():
@@ -260,6 +254,7 @@ def require_permission(object_key: str, action: str) -> Callable[..., User]:
     *every* record of a type (a bulk list, not a single "my own" lookup)
     must use require_permission_any_scope below instead, or an "own"-scoped
     role would see every other user's records too."""
+
     def _dep(user: User = Depends(require_user), db: Session = Depends(get_db)) -> User:
         if not _has_permission(db, user.role_id, object_key, action):
             raise HTTPException(
@@ -267,6 +262,7 @@ def require_permission(object_key: str, action: str) -> Callable[..., User]:
                 detail=f"Missing '{action}' permission on '{object_key}'.",
             )
         return user
+
     return _dep
 
 
@@ -291,6 +287,7 @@ def require_permission_any_scope(object_key: str, action: str) -> Callable[..., 
     profile via routes/me_vpn.py) but its scope for that object is "own",
     so it's blocked here even though require_permission alone would let it
     through."""
+
     def _dep(user: User = Depends(require_user), db: Session = Depends(get_db)) -> User:
         if not has_permission_any_scope(db, user, object_key, action):
             raise HTTPException(
@@ -298,12 +295,11 @@ def require_permission_any_scope(object_key: str, action: str) -> Callable[..., 
                 detail=f"Missing '{action}' permission on '{object_key}' (or this role is limited to its own records).",
             )
         return user
+
     return _dep
 
 
-def require_own_or_permission(
-    object_key: str, action: str, owner_username: Callable[[Request], str | None]
-) -> Callable[..., User]:
+def require_own_or_permission(object_key: str, action: str, owner_username: Callable[[Request], str | None]) -> Callable[..., User]:
     """Like require_permission, but if the caller's role is scoped "own" for
     this object, additionally requires owner_username(request) == the
     caller's own username. owner_username typically pulls a path param or
@@ -311,6 +307,7 @@ def require_own_or_permission(
     VpnProfileLink) -- return None if the target record doesn't exist, which
     this treats as "not the caller's own" (403, not 404 -- existing routes
     still do their own 404 handling after this dependency passes)."""
+
     def _dep(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)) -> User:
         if not _has_permission(db, user.role_id, object_key, action):
             raise HTTPException(
@@ -325,4 +322,5 @@ def require_own_or_permission(
                     detail="This role can only access its own records.",
                 )
         return user
+
     return _dep

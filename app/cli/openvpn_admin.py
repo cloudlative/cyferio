@@ -15,6 +15,7 @@ on failure -- structured so host_executor.py never has to scrape stderr
 text. Exit code is 0 on success, 1 on a handled OpenVPNError, 2 on anything
 else unexpected.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,12 +29,16 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(_THIS_DIR))  # parent of app/
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from app.services.openvpn import client_manager, host_scripts_manager, installer  # noqa: E402
+from app.services.openvpn import (  # noqa: E402
+    client_manager,
+    host_scripts_manager,
+    installer,
+    service_manager,  # noqa: E402
+)
 from app.services.openvpn.config_manager import InstallOptions  # noqa: E402
 from app.services.openvpn.exceptions import OpenVPNError, ValidationError  # noqa: E402
 from app.services.openvpn.management_client import ManagementClient  # noqa: E402
 from app.services.openvpn.paths import OpenVPNPaths  # noqa: E402
-from app.services.openvpn import service_manager  # noqa: E402
 from app.services.openvpn.validator import sanitize_client_name  # noqa: E402
 from app.services.system import network_manager  # noqa: E402
 
@@ -54,10 +59,14 @@ def _ok(data=None) -> int:
 
 
 def _err(e: OpenVPNError) -> int:
-    print(json.dumps({
-        "ok": False,
-        "error": {"type": type(e).__name__, "detail": e.detail, "context": e.context},
-    }))
+    print(
+        json.dumps(
+            {
+                "ok": False,
+                "error": {"type": type(e).__name__, "detail": e.detail, "context": e.context},
+            }
+        )
+    )
     return 1
 
 
@@ -70,9 +79,7 @@ def _paths_from_args(args: argparse.Namespace) -> OpenVPNPaths:
     # OPENVPN_DIR" even though OpenVPNPaths keeps them as independent fields
     # (matching vpn-tools.conf's ability to override each one separately).
     openvpn_dir = args.openvpn_dir or OpenVPNPaths.openvpn_dir
-    easyrsa_dir = args.easyrsa_dir or (
-        f"{openvpn_dir}/easy-rsa" if args.openvpn_dir else OpenVPNPaths.easyrsa_dir
-    )
+    easyrsa_dir = args.easyrsa_dir or (f"{openvpn_dir}/easy-rsa" if args.openvpn_dir else OpenVPNPaths.easyrsa_dir)
     return OpenVPNPaths(
         openvpn_dir=openvpn_dir,
         easyrsa_dir=easyrsa_dir,
@@ -90,15 +97,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("install", help="Fresh install (mirrors openvpn-install.sh's interactive install)")
     p.add_argument("--ip", default=None, help="Local IPv4 (auto-detected if there's exactly one)")
     p.add_argument(
-        "--public-ip", default=None,
-        help="Public IP/hostname if behind NAT. Auto-detected when omitted and the "
-        "resolved local IP is itself private (see network_manager.detect_public_ip).",
+        "--public-ip",
+        default=None,
+        help="Public IP/hostname if behind NAT. Auto-detected when omitted and the resolved local IP is itself private (see network_manager.detect_public_ip).",
     )
     p.add_argument("--port", type=int, default=1194)
     p.add_argument("--protocol", default="udp", choices=["udp", "tcp"])
     p.add_argument("--dns", type=int, default=1, choices=[1, 2, 3, 4, 5, 6])
     p.add_argument(
-        "--client-name", default=None,
+        "--client-name",
+        default=None,
         help="Name for an optional first client. Omit (or pass an empty string) to "
         "install OpenVPN with no first client at all -- installer.install() then "
         "skips client-cert/.ovpn generation entirely, and this command never calls "
@@ -106,7 +114,8 @@ def build_parser() -> argparse.ArgumentParser:
         "add-client action, exactly like every other client.",
     )
     p.add_argument(
-        "--client-mac", default=None,
+        "--client-mac",
+        default=None,
         help="MAC address to register the first client's cert under -- required only "
         "when --client-name is given (validated in main() below, not here, so the "
         "'X requires Y' relationship stays in one place rather than split across "
@@ -171,7 +180,8 @@ def build_parser() -> argparse.ArgumentParser:
         "this automatically. Idempotent, safe to re-run.",
     )
     p.add_argument(
-        "--restart", action="store_true",
+        "--restart",
+        action="store_true",
         help="Also restart the OpenVPN service so a newly-appended server.conf hook block "
         "takes effect immediately. DISRUPTIVE -- drops every currently-connected client. "
         "Omit to only stage the files/server.conf change for a restart at a chosen "
@@ -208,8 +218,12 @@ def main(argv: list[str] | None = None) -> int:
             if client_name and not args.client_mac:
                 raise ValidationError("--client-mac is required when --client-name is given.")
             opts = InstallOptions(
-                ip=ip, port=args.port, protocol=args.protocol, dns=args.dns,
-                public_ip=public_ip, group_name=paths.group_name,
+                ip=ip,
+                port=args.port,
+                protocol=args.protocol,
+                dns=args.dns,
+                public_ip=public_ip,
+                group_name=paths.group_name,
             )
             result = installer.install(paths, opts, client_name, install_packages=not args.no_packages)
             mac = client_manager.add_mac(paths, result.client_name, args.client_mac) if client_name else None

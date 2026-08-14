@@ -2,11 +2,11 @@
 (routes/reports.py) -- pure aggregation over policy_store's JSON files
 joined against User/Team/VpnProfileLink, no new data collection to test
 beyond the aggregation math itself."""
+
 import subprocess
 
 import pytest
 
-from vpnadmin import cli_wrapper as cw
 from vpnadmin import policy_store
 from vpnadmin.config import settings
 from vpnadmin.models import Team, User, VpnProfileLink
@@ -30,10 +30,12 @@ def _seed(db_session):
     db_session.add_all([alice, bob])
     db_session.commit()
 
-    db_session.add_all([
-        VpnProfileLink(user_id=alice.id, vpn_client_name="alice", link_source="created_with_profile"),
-        VpnProfileLink(user_id=bob.id, vpn_client_name="bob", link_source="created_with_profile"),
-    ])
+    db_session.add_all(
+        [
+            VpnProfileLink(user_id=alice.id, vpn_client_name="alice", link_source="created_with_profile"),
+            VpnProfileLink(user_id=bob.id, vpn_client_name="bob", link_source="created_with_profile"),
+        ]
+    )
     db_session.commit()
 
     # alice: 1GB quota, 900MB used (90% -- "exceeding" bucket lands at
@@ -45,11 +47,13 @@ def _seed(db_session):
     # get_all_usage() this report reads just needs a plausible current-
     # month row.
     import json
+
     usage_path = settings.CLIENT_USAGE_FILE
     from datetime import date
+
     period_start = date.today().replace(day=1).isoformat()
     with open(usage_path, "w") as f:
-        json.dump({"alice": {"period_start": period_start, "bytes_used": int(0.9 * 1024 ** 3)}}, f)
+        json.dump({"alice": {"period_start": period_start, "bytes_used": int(0.9 * 1024**3)}}, f)
 
 
 class TestUserReport:
@@ -106,6 +110,7 @@ def _fake_run(session_rows="[]", rejected_rows="[]"):
         if "--rejected-connections" in args:
             return subprocess.CompletedProcess(args, 0, stdout=rejected_rows, stderr="")
         return subprocess.CompletedProcess(args, 0, stdout="[]", stderr="")
+
     return run
 
 
@@ -133,13 +138,17 @@ class TestUserAnalyticsDetail:
     def test_found_user_with_profile(self, app_client, db_session, monkeypatch):
         _seed(db_session)
         alice = db_session.query(User).filter_by(username="alice").one()
-        monkeypatch.setattr(subprocess, "run", _fake_run(
-            session_rows='[{"client": "alice", "connected_at": "2026-08-01T10:00:00", '
-                         '"disconnected_at": "2026-08-01T11:00:00", "duration_seconds": 3600, '
-                         '"source_ip": "203.0.113.5", "bytes_received": 100, "bytes_sent": 200}]',
-            rejected_rows='[{"claimed_name": "alice", "timestamp": "2026-08-02T00:00:00", "reason": "mac_mismatch"}, '
-                          '{"claimed_name": "someone_else", "timestamp": "2026-08-02T00:00:00", "reason": "mac_mismatch"}]',
-        ))
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            _fake_run(
+                session_rows='[{"client": "alice", "connected_at": "2026-08-01T10:00:00", '
+                '"disconnected_at": "2026-08-01T11:00:00", "duration_seconds": 3600, '
+                '"source_ip": "203.0.113.5", "bytes_received": 100, "bytes_sent": 200}]',
+                rejected_rows='[{"claimed_name": "alice", "timestamp": "2026-08-02T00:00:00", "reason": "mac_mismatch"}, '
+                '{"claimed_name": "someone_else", "timestamp": "2026-08-02T00:00:00", "reason": "mac_mismatch"}]',
+            ),
+        )
         login(app_client, "admin", "adminpass123")
         r = app_client.get(f"/api/reports/users/{alice.id}")
         assert r.status_code == 200
@@ -177,6 +186,7 @@ class TestUserAnalyticsDetail:
 class TestLoginActivityLogging:
     def test_successful_login_writes_audit_entry(self, app_client, db_session):
         from vpnadmin.models import AuditLog
+
         login(app_client, "admin", "adminpass123")
         entries = db_session.query(AuditLog).filter_by(action="login_success").all()
         assert len(entries) == 1
@@ -185,6 +195,7 @@ class TestLoginActivityLogging:
 
     def test_failed_login_does_not_write_login_success(self, app_client, db_session):
         from vpnadmin.models import AuditLog
+
         login(app_client, "admin", "wrong-password")
         entries = db_session.query(AuditLog).filter_by(action="login_success").all()
         assert entries == []

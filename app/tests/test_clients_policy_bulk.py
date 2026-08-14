@@ -10,6 +10,7 @@ that both existing endpoints keep behaving correctly when called
 back-to-back for the same freshly-created client, exactly as the form now
 does, and that the bulk endpoint reflects the result afterward.
 """
+
 import pytest
 
 import vpnadmin.routes.clients as clients_mod

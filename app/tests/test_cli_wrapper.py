@@ -4,6 +4,7 @@ invoked -- subprocess.run itself is monkeypatched, and every test asserts on
 the exact argument list constructed, since that's the actual security
 boundary (list args, never shell=True/string interpolation).
 """
+
 import subprocess
 
 import pytest
@@ -47,7 +48,13 @@ class TestArgumentConstruction:
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.add_client("alice", "aa:bb:cc:dd:ee:ff")
         assert seen["args"] == [
-            "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--add-user", "alice", "aa:bb:cc:dd:ee:ff",
+            "sudo",
+            "-n",
+            "bash",
+            "/fake/openvpn-install.sh",
+            "--add-user",
+            "alice",
+            "aa:bb:cc:dd:ee:ff",
         ]
 
     def test_status_rejected_args_include_limit(self, monkeypatch):
@@ -60,7 +67,13 @@ class TestArgumentConstruction:
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.status_rejected(limit=42)
         assert seen["args"] == [
-            "sudo", "-n", "python3", "/fake/vpn-status.py", "--rejected-connections", "42", "--json",
+            "sudo",
+            "-n",
+            "python3",
+            "/fake/vpn-status.py",
+            "--rejected-connections",
+            "42",
+            "--json",
         ]
 
     def test_session_history_without_client_omits_flag(self, monkeypatch):
@@ -73,7 +86,13 @@ class TestArgumentConstruction:
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.status_session_history(limit=71)
         assert seen["args"] == [
-            "sudo", "-n", "python3", "/fake/vpn-status.py", "--session-history", "71", "--json",
+            "sudo",
+            "-n",
+            "python3",
+            "/fake/vpn-status.py",
+            "--session-history",
+            "71",
+            "--json",
         ]
 
     def test_session_history_with_client_passes_flag(self, monkeypatch):
@@ -86,7 +105,15 @@ class TestArgumentConstruction:
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.status_session_history(limit=72, client="alice")
         assert seen["args"] == [
-            "sudo", "-n", "python3", "/fake/vpn-status.py", "--session-history", "72", "--client", "alice", "--json",
+            "sudo",
+            "-n",
+            "python3",
+            "/fake/vpn-status.py",
+            "--session-history",
+            "72",
+            "--client",
+            "alice",
+            "--json",
         ]
 
     def test_session_history_client_filter_has_isolated_cache_key(self, monkeypatch):
@@ -131,7 +158,13 @@ class TestArgumentConstruction:
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.add_mac("alice", "aa:bb:cc:dd:ee:ff")
         assert seen["args"] == [
-            "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--add-mac", "alice", "aa:bb:cc:dd:ee:ff",
+            "sudo",
+            "-n",
+            "bash",
+            "/fake/openvpn-install.sh",
+            "--add-mac",
+            "alice",
+            "aa:bb:cc:dd:ee:ff",
         ]
 
     def test_remove_mac_args(self, monkeypatch):
@@ -144,7 +177,13 @@ class TestArgumentConstruction:
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.remove_mac("alice", "aa:bb:cc:dd:ee:ff")
         assert seen["args"] == [
-            "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--remove-mac", "alice", "aa:bb:cc:dd:ee:ff",
+            "sudo",
+            "-n",
+            "bash",
+            "/fake/openvpn-install.sh",
+            "--remove-mac",
+            "alice",
+            "aa:bb:cc:dd:ee:ff",
         ]
 
     def test_show_ovpn_args(self, monkeypatch):
@@ -180,12 +219,19 @@ class TestArgumentConstruction:
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.restore_client("alice", "aa:bb:cc:dd:ee:ff")
         assert seen["args"] == [
-            "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--restore", "alice", "aa:bb:cc:dd:ee:ff",
+            "sudo",
+            "-n",
+            "bash",
+            "/fake/openvpn-install.sh",
+            "--restore",
+            "alice",
+            "aa:bb:cc:dd:ee:ff",
         ]
 
     def test_show_ovpn_failure_raises(self, monkeypatch):
         monkeypatch.setattr(
-            subprocess, "run",
+            subprocess,
+            "run",
             lambda args, **kw: _completed(args, 1, "", "alice: no .ovpn file found"),
         )
         with pytest.raises(cw.ScriptError, match="no .ovpn file found"):
@@ -193,7 +239,8 @@ class TestArgumentConstruction:
 
     def test_purge_revoked_failure_raises(self, monkeypatch):
         monkeypatch.setattr(
-            subprocess, "run",
+            subprocess,
+            "run",
             lambda args, **kw: _completed(args, 1, "", "alice: not a revoked client"),
         )
         with pytest.raises(cw.ScriptError, match="not a revoked client"):
@@ -201,7 +248,8 @@ class TestArgumentConstruction:
 
     def test_add_mac_failure_raises(self, monkeypatch):
         monkeypatch.setattr(
-            subprocess, "run",
+            subprocess,
+            "run",
             lambda args, **kw: _completed(args, 1, "", "alice is already registered with MAC aa:bb:cc:dd:ee:ff."),
         )
         with pytest.raises(cw.ScriptError, match="already registered"):
@@ -209,9 +257,13 @@ class TestArgumentConstruction:
 
     def test_add_client_duplicate_mac_across_clients_raises_with_owner_name(self, monkeypatch):
         monkeypatch.setattr(
-            subprocess, "run",
+            subprocess,
+            "run",
             lambda args, **kw: _completed(
-                args, 1, "", "MAC address aa:bb:cc:dd:ee:ff is already assigned to client 'bob'.",
+                args,
+                1,
+                "",
+                "MAC address aa:bb:cc:dd:ee:ff is already assigned to client 'bob'.",
             ),
         )
         with pytest.raises(cw.ScriptError, match="already assigned to client 'bob'"):
@@ -223,9 +275,13 @@ class TestArgumentConstruction:
         # The script's exact wording is what routes/clients.py surfaces
         # verbatim as the toast message, so it's worth pinning here.
         monkeypatch.setattr(
-            subprocess, "run",
+            subprocess,
+            "run",
             lambda args, **kw: _completed(
-                args, 1, "", "MAC address aa:bb:cc:dd:ee:ff is already assigned to client 'bob'.",
+                args,
+                1,
+                "",
+                "MAC address aa:bb:cc:dd:ee:ff is already assigned to client 'bob'.",
             ),
         )
         with pytest.raises(cw.ScriptError, match="already assigned to client 'bob'"):
@@ -290,6 +346,7 @@ class TestErrorHandling:
     def test_timeout_raises_script_error(self, monkeypatch):
         def fake_run(args, **kwargs):
             raise subprocess.TimeoutExpired(cmd=args, timeout=30)
+
         monkeypatch.setattr(subprocess, "run", fake_run)
         with pytest.raises(cw.ScriptError, match="timed out"):
             cw.list_clients()
@@ -297,6 +354,7 @@ class TestErrorHandling:
     def test_missing_binary_raises_script_error(self, monkeypatch):
         def fake_run(args, **kwargs):
             raise FileNotFoundError()
+
         monkeypatch.setattr(subprocess, "run", fake_run)
         with pytest.raises(cw.ScriptError, match="not found"):
             cw.list_clients()
@@ -305,7 +363,8 @@ class TestErrorHandling:
         # --macs exits 1 with valid JSON when a client has zero registered
         # MACs -- informative, not a failure.
         monkeypatch.setattr(
-            subprocess, "run",
+            subprocess,
+            "run",
             lambda args, **kw: _completed(args, 1, '{"name":"bob","count":0,"macs":[]}'),
         )
         result = cw.list_macs("bob")
@@ -313,7 +372,8 @@ class TestErrorHandling:
 
     def test_check_allows_nonzero_when_issues_found(self, monkeypatch):
         monkeypatch.setattr(
-            subprocess, "run",
+            subprocess,
+            "run",
             lambda args, **kw: _completed(args, 1, '{"clean":false,"orphan_pki":["x"],"orphan_db":[]}'),
         )
         result = cw.check_consistency()

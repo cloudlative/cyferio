@@ -16,6 +16,7 @@ valid country code / IP / city / ASN" rules, not two copies that could
 quietly drift apart. See policy_store.py's module docstring for the fuller
 User<->VPN-Profile synchronization picture these feed into.
 """
+
 import ipaddress
 
 from . import geo_lists

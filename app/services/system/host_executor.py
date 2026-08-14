@@ -13,6 +13,7 @@ remote command; the corresponding host-side authorized_keys/sudoers entry
 should be restricted to that same command so a compromised app container
 can't run arbitrary commands on the host.
 """
+
 from __future__ import annotations
 
 import json
@@ -46,20 +47,24 @@ def run_host_command(config: HostExecutorConfig, action: str, *args: str) -> obj
     level (SSH connection failure, timeout, malformed output) -- callers
     don't need to know or care that this ran over SSH rather than
     in-process."""
-    remote_args = ["sudo", "-n", "python3", config.remote_script_path] if config.use_sudo \
-        else ["python3", config.remote_script_path]
+    remote_args = ["sudo", "-n", "python3", config.remote_script_path] if config.use_sudo else ["python3", config.remote_script_path]
     remote_args += [action, *args]
 
     ssh_args = [
         "ssh",
-        "-i", config.ssh_key_path,
-        "-p", str(config.ssh_port),
+        "-i",
+        config.ssh_key_path,
+        "-p",
+        str(config.ssh_port),
         # Non-interactive, fail fast rather than hang on a host-key prompt
         # or a password this caller has no way to answer -- consistent with
         # cli_wrapper.py's own `sudo -n` rationale for the same reason.
-        "-o", "BatchMode=yes",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", f"ConnectTimeout={min(config.timeout_seconds, 30)}",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        f"ConnectTimeout={min(config.timeout_seconds, 30)}",
         config.ssh_target,
         "--",
         *remote_args,
@@ -75,16 +80,13 @@ def run_host_command(config: HostExecutorConfig, action: str, *args: str) -> obj
         # (auth, host unreachable, ...) -- distinct from the remote
         # command's own exit code, which openvpn_admin.py always keeps
         # inside {0, 1, 2} (see its own docstring).
-        raise HostExecutorError(
-            f"SSH to {config.ssh_target} failed (exit 255): {result.stderr.strip() or 'connection error'}"
-        )
+        raise HostExecutorError(f"SSH to {config.ssh_target} failed (exit 255): {result.stderr.strip() or 'connection error'}")
 
     try:
         payload = json.loads(result.stdout.strip() or "{}")
     except json.JSONDecodeError as e:
         raise HostExecutorError(
-            f"Remote command produced non-JSON output (exit {result.returncode}): "
-            f"{result.stdout[:500]!r} / stderr: {result.stderr[:500]!r}"
+            f"Remote command produced non-JSON output (exit {result.returncode}): {result.stdout[:500]!r} / stderr: {result.stderr[:500]!r}"
         ) from e
 
     if not payload.get("ok"):

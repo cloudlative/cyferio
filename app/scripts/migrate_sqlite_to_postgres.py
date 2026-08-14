@@ -21,6 +21,7 @@ already-populated guard below).
 This script only reads from SQLite -- it never modifies or deletes the
 source file.
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -31,9 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
-from vpnadmin.db import Base
 from vpnadmin import models  # noqa: F401 -- registers all tables on Base
-
+from vpnadmin.db import Base
 
 # Migration order matters: Team before User (user_teams FKs both), User
 # before user_teams. AuditLog/AppSettings have no FK dependencies on
@@ -86,8 +86,10 @@ def main():
     dst_counts_before = _row_counts(dst_engine)
     already_populated = [t for t, c in dst_counts_before.items() if c]
     if already_populated:
-        print(f"\nRefusing to migrate: destination already has rows in {already_populated}. "
-              f"Wipe those tables first if you intend to re-run this migration.", file=sys.stderr)
+        print(
+            f"\nRefusing to migrate: destination already has rows in {already_populated}. Wipe those tables first if you intend to re-run this migration.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     model_by_table = {m.__tablename__: m for m in (models.Team, models.User, models.AuditLog, models.AppSettings)}
@@ -119,9 +121,7 @@ def main():
             max_id = max(o.id for o in objs)
             seq_name = f"{table_name}_id_seq"
             dst_session.execute(
-                __import__("sqlalchemy").text(
-                    f"SELECT setval('{seq_name}', :max_id)"
-                ),
+                __import__("sqlalchemy").text(f"SELECT setval('{seq_name}', :max_id)"),
                 {"max_id": max_id},
             )
             dst_session.commit()

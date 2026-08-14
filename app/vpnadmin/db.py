@@ -4,10 +4,12 @@ PostgreSQL depending on DATABASE_URL -- SQLAlchemy abstracts the dialect
 difference, the models and queries elsewhere never need to know which one
 is in use.
 """
+
 import os
 
-from sqlalchemy import Enum as SAEnum, create_engine, inspect, text
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 from .config import settings
 
@@ -66,6 +68,7 @@ def init_db():
     changes on both SQLite and Postgres, worth replacing with Alembic if the
     schema ever needs something more involved (renames, backfills, drops)."""
     from . import models  # noqa: F401  (ensure models are registered on Base)
+
     Base.metadata.create_all(bind=engine)
     _sync_missing_columns()
     _sync_enum_values()
@@ -80,6 +83,7 @@ def _seed_rbac():
     than inlined in init_db) so Phase 2's migrate_user_roles() backfill can
     be added right after this call without further restructuring."""
     from .permissions import migrate_user_roles, rename_legacy_vpn_self_service_role, seed_system_roles
+
     db = SessionLocal()
     try:
         # Must run before seed_system_roles() -- see its own docstring for
@@ -179,7 +183,13 @@ def _sync_missing_columns():
                 continue
             ddl_type = column.type.compile(dialect=engine.dialect)
             with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {ddl_type}"))
+                # table.name/column.name/ddl_type all come from this app's
+                # own Base.metadata (the ORM's compile-time model
+                # definitions) -- never from a request or any other
+                # runtime/user input. Not reachable for SQL injection.
+                conn.execute(
+                    text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {ddl_type}")  # nosemgrep: avoid-sqlalchemy-text
+                )
                 # ALTER TABLE ADD COLUMN always leaves existing rows NULL
                 # regardless of the model's `default=` (that's an
                 # insert-time default, not applied retroactively) -- for
@@ -195,8 +205,14 @@ def _sync_missing_columns():
                     if hasattr(value, "value"):  # enum member -> its stored value
                         value = value.value
                     if value is not None:
+                        # Same as above: table.name/column.name come from
+                        # Base.metadata, not user input. The actual value
+                        # being written IS bound as a parameter (`:v`), not
+                        # interpolated.
                         conn.execute(
-                            text(f"UPDATE {table.name} SET {column.name} = :v WHERE {column.name} IS NULL"),
+                            text(  # nosemgrep: avoid-sqlalchemy-text
+                                f"UPDATE {table.name} SET {column.name} = :v WHERE {column.name} IS NULL"
+                            ),
                             {"v": value},
                         )
 
@@ -228,12 +244,9 @@ def _sync_enum_values():
                 continue
             with engine.connect() as conn:
                 existing = {
-                    row[0] for row in conn.execute(
-                        text(
-                            "SELECT enumlabel FROM pg_enum "
-                            "JOIN pg_type ON pg_enum.enumtypid = pg_type.oid "
-                            "WHERE pg_type.typname = :type_name"
-                        ),
+                    row[0]
+                    for row in conn.execute(
+                        text("SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE pg_type.typname = :type_name"),
                         {"type_name": pg_type_name},
                     )
                 }
@@ -250,4 +263,6 @@ def _sync_enum_values():
                 # embedded quote defensively anyway.
                 escaped = value.replace("'", "''")
                 with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-                    conn.execute(text(f"ALTER TYPE {pg_type_name} ADD VALUE IF NOT EXISTS '{escaped}'"))
+                    conn.execute(
+                        text(f"ALTER TYPE {pg_type_name} ADD VALUE IF NOT EXISTS '{escaped}'")  # nosemgrep: avoid-sqlalchemy-text
+                    )

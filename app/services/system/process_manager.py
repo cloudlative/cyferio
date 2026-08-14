@@ -8,12 +8,13 @@ MACs) are ultimately user-supplied. Validation of *those* happens in
 validator.py before a value ever reaches here -- this module's job is only
 safe execution + structured errors + optional retry, not input sanitization.
 """
+
 from __future__ import annotations
 
 import logging
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +80,19 @@ def run(
 
     duration = time.monotonic() - started
     result = CommandResult(
-        args=args, returncode=proc.returncode, stdout=proc.stdout,
-        stderr=proc.stderr, duration_seconds=duration,
+        args=args,
+        returncode=proc.returncode,
+        stdout=proc.stdout,
+        stderr=proc.stderr,
+        duration_seconds=duration,
     )
     if not result.ok:
         logger.warning(
             "command failed (exit %s, %.2fs): %s -- stderr: %s",
-            proc.returncode, duration, args, proc.stderr.strip()[:500],
+            proc.returncode,
+            duration,
+            args,
+            proc.stderr.strip()[:500],
         )
     return result
 
@@ -128,14 +135,22 @@ def run_with_retry(
     for attempt in range(1, attempts + 1):
         try:
             return run_checked(
-                args, timeout=timeout, cwd=cwd, env=env, error_prefix=error_prefix,
+                args,
+                timeout=timeout,
+                cwd=cwd,
+                env=env,
+                error_prefix=error_prefix,
             )
         except CommandError as e:
             last_error = e
             if attempt < attempts:
                 logger.warning(
                     "attempt %d/%d failed for %s, retrying in %.1fs: %s",
-                    attempt, attempts, args, backoff_seconds, e,
+                    attempt,
+                    attempts,
+                    args,
+                    backoff_seconds,
+                    e,
                 )
                 time.sleep(backoff_seconds * attempt)
     assert last_error is not None

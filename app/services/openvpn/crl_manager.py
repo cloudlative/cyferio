@@ -3,6 +3,7 @@ of the crl.pem handling inside do_revoke_client (openvpn-install.sh:
 316-320): regenerate via easyrsa, then copy into OPENVPN_DIR with the
 ownership OpenVPN's dropped-privilege process needs to read it.
 """
+
 from __future__ import annotations
 
 import grp
@@ -10,7 +11,6 @@ import os
 import pwd
 import shutil
 
-from . import certificate_manager
 from .exceptions import CertificateError
 from .paths import OpenVPNPaths
 
@@ -26,9 +26,9 @@ def regenerate_and_install(paths: OpenVPNPaths) -> None:
 
 def install_crl(paths: OpenVPNPaths) -> None:
     """Mirrors:
-        rm -f "$OPENVPN_DIR/crl.pem"
-        cp "$EASYRSA_DIR/pki/crl.pem" "$OPENVPN_DIR/crl.pem"
-        chown nobody:"$group_name" "$OPENVPN_DIR/crl.pem"
+    rm -f "$OPENVPN_DIR/crl.pem"
+    cp "$EASYRSA_DIR/pki/crl.pem" "$OPENVPN_DIR/crl.pem"
+    chown nobody:"$group_name" "$OPENVPN_DIR/crl.pem"
     """
     if os.path.exists(paths.installed_crl_pem):
         os.remove(paths.installed_crl_pem)

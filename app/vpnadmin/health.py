@@ -14,6 +14,7 @@ container) -- only get_database_health() can return ok=False for a real
 connectivity problem, which is the one case actually worth surfacing as
 unhealthy rather than just "not applicable here".
 """
+
 import importlib.metadata
 import json
 import logging
@@ -22,7 +23,7 @@ import platform
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 
@@ -57,7 +58,7 @@ def get_app_health() -> dict:
     now = time.time()
     return {
         "status": "ok",
-        "started_at": datetime.fromtimestamp(_PROCESS_STARTED_AT, tz=timezone.utc).isoformat(),
+        "started_at": datetime.fromtimestamp(_PROCESS_STARTED_AT, tz=UTC).isoformat(),
         "uptime_seconds": round(now - _PROCESS_STARTED_AT, 1),
         "app_version": os.environ.get("APP_VERSION", "unknown"),
         "python_version": platform.python_version(),
@@ -88,12 +89,8 @@ def get_database_health() -> dict:
             conn.exec_driver_sql("SELECT 1")
             result["latency_ms"] = round((time.monotonic() - start) * 1000, 2)
             if engine.dialect.name == "postgresql":
-                result["size_bytes"] = conn.exec_driver_sql(
-                    "SELECT pg_database_size(current_database())"
-                ).scalar()
-                result["active_connections"] = conn.exec_driver_sql(
-                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
-                ).scalar()
+                result["size_bytes"] = conn.exec_driver_sql("SELECT pg_database_size(current_database())").scalar()
+                result["active_connections"] = conn.exec_driver_sql("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()").scalar()
         result["ok"] = True
     except Exception as e:
         result["error"] = str(e)
@@ -108,15 +105,19 @@ def gather_db_stats(conn) -> dict:
     mean. Callers are responsible for the `engine.dialect.name ==
     "postgresql"` guard -- this assumes it's already true."""
     stats: dict = {
-        "db_size_bytes": None, "active_connections": None, "idle_connections": None,
-        "xact_commit": None, "xact_rollback": None, "blks_hit": None, "blks_read": None,
-        "waiting_locks_count": None, "long_running_query_count": None,
+        "db_size_bytes": None,
+        "active_connections": None,
+        "idle_connections": None,
+        "xact_commit": None,
+        "xact_rollback": None,
+        "blks_hit": None,
+        "blks_read": None,
+        "waiting_locks_count": None,
+        "long_running_query_count": None,
     }
     stats["db_size_bytes"] = conn.execute(text("SELECT pg_database_size(current_database())")).scalar()
 
-    state_counts = dict(conn.execute(text(
-        "SELECT state, count(*) FROM pg_stat_activity WHERE datname = current_database() GROUP BY state"
-    )).all())
+    state_counts = dict(conn.execute(text("SELECT state, count(*) FROM pg_stat_activity WHERE datname = current_database() GROUP BY state")).all())
     stats["active_connections"] = state_counts.get("active", 0)
     # Every non-"active" state (idle, idle in transaction, idle in
     # transaction (aborted), etc.) counted as "idle" here -- a coarser
@@ -125,10 +126,9 @@ def gather_db_stats(conn) -> dict:
     # the Connections chart.
     stats["idle_connections"] = sum(v for k, v in state_counts.items() if k != "active")
 
-    pgstat_row = conn.execute(text(
-        "SELECT xact_commit, xact_rollback, blks_hit, blks_read FROM pg_stat_database "
-        "WHERE datname = current_database()"
-    )).one_or_none()
+    pgstat_row = conn.execute(
+        text("SELECT xact_commit, xact_rollback, blks_hit, blks_read FROM pg_stat_database WHERE datname = current_database()")
+    ).one_or_none()
     if pgstat_row:
         stats["xact_commit"], stats["xact_rollback"], stats["blks_hit"], stats["blks_read"] = pgstat_row
 
@@ -137,10 +137,9 @@ def gather_db_stats(conn) -> dict:
     # Fixed 5-second threshold -- a reasonable first cut, not yet an admin
     # setting (same stance reports.py's 80%-quota-approaching-threshold
     # constant already takes).
-    stats["long_running_query_count"] = conn.execute(text(
-        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
-        "AND state = 'active' AND now() - query_start > interval '5 seconds'"
-    )).scalar()
+    stats["long_running_query_count"] = conn.execute(
+        text("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active' AND now() - query_start > interval '5 seconds'")
+    ).scalar()
     return stats
 
 
@@ -152,13 +151,16 @@ def get_top_tables(limit: int = 10) -> list[dict]:
     if engine.dialect.name != "postgresql":
         return []
     with engine.connect() as conn:
-        rows = conn.execute(text(
-            "SELECT c.relname, pg_total_relation_size(c.oid) AS size_bytes "
-            "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-            "JOIN pg_stat_user_tables s ON s.relid = c.oid "
-            "WHERE n.nspname = 'public' AND c.relkind = 'r' "
-            "ORDER BY size_bytes DESC LIMIT :limit"
-        ), {"limit": limit}).all()
+        rows = conn.execute(
+            text(
+                "SELECT c.relname, pg_total_relation_size(c.oid) AS size_bytes "
+                "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "JOIN pg_stat_user_tables s ON s.relid = c.oid "
+                "WHERE n.nspname = 'public' AND c.relkind = 'r' "
+                "ORDER BY size_bytes DESC LIMIT :limit"
+            ),
+            {"limit": limit},
+        ).all()
     return [{"table": r[0], "size_bytes": r[1]} for r in rows]
 
 

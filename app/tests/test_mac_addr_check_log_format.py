@@ -13,6 +13,7 @@ on the very same loop iteration. This test doesn't run the script itself
 (it's a client-connect hook with real os.environ/sys.exit side effects,
 not import-safe) -- it inspects the source text directly, which is
 sufficient to catch a regression back to the old format."""
+
 import os
 import re
 

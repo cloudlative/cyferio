@@ -5,7 +5,8 @@ Sessions use Starlette's built-in SessionMiddleware (a signed, httponly
 cookie -- no server-side session store needed). Passwords are hashed with
 bcrypt via passlib. Two roles: admin (full control) and viewer (read-only).
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
@@ -53,6 +54,7 @@ def bootstrap_admin(db: Session) -> None:
     # the legacy `role` enum column keeps this account fully functional
     # under both systems for the duration of the Phase 1/2 transition.
     from .models import RoleDef
+
     admin_role = db.query(RoleDef).filter(RoleDef.slug == "admin").first()
     admin = User(
         username=settings.BOOTSTRAP_ADMIN_USERNAME,
@@ -80,10 +82,14 @@ def ensure_bootstrap_admin_flag(db: Session) -> None:
         return
     candidate = None
     if settings.BOOTSTRAP_ADMIN_USERNAME:
-        candidate = db.query(User).filter(
-            User.username == settings.BOOTSTRAP_ADMIN_USERNAME.strip().lower(),
-            User.role == Role.admin,
-        ).first()
+        candidate = (
+            db.query(User)
+            .filter(
+                User.username == settings.BOOTSTRAP_ADMIN_USERNAME.strip().lower(),
+                User.role == Role.admin,
+            )
+            .first()
+        )
     if candidate is None:
         candidate = db.query(User).filter(User.role == Role.admin).order_by(User.created_at).first()
     if candidate is not None:
@@ -108,7 +114,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | 
     # gives a sliding (not fixed) session: any activity resets the clock,
     # matching how "session timeout" is understood in most admin tools.
     last_activity_iso = request.session.get("last_activity")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if last_activity_iso is not None:
         try:
             last_activity = datetime.fromisoformat(last_activity_iso)
@@ -146,7 +152,7 @@ def login_user(request: Request, user: User, db: Session | None = None) -> None:
     # next login.
     request.session["user_id"] = user.id
     if db is not None:
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = datetime.now(UTC)
         db.commit()
 
 

@@ -2,6 +2,7 @@
 openvpn-install.sh:1075-1121 (interface IP selection) and :1090-1103
 (NAT / public-IP detection).
 """
+
 from __future__ import annotations
 
 import re
@@ -10,9 +11,7 @@ from dataclasses import dataclass
 
 from .process_manager import run
 
-_PRIVATE_IPV4_RE = re.compile(
-    r"^(10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.|192\.168\.)"
-)
+_PRIVATE_IPV4_RE = re.compile(r"^(10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.|192\.168\.)")
 _IPV4_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
 _IPV6_RE = re.compile(r"\b(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}\b")
 
@@ -136,6 +135,4 @@ def resolve_install_ip(explicit_ip: str | None = None) -> str:
         return addrs[0]
     if not addrs:
         raise RuntimeError("No non-loopback, non-virtual IPv4 address found on this host.")
-    raise RuntimeError(
-        f"Multiple IPv4 addresses found ({addrs}); pass one explicitly (install --ip <address>)."
-    )
+    raise RuntimeError(f"Multiple IPv4 addresses found ({addrs}); pass one explicitly (install --ip <address>).")

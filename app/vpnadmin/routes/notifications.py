@@ -11,7 +11,8 @@ scope check needed" reasoning as me_vpn.py's own module docstring. Any
 authenticated account (any role) can see its own notifications; there's
 no permission object for this because "my own notifications" isn't a
 module an admin would ever need to grant/revoke access to."""
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -36,18 +37,8 @@ def _serialize(n: QuotaNotification) -> dict:
 
 @router.get("")
 def list_my_notifications(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    rows = (
-        db.query(QuotaNotification)
-        .filter(QuotaNotification.user_id == user.id)
-        .order_by(QuotaNotification.created_at.desc())
-        .limit(30)
-        .all()
-    )
-    unread_count = (
-        db.query(QuotaNotification)
-        .filter(QuotaNotification.user_id == user.id, QuotaNotification.read_at.is_(None))
-        .count()
-    )
+    rows = db.query(QuotaNotification).filter(QuotaNotification.user_id == user.id).order_by(QuotaNotification.created_at.desc()).limit(30).all()
+    unread_count = db.query(QuotaNotification).filter(QuotaNotification.user_id == user.id, QuotaNotification.read_at.is_(None)).count()
     return {"notifications": [_serialize(n) for n in rows], "unread_count": unread_count}
 
 
@@ -60,14 +51,14 @@ def mark_read(notification_id: int, user: User = Depends(require_user), db: Sess
         # can't be used to probe for valid ids.
         raise HTTPException(status_code=404, detail="Notification not found.")
     if n.read_at is None:
-        n.read_at = datetime.now(timezone.utc)
+        n.read_at = datetime.now(UTC)
         db.commit()
     return _serialize(n)
 
 
 @router.post("/read-all")
 def mark_all_read(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     updated = (
         db.query(QuotaNotification)
         .filter(QuotaNotification.user_id == user.id, QuotaNotification.read_at.is_(None))

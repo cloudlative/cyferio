@@ -19,6 +19,7 @@ a lookup failure fails CLOSED (blocks login) when a user actually has a
 restriction of that kind enabled, same fail-safe stance host-scripts/
 policy_lib.py's caller already takes for VPN client connections.
 """
+
 import threading
 
 from .config import settings
@@ -45,6 +46,7 @@ def _get_reader(kind: str, path: str):
             return None
         try:
             import geoip2.database
+
             reader = geoip2.database.Reader(path)
         except Exception:
             return None
@@ -63,6 +65,7 @@ def lookup_country(ip: str | None) -> str | None:
         return None
     try:
         import geoip2.errors
+
         return reader.country(ip).country.iso_code
     except geoip2.errors.AddressNotFoundError:
         return None
@@ -82,6 +85,7 @@ def lookup_city(ip: str | None) -> str | None:
         return None
     try:
         import geoip2.errors
+
         name = reader.city(ip).city.name
         return name.strip() if name else None
     except geoip2.errors.AddressNotFoundError:
@@ -103,6 +107,7 @@ def lookup_asn(ip: str | None) -> int | None:
         return None
     try:
         import geoip2.errors
+
         return reader.asn(ip).autonomous_system_number
     except geoip2.errors.AddressNotFoundError:
         return None

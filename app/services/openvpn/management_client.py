@@ -29,6 +29,7 @@ wire format for a command ever turns out to differ from what's assumed
 here, MgmtProtocolError below is meant to surface that clearly rather than
 silently misparsing.
 """
+
 from __future__ import annotations
 
 import re
@@ -119,7 +120,7 @@ class ManagementClient:
         self.socket_path = socket_path
         self._sock: socket.socket | None = None
 
-    def __enter__(self) -> "ManagementClient":
+    def __enter__(self) -> ManagementClient:
         self.connect()
         return self
 
@@ -191,7 +192,7 @@ class ManagementClient:
                     if line == "END":
                         return lines
                     lines.append(line)
-        except socket.timeout as e:
+        except TimeoutError as e:
             raise MgmtConnectionError("Timed out waiting for the management socket to respond.") from e
         except OSError as e:
             raise MgmtConnectionError(f"Failed reading from the management socket: {e}") from e
@@ -234,23 +235,28 @@ class ManagementClient:
                     # output doesn't match the shape this client expects --
                     # surface that clearly rather than silently returning
                     # wrong/empty data.
-                    raise MgmtProtocolError(
-                        f"Unexpected `status 3` CLIENT_LIST row (no matching HEADER seen yet): {line!r}"
-                    )
-                row = dict(zip(header, values))
+                    raise MgmtProtocolError(f"Unexpected `status 3` CLIENT_LIST row (no matching HEADER seen yet): {line!r}")
+                # strict=False: deliberately lenient -- a header/values
+                # length mismatch here reflects an OpenVPN management
+                # protocol quirk/version difference, not a bug in this
+                # parser, and dict(zip(...)) already does the sensible
+                # thing (drops the excess) without raising.
+                row = dict(zip(header, values, strict=False))
                 try:
                     real_address = row["Real Address"]
                     since_epoch_raw = row.get("Connected Since (time_t)")
-                    sessions.append(ClientSession(
-                        common_name=row["Common Name"],
-                        real_address=real_address,
-                        virtual_address=row.get("Virtual Address", ""),
-                        bytes_received=int(row.get("Bytes Received") or 0),
-                        bytes_sent=int(row.get("Bytes Sent") or 0),
-                        connected_since=row.get("Connected Since", ""),
-                        connected_since_epoch=int(since_epoch_raw) if since_epoch_raw else None,
-                        source_ip=parse_source_ip(real_address),
-                    ))
+                    sessions.append(
+                        ClientSession(
+                            common_name=row["Common Name"],
+                            real_address=real_address,
+                            virtual_address=row.get("Virtual Address", ""),
+                            bytes_received=int(row.get("Bytes Received") or 0),
+                            bytes_sent=int(row.get("Bytes Sent") or 0),
+                            connected_since=row.get("Connected Since", ""),
+                            connected_since_epoch=int(since_epoch_raw) if since_epoch_raw else None,
+                            source_ip=parse_source_ip(real_address),
+                        )
+                    )
                 except KeyError as e:
                     raise MgmtProtocolError(f"`status 3` CLIENT_LIST row missing expected field {e}: {line!r}") from e
         return sessions

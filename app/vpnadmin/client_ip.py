@@ -40,6 +40,7 @@ covers both of the auto-detected modes above without needing the config
 value set at all (useful for local/dev runs with no Traefik in front,
 where every branch below simply falls through to the raw socket peer).
 """
+
 import ipaddress
 
 from fastapi import Request

@@ -21,6 +21,7 @@ Docker with the app's venv and DATABASE_URL/etc. pointed at the real DB.)
 Idempotent: `run` skips any column that's already gone, so it's safe to run
 again (e.g. against a database that already had this applied).
 """
+
 import argparse
 import sys
 
@@ -70,7 +71,8 @@ def cmd_run(args) -> int:
 
     for column in present:
         with engine.begin() as conn:
-            conn.execute(text(f"ALTER TABLE app_settings DROP COLUMN {column}"))
+            # column is always one of the hardcoded _COLUMNS tuple above, not user input
+            conn.execute(text(f"ALTER TABLE app_settings DROP COLUMN {column}"))  # nosemgrep: avoid-sqlalchemy-text
         print(f"  dropped {column}")
     print("Done.")
     return 0

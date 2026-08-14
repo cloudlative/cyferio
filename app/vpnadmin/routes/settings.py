@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
@@ -28,6 +28,7 @@ class UpdateSettingsRequest(BaseModel):
     to touch (see model_fields_set usage in the route below); this is a
     partial update, not a full replace. An explicit null clears that field
     back to its environment-variable default (see app_settings.py)."""
+
     portal_url: str | None = None
 
     smtp_host: str | None = None
@@ -288,10 +289,7 @@ def get_settings(_: User = Depends(require_admin), db: Session = Depends(get_db)
     # offers, so an admin can only ever pick a role that actually exists.
     # Excludes super_admin for the same reason create_user() already
     # forbids assigning it (see routes/users.py's _resolve_creatable_role).
-    body["role_choices"] = [
-        {"slug": r.slug, "name": r.name}
-        for r in db.query(RoleDef).filter(RoleDef.slug != "super_admin").order_by(RoleDef.name).all()
-    ]
+    body["role_choices"] = [{"slug": r.slug, "name": r.name} for r in db.query(RoleDef).filter(RoleDef.slug != "super_admin").order_by(RoleDef.name).all()]
     return body
 
 
@@ -304,15 +302,37 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
     fields_set = body.model_fields_set
     changes = []
 
-    for field in ("portal_url", "smtp_host", "smtp_port",
-                   "smtp_username", "smtp_from", "smtp_use_tls", "min_password_length",
-                   "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
-                   "audit_retention_days", "log_failed_login_attempts", "default_new_user_role",
-                   "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "admin_notification_email",
-                   "notify_admin_on_user_created", "notify_admin_on_client_revoked",
-                   "quota_notify_warning_pct", "quota_notify_critical_pct", "notify_admin_on_quota_critical",
-                   "reports_default_range_days", "db_snapshot_retention_days", "maintenance_mode", "maintenance_message",
-                   "notification_duration_ms", "login_theme", "timezone", "time_format"):
+    for field in (
+        "portal_url",
+        "smtp_host",
+        "smtp_port",
+        "smtp_username",
+        "smtp_from",
+        "smtp_use_tls",
+        "min_password_length",
+        "session_timeout_minutes",
+        "account_lockout_threshold",
+        "account_lockout_minutes",
+        "audit_retention_days",
+        "log_failed_login_attempts",
+        "default_new_user_role",
+        "default_bandwidth_monthly_gb",
+        "default_quota_enforcement_policy",
+        "admin_notification_email",
+        "notify_admin_on_user_created",
+        "notify_admin_on_client_revoked",
+        "quota_notify_warning_pct",
+        "quota_notify_critical_pct",
+        "notify_admin_on_quota_critical",
+        "reports_default_range_days",
+        "db_snapshot_retention_days",
+        "maintenance_mode",
+        "maintenance_message",
+        "notification_duration_ms",
+        "login_theme",
+        "timezone",
+        "time_format",
+    ):
         if field in fields_set:
             value = getattr(body, field)
             if value != getattr(row, field):
@@ -347,7 +367,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
         raise HTTPException(status_code=400, detail="The warning threshold must be lower than the critical threshold.")
 
     if changes:
-        row.updated_at = datetime.now(timezone.utc)
+        row.updated_at = datetime.now(UTC)
         row.updated_by = admin.username
         db.commit()
         refresh_runtime_cache(db)
@@ -359,6 +379,7 @@ class TestSmtpRequest(BaseModel):
     """Tests whatever SMTP values are currently in the Settings-page form --
     not necessarily what's already saved -- against a destination address,
     without persisting anything."""
+
     email: str
     smtp_host: str
     smtp_port: int = 587

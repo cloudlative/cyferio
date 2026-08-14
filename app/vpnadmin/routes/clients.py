@@ -9,11 +9,8 @@ from services.openvpn.exceptions import ValidationError as MacFormatError
 from services.openvpn.validator import normalize_mac
 from services.system.host_executor import HostExecutorConfig, run_host_command
 
-from .. import app_settings
+from .. import app_settings, mailer, policy_store, vpn_identity_sync
 from .. import cli_wrapper as cli
-from .. import mailer
-from .. import policy_store
-from .. import vpn_identity_sync
 from ..audit import log_action
 from ..cli_wrapper import ScriptError
 from ..config import settings
@@ -96,9 +93,7 @@ class AddClientRequest(BaseModel):
     @classmethod
     def _valid_name(cls, v: str) -> str:
         if not NAME_RE.match(v):
-            raise ValueError(
-                "Name must be 1-64 characters: letters, numbers, underscore, or hyphen only."
-            )
+            raise ValueError("Name must be 1-64 characters: letters, numbers, underscore, or hyphen only.")
         return v
 
     @field_validator("mac")
@@ -159,10 +154,7 @@ def get_client_user_links(_: User = Depends(_require_client_viewer), db: Session
     "unassigned"/policy gate. Registered before /{name}/... below, same
     static-before-dynamic ordering as /revoked and /unassigned."""
     links = db.query(VpnProfileLink).options(selectinload(VpnProfileLink.user)).all()
-    return {
-        link.vpn_client_name: {"username": link.user.username, "display_name": link.user.display_name}
-        for link in links
-    }
+    return {link.vpn_client_name: {"username": link.user.username, "display_name": link.user.display_name} for link in links}
 
 
 @router.get("/{name}/macs")
@@ -283,8 +275,7 @@ def _host_executor_config() -> HostExecutorConfig:
     if not settings.HOST_SSH_TARGET or not settings.HOST_SSH_KEY_PATH:
         raise HTTPException(
             status_code=400,
-            detail="Host executor is not configured -- set HOST_SSH_TARGET and "
-            "HOST_SSH_KEY_PATH (see .env.example) before session actions can run.",
+            detail="Host executor is not configured -- set HOST_SSH_TARGET and HOST_SSH_KEY_PATH (see .env.example) before session actions can run.",
         )
     return HostExecutorConfig(
         ssh_key_path=settings.HOST_SSH_KEY_PATH,
@@ -299,6 +290,7 @@ def _host_executor_config() -> HostExecutorConfig:
 class DisconnectRequest(BaseModel):
     """Optional reason, shown nowhere except the audit log -- an admin
     disconnecting a session isn't required to explain why, but can."""
+
     reason: str | None = None
 
     @field_validator("reason")
@@ -386,9 +378,11 @@ def disconnect_all_clients(body: DisconnectRequest, user: User = Depends(_requir
         except OpenVPNError as e:
             failed.append({"name": name, "error": e.detail})
     log_action(
-        db, user, "disconnect_all_sessions",
+        db,
+        user,
+        "disconnect_all_sessions",
         detail=f"{body.reason + '; ' if body.reason else ''}disconnected: {', '.join(disconnected) or 'none'}"
-               + (f"; failed: {', '.join(f['name'] for f in failed)}" if failed else ""),
+        + (f"; failed: {', '.join(f['name'] for f in failed)}" if failed else ""),
         success=not failed,
     )
     return {"disconnected": disconnected, "failed": failed}
@@ -528,6 +522,7 @@ def restore_revoked_client(name: str, body: RestoreClientRequest, user: User = D
 # -- these endpoints only read/write client_policy.json via policy_store,
 # they never invoke cli_wrapper/openvpn-install.sh for this feature.
 
+
 class PolicyRequest(BaseModel):
     """Same partial-update-by-field-presence convention as Settings'
     UpdateSettingsRequest: a field omitted from the request body is left
@@ -547,6 +542,7 @@ class PolicyRequest(BaseModel):
     same fields automatically; this endpoint is the other way to set them
     (unlinked clients, or a VPN-only restriction that intentionally
     differs from the linked user's own login restrictions)."""
+
     allowed_os: list[str] | None = None
     bandwidth_monthly_gb: float | None = None
     allowed_countries: list[str] | None = None

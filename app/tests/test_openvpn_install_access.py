@@ -9,8 +9,9 @@ Uses the shared app_client fixture (see conftest.py) -- host_executor itself
 is never exercised here (HOST_SSH_TARGET stays unset), these tests only
 cover what happens before a real SSH call would be attempted.
 """
-from vpnadmin.models import RoleDef, User
+
 from vpnadmin.auth import hash_password
+from vpnadmin.models import RoleDef, User
 
 from .conftest import login
 
@@ -18,8 +19,10 @@ from .conftest import login
 def _make_admin(db_session, username, *, is_bootstrap_admin, password="somepass123"):
     role = db_session.query(RoleDef).filter_by(slug="admin").first()
     user = User(
-        username=username, password_hash=hash_password(password),
-        role_id=role.id, is_bootstrap_admin=is_bootstrap_admin,
+        username=username,
+        password_hash=hash_password(password),
+        role_id=role.id,
+        is_bootstrap_admin=is_bootstrap_admin,
     )
     db_session.add(user)
     db_session.commit()

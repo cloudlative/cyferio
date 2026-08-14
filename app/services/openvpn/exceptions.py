@@ -11,6 +11,7 @@ Every exception carries:
   - `.context`: a dict of structured fields (e.g. {"client": "alice"}) for
     logging/audit, not meant to be user-facing on its own.
 """
+
 from __future__ import annotations
 
 
@@ -113,10 +114,19 @@ class HostExecutorError(OpenVPNError):
 _EXCEPTION_REGISTRY: dict[str, type[OpenVPNError]] = {
     cls.__name__: cls
     for cls in (
-        ValidationError, InstallError, AlreadyInstalledError, NotInstalledError,
-        CertificateError, ClientAlreadyExistsError, ClientNotFoundError,
-        ClientNotRevokedError, MacAlreadyRegisteredError, MacNotFoundError,
-        FirewallConfigError, ServiceManagementError, UnsupportedOSError,
+        ValidationError,
+        InstallError,
+        AlreadyInstalledError,
+        NotInstalledError,
+        CertificateError,
+        ClientAlreadyExistsError,
+        ClientNotFoundError,
+        ClientNotRevokedError,
+        MacAlreadyRegisteredError,
+        MacNotFoundError,
+        FirewallConfigError,
+        ServiceManagementError,
+        UnsupportedOSError,
     )
 }
 

@@ -5,9 +5,8 @@ first client's cert is created but never registered in DB_FILE, so it can't
 pass the MAC check until a separate add_mac/restore call). See
 routes/openvpn_install.py's post_install, which now requires a mac and
 passes it through as --client-mac."""
-import json
 
-import pytest
+import json
 
 from cli import openvpn_admin
 
@@ -90,10 +89,15 @@ def test_install_action_calls_add_mac_after_install(monkeypatch, capsys):
     monkeypatch.setattr(openvpn_admin.installer, "install", fake_install)
     monkeypatch.setattr(openvpn_admin.client_manager, "add_mac", fake_add_mac)
 
-    rc = openvpn_admin.main([
-        "--openvpn-dir=/tmp/scratch-openvpn",
-        "install", "--client-name=client", "--client-mac=aa:bb:cc:dd:ee:ff", "--no-packages",
-    ])
+    rc = openvpn_admin.main(
+        [
+            "--openvpn-dir=/tmp/scratch-openvpn",
+            "install",
+            "--client-name=client",
+            "--client-mac=aa:bb:cc:dd:ee:ff",
+            "--no-packages",
+        ]
+    )
     assert rc == 0
     assert calls["install"] == ("client", False)
     assert calls["add_mac"] == ("client", "aa:bb:cc:dd:ee:ff")
@@ -126,7 +130,10 @@ class TestPublicIpAutoDetect:
 
         args = [
             "--openvpn-dir=/tmp/scratch-openvpn",
-            "install", "--client-name=client", "--client-mac=aa:bb:cc:dd:ee:ff", "--no-packages",
+            "install",
+            "--client-name=client",
+            "--client-mac=aa:bb:cc:dd:ee:ff",
+            "--no-packages",
         ]
         if explicit_public_ip:
             args.append(f"--public-ip={explicit_public_ip}")

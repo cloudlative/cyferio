@@ -1,12 +1,12 @@
 """Tests for the admin-only Settings page (branding/SMTP/security/audit
 retention) -- routes/settings.py, app_settings.py, and mailer.py's
 send_test_email path."""
+
 import smtplib
 
-import pytest
-
 import vpnadmin.routes.settings as settings_mod
-from vpnadmin.app_settings import SMTP_PASSWORD_PLACEHOLDER, runtime as runtime_settings
+from vpnadmin.app_settings import SMTP_PASSWORD_PLACEHOLDER
+from vpnadmin.app_settings import runtime as runtime_settings
 
 from .conftest import login
 
@@ -101,21 +101,34 @@ class TestUpdateSettings:
 
     def test_password_length_setting_affects_new_user_validation(self, app_client, db_session, monkeypatch):
         from vpnadmin.routes import users as users_mod
+
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
         r = app_client.patch("/api/settings", json={"min_password_length": 12})
         assert r.status_code == 200
 
-        r = app_client.post("/api/users", json={
-            "username": "shortpw", "password": "short123", "first_name": "Short",
-            "email": "shortpw@example.com", "mac": "aa:bb:cc:dd:ee:ff",
-        })
+        r = app_client.post(
+            "/api/users",
+            json={
+                "username": "shortpw",
+                "password": "short123",
+                "first_name": "Short",
+                "email": "shortpw@example.com",
+                "mac": "aa:bb:cc:dd:ee:ff",
+            },
+        )
         assert r.status_code == 422
 
-        r = app_client.post("/api/users", json={
-            "username": "longenough", "password": "Longenoughpassword123!", "first_name": "Long",
-            "email": "longenough@example.com", "mac": "aa:bb:cc:dd:ee:ff",
-        })
+        r = app_client.post(
+            "/api/users",
+            json={
+                "username": "longenough",
+                "password": "Longenoughpassword123!",
+                "first_name": "Long",
+                "email": "longenough@example.com",
+                "mac": "aa:bb:cc:dd:ee:ff",
+            },
+        )
         assert r.status_code == 201
 
     def test_settings_change_audit_logged(self, app_client, db_session):
@@ -136,9 +149,14 @@ class TestSmtpTestEmail:
 
         monkeypatch.setattr(settings_mod.mailer, "send_test_email", fake_send)
         login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/settings/smtp/test", json={
-            "email": "me@example.com", "smtp_host": "smtp.example.com", "smtp_port": 587,
-        })
+        r = app_client.post(
+            "/api/settings/smtp/test",
+            json={
+                "email": "me@example.com",
+                "smtp_host": "smtp.example.com",
+                "smtp_port": 587,
+            },
+        )
         assert r.status_code == 200
         assert sent == {"to_address": "me@example.com", "host": "smtp.example.com", "port": 587}
 
@@ -148,9 +166,13 @@ class TestSmtpTestEmail:
 
         monkeypatch.setattr(settings_mod.mailer, "send_test_email", fake_send)
         login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/settings/smtp/test", json={
-            "email": "me@example.com", "smtp_host": "smtp.example.com",
-        })
+        r = app_client.post(
+            "/api/settings/smtp/test",
+            json={
+                "email": "me@example.com",
+                "smtp_host": "smtp.example.com",
+            },
+        )
         assert r.status_code == 502
         assert "authentication failed" in r.json()["detail"].lower()
 
@@ -174,10 +196,14 @@ class TestSmtpTestEmail:
             seen["password"] = password
 
         monkeypatch.setattr(settings_mod.mailer, "send_test_email", fake_send)
-        r = app_client.post("/api/settings/smtp/test", json={
-            "email": "me@example.com", "smtp_host": "smtp.example.com",
-            "smtp_password": SMTP_PASSWORD_PLACEHOLDER,
-        })
+        r = app_client.post(
+            "/api/settings/smtp/test",
+            json={
+                "email": "me@example.com",
+                "smtp_host": "smtp.example.com",
+                "smtp_password": SMTP_PASSWORD_PLACEHOLDER,
+            },
+        )
         assert r.status_code == 200
         assert seen["password"] == "realpass"
 
@@ -189,7 +215,11 @@ class TestSmtpTestEmail:
     def test_test_email_does_not_persist_settings(self, app_client, monkeypatch):
         monkeypatch.setattr(settings_mod.mailer, "send_test_email", lambda **kw: None)
         login(app_client, "admin", "adminpass123")
-        app_client.post("/api/settings/smtp/test", json={
-            "email": "me@example.com", "smtp_host": "not-saved.example.com",
-        })
+        app_client.post(
+            "/api/settings/smtp/test",
+            json={
+                "email": "me@example.com",
+                "smtp_host": "not-saved.example.com",
+            },
+        )
         assert runtime_settings.smtp_host == ""  # unaffected -- dry run only

@@ -6,6 +6,7 @@ the permission gate, the 404-when-unlinked behavior (mirroring
 get_user_analytics()'s equivalent 404 in test_reports.py), and that the
 response only ever contains the calling user's own data even when another
 user's data also exists in the same DB."""
+
 import subprocess
 
 import pytest
@@ -46,6 +47,7 @@ def _fake_run(session_rows="[]", rejected_rows="[]"):
         if "--rejected-connections" in args:
             return subprocess.CompletedProcess(args, 0, stdout=rejected_rows, stderr="")
         return subprocess.CompletedProcess(args, 0, stdout="[]", stderr="")
+
     return run
 
 
@@ -64,13 +66,17 @@ class TestMyVpnReport:
         # must never leak into bob's report.
         _make_self_service_user(db_session, "alice", vpn_client_name="alice")
         _make_self_service_user(db_session, "bob", vpn_client_name="bob", password="bobpass123")
-        monkeypatch.setattr(subprocess, "run", _fake_run(
-            session_rows='[{"client": "alice", "connected_at": "2026-08-01T10:00:00", '
-                         '"disconnected_at": "2026-08-01T11:00:00", "duration_seconds": 3600, '
-                         '"source_ip": "203.0.113.5", "bytes_received": 100, "bytes_sent": 200}]',
-            rejected_rows='[{"claimed_name": "alice", "timestamp": "2026-08-02T00:00:00", "reason": "mac_mismatch"}, '
-                          '{"claimed_name": "bob", "timestamp": "2026-08-02T00:00:00", "reason": "mac_mismatch"}]',
-        ))
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            _fake_run(
+                session_rows='[{"client": "alice", "connected_at": "2026-08-01T10:00:00", '
+                '"disconnected_at": "2026-08-01T11:00:00", "duration_seconds": 3600, '
+                '"source_ip": "203.0.113.5", "bytes_received": 100, "bytes_sent": 200}]',
+                rejected_rows='[{"claimed_name": "alice", "timestamp": "2026-08-02T00:00:00", "reason": "mac_mismatch"}, '
+                '{"claimed_name": "bob", "timestamp": "2026-08-02T00:00:00", "reason": "mac_mismatch"}]',
+            ),
+        )
         login(app_client, "alice", "somepass123")
         r = app_client.get("/api/me/vpn-profile/report")
         assert r.status_code == 200
@@ -85,6 +91,7 @@ class TestMyVpnReport:
 
     def test_quota_and_usage_scoped_to_own_client(self, app_client, db_session, monkeypatch):
         from vpnadmin import policy_store
+
         _make_self_service_user(db_session, "alice", vpn_client_name="alice")
         policy_store.set_policy("alice", bandwidth_monthly_gb=2.0)
         monkeypatch.setattr(subprocess, "run", _fake_run())

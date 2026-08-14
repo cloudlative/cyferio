@@ -3,12 +3,12 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from . import openvpn_install
 from ..app_settings import apply_settings_globals
 from ..auth import get_current_user
 from ..db import get_db
 from ..models import User
 from ..permissions import has_permission, has_permission_any_scope
+from . import openvpn_install
 
 router = APIRouter()
 templates = Jinja2Templates(directory="vpnadmin/templates")
@@ -288,9 +288,12 @@ def openvpn_install_page(request: Request, user: User | None = Depends(get_curre
     # is_elevated()/ELEVATED_TTL_MINUTES).
     needs_verification = not openvpn_install.is_elevated(request)
     return templates.TemplateResponse(
-        request, "openvpn_install.html",
+        request,
+        "openvpn_install.html",
         _ctx(
-            user, db, needs_verification=needs_verification,
+            user,
+            db,
+            needs_verification=needs_verification,
             elevated_ttl_minutes=openvpn_install.ELEVATED_TTL_MINUTES,
         ),
     )
@@ -308,5 +311,3 @@ def change_password_page(request: Request, user: User | None = Depends(get_curre
     if user is None:
         return RedirectResponse("/login", status_code=303)
     return templates.TemplateResponse(request, "change_password.html", _ctx(user, db))
-
-

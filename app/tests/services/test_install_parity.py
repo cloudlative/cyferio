@@ -11,6 +11,7 @@ It always uses a throwaway, non-default port so it can't collide with a
 real production install on the same box, and always uninstalls what it
 created in a finally block.
 """
+
 from __future__ import annotations
 
 import os
@@ -24,8 +25,7 @@ from services.system import network_manager
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_LIVE_HOST_TESTS") != "1",
-    reason="Live-host install test -- run explicitly with RUN_LIVE_HOST_TESTS=1 as root "
-    "on a disposable test machine, never in normal CI.",
+    reason="Live-host install test -- run explicitly with RUN_LIVE_HOST_TESTS=1 as root on a disposable test machine, never in normal CI.",
 )
 
 TEST_PORT = 11941  # deliberately not 1194 or the bash-reference's 11940

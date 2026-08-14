@@ -1,14 +1,14 @@
 import enum
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Date, DateTime, Enum, Text, Float, ForeignKey, Table, UniqueConstraint, event
-from sqlalchemy.orm import backref, validates, relationship
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, Enum, Float, ForeignKey, Integer, String, Table, Text, UniqueConstraint, event
+from sqlalchemy.orm import backref, relationship, validates
 
 from .db import Base
 
 
 def _utcnow():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Role(str, enum.Enum):
@@ -19,6 +19,7 @@ class Role(str, enum.Enum):
     complete and verified in production; every *new* permission check should
     use RoleDef/require_permission, not this enum. Do not add new members
     here -- add a custom RoleDef row instead."""
+
     admin = "admin"
     editor = "editor"  # can add/revoke/edit VPN clients and manage their MAC
     # addresses (everything in routes/clients.py) -- but not user
@@ -36,6 +37,7 @@ class RoleDef(Base):
     """Dynamic role, replacing the `Role` enum above. A role is just a name
     plus a bag of ObjectPermission/RoleApiScope rows -- see
     docs/rbac_identity_design.md §1.1 for the full design."""
+
     __tablename__ = "roles"
 
     id = Column(Integer, primary_key=True)
@@ -48,12 +50,8 @@ class RoleDef(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     created_by = Column(String(64), nullable=True)  # username snapshot, same pattern as AuditLog
 
-    object_permissions = relationship(
-        "ObjectPermission", back_populates="role", cascade="all, delete-orphan"
-    )
-    api_scopes = relationship(
-        "RoleApiScope", back_populates="role", cascade="all, delete-orphan"
-    )
+    object_permissions = relationship("ObjectPermission", back_populates="role", cascade="all, delete-orphan")
+    api_scopes = relationship("RoleApiScope", back_populates="role", cascade="all, delete-orphan")
 
     @validates("slug")
     def _normalize_slug(self, key, value):
@@ -67,6 +65,7 @@ class ObjectPermission(Base):
     "audit_log", "settings", "teams", "reports", "health") rather than its
     own DB table -- adding a future module is one line in that registry, not
     a migration."""
+
     __tablename__ = "role_object_permissions"
 
     id = Column(Integer, primary_key=True)
@@ -85,8 +84,8 @@ class ObjectPermission(Base):
 
 
 class ApiScope(str, enum.Enum):
-    any = "any"   # operate on any record of this object type
-    own = "own"   # operate only on records the caller owns (self-service)
+    any = "any"  # operate on any record of this object type
+    own = "own"  # operate only on records the caller owns (self-service)
 
 
 class RoleApiScope(Base):
@@ -96,6 +95,7 @@ class RoleApiScope(Base):
     User work -- see require_own_or_permission in permissions.py. Absence of
     a row for a given (role, object) defaults to scope="any" (i.e. this
     table only needs a row when a role is deliberately restricted to "own")."""
+
     __tablename__ = "role_api_scopes"
 
     id = Column(Integer, primary_key=True)
@@ -123,6 +123,7 @@ class Team(Base):
     to zero, one, or several teams; a user with no team is simply absent
     from every team's `members`, not a row here ("Unassigned" is a UI
     concept, not a database one)."""
+
     __tablename__ = "teams"
 
     id = Column(Integer, primary_key=True)
@@ -320,9 +321,7 @@ def _default_role_id_from_legacy_role(mapper, connection, target: User) -> None:
     # -- handle both rather than assuming .value always exists.
     role_value = target.role.value if hasattr(target.role, "value") else target.role
     roles_table = RoleDef.__table__
-    row = connection.execute(
-        roles_table.select().where(roles_table.c.slug == role_value)
-    ).first()
+    row = connection.execute(roles_table.select().where(roles_table.c.slug == role_value)).first()
     if row is not None:
         target.role_id = row.id
 
@@ -337,6 +336,7 @@ class AppSettings(Base):
     app_settings.py's EffectiveSettings), so a fresh install with no admin
     ever touching this page behaves exactly as it did before this table
     existed."""
+
     __tablename__ = "app_settings"
 
     id = Column(Integer, primary_key=True)
@@ -470,6 +470,7 @@ class AuditLog(Base):
     management), for accountability -- who did what, and when. Read-only
     operations (list/status/check) are deliberately NOT logged here to keep
     this table meaningful rather than a firehose of GET requests."""
+
     __tablename__ = "audit_log"
 
     id = Column(Integer, primary_key=True)
@@ -508,6 +509,7 @@ class DbStatSnapshot(Base):
     an error" stance -- a snapshot taken against a non-Postgres engine
     still gets a row (so the time series has no silent gaps), just with
     every stat left NULL."""
+
     __tablename__ = "db_stat_snapshots"
 
     id = Column(Integer, primary_key=True)
@@ -538,6 +540,7 @@ class QuotaNotification(Base):
     policy_lib.py's client_usage.json already uses -- lets a user cross
     80% again next month and get a fresh notification, not silence
     forever after the first one."""
+
     __tablename__ = "quota_notifications"
 
     id = Column(Integer, primary_key=True)
@@ -563,6 +566,7 @@ class VpnProfileLink(Base):
     not just in application code. Deliberately its own table rather than a
     column on User, since a VPN client can (transiently, before an admin
     links or a migration runs) exist with no linked portal user at all."""
+
     __tablename__ = "vpn_profile_links"
 
     id = Column(Integer, primary_key=True)
@@ -612,6 +616,7 @@ class MigrationReport(Base):
     stripped before this is ever written (see migration_engine.py's
     apply_migration) so a plaintext temp password never sits at rest in
     the DB, even redacted-on-read; it's stripped on write instead."""
+
     __tablename__ = "migration_reports"
 
     id = Column(Integer, primary_key=True)

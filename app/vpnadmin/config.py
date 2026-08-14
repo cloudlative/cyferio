@@ -7,6 +7,7 @@ box as openvpn-install.sh / vpn-status.py). No config value here is
 hardcoded to any specific person's server -- this is the open-source app,
 not a private deployment.
 """
+
 import os
 import secrets
 
@@ -73,12 +74,8 @@ class Settings:
     # Docker deployment these are bind-mounted from the host (see
     # docker-compose.yml) and these env vars should point at the mounted
     # paths instead.
-    OPENVPN_INSTALL_SCRIPT: str = os.environ.get(
-        "OPENVPN_INSTALL_SCRIPT", "/opt/openvpn-toolkit/openvpn-install.sh"
-    )
-    VPN_STATUS_SCRIPT: str = os.environ.get(
-        "VPN_STATUS_SCRIPT", "/opt/openvpn-toolkit/vpn-status.py"
-    )
+    OPENVPN_INSTALL_SCRIPT: str = os.environ.get("OPENVPN_INSTALL_SCRIPT", "/opt/openvpn-toolkit/openvpn-install.sh")
+    VPN_STATUS_SCRIPT: str = os.environ.get("VPN_STATUS_SCRIPT", "/opt/openvpn-toolkit/vpn-status.py")
 
     # Whether to prefix script invocations with `sudo`. Default true (the
     # scripts require root for most operations). Set to false if this
@@ -117,9 +114,7 @@ class Settings:
     HOST_SSH_KEY_PATH: str = os.environ.get("HOST_SSH_KEY_PATH", "/run/secrets/openvpn-toolkit-deploy-key")
     HOST_SSH_TARGET: str = os.environ.get("HOST_SSH_TARGET", "")  # "user@host"
     HOST_SSH_PORT: int = int(os.environ.get("HOST_SSH_PORT", 22))
-    HOST_SSH_REMOTE_SCRIPT_PATH: str = os.environ.get(
-        "HOST_SSH_REMOTE_SCRIPT_PATH", "/opt/openvpn-toolkit/app/cli/openvpn_admin.py"
-    )
+    HOST_SSH_REMOTE_SCRIPT_PATH: str = os.environ.get("HOST_SSH_REMOTE_SCRIPT_PATH", "/opt/openvpn-toolkit/app/cli/openvpn_admin.py")
     HOST_SSH_USE_SUDO: bool = _env_bool("HOST_SSH_USE_SUDO", True)
     HOST_SSH_TIMEOUT_SECONDS: int = int(os.environ.get("HOST_SSH_TIMEOUT_SECONDS", 180))
 

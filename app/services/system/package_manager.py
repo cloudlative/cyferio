@@ -8,6 +8,7 @@ fedora branches are ported directly from the bash script's own logic as the
 spec, per the Phase 1 plan's risk note, but are untested against a real host
 of those distros.
 """
+
 from __future__ import annotations
 
 import os
@@ -78,9 +79,9 @@ def _check_min_version(info: OSInfo) -> None:
         return
     if version_num < minimum:
         raise UnsupportedOSError(
-            f"{info.os.capitalize()} {minimum} or higher is required to use this installer. "
-            f"This version ({info.os_version}) is too old and unsupported.",
-            os=info.os, os_version=info.os_version,
+            f"{info.os.capitalize()} {minimum} or higher is required to use this installer. This version ({info.os_version}) is too old and unsupported.",
+            os=info.os,
+            os_version=info.os_version,
         )
 
 
@@ -98,7 +99,8 @@ def install_packages(info: OSInfo, packages: list[str]) -> None:
         run_checked(["apt-get", "update"], timeout=120, error_prefix="apt-get update failed")
         run_checked(
             ["apt-get", "install", "-y", "--no-install-recommends", *packages],
-            timeout=300, error_prefix="apt-get install failed",
+            timeout=300,
+            error_prefix="apt-get install failed",
         )
     elif info.os == "centos":
         run_checked(["yum", "install", "-y", "epel-release"], timeout=120, error_prefix="yum epel-release failed")

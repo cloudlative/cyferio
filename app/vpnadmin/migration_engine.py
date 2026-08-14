@@ -22,8 +22,8 @@ preview() and apply() share the exact same matching algorithm (compute_report)
 so what a preview shows is guaranteed to be what apply() actually does --
 apply() just additionally writes the rows.
 """
+
 import json
-from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -45,8 +45,7 @@ def compute_report(db: Session) -> dict:
     try:
         clients = cli.list_clients()
     except ScriptError as e:
-        return {"error": e.message, "linked_existing": [], "created_new_accounts": [],
-                "unmatched_portal_users": [], "conflicts": []}
+        return {"error": e.message, "linked_existing": [], "created_new_accounts": [], "unmatched_portal_users": [], "conflicts": []}
 
     client_names = [c["name"] for c in (clients or []) if "name" in c]
     already_linked = {link.vpn_client_name for link in db.query(VpnProfileLink).all()}
@@ -66,11 +65,13 @@ def compute_report(db: Session) -> dict:
             created_new_accounts.append({"vpn_client_name": name, "username": normalized})
             continue
         if user.vpn_profile_link is not None:
-            conflicts.append({
-                "vpn_client_name": name,
-                "reason": f"username '{normalized}' matches this client but is already linked to "
-                          f"a different VPN profile ('{user.vpn_profile_link.vpn_client_name}').",
-            })
+            conflicts.append(
+                {
+                    "vpn_client_name": name,
+                    "reason": f"username '{normalized}' matches this client but is already linked to "
+                    f"a different VPN profile ('{user.vpn_profile_link.vpn_client_name}').",
+                }
+            )
             continue
         linked_existing.append({"username": user.username, "vpn_client_name": name, "role": _role_slug(user)})
         matched_usernames.add(normalized)
@@ -114,20 +115,28 @@ def apply_migration(db: Session, *, run_by: str) -> dict:
         )
         db.add(user)
         db.flush()
-        db.add(VpnProfileLink(
-            user_id=user.id, vpn_client_name=entry["vpn_client_name"],
-            link_source="migration_exact_match", protected_from_auto_revoke=True,
-            linked_by=run_by,
-        ))
+        db.add(
+            VpnProfileLink(
+                user_id=user.id,
+                vpn_client_name=entry["vpn_client_name"],
+                link_source="migration_exact_match",
+                protected_from_auto_revoke=True,
+                linked_by=run_by,
+            )
+        )
         created_accounts_out.append({**entry, "temp_password": temp_password})
 
     for entry in report["linked_existing"]:
         user = db.query(User).filter_by(username=entry["username"]).first()
-        db.add(VpnProfileLink(
-            user_id=user.id, vpn_client_name=entry["vpn_client_name"],
-            link_source="migration_exact_match", protected_from_auto_revoke=True,
-            linked_by=run_by,
-        ))
+        db.add(
+            VpnProfileLink(
+                user_id=user.id,
+                vpn_client_name=entry["vpn_client_name"],
+                link_source="migration_exact_match",
+                protected_from_auto_revoke=True,
+                linked_by=run_by,
+            )
+        )
 
     db.commit()
 

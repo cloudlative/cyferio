@@ -10,6 +10,7 @@ single source of truth for validation (name sanitization, MAC
 normalization, etc.); this wrapper does not re-implement that logic, only
 invokes it and relays the result.
 """
+
 import json
 import subprocess
 import threading
@@ -81,14 +82,9 @@ def _run(args: list[str]) -> subprocess.CompletedProcess:
                 shell=False,  # explicit: never let this become shell=True
             )
     except subprocess.TimeoutExpired as e:
-        raise ScriptError(
-            f"Command timed out after {settings.SCRIPT_TIMEOUT_SECONDS}s"
-        ) from e
+        raise ScriptError(f"Command timed out after {settings.SCRIPT_TIMEOUT_SECONDS}s") from e
     except FileNotFoundError as e:
-        raise ScriptError(
-            f"Command not found: {args[0]} -- check OPENVPN_INSTALL_SCRIPT/"
-            f"VPN_STATUS_SCRIPT/sudo paths in the app's config"
-        ) from e
+        raise ScriptError(f"Command not found: {args[0]} -- check OPENVPN_INSTALL_SCRIPT/VPN_STATUS_SCRIPT/sudo paths in the app's config") from e
 
 
 def _run_install_script(*args: str) -> subprocess.CompletedProcess:
@@ -107,33 +103,37 @@ def _parse_json_or_raise(proc: subprocess.CompletedProcess, *, allow_nonzero_jso
     if proc.returncode != 0 and not allow_nonzero_json:
         raise ScriptError(
             proc.stderr.strip() or f"Command failed with exit code {proc.returncode}",
-            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            returncode=proc.returncode,
         )
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError as e:
         raise ScriptError(
             "Command did not return valid JSON",
-            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            returncode=proc.returncode,
         ) from e
 
 
 # --- openvpn-install.sh ------------------------------------------------------
 
+
 def list_clients() -> list[dict]:
-    return _cached(("list_clients",), lambda:
-        _parse_json_or_raise(_run_install_script("--list-users", "--json")))
+    return _cached(("list_clients",), lambda: _parse_json_or_raise(_run_install_script("--list-users", "--json")))
 
 
 def list_revoked() -> list[dict]:
-    return _cached(("list_revoked",), lambda:
-        _parse_json_or_raise(_run_install_script("--list-revoked-users", "--json")))
+    return _cached(("list_revoked",), lambda: _parse_json_or_raise(_run_install_script("--list-revoked-users", "--json")))
 
 
 def list_macs(name: str) -> dict:
     def _do():
         proc = _run_install_script("--macs", name, "--json")
         return _parse_json_or_raise(proc, allow_nonzero_json=True)
+
     return _cached(("list_macs", name), _do)
 
 
@@ -142,7 +142,9 @@ def add_mac(name: str, mac: str) -> str:
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to add MAC address",
-            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            returncode=proc.returncode,
         )
     _invalidate_client_caches(name)
     return proc.stdout.strip()
@@ -153,7 +155,9 @@ def remove_mac(name: str, mac: str) -> str:
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to remove MAC address",
-            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            returncode=proc.returncode,
         )
     _invalidate_client_caches(name)
     return proc.stdout.strip()
@@ -164,19 +168,20 @@ def _invalidate_client_caches(name: str) -> None:
     that would now be stale -- otherwise a change could appear not to have
     taken effect for up to _CACHE_TTL_SECONDS."""
     with _cache_lock:
-        for key in [k for k in _cache if k[0] in ("list_clients", "list_revoked", "check_consistency", "lint_db")
-                    or (k[0] == "list_macs" and len(k) > 1 and k[1] == name)]:
+        for key in [
+            k
+            for k in _cache
+            if k[0] in ("list_clients", "list_revoked", "check_consistency", "lint_db") or (k[0] == "list_macs" and len(k) > 1 and k[1] == name)
+        ]:
             _cache.pop(key, None)
 
 
 def check_consistency() -> dict:
-    return _cached(("check_consistency",), lambda:
-        _parse_json_or_raise(_run_install_script("--check-certs", "--json"), allow_nonzero_json=True))
+    return _cached(("check_consistency",), lambda: _parse_json_or_raise(_run_install_script("--check-certs", "--json"), allow_nonzero_json=True))
 
 
 def lint_db() -> dict:
-    return _cached(("lint_db",), lambda:
-        _parse_json_or_raise(_run_install_script("--lint-mac-db", "--json"), allow_nonzero_json=True))
+    return _cached(("lint_db",), lambda: _parse_json_or_raise(_run_install_script("--lint-mac-db", "--json"), allow_nonzero_json=True))
 
 
 def add_client(name: str, mac: str) -> str:
@@ -190,7 +195,9 @@ def add_client(name: str, mac: str) -> str:
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to add client",
-            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            returncode=proc.returncode,
         )
     _invalidate_client_caches(name)
     return proc.stdout.strip()
@@ -201,7 +208,9 @@ def revoke_client(name: str) -> str:
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to revoke client",
-            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            returncode=proc.returncode,
         )
     _invalidate_client_caches(name)
     return proc.stdout.strip()
@@ -215,7 +224,9 @@ def show_ovpn(name: str) -> str:
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to read .ovpn file",
-            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            returncode=proc.returncode,
         )
     return proc.stdout
 
@@ -228,7 +239,9 @@ def purge_revoked(name: str) -> str:
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to purge revoked client",
-            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            returncode=proc.returncode,
         )
     _invalidate_client_caches(name)
     return proc.stdout.strip()
@@ -244,7 +257,9 @@ def clean_stale_db_entry(name: str) -> str:
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to clean stale db entry",
-            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            returncode=proc.returncode,
         )
     _invalidate_client_caches(name)
     return proc.stdout.strip()
@@ -258,7 +273,9 @@ def restore_client(name: str, mac: str) -> str:
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to restore client",
-            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            returncode=proc.returncode,
         )
     _invalidate_client_caches(name)
     return proc.stdout.strip()
@@ -266,19 +283,17 @@ def restore_client(name: str, mac: str) -> str:
 
 # --- vpn-status.py ------------------------------------------------------------
 
+
 def status_connected() -> list[dict]:
-    return _cached(("status_connected",), lambda:
-        _parse_json_or_raise(_run_status_script("--json")))
+    return _cached(("status_connected",), lambda: _parse_json_or_raise(_run_status_script("--json")))
 
 
 def status_all() -> list[dict]:
-    return _cached(("status_all",), lambda:
-        _parse_json_or_raise(_run_status_script("--all-clients", "--json")))
+    return _cached(("status_all",), lambda: _parse_json_or_raise(_run_status_script("--all-clients", "--json")))
 
 
 def status_rejected(limit: int = 20) -> list[dict]:
-    return _cached(("status_rejected", limit), lambda:
-        _parse_json_or_raise(_run_status_script("--rejected-connections", str(limit), "--json")))
+    return _cached(("status_rejected", limit), lambda: _parse_json_or_raise(_run_status_script("--rejected-connections", str(limit), "--json")))
 
 
 def status_session_history(limit: int = 20, client: str | None = None) -> list[dict]:
@@ -299,12 +314,14 @@ def status_session_history(limit: int = 20, client: str | None = None) -> list[d
     connection_history.html's page-level search does. `client` is part of
     the cache key so a scoped and an unscoped call for the same `limit`
     never collide in the 3s TTL cache."""
-    return _cached(("status_session_history", limit, client), lambda:
-        _parse_json_or_raise(_run_status_script(
-            "--session-history", str(limit), *(["--client", client] if client else []), "--json")))
+    return _cached(
+        ("status_session_history", limit, client),
+        lambda: _parse_json_or_raise(_run_status_script("--session-history", str(limit), *(["--client", client] if client else []), "--json")),
+    )
 
 
 # --- Combined dashboard summary ------------------------------------------
+
 
 def dashboard_summary(rejected_limit: int = 20) -> dict:
     """One call for everything the dashboard (and, via the shared background

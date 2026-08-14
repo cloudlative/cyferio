@@ -92,6 +92,7 @@ class UpdateTeamRequest(BaseModel):
     No `members` here; membership stays on its own dedicated endpoints
     below (add_team_member/remove_team_member), same separation of concerns
     already established for this resource."""
+
     name: str | None = None
     slug: str | None = None
     description: str | None = None
@@ -162,13 +163,7 @@ def list_teams(_: User = Depends(require_user), db: Session = Depends(get_db)):
     # touched -- one extra query per user (N+1), the actual cause of this
     # page's slow load on any deployment with more than a handful of users.
     # This batches it into a single extra query total, up front.
-    users = (
-        db.query(User)
-        .options(selectinload(User.teams))
-        .filter(User.deleted.is_(False))
-        .order_by(User.username)
-        .all()
-    )
+    users = db.query(User).options(selectinload(User.teams)).filter(User.deleted.is_(False)).order_by(User.username).all()
 
     groups: list[dict] = []
     for t in teams:
@@ -176,10 +171,17 @@ def list_teams(_: User = Depends(require_user), db: Session = Depends(get_db)):
         groups.append({**_team_detail(t), "count": len(members), "members": members})
 
     unassigned_members = [_member(u) for u in users if len(u.teams) == 0]
-    groups.append({
-        "id": None, "team": UNASSIGNED, "slug": None, "description": None, "tags": [],
-        "count": len(unassigned_members), "members": unassigned_members,
-    })
+    groups.append(
+        {
+            "id": None,
+            "team": UNASSIGNED,
+            "slug": None,
+            "description": None,
+            "tags": [],
+            "count": len(unassigned_members),
+            "members": unassigned_members,
+        }
+    )
 
     return groups
 
@@ -192,7 +194,9 @@ def create_team(body: CreateTeamRequest, admin: User = Depends(require_admin), d
     if db.query(Team).filter(Team.slug == slug).first() is not None:
         raise HTTPException(status_code=409, detail=f"A team with slug '{slug}' already exists.")
     team = Team(
-        name=body.name, slug=slug, description=body.description,
+        name=body.name,
+        slug=slug,
+        description=body.description,
         tags=json.dumps(body.tags) if body.tags else None,
     )
     db.add(team)
@@ -242,8 +246,7 @@ def delete_team(team_id: int, admin: User = Depends(require_admin), db: Session 
     if active_members:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot delete a team with members assigned ({len(active_members)}) -- "
-                   f"reassign or remove its members first.",
+            detail=f"Cannot delete a team with members assigned ({len(active_members)}) -- reassign or remove its members first.",
         )
     name = team.name
     db.delete(team)

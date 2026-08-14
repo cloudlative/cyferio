@@ -2,7 +2,6 @@
 `status 3` CSV shapes (see this file's module docstring), with the socket
 layer monkeypatched (_send/_read_until_end) rather than opening a real
 Unix socket."""
-import pytest
 
 from services.openvpn.management_client import ManagementClient, parse_source_ip
 
@@ -50,8 +49,7 @@ class TestListSessions:
             "HEADER\tCLIENT_LIST\tCommon Name\tReal Address\tVirtual Address\t"
             "Virtual IPv6 Address\tBytes Received\tBytes Sent\tConnected Since\t"
             "Connected Since (time_t)\tUsername\tClient ID\tPeer ID\tData Channel Cipher",
-            "CLIENT_LIST\ttest\tudp4:182.185.203.112:63223\t10.8.0.3\t\t129722\t96623\t"
-            "2026-08-12 12:18:53\t1786537133\tUNDEF\t128\t1\tAES-256-GCM",
+            "CLIENT_LIST\ttest\tudp4:182.185.203.112:63223\t10.8.0.3\t\t129722\t96623\t2026-08-12 12:18:53\t1786537133\tUNDEF\t128\t1\tAES-256-GCM",
             "HEADER\tROUTING_TABLE\tVirtual Address\tCommon Name\tReal Address\tLast Ref\tLast Ref (time_t)",
             "GLOBAL_STATS\tMax bcast/mcast queue length\t1",
         ]
@@ -88,8 +86,7 @@ class TestListSessions:
             "HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,"
             "Virtual IPv6 Address,Bytes Received,Bytes Sent,Connected Since,"
             "Connected Since (time_t),Username,Client ID,Peer ID,Data Channel Cipher",
-            "CLIENT_LIST,test,udp4:182.185.203.112:63223,10.8.0.3,,129722,96623,"
-            "2026-08-12 12:18:53,1786537133,UNDEF,128,1,AES-256-GCM",
+            "CLIENT_LIST,test,udp4:182.185.203.112:63223,10.8.0.3,,129722,96623,2026-08-12 12:18:53,1786537133,UNDEF,128,1,AES-256-GCM",
         ]
         mc = self._mc(monkeypatch, lines)
         assert mc.list_sessions() == []

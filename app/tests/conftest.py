@@ -6,6 +6,7 @@ never invoke the real openvpn-install.sh/vpn-status.py -- cli_wrapper calls
 are monkeypatched per-test where needed. No test here requires a real
 OpenVPN install or root access.
 """
+
 import os
 import sys
 
@@ -66,6 +67,7 @@ def _clear_cli_wrapper_cache():
     cached success instead of actually re-invoking the (differently)
     mocked subprocess.run. Clear it before and after every test."""
     from vpnadmin import cli_wrapper
+
     cli_wrapper._cache.clear()
     yield
     cli_wrapper._cache.clear()
@@ -95,6 +97,7 @@ def db_session():
     # check in the app fails closed (no RoleDef rows to match against),
     # regardless of what any test user's role_id/legacy role is set to.
     from vpnadmin.permissions import seed_system_roles
+
     seed_system_roles(session)
     try:
         yield session

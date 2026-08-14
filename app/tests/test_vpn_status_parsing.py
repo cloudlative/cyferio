@@ -8,9 +8,9 @@ repo root via importlib.
 These are pure parsing-logic tests against synthetic log text -- no real
 OpenVPN install, root access, or subprocess involved.
 """
+
 import importlib.util
 import os
-import sys
 
 import pytest
 
@@ -115,6 +115,7 @@ class TestCmdRejectedReasonDefault:
         _write_log(vpn_status, OLD_FORMAT_MAC_MISMATCH_BLOCK)
         vpn_status.cmd_rejected(20, as_json=True)
         import json
+
         rows = json.loads(capsys.readouterr().out)
         assert len(rows) == 1
         assert rows[0]["reason"] == "mac_mismatch"
@@ -123,6 +124,7 @@ class TestCmdRejectedReasonDefault:
         _write_log(vpn_status, NEW_FORMAT_OS_REJECTION_BLOCK)
         vpn_status.cmd_rejected(20, as_json=True)
         import json
+
         rows = json.loads(capsys.readouterr().out)
         assert len(rows) == 1
         assert rows[0]["reason"] == "os_not_allowed"

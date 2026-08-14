@@ -6,6 +6,7 @@ from ..cli_wrapper import ScriptError
 from ..db import get_db, get_db_engine_info
 from ..models import User
 from ..permissions import require_permission_any_scope
+
 # Reused rather than duplicated -- see that function's own docstring for
 # why this is deliberately an admin-wide view, unlike routes/notifications.py's
 # self-scoped list_my_notifications().

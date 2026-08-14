@@ -16,7 +16,8 @@ uninstall), this whole router is locked down two ways beyond the normal
      is required every ELEVATED_TTL_MINUTES, same sliding-window shape as
      auth.py's own session-timeout check but deliberately much shorter.
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -67,7 +68,7 @@ def is_elevated(request: Request) -> bool:
         verified_at = datetime.fromisoformat(verified_at_iso)
     except ValueError:
         return False
-    elapsed_minutes = (datetime.now(timezone.utc) - verified_at).total_seconds() / 60
+    elapsed_minutes = (datetime.now(UTC) - verified_at).total_seconds() / 60
     return elapsed_minutes <= ELEVATED_TTL_MINUTES
 
 
@@ -91,7 +92,7 @@ def verify_access(body: VerifyAccessRequest, request: Request, user: User = Depe
     *grants* elevation) so only the bootstrap admin can even attempt it."""
     if not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect password.")
-    request.session[_SESSION_ELEVATED_KEY] = datetime.now(timezone.utc).isoformat()
+    request.session[_SESSION_ELEVATED_KEY] = datetime.now(UTC).isoformat()
     return {"elevated": True, "ttl_minutes": ELEVATED_TTL_MINUTES}
 
 
@@ -99,8 +100,7 @@ def _host_executor_config() -> HostExecutorConfig:
     if not settings.HOST_SSH_TARGET or not settings.HOST_SSH_KEY_PATH:
         raise HTTPException(
             status_code=400,
-            detail="Host executor is not configured -- set HOST_SSH_TARGET and "
-            "HOST_SSH_KEY_PATH (see .env.example) before install/uninstall can run.",
+            detail="Host executor is not configured -- set HOST_SSH_TARGET and HOST_SSH_KEY_PATH (see .env.example) before install/uninstall can run.",
         )
     return HostExecutorConfig(
         ssh_key_path=settings.HOST_SSH_KEY_PATH,

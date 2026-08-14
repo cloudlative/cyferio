@@ -24,8 +24,9 @@ multi-worker deployment would need a shared cache instead (documented as a
 known limitation, not silently wrong -- a stale worker still falls back to
 correct-but-outdated values, never garbage).
 """
+
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -51,7 +52,10 @@ def _compute_static_version() -> str:
     changes the cache key on every release that touches a static file, so
     Cloudflare treats it as a new object instead of serving the stale HIT.
     """
-    h = hashlib.sha1()
+    # Not a security use -- this is a cache-busting content fingerprint for
+    # a `?v=` query string, never a password/token/signature. Collision
+    # resistance is irrelevant here; sha1 is just a fast, short digest.
+    h = hashlib.sha1()  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
     for path in sorted(_STATIC_DIR.rglob("*")):
         if path.is_file():
             h.update(path.read_bytes())
@@ -75,20 +79,21 @@ ACTIVE_THEME_IDS = ("constellation", "contour", "ingress", "cipher", "perimeter"
 # a short one-line rationale (reused verbatim from the approved preview) so
 # an admin isn't picking blind between six similar-sounding names.
 THEME_CHOICES = [
-    {"id": "auto", "label": "Auto-rotate (every 2 hours, 6 themes)",
-     "description": "Cycles through all 6 themes below on a fixed schedule -- each active for two 2-hour slots per day."},
-    {"id": "constellation", "label": "Constellation",
-     "description": "A mesh of nodes, quietly drifting, occasionally trading a packet along an edge. Indigo/violet/cyan."},
-    {"id": "contour", "label": "Signal Contour",
-     "description": "Faint oscilloscope-like waveform lines drifting sideways. Sky-blue into teal."},
-    {"id": "ingress", "label": "Ingress Field",
-     "description": "A deep starfield with rare bright streaks crossing the frame. Deep blue into cyan."},
-    {"id": "cipher", "label": "Cipher Rain",
-     "description": "Thin columns of hex digits drifting downward, low opacity. Emerald/teal on near-black."},
-    {"id": "perimeter", "label": "Perimeter Grid",
-     "description": "A faint grid with a slow radar-style sweep. Amber into gold."},
-    {"id": "horizon", "label": "Data Horizon",
-     "description": "Straight horizontal lines drifting past a soft horizon glow. Violet into rose."},
+    {
+        "id": "auto",
+        "label": "Auto-rotate (every 2 hours, 6 themes)",
+        "description": "Cycles through all 6 themes below on a fixed schedule -- each active for two 2-hour slots per day.",
+    },
+    {
+        "id": "constellation",
+        "label": "Constellation",
+        "description": "A mesh of nodes, quietly drifting, occasionally trading a packet along an edge. Indigo/violet/cyan.",
+    },
+    {"id": "contour", "label": "Signal Contour", "description": "Faint oscilloscope-like waveform lines drifting sideways. Sky-blue into teal."},
+    {"id": "ingress", "label": "Ingress Field", "description": "A deep starfield with rare bright streaks crossing the frame. Deep blue into cyan."},
+    {"id": "cipher", "label": "Cipher Rain", "description": "Thin columns of hex digits drifting downward, low opacity. Emerald/teal on near-black."},
+    {"id": "perimeter", "label": "Perimeter Grid", "description": "A faint grid with a slow radar-style sweep. Amber into gold."},
+    {"id": "horizon", "label": "Data Horizon", "description": "Straight horizontal lines drifting past a soft horizon glow. Violet into rose."},
 ]
 
 
@@ -253,7 +258,7 @@ def prune_audit_log(db: Session) -> int:
 
     if not runtime.audit_retention_days:
         return 0
-    cutoff = datetime.now(timezone.utc) - timedelta(days=runtime.audit_retention_days)
+    cutoff = datetime.now(UTC) - timedelta(days=runtime.audit_retention_days)
     deleted = db.query(AuditLog).filter(AuditLog.timestamp < cutoff).delete(synchronize_session=False)
     db.commit()
     return deleted
@@ -270,7 +275,7 @@ def prune_db_stat_snapshots(db: Session) -> int:
 
     if not runtime.db_snapshot_retention_days:
         return 0
-    cutoff = datetime.now(timezone.utc) - timedelta(days=runtime.db_snapshot_retention_days)
+    cutoff = datetime.now(UTC) - timedelta(days=runtime.db_snapshot_retention_days)
     deleted = db.query(DbStatSnapshot).filter(DbStatSnapshot.timestamp < cutoff).delete(synchronize_session=False)
     db.commit()
     return deleted

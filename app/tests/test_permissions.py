@@ -1,6 +1,7 @@
 """Tests for permissions.py's system-role seeding, including the
 rename_legacy_vpn_self_service_role() migration fixup (see its own
 docstring / db.py's _seed_rbac for why it exists and must run first)."""
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -11,7 +12,9 @@ from vpnadmin.models import ObjectPermission, RoleDef
 
 def _fresh_session():
     engine = create_engine(
-        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
     return sessionmaker(bind=engine)()

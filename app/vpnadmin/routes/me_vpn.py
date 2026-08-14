@@ -18,6 +18,7 @@ Profile lifecycle unification) or by attaching an existing, unassigned
 profile via routes/users.py's link_vpn_profile. This router only ever
 views/updates a profile that's already linked, regardless of which of
 those two ways it got linked."""
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
@@ -29,6 +30,7 @@ from ..cli_wrapper import ScriptError
 from ..db import get_db
 from ..models import User
 from ..permissions import require_permission
+
 # _source_ip_summary is a pure, user-agnostic helper (takes a plain session
 # list, does its own geoip resolution) -- reused verbatim rather than
 # duplicated. reports.py doesn't import anything from this module, so this

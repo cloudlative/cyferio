@@ -3,6 +3,7 @@ Phase 5 of the dynamic-RBAC rollout: Roles Management CRUD + the
 permission-matrix editor's API -- see docs/rbac_identity_design.md §6 and
 the joyful-sauteeing-cookie plan.
 """
+
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -94,8 +95,12 @@ def create_role(body: CreateRoleRequest, admin: User = Depends(require_roles_adm
     if db.query(RoleDef).filter(RoleDef.slug == body.slug).first() is not None:
         raise HTTPException(status_code=409, detail=f"A role with slug '{body.slug}' already exists.")
     role = RoleDef(
-        slug=body.slug, name=body.name, description=body.description,
-        kind=RoleKind.custom, is_system=False, created_by=admin.username,
+        slug=body.slug,
+        name=body.name,
+        description=body.description,
+        kind=RoleKind.custom,
+        is_system=False,
+        created_by=admin.username,
     )
     db.add(role)
     db.commit()
@@ -116,6 +121,7 @@ class UpdateRoleRequest(BaseModel):
     roles -- it's the stable identity routes/users.py's _resolve_role and
     every audit-log entry reference by string, and nothing in this app
     needs to rename it after creation."""
+
     name: str | None = None
     description: str | None = None
 
@@ -191,8 +197,10 @@ class UpdateObjectPermissionsRequest(BaseModel):
 
 @router.put("/{role_id}/object-permissions")
 def update_object_permissions(
-    role_id: int, body: UpdateObjectPermissionsRequest,
-    admin: User = Depends(require_roles_admin), db: Session = Depends(get_db),
+    role_id: int,
+    body: UpdateObjectPermissionsRequest,
+    admin: User = Depends(require_roles_admin),
+    db: Session = Depends(get_db),
 ):
     role = db.get(RoleDef, role_id)
     if role is None:
@@ -207,8 +215,7 @@ def update_object_permissions(
         for action in ACTIONS:
             setattr(row, f"can_{action}", getattr(entry, action))
     db.commit()
-    log_action(db, admin, "update_role_permissions", target=role.slug,
-               detail=f"{len(body.permissions)} object(s) updated")
+    log_action(db, admin, "update_role_permissions", target=role.slug, detail=f"{len(body.permissions)} object(s) updated")
     return _serialize(db, role, with_matrix=True)
 
 
@@ -226,8 +233,10 @@ class UpdateApiScopesRequest(BaseModel):
 
 @router.put("/{role_id}/api-scopes")
 def update_api_scopes(
-    role_id: int, body: UpdateApiScopesRequest,
-    admin: User = Depends(require_roles_admin), db: Session = Depends(get_db),
+    role_id: int,
+    body: UpdateApiScopesRequest,
+    admin: User = Depends(require_roles_admin),
+    db: Session = Depends(get_db),
 ):
     role = db.get(RoleDef, role_id)
     if role is None:
@@ -241,6 +250,5 @@ def update_api_scopes(
         else:
             row.scope = scope
     db.commit()
-    log_action(db, admin, "update_role_api_scopes", target=role.slug,
-               detail=f"{len(body.scopes)} object(s) updated")
+    log_action(db, admin, "update_role_api_scopes", target=role.slug, detail=f"{len(body.scopes)} object(s) updated")
     return _serialize(db, role, with_matrix=True)

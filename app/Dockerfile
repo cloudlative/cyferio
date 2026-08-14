@@ -29,13 +29,28 @@ ENV APP_VERSION=${APP_VERSION}
 # openvpn_install.py) shells out to the system `ssh` binary for the one
 # whitelisted remote install/uninstall command; not present in the base
 # Alpine image by default.
+# Deliberately unpinned (hadolint DL3018 ignored below): this base image
+# (python:3.12-alpine, a specific tag, not `:latest`) is the real pin.
+# Alpine's apk index only retains recent package builds, not an
+# indefinite history, so a hardcoded exact apk version routinely stops
+# resolving on a future rebuild from a still-valid base-image tag --
+# pinning here trades a real, current problem (broken rebuilds) for a
+# theoretical one (an apk package updating from under us), which the
+# Trivy image scan in build.yml (plus .trivyignore for anything
+# individually reviewed and accepted) already covers.
+# hadolint ignore=DL3018
 RUN apk add --no-cache bash openssl ca-certificates openssh-client
 
 WORKDIR /app
 
 COPY requirements.txt .
 # Upgrade pip itself first -- pip versions bundled in base images tend to
-# lag behind and pick up known, already-patched CVEs otherwise.
+# lag behind and pick up known, already-patched CVEs otherwise. The
+# `--upgrade pip` here is deliberately unpinned (hadolint DL3013 ignored
+# below); every actual project dependency already comes from
+# `-r requirements.txt` on the next line, which pins every package to an
+# exact version -- hadolint's own suggested alternative.
+# hadolint ignore=DL3013
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt \
     # The base image also carries a bundled pip wheel under ensurepip/
@@ -91,8 +106,23 @@ RUN mkdir -p /opt/openvpn-toolkit /app/data
 
 EXPOSE 8000
 
+# Hits main.py's unauthenticated GET /healthz -- deliberately not curl/wget
+# (neither is installed, and adding one just for this would be an extra
+# package solely to shell out to, when the base image already has a
+# perfectly good HTTP client available via Python's own stdlib).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python3 -c "import urllib.request as r; r.urlopen('http://127.0.0.1:8000/healthz', timeout=3)" || exit 1
+
+# checkov:skip=CKV_DOCKER_3: deliberately runs as root -- this app writes to
+# the bind-mounted, root-owned /etc/openvpn and executes easyrsa, both of
+# which require the privilege a non-root USER would otherwise need to sudo
+# back into (and sudo isn't installed here -- see USE_SUDO=false in
+# docker-compose.yml). See this file's own header comment and
+# docker-compose.yml's `app` service comment for the full reasoning.
+#
 # Runs as root: needed to read/write the bind-mounted /etc/openvpn (root-owned
 # on the host) and execute easyrsa. USE_SUDO=false in docker-compose.yml
 # reflects that -- sudo isn't installed in this image and isn't needed when
 # the process already has the privilege it would otherwise escalate to.
+# nosemgrep: dockerfile.security.missing-user.missing-user
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

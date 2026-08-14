@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from services.openvpn.exceptions import ValidationError as MacFormatError
 from services.openvpn.validator import normalize_mac
 
-from .. import app_settings, geo_lists, mailer, policy_store, vpn_identity_sync
+from .. import app_settings, mailer, policy_store, vpn_identity_sync
 from .. import cli_wrapper as cli
 from ..audit import log_action
 from ..auth import hash_password, require_user, verify_password
@@ -191,17 +191,12 @@ def _valid_phone(v: str | None) -> str | None:
             if len(local) == 10:
                 v = f"+92-{local[:3]}-{local[3:]}"
         if not _PHONE_PK_RE.match(v):
-            raise ValueError(
-                "Pakistani phone numbers must be in the format +92-321-1234567 "
-                "(3-digit prefix, dash, 7-digit number)."
-            )
+            raise ValueError("Pakistani phone numbers must be in the format +92-321-1234567 (3-digit prefix, dash, 7-digit number).")
         return v
 
     if _PHONE_GENERAL_RE.match(v) or _PHONE_LEGACY_RE.match(v):
         return v
-    raise ValueError(
-        "Phone number must be in the format +<country code>-<number>, e.g. +92-321-1234567."
-    )
+    raise ValueError("Phone number must be in the format +<country code>-<number>, e.g. +92-321-1234567.")
 
 
 # _valid_country_list/_valid_city_list/_valid_asn_list/_valid_ip_list used
@@ -345,10 +340,7 @@ class CreateUserRequest(BaseModel):
     @model_validator(mode="after")
     def _exactly_one_profile_source(self) -> "CreateUserRequest":
         if bool(self.mac) == bool(self.link_existing_vpn_profile):
-            raise ValueError(
-                "Provide either a Device MAC Address (to create a new VPN profile) or an existing "
-                "VPN profile to link, not both and not neither."
-            )
+            raise ValueError("Provide either a Device MAC Address (to create a new VPN profile) or an existing VPN profile to link, not both and not neither.")
         return self
 
     restrict_login_by_country: bool = False
@@ -416,6 +408,7 @@ class UpdateUserRequest(BaseModel):
     """Admin-only edits to another (or their own, for non-guardrailed
     fields) user's account. Password here is an unconditional admin reset --
     no current-password check, unlike the self-service /me endpoint below."""
+
     role: str | None = None  # a RoleDef slug -- resolved/validated in update_user() via _resolve_role
     is_active: bool | None = None
     deleted: bool | None = None  # True = soft-delete, False = restore
@@ -507,6 +500,7 @@ class UpdateUserRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     """Self-service: any logged-in user editing their own profile. No role/
     is_active/deleted here -- those are admin-only, via UpdateUserRequest."""
+
     first_name: str | None = None
     last_name: str | None = None
     gender: Gender | None = None
@@ -596,9 +590,12 @@ def _guard_against_self_lockout(db: Session, target: User, admin: User, *, remov
         return
     if target.id == admin.id:
         raise HTTPException(status_code=400, detail="You can't demote, deactivate, or delete your own account.")
-    remaining_admins = db.query(User).join(RoleDef, User.role_id == RoleDef.id).filter(
-        RoleDef.slug == "admin", User.is_active.is_(True), User.deleted.is_(False), User.id != target.id
-    ).count()
+    remaining_admins = (
+        db.query(User)
+        .join(RoleDef, User.role_id == RoleDef.id)
+        .filter(RoleDef.slug == "admin", User.is_active.is_(True), User.deleted.is_(False), User.id != target.id)
+        .count()
+    )
     if remaining_admins == 0:
         raise HTTPException(status_code=400, detail="Can't remove the last active admin account.")
 
@@ -613,10 +610,7 @@ _USERS_LIST_OPTIONS = (selectinload(User.role_def), selectinload(User.teams), se
 
 @router.get("")
 def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    users = (
-        db.query(User).options(*_USERS_LIST_OPTIONS)
-        .filter(User.deleted.is_(False)).order_by(User.username).all()
-    )
+    users = db.query(User).options(*_USERS_LIST_OPTIONS).filter(User.deleted.is_(False)).order_by(User.username).all()
     # One bulk policy_store read for the whole list, not one per user -- see
     # _serialize's docstring.
     policies = policy_store.get_all_policies()
@@ -625,10 +619,7 @@ def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_d
 
 @router.get("/deleted")
 def list_deleted_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    users = (
-        db.query(User).options(*_USERS_LIST_OPTIONS)
-        .filter(User.deleted.is_(True)).order_by(User.deleted_at.desc()).all()
-    )
+    users = db.query(User).options(*_USERS_LIST_OPTIONS).filter(User.deleted.is_(True)).order_by(User.deleted_at.desc()).all()
     policies = policy_store.get_all_policies()
     return [_serialize(u, policies) for u in users]
 
@@ -781,19 +772,25 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         # this request entirely (nothing of ours to roll back besides the
         # DB rows already handled above), so the message only talks about
         # a freshly-created cert in the create-new case.
-        log_action(db, admin, "create_user", target=body.username,
-                   detail=f"VPN profile '{effective_client_name}' was to be linked but the user record failed to save", success=False)
+        log_action(
+            db,
+            admin,
+            "create_user",
+            target=body.username,
+            detail=f"VPN profile '{effective_client_name}' was to be linked but the user record failed to save",
+            success=False,
+        )
         if body.link_existing_vpn_profile:
             raise HTTPException(
                 status_code=500,
                 detail=f"Saving the user account failed. '{effective_client_name}' was NOT linked -- try again, or use "
-                       f"Edit User's \"Attach existing VPN profile\" once the account exists.",
+                f'Edit User\'s "Attach existing VPN profile" once the account exists.',
             )
         raise HTTPException(
             status_code=500,
             detail=f"A VPN profile named '{effective_client_name}' was created, but saving the user account failed. "
-                   f"The VPN profile was NOT rolled back -- use Edit User's \"Attach existing VPN profile\" to link it "
-                   f"to an account manually.",
+            f'The VPN profile was NOT rolled back -- use Edit User\'s "Attach existing VPN profile" to link it '
+            f"to an account manually.",
         )
     log_action(db, admin, "create_user", target=body.username, detail=f"role={role_def.slug}")
 
@@ -821,8 +818,14 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     # geo_validators.py rules this data has already passed once, at the
     # CreateUserRequest field-validator level, above.
     policy = {}
-    if body.allowed_os or effective_bandwidth or body.restrict_login_by_country or body.restrict_login_by_city \
-            or body.restrict_login_by_asn or body.restrict_login_by_ip:
+    if (
+        body.allowed_os
+        or effective_bandwidth
+        or body.restrict_login_by_country
+        or body.restrict_login_by_city
+        or body.restrict_login_by_asn
+        or body.restrict_login_by_ip
+    ):
         try:
             policy = policy_store.set_policy(
                 effective_client_name,
@@ -834,8 +837,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
                 allowed_ips=body.allowed_login_ips if body.restrict_login_by_ip else None,
             )
         except (PolicyValidationError, OSError) as e:
-            log_action(db, admin, "create_user", target=body.username,
-                       detail=f"VPN profile restrictions could not be applied: {e}", success=False)
+            log_action(db, admin, "create_user", target=body.username, detail=f"VPN profile restrictions could not be applied: {e}", success=False)
 
     if app_settings.runtime.notify_admin_on_user_created:
         mailer.send_admin_notification(
@@ -869,8 +871,12 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
             # sent from here, never as a later "resend" (see mailer.py's
             # send_welcome_email docstring for the full reasoning).
             mailer.send_welcome_email(
-                to_address=body.email, username=body.username, password=body.password,
-                client_name=effective_client_name, ovpn_content=ovpn_content, recipient_name=recipient_name,
+                to_address=body.email,
+                username=body.username,
+                password=body.password,
+                client_name=effective_client_name,
+                ovpn_content=ovpn_content,
+                recipient_name=recipient_name,
             )
             log_action(db, admin, "email_ovpn", target=body.username, detail=f"welcome email sent to {body.email} (on creation)", success=True)
         except Exception as e:
@@ -917,9 +923,7 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     # doesn't cover (e.g. a non-bootstrap admin demoting/deactivating/
     # deleting themselves, or removing the last other active admin).
     would_remove = _role_slug(target) == "admin" and (
-        (body.role is not None and body.role.strip().lower() != "admin")
-        or body.is_active is False
-        or body.deleted is True
+        (body.role is not None and body.role.strip().lower() != "admin") or body.is_active is False or body.deleted is True
     )
     _guard_against_self_lockout(db, target, admin, removing=would_remove)
 
@@ -947,7 +951,7 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         target.is_active = body.is_active
     if body.deleted is not None and body.deleted != target.deleted:
         target.deleted = body.deleted
-        target.deleted_at = datetime.now(timezone.utc) if body.deleted else None
+        target.deleted_at = datetime.now(UTC) if body.deleted else None
         changes.append("deleted" if body.deleted else "restored")
     if body.password:
         target.password_hash = hash_password(body.password)
@@ -1043,32 +1047,38 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     # sync) since those have no such toggle -- "field present in this PATCH
     # at all" is already the right signal for them.
     restriction_fields_touched = bool(
-        {"restrict_login_by_country", "allowed_login_countries", "restrict_login_by_city", "allowed_login_cities",
-         "restrict_login_by_asn", "allowed_login_asns", "restrict_login_by_ip", "allowed_login_ips"}
+        {
+            "restrict_login_by_country",
+            "allowed_login_countries",
+            "restrict_login_by_city",
+            "allowed_login_cities",
+            "restrict_login_by_asn",
+            "allowed_login_asns",
+            "restrict_login_by_ip",
+            "allowed_login_ips",
+        }
         & body.model_fields_set
     )
     client_name = target.vpn_profile_link.vpn_client_name if target.vpn_profile_link else None
     policy = policy_store.get_policy(client_name) if client_name else {}
-    if client_name and ("allowed_os" in body.model_fields_set or "bandwidth_monthly_gb" in body.model_fields_set
-                         or restriction_fields_touched):
+    if client_name and ("allowed_os" in body.model_fields_set or "bandwidth_monthly_gb" in body.model_fields_set or restriction_fields_touched):
         try:
             policy = policy_store.set_policy(
                 client_name,
                 allowed_os=body.allowed_os if "allowed_os" in body.model_fields_set else ...,
                 bandwidth_monthly_gb=body.bandwidth_monthly_gb if "bandwidth_monthly_gb" in body.model_fields_set else ...,
                 allowed_countries=(json.loads(target.allowed_login_countries or "[]") if target.restrict_login_by_country else None)
-                    if restriction_fields_touched else ...,
+                if restriction_fields_touched
+                else ...,
                 allowed_cities=(json.loads(target.allowed_login_cities or "[]") if target.restrict_login_by_city else None)
-                    if restriction_fields_touched else ...,
-                allowed_asns=(json.loads(target.allowed_login_asns or "[]") if target.restrict_login_by_asn else None)
-                    if restriction_fields_touched else ...,
-                allowed_ips=(json.loads(target.allowed_login_ips or "[]") if target.restrict_login_by_ip else None)
-                    if restriction_fields_touched else ...,
+                if restriction_fields_touched
+                else ...,
+                allowed_asns=(json.loads(target.allowed_login_asns or "[]") if target.restrict_login_by_asn else None) if restriction_fields_touched else ...,
+                allowed_ips=(json.loads(target.allowed_login_ips or "[]") if target.restrict_login_by_ip else None) if restriction_fields_touched else ...,
             )
             log_action(db, admin, "update_user", target=target.username, detail="synced VPN profile restrictions")
         except (PolicyValidationError, OSError) as e:
-            log_action(db, admin, "update_user", target=target.username,
-                       detail=f"VPN profile restrictions could not be applied: {e}", success=False)
+            log_action(db, admin, "update_user", target=target.username, detail=f"VPN profile restrictions could not be applied: {e}", success=False)
     return _serialize(target, {client_name: policy} if client_name else {})
 
 
@@ -1125,8 +1135,7 @@ def link_vpn_profile(user_id: int, body: VpnLinkRequest, admin: User = Depends(r
             allowed_ips=json.loads(target.allowed_login_ips or "[]") if target.restrict_login_by_ip else None,
         )
     except (PolicyValidationError, OSError) as e:
-        log_action(db, admin, "link_vpn_profile", target=target.username,
-                   detail=f"VPN profile restrictions could not be synced: {e}", success=False)
+        log_action(db, admin, "link_vpn_profile", target=target.username, detail=f"VPN profile restrictions could not be synced: {e}", success=False)
     return _serialize(target, {name: policy})
 
 
@@ -1143,7 +1152,7 @@ def delete_user(user_id: int, admin: User = Depends(require_admin), db: Session 
         raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deleted.")
     _guard_against_self_lockout(db, target, admin, removing=(_role_slug(target) == "admin"))
     target.deleted = True
-    target.deleted_at = datetime.now(timezone.utc)
+    target.deleted_at = datetime.now(UTC)
     target.is_active = False
     db.commit()
     log_action(db, admin, "delete_user", target=target.username)
@@ -1186,8 +1195,7 @@ def permanently_delete_user(user_id: int, admin: User = Depends(require_admin), 
     # rather than relying on cascade semantics that differ between them.
     if target.vpn_profile_link is not None:
         db.delete(target.vpn_profile_link)
-    log_action(db, admin, "permanently_delete_user", target=username,
-               detail="hard-deleted from the deleted-users list -- irreversible")
+    log_action(db, admin, "permanently_delete_user", target=username, detail="hard-deleted from the deleted-users list -- irreversible")
     db.delete(target)
     db.commit()
     return {"message": f"User '{username}' permanently deleted. This cannot be undone."}

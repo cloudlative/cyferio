@@ -22,6 +22,7 @@ client_policy_cli.py's own docstrings for why they're not a shared import
 across the app's container / the OpenVPN host / wherever openvpn-install.sh
 is installed).
 """
+
 import fcntl
 import json
 import os
@@ -49,6 +50,7 @@ def _ensure_dir_writable_by_nobody(d: str) -> None:
     try:
         import grp
         import pwd
+
         os.chown(d, pwd.getpwnam("nobody").pw_uid, grp.getgrnam("nogroup").gr_gid)
         os.chmod(d, 0o770)
     except (OSError, KeyError):
@@ -69,6 +71,7 @@ def _locked(path: str):
         os.fchmod(fd, 0o666)
         import grp
         import pwd
+
         os.fchown(fd, pwd.getpwnam("nobody").pw_uid, grp.getgrnam("nogroup").gr_gid)
     except (OSError, KeyError):
         pass
@@ -110,6 +113,7 @@ def _atomic_write_json(path: str, data: dict) -> None:
         try:
             import grp
             import pwd
+
             orig_uid = pwd.getpwnam("nobody").pw_uid
             orig_gid = grp.getgrnam("nogroup").gr_gid
         except (KeyError, ImportError):
@@ -192,14 +196,17 @@ class PolicyValidationError(ValueError):
     pass
 
 
-def set_policy(name: str, *,
-               allowed_os: list[str] | None | object = ...,
-               bandwidth_monthly_gb: float | None | object = ...,
-               allowed_countries: list[str] | None | object = ...,
-               allowed_cities: list[str] | None | object = ...,
-               allowed_asns: list[str] | None | object = ...,
-               allowed_ips: list[str] | None | object = ...,
-               quota_enforcement_policy: str | None | object = ...) -> dict:
+def set_policy(
+    name: str,
+    *,
+    allowed_os: list[str] | None | object = ...,
+    bandwidth_monthly_gb: float | None | object = ...,
+    allowed_countries: list[str] | None | object = ...,
+    allowed_cities: list[str] | None | object = ...,
+    allowed_asns: list[str] | None | object = ...,
+    allowed_ips: list[str] | None | object = ...,
+    quota_enforcement_policy: str | None | object = ...,
+) -> dict:
     """Partial update of one client's policy -- any parameter left at its
     `...` sentinel default is untouched; pass an explicit `None` (or `[]`
     for the list fields) to clear that field. A resulting policy with no
@@ -243,9 +250,7 @@ def set_policy(name: str, *,
             allowed_os = sorted({o.strip().lower() for o in allowed_os if o.strip()})
             bad = [o for o in allowed_os if o not in VALID_OS]
             if bad:
-                raise PolicyValidationError(
-                    f"Invalid OS name(s): {', '.join(bad)} -- expected any of: {', '.join(sorted(VALID_OS))}."
-                )
+                raise PolicyValidationError(f"Invalid OS name(s): {', '.join(bad)} -- expected any of: {', '.join(sorted(VALID_OS))}.")
             if not allowed_os:
                 allowed_os = None
     if bandwidth_monthly_gb is not ...:
@@ -255,9 +260,7 @@ def set_policy(name: str, *,
             except (TypeError, ValueError):
                 raise PolicyValidationError("Bandwidth quota must be a number.")
             if bandwidth_monthly_gb < 0.1:
-                raise PolicyValidationError(
-                    "Bandwidth quota must be at least 0.1 GB (100 MB) -- leave blank to clear it."
-                )
+                raise PolicyValidationError("Bandwidth quota must be at least 0.1 GB (100 MB) -- leave blank to clear it.")
     if allowed_countries is not ... and allowed_countries is not None:
         try:
             allowed_countries = valid_country_list(allowed_countries) or None
@@ -282,8 +285,7 @@ def set_policy(name: str, *,
         quota_enforcement_policy = quota_enforcement_policy.strip().lower()
         if quota_enforcement_policy not in VALID_QUOTA_ENFORCEMENT_POLICIES:
             raise PolicyValidationError(
-                f"Invalid quota enforcement policy: '{quota_enforcement_policy}' -- "
-                f"expected one of: {', '.join(sorted(VALID_QUOTA_ENFORCEMENT_POLICIES))}."
+                f"Invalid quota enforcement policy: '{quota_enforcement_policy}' -- expected one of: {', '.join(sorted(VALID_QUOTA_ENFORCEMENT_POLICIES))}."
             )
 
     with _locked(settings.CLIENT_POLICY_FILE):

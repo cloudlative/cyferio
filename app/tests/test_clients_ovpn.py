@@ -1,4 +1,5 @@
 """Tests for the .ovpn view/copy and email-delivery client actions."""
+
 import pytest
 
 import vpnadmin.routes.clients as clients_mod
@@ -75,6 +76,7 @@ class TestRevokedCleanup:
         def fake_purge(name):
             if name == "bad":
                 from vpnadmin.cli_wrapper import ScriptError
+
                 raise ScriptError("not a revoked client")
             return f"{name}: purged."
 

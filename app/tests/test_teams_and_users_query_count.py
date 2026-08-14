@@ -2,6 +2,7 @@
 and routes/users.py::list_users() (selectinload(User.teams)/(User.role_def)
 -- see their own comments). Asserts the actual SQL query count doesn't grow
 with the number of users, not just that the diff "looks" eager-loaded."""
+
 from sqlalchemy import event
 
 from vpnadmin.auth import hash_password
@@ -27,7 +28,9 @@ def _query_count_during(engine, fn):
 def _add_users_across_teams(db_session, n_users, teams, prefix):
     for i in range(n_users):
         u = User(
-            username=f"{prefix}{i}", password_hash=hash_password("memberpass123"), role=Role.viewer,
+            username=f"{prefix}{i}",
+            password_hash=hash_password("memberpass123"),
+            role=Role.viewer,
         )
         u.teams.append(teams[i % len(teams)])
         db_session.add(u)
@@ -53,9 +56,7 @@ class TestTeamsQueryCountDoesNotScaleWithUsers:
         # queries. Fixed, it's the same handful of queries regardless of
         # row count (a small allowance for session/permission-check
         # overhead that isn't itself user-count-dependent).
-        assert large_count - small_count <= 3, (
-            f"query count grew with user count ({small_count} -> {large_count}) -- N+1 regression"
-        )
+        assert large_count - small_count <= 3, f"query count grew with user count ({small_count} -> {large_count}) -- N+1 regression"
 
 
 class TestUsersQueryCountDoesNotScaleWithUsers:
@@ -72,6 +73,4 @@ class TestUsersQueryCountDoesNotScaleWithUsers:
         _add_users_across_teams(db_session, 25, teams, "memberb")
         large_count = _query_count_during(engine, lambda: app_client.get("/api/users"))
 
-        assert large_count - small_count <= 3, (
-            f"query count grew with user count ({small_count} -> {large_count}) -- N+1 regression"
-        )
+        assert large_count - small_count <= 3, f"query count grew with user count ({small_count} -> {large_count}) -- N+1 regression"

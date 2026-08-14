@@ -11,7 +11,8 @@ VPN client belong to" mapping. See the architecture review this feature
 shipped with for why on-read aggregation (rather than a periodic rollup
 job) is the right choice at this deployment's scale.
 """
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
@@ -20,7 +21,7 @@ from .. import cli_wrapper as cli
 from .. import geoip, health, policy_store
 from ..cli_wrapper import ScriptError
 from ..db import engine, get_db
-from ..models import AuditLog, DbStatSnapshot, QuotaNotification, Team, User, VpnProfileLink
+from ..models import AuditLog, DbStatSnapshot, QuotaNotification, Team, User
 from ..permissions import require_permission_any_scope
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -39,7 +40,7 @@ def _per_client_row(user: User, client_name: str | None, policies: dict, usage: 
     quota_gb = policy.get("bandwidth_monthly_gb")
     usage_row = usage.get(client_name, {}) if client_name else {}
     used_bytes = usage_row.get("bytes_used", 0)
-    used_gb = used_bytes / (1024 ** 3)
+    used_gb = used_bytes / (1024**3)
     pct_used = round((used_gb / quota_gb) * 100, 1) if quota_gb else None
     remaining_gb = round(max(0, quota_gb - used_gb), 3) if quota_gb else None
     return {
@@ -84,12 +85,9 @@ def _source_ip_summary(sessions: list[dict]) -> dict:
     top_ips = sorted(ip_counts.items(), key=lambda kv: kv[1], reverse=True)[:10]
     return {
         "top_ips": [{"ip": ip, "count": count} for ip, count in top_ips],
-        "country_distribution": sorted(
-            [{"country": k, "count": v} for k, v in _bucket(0).items()], key=lambda r: r["count"], reverse=True),
-        "city_distribution": sorted(
-            [{"city": k, "count": v} for k, v in _bucket(1).items()], key=lambda r: r["count"], reverse=True)[:10],
-        "asn_distribution": sorted(
-            [{"asn": k, "count": v} for k, v in _bucket(2).items()], key=lambda r: r["count"], reverse=True)[:10],
+        "country_distribution": sorted([{"country": k, "count": v} for k, v in _bucket(0).items()], key=lambda r: r["count"], reverse=True),
+        "city_distribution": sorted([{"city": k, "count": v} for k, v in _bucket(1).items()], key=lambda r: r["count"], reverse=True)[:10],
+        "asn_distribution": sorted([{"asn": k, "count": v} for k, v in _bucket(2).items()], key=lambda r: r["count"], reverse=True)[:10],
     }
 
 
@@ -101,13 +99,7 @@ def _recent_quota_warnings(db: Session, limit: int = 50) -> list[dict]:
     caller's own rows. Used by Diagnostics' "Active Quota Warnings" panel
     and the Dashboard's System Insights card -- both want "which users are
     near/over quota right now", just at different levels of detail."""
-    rows = (
-        db.query(QuotaNotification)
-        .options(selectinload(QuotaNotification.user))
-        .order_by(QuotaNotification.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    rows = db.query(QuotaNotification).options(selectinload(QuotaNotification.user)).order_by(QuotaNotification.created_at.desc()).limit(limit).all()
     return [
         {
             "id": n.id,
@@ -219,6 +211,7 @@ def get_global_report(db: Session = Depends(get_db), _: User = Depends(require_r
 
 # --- Per-User Analytics (Phase 2) ----------------------------------------
 
+
 @router.get("/user-options")
 def get_user_options(_: User = Depends(require_reports_view), db: Session = Depends(get_db)):
     """Backs the Per-User Analytics picker -- every active, non-deleted
@@ -229,16 +222,11 @@ def get_user_options(_: User = Depends(require_reports_view), db: Session = Depe
     reports:view but not users:manage would otherwise 403 populating this
     picker, even though it already sees this same user's bandwidth/quota
     numbers elsewhere on this same page."""
-    users = (
-        db.query(User)
-        .options(selectinload(User.vpn_profile_link))
-        .filter(User.deleted.is_(False), User.is_active.is_(True))
-        .order_by(User.username)
-        .all()
-    )
+    users = db.query(User).options(selectinload(User.vpn_profile_link)).filter(User.deleted.is_(False), User.is_active.is_(True)).order_by(User.username).all()
     return [
         {"id": u.id, "username": u.username, "display_name": u.display_name, "vpn_client_name": u.vpn_profile_link.vpn_client_name}
-        for u in users if u.vpn_profile_link is not None
+        for u in users
+        if u.vpn_profile_link is not None
     ]
 
 
@@ -290,6 +278,7 @@ def get_user_analytics(user_id: int, _: User = Depends(require_reports_view), db
 
 # --- User Activity Analytics (Phase 2) -----------------------------------
 
+
 @router.get("/login-activity")
 def get_login_activity(
     days: int = Query(90, ge=1, le=365),
@@ -304,7 +293,7 @@ def get_login_activity(
     since that logging started (this feature's own deploy date); there is
     no retroactive login history, which the page's own copy calls out
     rather than silently implying a longer history exists."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
     rows = (
         db.query(AuditLog.timestamp, AuditLog.username)
         .filter(AuditLog.action == "login_success", AuditLog.timestamp >= cutoff)
@@ -315,6 +304,7 @@ def get_login_activity(
 
 
 # --- Database Reporting (Phase 3) -----------------------------------------
+
 
 def _history_with_deltas(rows: list[DbStatSnapshot]) -> list[dict]:
     """Converts consecutive DbStatSnapshot rows' RAW CUMULATIVE
@@ -391,11 +381,6 @@ def get_database_report(
         current = health.gather_db_stats(conn)
     current["top_tables"] = health.get_top_tables(10)
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    rows = (
-        db.query(DbStatSnapshot)
-        .filter(DbStatSnapshot.timestamp >= cutoff)
-        .order_by(DbStatSnapshot.timestamp)
-        .all()
-    )
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    rows = db.query(DbStatSnapshot).filter(DbStatSnapshot.timestamp >= cutoff).order_by(DbStatSnapshot.timestamp).all()
     return {"available": True, "reason": None, "current": current, "history": _history_with_deltas(rows)}

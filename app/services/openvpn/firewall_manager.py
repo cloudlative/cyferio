@@ -4,6 +4,7 @@ only; the firewalld path at :1319-1336 is intentionally not ported this
 phase -- see the Phase 1 plan's module scope table, this box has no
 firewalld). Uninstall counterparts mirror :1568-1571 and :1310→removal.
 """
+
 from __future__ import annotations
 
 import os
@@ -80,7 +81,13 @@ def _is_nft_backed(iptables_path: str) -> bool:
 
 
 def render_iptables_unit(
-    *, iptables_path: str, ip6tables_path: str, ip: str, port: int, protocol: str, ip6: str | None = None,
+    *,
+    iptables_path: str,
+    ip6tables_path: str,
+    ip: str,
+    port: int,
+    protocol: str,
+    ip6: str | None = None,
 ) -> str:
     """Mirrors the systemd unit generated at :1347-1369."""
     lines = [
@@ -115,8 +122,12 @@ def install_iptables_firewall(*, ip: str, port: int, protocol: str, ip6: str | N
     unit, enable --now it."""
     iptables_path, ip6tables_path = resolve_iptables_paths()
     content = render_iptables_unit(
-        iptables_path=iptables_path, ip6tables_path=ip6tables_path,
-        ip=ip, port=port, protocol=protocol, ip6=ip6,
+        iptables_path=iptables_path,
+        ip6tables_path=ip6tables_path,
+        ip=ip,
+        port=port,
+        protocol=protocol,
+        ip6=ip6,
     )
     with open(IPTABLES_UNIT_PATH, "w", encoding="utf-8") as f:
         f.write(content)

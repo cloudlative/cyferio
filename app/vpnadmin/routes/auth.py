@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
@@ -34,7 +34,10 @@ def login_submit(
     db: Session = Depends(get_db),
 ):
     generic_error = templates.TemplateResponse(
-        request, "login.html", {"error": "Invalid username or password."}, status_code=401,
+        request,
+        "login.html",
+        {"error": "Invalid username or password."},
+        status_code=401,
     )
 
     user = db.query(User).filter(User.username == username.strip().lower()).first()
@@ -60,10 +63,11 @@ def login_submit(
     # failed_login_attempts reaches the threshold (see the wrong-password
     # branch further down) and simply expires on its own -- no admin unlock
     # action needed for the common case.
-    if user.locked_until and user.locked_until > datetime.now(timezone.utc):
-        remaining_minutes = max(1, int((user.locked_until - datetime.now(timezone.utc)).total_seconds() // 60) + 1)
+    if user.locked_until and user.locked_until > datetime.now(UTC):
+        remaining_minutes = max(1, int((user.locked_until - datetime.now(UTC)).total_seconds() // 60) + 1)
         return templates.TemplateResponse(
-            request, "login.html",
+            request,
+            "login.html",
             {"error": f"Too many failed login attempts. Try again in about {remaining_minutes} minute(s)."},
             status_code=423,
         )
@@ -89,15 +93,17 @@ def login_submit(
             country = geoip.lookup_country(client_ip)
             if country not in allowed_countries:
                 log_action(
-                    db, user, "login_blocked_country", target=user.username,
-                    detail=f"IP {client_ip or 'unknown'}; detected country {country or 'unknown'}; "
-                           f"allowed: {', '.join(allowed_countries)}",
+                    db,
+                    user,
+                    "login_blocked_country",
+                    target=user.username,
+                    detail=f"IP {client_ip or 'unknown'}; detected country {country or 'unknown'}; allowed: {', '.join(allowed_countries)}",
                     success=False,
                 )
                 return templates.TemplateResponse(
-                    request, "login.html",
-                    {"error": f"Login is not permitted from your current country "
-                              f"({country or 'unknown'}, IP {client_ip or 'unknown'})."},
+                    request,
+                    "login.html",
+                    {"error": f"Login is not permitted from your current country ({country or 'unknown'}, IP {client_ip or 'unknown'})."},
                     status_code=403,
                 )
 
@@ -108,15 +114,17 @@ def login_submit(
             allowed_lower = {c.lower() for c in allowed_cities}
             if (city or "").lower() not in allowed_lower:
                 log_action(
-                    db, user, "login_blocked_city", target=user.username,
-                    detail=f"IP {client_ip or 'unknown'}; detected city {city or 'unknown'}; "
-                           f"allowed: {', '.join(allowed_cities)}",
+                    db,
+                    user,
+                    "login_blocked_city",
+                    target=user.username,
+                    detail=f"IP {client_ip or 'unknown'}; detected city {city or 'unknown'}; allowed: {', '.join(allowed_cities)}",
                     success=False,
                 )
                 return templates.TemplateResponse(
-                    request, "login.html",
-                    {"error": f"Login is not permitted from your current city "
-                              f"({city or 'unknown'}, IP {client_ip or 'unknown'})."},
+                    request,
+                    "login.html",
+                    {"error": f"Login is not permitted from your current city ({city or 'unknown'}, IP {client_ip or 'unknown'})."},
                     status_code=403,
                 )
 
@@ -127,15 +135,17 @@ def login_submit(
             asn_label = f"AS{asn}" if asn is not None else None
             if asn_label not in allowed_asns:
                 log_action(
-                    db, user, "login_blocked_asn", target=user.username,
-                    detail=f"IP {client_ip or 'unknown'}; detected ASN {asn_label or 'unknown'}; "
-                           f"allowed: {', '.join(allowed_asns)}",
+                    db,
+                    user,
+                    "login_blocked_asn",
+                    target=user.username,
+                    detail=f"IP {client_ip or 'unknown'}; detected ASN {asn_label or 'unknown'}; allowed: {', '.join(allowed_asns)}",
                     success=False,
                 )
                 return templates.TemplateResponse(
-                    request, "login.html",
-                    {"error": f"Login is not permitted from your current network "
-                              f"({asn_label or 'unknown'}, IP {client_ip or 'unknown'})."},
+                    request,
+                    "login.html",
+                    {"error": f"Login is not permitted from your current network ({asn_label or 'unknown'}, IP {client_ip or 'unknown'})."},
                     status_code=403,
                 )
 
@@ -144,14 +154,17 @@ def login_submit(
         if allowed_ips:
             if not ip_matches_allowlist(client_ip, allowed_ips):
                 log_action(
-                    db, user, "login_blocked_ip", target=user.username,
+                    db,
+                    user,
+                    "login_blocked_ip",
+                    target=user.username,
                     detail=f"IP {client_ip or 'unknown'}; allowed: {', '.join(allowed_ips)}",
                     success=False,
                 )
                 return templates.TemplateResponse(
-                    request, "login.html",
-                    {"error": f"Login is not permitted from your current IP address "
-                              f"({client_ip or 'unknown'})."},
+                    request,
+                    "login.html",
+                    {"error": f"Login is not permitted from your current IP address ({client_ip or 'unknown'})."},
                     status_code=403,
                 )
 
@@ -160,7 +173,7 @@ def login_submit(
         threshold = app_settings.runtime.account_lockout_threshold
         locked_now = False
         if threshold and user.failed_login_attempts >= threshold:
-            user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=app_settings.runtime.account_lockout_minutes)
+            user.locked_until = datetime.now(UTC) + timedelta(minutes=app_settings.runtime.account_lockout_minutes)
             locked_now = True
         if app_settings.runtime.log_failed_login_attempts:
             detail = f"IP {client_ip or 'unknown'}; attempt {user.failed_login_attempts}"

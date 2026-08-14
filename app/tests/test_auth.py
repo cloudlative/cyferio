@@ -66,6 +66,7 @@ class TestLoginFlow:
 class TestRoleGating:
     def test_viewer_can_read_clients_api(self, app_client, monkeypatch):
         import vpnadmin.routes.clients as clients_mod
+
         monkeypatch.setattr(clients_mod.cli, "list_clients", lambda: [])
         login(app_client, "viewer", "viewerpass123")
         r = app_client.get("/api/clients")
@@ -253,9 +254,7 @@ class TestSoftDeleteAndRestore:
         # admin2 is now the only admin -- deleting it (even via itself,
         # blocked by self-lockout) or being the sole survivor is the
         # relevant state; assert no *third* admin could remove it either.
-        third_admin_check = db_session.query(User).filter(
-            User.role == Role.admin, User.is_active.is_(True), User.deleted.is_(False)
-        ).count()
+        third_admin_check = db_session.query(User).filter(User.role == Role.admin, User.is_active.is_(True), User.deleted.is_(False)).count()
         assert third_admin_check == 1
 
 
@@ -307,42 +306,70 @@ class TestPermanentDelete:
 class TestFirstNameRequired:
     def test_create_user_without_first_name_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/users", json={
-            "username": "nofirstname", "password": "Somepass123!", "email": "nofirstname@example.com",
-        })
+        r = app_client.post(
+            "/api/users",
+            json={
+                "username": "nofirstname",
+                "password": "Somepass123!",
+                "email": "nofirstname@example.com",
+            },
+        )
         assert r.status_code == 422
 
     def test_create_user_with_blank_first_name_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/users", json={
-            "username": "blankfirstname", "password": "Somepass123!", "first_name": "   ",
-            "email": "blankfirstname@example.com",
-        })
+        r = app_client.post(
+            "/api/users",
+            json={
+                "username": "blankfirstname",
+                "password": "Somepass123!",
+                "first_name": "   ",
+                "email": "blankfirstname@example.com",
+            },
+        )
         assert r.status_code == 422
 
     def test_create_user_with_first_name_succeeds(self, app_client, monkeypatch):
         from vpnadmin.routes import users as users_mod
+
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/users", json={
-            "username": "hasfirstname", "password": "Somepass123!", "first_name": "Alex",
-            "email": "hasfirstname@example.com", "mac": "aa:bb:cc:dd:ee:ff",
-        })
+        r = app_client.post(
+            "/api/users",
+            json={
+                "username": "hasfirstname",
+                "password": "Somepass123!",
+                "first_name": "Alex",
+                "email": "hasfirstname@example.com",
+                "mac": "aa:bb:cc:dd:ee:ff",
+            },
+        )
         assert r.status_code == 201
         assert r.json()["first_name"] == "Alex"
 
     def test_create_user_without_email_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/users", json={
-            "username": "noemail", "password": "Somepass123!", "first_name": "Noel",
-        })
+        r = app_client.post(
+            "/api/users",
+            json={
+                "username": "noemail",
+                "password": "Somepass123!",
+                "first_name": "Noel",
+            },
+        )
         assert r.status_code == 422
 
     def test_create_user_with_blank_email_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/users", json={
-            "username": "blankemail", "password": "Somepass123!", "first_name": "Blank", "email": "   ",
-        })
+        r = app_client.post(
+            "/api/users",
+            json={
+                "username": "blankemail",
+                "password": "Somepass123!",
+                "first_name": "Blank",
+                "email": "   ",
+            },
+        )
         assert r.status_code == 422
 
     def test_admin_edit_cannot_blank_out_first_name(self, app_client, db_session):
@@ -414,16 +441,24 @@ class TestSelfServiceProfile:
 
     def test_self_password_change_wrong_current_password_rejected(self, app_client):
         login(app_client, "viewer", "viewerpass123")
-        r = app_client.patch("/api/users/me", json={
-            "current_password": "wrongpass", "new_password": "Brandnewpass123!",
-        })
+        r = app_client.patch(
+            "/api/users/me",
+            json={
+                "current_password": "wrongpass",
+                "new_password": "Brandnewpass123!",
+            },
+        )
         assert r.status_code == 400
 
     def test_self_password_change_succeeds_and_new_password_works(self, app_client):
         login(app_client, "viewer", "viewerpass123")
-        r = app_client.patch("/api/users/me", json={
-            "current_password": "viewerpass123", "new_password": "Brandnewpass123!",
-        })
+        r = app_client.patch(
+            "/api/users/me",
+            json={
+                "current_password": "viewerpass123",
+                "new_password": "Brandnewpass123!",
+            },
+        )
         assert r.status_code == 200
 
         app_client.post("/logout")

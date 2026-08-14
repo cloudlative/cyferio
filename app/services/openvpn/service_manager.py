@@ -4,11 +4,12 @@ throughout openvpn-install.sh (enable/start the OpenVPN server unit at
 drop-in at :1182-1186 and its removal at :1576, the iptables persistence
 unit's enable/disable at :1370/:1569-1570).
 """
+
 from __future__ import annotations
 
 import os
 
-from ..system.process_manager import run, run_checked, CommandError
+from ..system.process_manager import CommandError, run, run_checked
 from .exceptions import ServiceManagementError
 
 LIMITNPROC_DROPIN_DIR = "/etc/systemd/system/openvpn-server@server.service.d"

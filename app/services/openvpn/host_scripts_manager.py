@@ -25,6 +25,7 @@ extra directives this module adds live in a clearly-delimited block
 APPENDED after render_server_conf()'s content by installer.py's own write
 step, not inside render_server_conf() itself.
 """
+
 from __future__ import annotations
 
 import logging
@@ -92,6 +93,7 @@ def _chown_nobody(path: str, group_name: str) -> None:
     try:
         import grp
         import pwd
+
         os.chown(path, pwd.getpwnam("nobody").pw_uid, grp.getgrnam(group_name).gr_gid)
     except (OSError, KeyError):
         # Best-effort, same fail-soft stance as policy_lib.py's own
@@ -151,6 +153,7 @@ def _fix_vpn_tools_conf_permissions(group_name: str) -> bool:
         changed = True
     try:
         import grp
+
         gid = grp.getgrnam(group_name).gr_gid
         if st.st_gid != gid:
             os.chown(VPN_TOOLS_CONF_PATH, st.st_uid, gid)
@@ -212,12 +215,13 @@ def ensure_geoip2_package(os_info: package_manager.OSInfo | None = None) -> str 
             run(["python3", "-m", "pip", "install", "geoip2"], timeout=120)
         if _geoip2_importable():
             return "installed the geoip2 Python package (needed for country/city/ASN restriction checks)"
-        logger.warning("geoip2 still not importable after install attempts -- country/city/ASN "
-                        "restrictions will fail closed until this is resolved manually")
+        logger.warning("geoip2 still not importable after install attempts -- country/city/ASN restrictions will fail closed until this is resolved manually")
         return "attempted to install geoip2, but it's still not importable -- see logs"
     except Exception:
-        logger.exception("failed to install geoip2 -- country/city/ASN restrictions will fail closed "
-                          "until this is resolved manually (MAC binding/OS/bandwidth are unaffected)")
+        logger.exception(
+            "failed to install geoip2 -- country/city/ASN restrictions will fail closed "
+            "until this is resolved manually (MAC binding/OS/bandwidth are unaffected)"
+        )
         return "failed to install geoip2 -- see logs (MAC binding/OS/bandwidth restrictions are unaffected)"
 
 
@@ -295,8 +299,7 @@ def install_host_scripts(paths: OpenVPNPaths, *, os_info: package_manager.OSInfo
             if not server_conf.endswith("\n"):
                 f.write("\n")
             f.write(desired_block)
-        changes.append(f"appended restriction-enforcement block to {paths.server_conf} -- "
-                        f"NOT yet active until the OpenVPN service is restarted")
+        changes.append(f"appended restriction-enforcement block to {paths.server_conf} -- NOT yet active until the OpenVPN service is restarted")
     else:
         # The block already exists, but its CONTENT can still be stale --
         # found live (2026-08-12): a server.conf from before this feature
@@ -313,8 +316,9 @@ def install_host_scripts(paths: OpenVPNPaths, *, os_info: package_manager.OSInfo
             new_conf = server_conf[:start] + desired_block + server_conf[end:].lstrip("\n")
             with open(paths.server_conf, "w", encoding="utf-8") as f:
                 f.write(new_conf)
-            changes.append(f"updated the restriction-enforcement block in {paths.server_conf} (was out of date) -- "
-                            f"NOT yet active until the OpenVPN service is restarted")
+            changes.append(
+                f"updated the restriction-enforcement block in {paths.server_conf} (was out of date) -- NOT yet active until the OpenVPN service is restarted"
+            )
 
     quota_enforcer_change = install_quota_enforcer(paths)
     if quota_enforcer_change:

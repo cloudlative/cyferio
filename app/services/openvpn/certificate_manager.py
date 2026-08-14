@@ -8,6 +8,7 @@ orchestrates the same commands the bash script runs, which is also why the
 Phase 1 parity tests validate "did Python invoke easyrsa correctly" rather
 than diffing byte-for-byte cert output (see the plan's §5b).
 """
+
 from __future__ import annotations
 
 import os
@@ -17,15 +18,12 @@ import tempfile
 import urllib.request
 from dataclasses import dataclass
 
-from ..system.process_manager import run_checked, CommandError
+from ..system.process_manager import CommandError, run_checked
 from .exceptions import CertificateError
 from .paths import OpenVPNPaths
 
 EASYRSA_VERSION = "3.1.7"
-EASYRSA_URL = (
-    f"https://github.com/OpenVPN/easy-rsa/releases/download/"
-    f"v{EASYRSA_VERSION}/EasyRSA-{EASYRSA_VERSION}.tgz"
-)
+EASYRSA_URL = f"https://github.com/OpenVPN/easy-rsa/releases/download/v{EASYRSA_VERSION}/EasyRSA-{EASYRSA_VERSION}.tgz"
 CERT_DAYS = "3650"  # matches every --days=3650 in the bash script
 
 # Static ffdhe2048 DH params, byte-identical to openvpn-install.sh:1222-1229
@@ -55,7 +53,8 @@ class EasyRSA:
         try:
             run_checked(
                 [self.binary, "--batch", *args],
-                cwd=self.easyrsa_dir, timeout=timeout,
+                cwd=self.easyrsa_dir,
+                timeout=timeout,
                 error_prefix=f"easyrsa {' '.join(args)} failed",
             )
         except CommandError as e:
@@ -167,7 +166,8 @@ def generate_tls_crypt_key(paths: OpenVPNPaths) -> None:
         # actually runs is the point, not "most modern" syntax.
         run_checked(
             ["openvpn", "--genkey", "--secret", paths.tc_key],
-            timeout=15, error_prefix="Failed to generate tls-crypt key",
+            timeout=15,
+            error_prefix="Failed to generate tls-crypt key",
         )
     except CommandError as e:
         raise CertificateError(e.message) from e

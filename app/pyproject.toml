@@ -1,0 +1,37 @@
+[tool.ruff]
+line-length = 160
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F/I/UP: real bugs (F), style consistency (E), import order (I), and
+# outdated syntax (UP) -- high-signal, low-noise. B (flake8-bugbear) adds
+# genuinely useful catches (mutable default args, etc.) on top of that.
+#
+# B008 is deliberately excluded: it flags `Depends(...)` in a parameter
+# default, which is FastAPI's own documented dependency-injection idiom
+# (see every route in vpnadmin/routes/*.py) -- not a bug here, and it
+# alone accounted for 195 of this repo's first 319 findings when this
+# config was written. This is the same exclusion FastAPI's own docs and
+# the wider FastAPI/ruff community recommend, not a one-off carve-out.
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "B008", # Depends(...) in defaults -- FastAPI's own idiom, see above
+    # B904 (raise-without-from-inside-except): a real, worthwhile pattern
+    # to fix, but 49 pre-existing call sites across vpnadmin/routes/*.py,
+    # each needing individual judgment (bind the caught exception? chain
+    # it, or `from None` to deliberately suppress it?) -- out of scope for
+    # this CI-hardening change to bulk-transform. Tracked as a follow-up,
+    # not silently ignored forever: re-visit and either fix or narrow this
+    # ignore to specific files once that pass happens.
+    "B904",
+    # UP042 (str+Enum -> enum.StrEnum): 4 hits, all in vpnadmin/models.py
+    # on enum classes used throughout the SQLAlchemy schema. Semantically
+    # equivalent, but changing core model classes is a deliberate,
+    # separately-reviewed change, not a side effect of a CI-config PR.
+    "UP042",
+]
+
+[tool.ruff.format]
+# Matches the repo's existing style (double quotes throughout) --
+# formatting check only enforces consistency, doesn't change behavior.
+quote-style = "double"

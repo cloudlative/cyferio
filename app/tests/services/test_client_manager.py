@@ -4,12 +4,15 @@ import pytest
 
 from services.openvpn import client_manager
 from services.openvpn.exceptions import (
-    ClientAlreadyExistsError, ClientNotFoundError, ClientNotRevokedError,
-    MacAlreadyRegisteredError, MacNotFoundError,
+    ClientAlreadyExistsError,
+    ClientNotFoundError,
+    ClientNotRevokedError,
+    MacAlreadyRegisteredError,
+    MacNotFoundError,
 )
 
-
 # --- add_client ---------------------------------------------------------
+
 
 def test_add_client_success(paths):
     result = client_manager.add_client(paths, "alice", "aa:bb:cc:dd:ee:ff")
@@ -59,6 +62,7 @@ def test_add_client_rollback_leaves_no_partial_state(paths, monkeypatch):
 
 # --- revoke_client / show_ovpn ------------------------------------------
 
+
 def test_revoke_client_removes_db_entry_and_installs_crl(paths):
     client_manager.add_client(paths, "alice", "aa:bb:cc:dd:ee:ff")
     client_manager.revoke_client(paths, "alice")
@@ -80,6 +84,7 @@ def test_show_ovpn_returns_delivered_content(paths):
 
 
 # --- purge_revoked / clean_stale_db_entry / restore_client --------------
+
 
 def test_purge_revoked_requires_revoked_first(paths):
     client_manager.add_client(paths, "alice", "aa:bb:cc:dd:ee:ff")
@@ -139,6 +144,7 @@ def test_restore_client_requires_revoked_first(paths):
 
 # --- MAC management --------------------------------------------------------
 
+
 def test_add_mac_and_list_macs(paths):
     client_manager.add_client(paths, "alice", "aa:bb:cc:dd:ee:ff")
     client_manager.add_mac(paths, "alice", "11:22:33:44:55:66")
@@ -188,6 +194,7 @@ def test_remove_mac_not_found_raises(paths):
 
 
 # --- list_clients / check_consistency / lint_db --------------------------
+
 
 def test_list_clients_reports_mac_count_and_in_db(paths):
     client_manager.add_client(paths, "alice", "aa:bb:cc:dd:ee:ff")
@@ -247,6 +254,7 @@ def test_lint_db_detects_duplicate_mac_across_clients(paths):
 
 
 # --- idempotency: re-run twice ------------------------------------------
+
 
 def test_add_client_twice_is_rejected_not_silently_duplicated(paths):
     client_manager.add_client(paths, "alice", "aa:bb:cc:dd:ee:ff")

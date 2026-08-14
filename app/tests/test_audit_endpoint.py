@@ -1,5 +1,6 @@
 """Tests for GET /api/audit -- the admin-only recent-activity feed backing
 the Dashboard's Recent Activity section (see routes/status.py)."""
+
 from vpnadmin.audit import log_action
 from vpnadmin.models import User
 

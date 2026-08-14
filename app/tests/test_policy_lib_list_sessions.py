@@ -12,6 +12,7 @@ Runs a tiny fake Unix-socket server that speaks just enough of the real
 protocol (banner + a `status 3` response) for list_sessions() to exercise
 its real socket-handling code end-to-end, rather than mocking it away.
 """
+
 import importlib.util
 import os
 import socket
