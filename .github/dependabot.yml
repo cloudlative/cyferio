@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # app/requirements.txt + requirements-dev.txt
+  - package-ecosystem: "pip"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+
+  # app/Dockerfile's base image
+  - package-ecosystem: "docker"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+
+  # This pipeline's own dependencies -- the actions ci.yml/build.yml pin
+  # to a commit SHA (see those files' header comments for why), Dependabot
+  # is what keeps those pins from silently going stale. It opens a PR
+  # bumping both the SHA and the version comment together.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

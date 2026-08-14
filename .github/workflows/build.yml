@@ -1,11 +1,20 @@
 name: Build
 
+# Release pipeline: only fires on a version tag (git tag vX.Y.Z && git push
+# --tags), never on ordinary commits. Every quality/security/compliance/
+# test check lives in ci.yml -- this file calls it as a reusable workflow
+# (the `ci:` job below) and gates the actual build on it passing, since a
+# tag isn't guaranteed to sit on a commit that already went through a PR
+# here. What's added on top of that: the image build itself, a container
+# vulnerability scan, an SBOM, and keyless signing + SLSA provenance --
+# release-time concerns that don't belong in every PR run.
+#
+# Every third-party action is pinned to a commit SHA, not a mutable
+# version tag -- see ci.yml's header comment for why.
+
 on:
   push:
-    branches: [master]
     tags: ["v*.*.*"]
-  pull_request:
-    branches: [master]
 
 env:
   IMAGE_NAME: ghcr.io/cloudlative/cyferio-app
@@ -15,37 +24,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # TEMPORARILY DISABLED (test + scan below) to speed up rapid iteration --
-  # re-enable both by uncommenting this job and restoring `needs: test` on
-  # build-push below, once the current fast-iteration phase is done. Don't
-  # leave this disabled long-term -- it's the only thing gating a bad
-  # commit from getting built and shipped.
-  # test:
-  #   name: Test
-  #   runs-on: ubuntu-24.04
-  #   defaults:
-  #     run:
-  #       working-directory: app
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #
-  #     - uses: actions/setup-python@v5
-  #       with:
-  #         python-version: "3.12"
-  #
-  #     - name: Install dependencies
-  #       run: pip install -r requirements-dev.txt
-  #
-  #     - name: Run tests
-  #       run: pytest -v
+  ci:
+    name: Quality/security/test gates
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      security-events: write
 
   build-push:
     name: Build and push image
-    # needs: test  -- temporarily removed, see the commented-out test job above
-    # Release builds only: ordinary commits to master (and PRs) only run
-    # the test job above. A new image is published solely by pushing a
-    # version tag, e.g. `git tag v1.0.0 && git push --tags`.
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: ci
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -54,13 +42,13 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.meta.outputs.tags }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -68,7 +56,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893 # v5.9.0
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
@@ -78,7 +66,7 @@ jobs:
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: app
           push: true
@@ -92,48 +80,119 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # TEMPORARILY DISABLED, same as the test job above -- re-enable once the
-  # current fast-iteration phase is done.
-  # scan:
-  #   name: Scan image
-  #   needs: build-push
-  #   if: startsWith(github.ref, 'refs/tags/v')
-  #   runs-on: ubuntu-24.04
-  #   permissions:
-  #     contents: read
-  #     packages: read
-  #     security-events: write
-  #   steps:
-  #     # Needed for .trivyignore below (individually-justified suppressions
-  #     # only -- see that file's own header comment).
-  #     - uses: actions/checkout@v4
-  #
-  #     - name: Log in to GHCR
-  #       uses: docker/login-action@v3
-  #       with:
-  #         registry: ghcr.io
-  #         username: ${{ github.actor }}
-  #         password: ${{ secrets.GITHUB_TOKEN }}
-  #
-  #     - name: Resolve image ref
-  #       id: ref
-  #       run: |
-  #         tags="${{ needs.build-push.outputs.tags }}"
-  #         echo "image=$(echo "$tags" | head -n1)" >> "$GITHUB_OUTPUT"
-  #
-  #     - name: Run Trivy vulnerability scanner
-  #       uses: aquasecurity/trivy-action@master
-  #       with:
-  #         image-ref: ${{ steps.ref.outputs.image }}
-  #         format: sarif
-  #         output: trivy-results.sarif
-  #         severity: CRITICAL,HIGH
-  #         exit-code: "1"
-  #         vuln-type: os,library
-  #         trivyignores: .trivyignore
-  #
-  #     - name: Upload Trivy results to Security tab
-  #       if: always()
-  #       uses: github/codeql-action/upload-sarif@v3
-  #       with:
-  #         sarif_file: trivy-results.sarif
+  container-scan:
+    name: Scan image
+    needs: build-push
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      # Needed for .trivyignore below (individually-justified suppressions
+      # only -- see that file's own header comment).
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Log in to GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image ref
+        id: ref
+        run: |
+          tags="${{ needs.build-push.outputs.tags }}"
+          echo "image=$(echo "$tags" | head -n1)" >> "$GITHUB_OUTPUT"
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          image-ref: ${{ steps.ref.outputs.image }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          vuln-type: os,library
+          trivyignores: .trivyignore
+
+      - name: Upload Trivy results to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@66b39da20ccc656acc90dd27ea30f5d458ec33ce # v3.28.19
+        with:
+          sarif_file: trivy-results.sarif
+
+  sbom:
+    name: Generate SBOM
+    needs: build-push
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # attaches the SBOM to the GitHub Release
+      packages: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Log in to GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image ref
+        id: ref
+        run: |
+          tags="${{ needs.build-push.outputs.tags }}"
+          echo "image=$(echo "$tags" | head -n1)" >> "$GITHUB_OUTPUT"
+
+      # CycloneDX per the project's chosen format -- SPDX is the action's
+      # default, overridden here.
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@8e94d75ddd33f69f691467e42275782e4bfefe84 # v0.20.9
+        with:
+          image: ${{ steps.ref.outputs.image }}
+          format: cyclonedx-json
+          artifact-name: sbom.cyclonedx.json
+          output-file: sbom.cyclonedx.json
+
+      - name: Attach SBOM to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" sbom.cyclonedx.json --clobber || \
+            echo "No GitHub Release exists yet for this tag -- SBOM is still available as a workflow artifact above."
+
+  sign-and-provenance:
+    name: Sign image + generate provenance
+    needs: build-push
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # keyless cosign signing + attestations both need OIDC
+      attestations: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+
+      # Keyless: signs using this workflow run's own GitHub OIDC identity,
+      # recorded in the public Rekor transparency log -- no signing key to
+      # generate, store as a secret, or rotate.
+      - name: Sign image (keyless, GitHub OIDC)
+        run: cosign sign --yes "${{ env.IMAGE_NAME }}@${{ needs.build-push.outputs.digest }}"
+
+      - name: Generate SLSA build provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ needs.build-push.outputs.digest }}
+          push-to-registry: true

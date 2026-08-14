@@ -1,0 +1,12 @@
+# Extends gitleaks' own default ruleset (every built-in rule stays active)
+# rather than replacing it -- this file only adds a narrow, documented
+# allowlist for genuinely-false findings, same philosophy as .trivyignore:
+# individually justified, never a blanket suppression.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test code that asserts generated OpenVPN client configs contain a real PEM key block -- matches the private-key rule's PEM-header pattern as plain text being compared against, not an actual embedded secret."
+paths = [
+  '''app/tests/services/test_config_manager\.py''',
+]
