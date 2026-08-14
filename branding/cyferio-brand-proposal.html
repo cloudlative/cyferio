@@ -1,0 +1,792 @@
+<title>Cyferio Brand Proposal</title>
+<style>
+/* ============ Design tokens ============ */
+:root {
+  /* Document chrome — deliberately neutral so the 5 concept palettes read as
+     the content, not competitors to the page's own accent. The single
+     "annotation" accent (warm bronze) marks this as a review/strategy
+     document, distinct from every brand-concept hue used later. */
+  --ink: #14181F;
+  --paper: #F7F8FA;
+  --surface: #FFFFFF;
+  --surface-alt: #EEF0F3;
+  --muted: #5B6472;
+  --line: #DDE1E7;
+  --mark: #B9721C;
+  --mark-soft: #F3E4D0;
+  --good: #1E7A4C;
+  --shadow: 0 1px 2px rgba(20,24,31,.04), 0 8px 24px rgba(20,24,31,.06);
+
+  /* Concept palettes — referenced only inside their own concept cards */
+  --a-bg:#0B1220; --a-surface:#12213B; --a-accent:#23D6C4; --a-accent2:#F2A93B; --a-text:#E7ECF5; --a-muted:#8CA0C2;
+  --b-bg:#0F1A16; --b-surface:#1C2C24; --b-accent:#5FA08C; --b-accent2:#EDE6D6; --b-text:#EAF1EC; --b-muted:#9BB3A9;
+  --c-bg:#FFFFFF; --c-surface:#F3F5F9; --c-accent:#2F5FDE; --c-accent2:#64748B; --c-text:#131A2B; --c-muted:#5B6577;
+  --d-bg:#FAFAFB; --d-surface:#F0F0F4; --d-accent:#6C5CE7; --d-text:#2A2C33; --d-muted:#8A8D97;
+  --e-bg:#0A0A0B; --e-surface:#1A1A1C; --e-accent:#C9A15A; --e-text:#F5F1E8; --e-muted:#8C877C;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #EDEFF3;
+    --paper: #0E1116;
+    --surface: #171B22;
+    --surface-alt: #1D222B;
+    --muted: #9096A1;
+    --line: #262B33;
+    --mark: #E0A64B;
+    --mark-soft: #2B2115;
+    --good: #4ADE95;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"] {
+  --ink: #EDEFF3;
+  --paper: #0E1116;
+  --surface: #171B22;
+  --surface-alt: #1D222B;
+  --muted: #9096A1;
+  --line: #262B33;
+  --mark: #E0A64B;
+  --mark-soft: #2B2115;
+  --good: #4ADE95;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ============ Layout shell ============ */
+.shell {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 860px);
+  gap: 64px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 48px 24px 120px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+  .toc { display: none; }
+}
+
+.toc {
+  position: sticky;
+  top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.toc-eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.toc a {
+  display: block;
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+}
+.toc a:hover { color: var(--ink); background: var(--surface-alt); }
+
+/* ============ Cover ============ */
+.cover {
+  padding-bottom: 40px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 48px;
+}
+.cover-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--mark);
+  font-weight: 700;
+  margin-bottom: 18px;
+}
+.cover-eyebrow::before {
+  content: "";
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--mark);
+}
+.cover h1 {
+  font-size: clamp(2.1rem, 4vw, 3.1rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  max-width: 18ch;
+}
+.cover-sub {
+  margin-top: 16px;
+  font-size: 1.05rem;
+  color: var(--muted);
+  max-width: 62ch;
+}
+.cover-meta {
+  display: flex;
+  gap: 28px;
+  margin-top: 28px;
+  flex-wrap: wrap;
+}
+.cover-meta-item { font-size: 0.82rem; }
+.cover-meta-item .l { display: block; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
+
+/* ============ Sections ============ */
+section { margin-bottom: 72px; }
+.section-head { margin-bottom: 24px; }
+.section-num { font-size: 0.72rem; color: var(--mark); font-weight: 700; letter-spacing: .06em; margin-bottom: 6px; display: block; }
+.section-head h2 { font-size: 1.65rem; font-weight: 800; letter-spacing: -0.01em; }
+.section-dek { color: var(--muted); margin-top: 10px; font-size: 0.98rem; max-width: 62ch; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: var(--shadow);
+}
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+@media (max-width: 720px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  background: var(--surface-alt);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.pill.rec { background: var(--mark-soft); color: var(--mark); border-color: transparent; }
+.pill.good { color: var(--good); }
+
+/* ============ Taglines & value prop ============ */
+.tagline-list { display: flex; flex-direction: column; gap: 10px; }
+.tagline-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  padding: 14px 16px; border-radius: 10px; background: var(--surface-alt);
+}
+.tagline-row .t { font-size: 1.05rem; font-weight: 700; }
+.tagline-row .n { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+
+.vp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+@media (max-width: 720px) { .vp-grid { grid-template-columns: 1fr; } }
+.vp-cell { background: var(--surface); padding: 20px; }
+.vp-cell .l { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--mark); font-weight: 700; margin-bottom: 8px; }
+.vp-cell p { font-size: 0.92rem; }
+
+/* ============ Comparison table ============ */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+table { width: 100%; border-collapse: collapse; min-width: 720px; background: var(--surface); }
+th, td { padding: 12px 14px; text-align: left; font-size: 0.86rem; border-bottom: 1px solid var(--line); }
+th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--surface-alt); white-space: nowrap; }
+td.hero-col, th.hero-col { position: sticky; left: 0; background: var(--surface); font-weight: 700; }
+th.hero-col { background: var(--surface-alt); }
+tr:last-child td { border-bottom: none; }
+.yes { color: var(--good); font-weight: 700; }
+.no { color: var(--muted); }
+.footnote { font-size: 0.78rem; color: var(--muted); margin-top: 12px; }
+
+/* ============ Logo concepts ============ */
+.concept {
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.concept-hero {
+  padding: 40px 28px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+.concept-mark { flex-shrink: 0; }
+.concept-word { font-weight: 800; font-size: 1.5rem; letter-spacing: -0.01em; }
+.concept-word small { display: block; font-weight: 500; font-size: 0.68rem; letter-spacing: .12em; text-transform: uppercase; opacity: .7; margin-top: 4px; }
+.concept-body { padding: 22px 28px 28px; background: var(--surface); }
+.concept-name-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.concept-name { font-size: 1.1rem; font-weight: 800; }
+.concept-personality { color: var(--muted); font-size: 0.9rem; margin-bottom: 16px; }
+.swatch-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.swatch { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.swatch .chip { width: 40px; height: 40px; border-radius: 9px; border: 1px solid rgba(0,0,0,.08); }
+.swatch .hex { font-size: 0.65rem; color: var(--muted); }
+.type-sample { font-size: 0.82rem; color: var(--muted); }
+.type-sample b { color: var(--ink); }
+
+/* Concept A - Cipher Signal */
+.concept.a .concept-hero { background: var(--a-bg); color: var(--a-text); }
+.concept.a .concept-word { font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: -.02em; }
+
+/* Concept B - Meshguard */
+.concept.b .concept-hero { background: var(--b-bg); color: var(--b-text); }
+
+/* Concept C - Enterprise */
+.concept.c .concept-hero { background: var(--c-bg); color: var(--c-text); border-bottom: 1px solid var(--line); }
+
+/* Concept D - Cloudline */
+.concept.d .concept-hero { background: var(--d-bg); color: var(--d-text); border-bottom: 1px solid var(--line); }
+
+/* Concept E - Noir */
+.concept.e .concept-hero { background: var(--e-bg); color: var(--e-text); }
+.concept.e .concept-word { font-weight: 900; letter-spacing: .01em; }
+
+/* ============ Recommended direction deep-dive ============ */
+.rec-banner {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 20px; border-radius: 12px;
+  background: var(--mark-soft); color: var(--mark);
+  font-size: 0.9rem; font-weight: 700; margin-bottom: 20px;
+}
+
+/* ============ Sitemap diagram ============ */
+.sitemap { padding: 32px 16px; }
+.sm-root {
+  display: flex; justify-content: center; margin-bottom: 8px;
+}
+.sm-node {
+  padding: 10px 18px; border-radius: 10px; background: var(--ink); color: var(--paper);
+  font-size: 0.82rem; font-weight: 700; white-space: nowrap;
+}
+.sm-node.leaf { background: var(--surface); color: var(--ink); border: 1px solid var(--line); font-weight: 600; }
+.sm-connector { height: 28px; width: 2px; background: var(--line); margin: 0 auto; }
+.sm-row { display: flex; justify-content: center; gap: 0; position: relative; }
+.sm-branches { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; position: relative; padding-top: 28px; }
+.sm-branches::before {
+  content: ""; position: absolute; top: 0; left: 10%; right: 10%; height: 2px; background: var(--line);
+}
+.sm-branch { display: flex; flex-direction: column; align-items: center; gap: 8px; position: relative; }
+.sm-branch::before { content: ""; position: absolute; top: -28px; left: 50%; width: 2px; height: 28px; background: var(--line); }
+
+/* ============ Homepage content plan ============ */
+.wire { border: 1px dashed var(--line); border-radius: 12px; padding: 18px; background: var(--surface-alt); }
+.wire .tag { font-size: 0.68rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 700; margin-bottom: 8px; }
+.wire h4 { font-size: 1rem; margin-bottom: 6px; }
+.wire p { font-size: 0.86rem; color: var(--muted); }
+.wire ul { margin: 8px 0 0; padding-left: 18px; font-size: 0.86rem; color: var(--muted); }
+
+/* ============ Checklist ============ */
+.checklist { display: flex; flex-direction: column; gap: 10px; }
+.check-row { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 10px; background: var(--surface-alt); }
+.check-row .box { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--muted); flex-shrink: 0; margin-top: 2px; }
+.check-row .txt b { display: block; font-size: 0.9rem; }
+.check-row .txt span { font-size: 0.82rem; color: var(--muted); }
+
+footer.doc-footer {
+  border-top: 1px solid var(--line);
+  margin-top: 80px;
+  padding-top: 24px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+</style>
+
+<div class="shell">
+  <nav class="toc">
+    <span class="toc-eyebrow">Contents</span>
+    <a href="#strategy">Brand strategy</a>
+    <a href="#positioning">Competitive positioning</a>
+    <a href="#messaging">Messaging &amp; taglines</a>
+    <a href="#logos">Logo concepts</a>
+    <a href="#guidelines">Brand guidelines</a>
+    <a href="#website">Website architecture</a>
+    <a href="#sitemap">Sitemap</a>
+    <a href="#homepage">Page content plans</a>
+    <a href="#github">GitHub presence</a>
+    <a href="#rebrand">Rebrand checklist</a>
+    <a href="#next">Decisions needed</a>
+  </nav>
+
+  <main>
+    <div class="cover">
+      <span class="cover-eyebrow">Branding &amp; positioning proposal — for review</span>
+      <h1>Cyferio: Brand, Site &amp; Product Identity</h1>
+      <p class="cover-sub">A complete first pass at who Cyferio is, how it's positioned against the self-hosted-VPN and ZTNA markets, five distinct visual directions, and the plan for the marketing site — all for your review before anything gets built.</p>
+      <div class="cover-meta">
+        <div class="cover-meta-item"><span class="l">Domain</span>cyferio.com</div>
+        <div class="cover-meta-item"><span class="l">Status</span>Proposal — nothing implemented yet</div>
+        <div class="cover-meta-item"><span class="l">Scope</span>Brand, positioning, site plan, 5 logo directions</div>
+      </div>
+    </div>
+
+    <!-- ============ 1. BRAND STRATEGY ============ -->
+    <section id="strategy">
+      <div class="section-head">
+        <span class="section-num">Brand strategy</span>
+        <h2>What Cyferio actually is, in one sentence</h2>
+        <p class="section-dek">Everything else in this document — the logos, the taglines, the site copy — is downstream of getting this sentence right first.</p>
+      </div>
+
+      <div class="card stack">
+        <p style="font-size:1.15rem;font-weight:700;line-height:1.4">
+          Cyferio is a self-hosted operations layer for OpenVPN — it takes a server that only knows how to authenticate connections, and turns it into something an IT team can actually govern: who connects, from which device, from where, using how much bandwidth, with a full record of every change.
+        </p>
+        <p style="color:var(--muted);font-size:0.94rem">
+          That's the honest one-sentence version, based on what the product already does today (dynamic RBAC, MAC-address binding, connect-time geo/ASN/IP enforcement, hard bandwidth-quota enforcement, team-based reporting, a full audit log, and a self-service portal for end users). The brand should sell exactly this — not a vaguer "VPN for everyone" promise the product doesn't need to make.
+        </p>
+      </div>
+
+      <div class="vp-grid" style="margin-top:20px">
+        <div class="vp-cell">
+          <div class="l">What it is</div>
+          <p>A self-hosted admin &amp; governance console that wraps OpenVPN — not a new VPN protocol, not a mesh network, not a managed cloud service.</p>
+        </div>
+        <div class="vp-cell">
+          <div class="l">Who it's for</div>
+          <p>MSPs running VPN for multiple clients, internal IT/security teams, and any org that needs self-hosted control (data sovereignty, compliance) without building admin tooling from scratch.</p>
+        </div>
+        <div class="vp-cell">
+          <div class="l">Why they'd choose it</div>
+          <p>No per-seat fees, no vendor lock-in, no re-architecting onto a mesh network — governance features that competitors either don't ship natively or gate behind enterprise/plugin tiers.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 2. COMPETITIVE POSITIONING ============ -->
+    <section id="positioning">
+      <div class="section-head">
+        <span class="section-num">Competitive positioning</span>
+        <h2>Where Cyferio actually sits</h2>
+        <p class="section-dek">Researched against public docs, pricing pages, and community forums as of August 2026. Where a competitor's feature set wasn't confirmed publicly, it's marked as such rather than assumed absent — this keeps the comparison defensible if a prospect fact-checks it.</p>
+      </div>
+
+      <h3 style="font-size:1.05rem;margin-bottom:12px">Direct architectural peers — self-hosted OpenVPN admin layers</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="hero-col">Capability</th>
+              <th>Cyferio</th>
+              <th>OpenVPN Access Server</th>
+              <th>Pritunl</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="hero-col">Fine-grained RBAC (per-object, own-vs-any scope)</td><td class="yes">Native</td><td class="no">Auth via RADIUS/LDAP/SAML — not object-level RBAC</td><td class="no">Not confirmed built-in</td></tr>
+            <tr><td class="hero-col">Per-device MAC binding</td><td class="yes">Native, enforced at connect time</td><td class="no">Not confirmed built-in</td><td class="no">Open community feature request, not shipped¹</td></tr>
+            <tr><td class="hero-col">Geo / ASN / IP restrictions</td><td class="yes">Native, enforced at connect time</td><td class="no">Not confirmed built-in</td><td class="no">Not confirmed built-in</td></tr>
+            <tr><td class="hero-col">Bandwidth quotas w/ hard enforcement</td><td class="yes">Native (soft or hard, forced disconnect)</td><td class="no">Not confirmed built-in</td><td class="no">Plugin territory, not native²</td></tr>
+            <tr><td class="hero-col">Full admin audit log</td><td class="yes">Native, every action logged</td><td class="no">Not confirmed built-in</td><td class="no">Not confirmed built-in</td></tr>
+            <tr><td class="hero-col">Self-service end-user portal</td><td class="yes">Native (own profile, own usage reports)</td><td class="no">Not confirmed built-in</td><td class="no">Not confirmed built-in</td></tr>
+            <tr><td class="hero-col">Self-hosted, no per-seat fee</td><td class="yes">Yes</td><td class="yes">Yes (paid tiers above free connection limit)</td><td class="yes">Yes (paid enterprise tiers exist)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="footnote">¹ Per Pritunl's own community forum, MAC binding has been requested but is not a shipped feature. ² Pritunl exposes a Python plugin system for custom access logic; quotas aren't a native, no-code setting.</p>
+
+      <h3 style="font-size:1.05rem;margin:32px 0 12px">Adjacent alternatives — different architecture entirely</h3>
+      <p style="color:var(--muted);font-size:0.9rem;margin-bottom:16px;max-width:62ch">Tailscale, NetBird, NordLayer, and Perimeter 81 aren't OpenVPN admin tools — they're mesh-WireGuard networks or managed SASE/ZTNA platforms. The honest comparison here is architecture and pricing model, not feature-for-feature, since they're solving access differently.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th class="hero-col">Product</th><th>Architecture</th><th>Control plane</th><th>Pricing (2026)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="hero-col">Cyferio</td><td>OpenVPN, star topology</td><td>Fully self-hosted</td><td>No seat fee — your infra only</td></tr>
+            <tr><td class="hero-col">Tailscale</td><td>Mesh WireGuard</td><td>Managed cloud (Headscale is an unofficial OSS re-implementation)</td><td>$8–18 / seat / month</td></tr>
+            <tr><td class="hero-col">NetBird</td><td>Mesh WireGuard, OSS</td><td>Self-hostable (Community Edition, free)</td><td>Free CE, or ~€2,000/yr commercial self-hosted (50 users)</td></tr>
+            <tr><td class="hero-col">NordLayer</td><td>SASE / ZTNA</td><td>Managed cloud</td><td>$7–14 / seat / month, 5-seat minimum</td></tr>
+            <tr><td class="hero-col">Perimeter 81</td><td>SASE / ZTNA</td><td>Managed cloud</td><td>$8–12 / seat / month + $50/mo per gateway, 10–20 seat minimum</td></tr>
+            <tr><td class="hero-col">OpenVPN Cloud (CloudConnexa)</td><td>Managed OpenVPN, Regions/Connectors</td><td>Fully managed</td><td>Per seat</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" style="margin-top:24px">
+        <p style="font-weight:700;margin-bottom:8px">The defensible one-liner</p>
+        <p style="color:var(--muted);font-size:0.92rem">"If you already run OpenVPN and don't want to pay per-seat SaaS pricing or re-architect onto a mesh network, Cyferio is the governance layer OpenVPN itself doesn't ship with." That claim is backed by the table above — it doesn't require overstating what Tailscale/NetBird/NordLayer do, just being specific about what they <em>are</em> versus what Cyferio is.</p>
+      </div>
+    </section>
+
+    <!-- ============ 3. MESSAGING ============ -->
+    <section id="messaging">
+      <div class="section-head">
+        <span class="section-num">Messaging</span>
+        <h2>Taglines &amp; value proposition</h2>
+        <p class="section-dek">Your three examples were solid but generic-VPN-industry (they'd fit almost any competitor above). These lean on what's actually distinctive: governance, not just access.</p>
+      </div>
+
+      <div class="tagline-list">
+        <div class="tagline-row"><span class="t">OpenVPN, Governed.</span><span class="n">Primary candidate — 3 words, states the category and the differentiator</span></div>
+        <div class="tagline-row"><span class="t">The Admin Layer OpenVPN Never Shipped.</span><span class="n">Product-truth framing, good for a technical/IT audience</span></div>
+        <div class="tagline-row"><span class="t">Every Connection, Accounted For.</span><span class="n">Leans on audit/reporting strength</span></div>
+        <div class="tagline-row"><span class="t">Your VPN, Actually Under Control.</span><span class="n">Plain-language, good for non-technical buyers (ops/compliance)</span></div>
+        <div class="tagline-row"><span class="t">Self-Hosted. Fully Governed.</span><span class="n">Two-beat, leads with the self-hosting differentiator first</span></div>
+        <div class="tagline-row"><span class="t">Secure Access, Simplified.</span><span class="n">Your original example — kept as the safe, category-generic fallback</span></div>
+      </div>
+    </section>
+
+    <!-- ============ 4. LOGO CONCEPTS ============ -->
+    <section id="logos">
+      <div class="section-head">
+        <span class="section-num">Visual identity</span>
+        <h2>Five directions</h2>
+        <p class="section-dek">Each pairs a mark, a palette, and a personality mapped to a different buyer in the table above. Pick one, mix elements across two, or reject all five — this is the point where your call matters most.</p>
+      </div>
+
+      <div class="stack">
+
+        <!-- CONCEPT A -->
+        <div class="concept a">
+          <div class="concept-hero">
+            <svg class="concept-mark" width="56" height="56" viewBox="0 0 56 56" fill="none">
+              <circle cx="28" cy="28" r="24" stroke="var(--a-accent)" stroke-width="3" stroke-dasharray="70 80"/>
+              <circle cx="28" cy="28" r="16" stroke="var(--a-accent2)" stroke-width="2.5" stroke-dasharray="46 55" transform="rotate(35 28 28)"/>
+              <circle cx="28" cy="28" r="4.5" fill="var(--a-accent)"/>
+            </svg>
+            <div class="concept-word">CYFERIO<small>signal · cipher · vigilance</small></div>
+          </div>
+          <div class="concept-body">
+            <div class="concept-name-row">
+              <span class="concept-name">A · Cipher Signal</span>
+              <span class="pill rec">Recommended primary direction</span>
+            </div>
+            <p class="concept-personality">Broken concentric rings read as both a radar ping and a cipher wheel — literal to "signal" and "encryption" without a padlock cliché. Precise, technical, built for the IT/security admin who's evaluating this at 11pm during an incident.</p>
+            <div class="swatch-row">
+              <div class="swatch"><div class="chip" style="background:#0B1220"></div><span class="hex mono">#0B1220</span></div>
+              <div class="swatch"><div class="chip" style="background:#12213B"></div><span class="hex mono">#12213B</span></div>
+              <div class="swatch"><div class="chip" style="background:#23D6C4"></div><span class="hex mono">#23D6C4</span></div>
+              <div class="swatch"><div class="chip" style="background:#F2A93B"></div><span class="hex mono">#F2A93B</span></div>
+              <div class="swatch"><div class="chip" style="background:#E7ECF5"></div><span class="hex mono">#E7ECF5</span></div>
+            </div>
+            <p class="type-sample">Display: <b>geometric sans, tight tracking</b> · Body: <b>system sans</b> · Data/labels: <b>monospace</b></p>
+          </div>
+        </div>
+
+        <!-- CONCEPT B -->
+        <div class="concept b">
+          <div class="concept-hero">
+            <svg class="concept-mark" width="56" height="56" viewBox="0 0 56 56" fill="none">
+              <path d="M28 4 L50 13 V30 C50 42 40 50 28 53 C16 50 6 42 6 30 V13 Z" stroke="var(--b-accent)" stroke-width="2.5"/>
+              <circle cx="22" cy="24" r="2.6" fill="var(--b-accent2)"/>
+              <circle cx="34" cy="22" r="2.6" fill="var(--b-accent2)"/>
+              <circle cx="28" cy="36" r="2.6" fill="var(--b-accent2)"/>
+              <line x1="22" y1="24" x2="34" y2="22" stroke="var(--b-accent2)" stroke-width="1.2"/>
+              <line x1="22" y1="24" x2="28" y2="36" stroke="var(--b-accent2)" stroke-width="1.2"/>
+              <line x1="34" y1="22" x2="28" y2="36" stroke="var(--b-accent2)" stroke-width="1.2"/>
+            </svg>
+            <div class="concept-word">CYFERIO<small>mesh · protection · trust</small></div>
+          </div>
+          <div class="concept-body">
+            <div class="concept-name-row"><span class="concept-name">B · Meshguard</span></div>
+            <p class="concept-personality">A shield built from connected nodes — protection <em>and</em> network topology in one mark. Sturdier and warmer than Concept A; reads well to a risk/compliance buyer who cares more about "is this safe" than "is this technically elegant."</p>
+            <div class="swatch-row">
+              <div class="swatch"><div class="chip" style="background:#0F1A16"></div><span class="hex mono">#0F1A16</span></div>
+              <div class="swatch"><div class="chip" style="background:#1C2C24"></div><span class="hex mono">#1C2C24</span></div>
+              <div class="swatch"><div class="chip" style="background:#5FA08C"></div><span class="hex mono">#5FA08C</span></div>
+              <div class="swatch"><div class="chip" style="background:#EDE6D6"></div><span class="hex mono">#EDE6D6</span></div>
+            </div>
+            <p class="type-sample">Display: <b>humanist sans, medium weight</b> · Body: <b>system sans</b> · Warmer, less "hacker aesthetic" than A</p>
+          </div>
+        </div>
+
+        <!-- CONCEPT C -->
+        <div class="concept c">
+          <div class="concept-hero">
+            <svg class="concept-mark" width="56" height="56" viewBox="0 0 56 56" fill="none">
+              <circle cx="28" cy="28" r="22" fill="var(--c-accent)"/>
+              <path d="M36 18 A14 14 0 1 0 36 38" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round"/>
+            </svg>
+            <div class="concept-word">CYFERIO<small>enterprise · trust · scale</small></div>
+          </div>
+          <div class="concept-body">
+            <div class="concept-name-row"><span class="concept-name">C · Cyferio Enterprise</span></div>
+            <p class="concept-personality">A cut-ring "C," corporate blue, white ground. This is the deliberately safe choice — the one that won't raise an eyebrow in a procurement deck. Least distinctive of the five, most boardroom-proof.</p>
+            <div class="swatch-row">
+              <div class="swatch"><div class="chip" style="background:#2F5FDE"></div><span class="hex mono">#2F5FDE</span></div>
+              <div class="swatch"><div class="chip" style="background:#64748B"></div><span class="hex mono">#64748B</span></div>
+              <div class="swatch"><div class="chip" style="background:#F3F5F9"></div><span class="hex mono">#F3F5F9</span></div>
+              <div class="swatch"><div class="chip" style="background:#131A2B"></div><span class="hex mono">#131A2B</span></div>
+            </div>
+            <p class="type-sample">Display: <b>clean grotesk</b> · Body: <b>system sans</b> · The "default enterprise SaaS" register, deliberately</p>
+          </div>
+        </div>
+
+        <!-- CONCEPT D -->
+        <div class="concept d">
+          <div class="concept-hero">
+            <svg class="concept-mark" width="56" height="56" viewBox="0 0 56 56" fill="none">
+              <path d="M14 34 a8 8 0 0 1 0-16 a10 10 0 0 1 19-3 a8 8 0 0 1 1 19 Z" stroke="var(--d-accent)" stroke-width="2.2" fill="none" stroke-linejoin="round"/>
+              <circle cx="42" cy="18" r="2.4" fill="var(--d-accent)"/>
+              <line x1="34" y1="21" x2="40" y2="19" stroke="var(--d-accent)" stroke-width="1.4"/>
+            </svg>
+            <div class="concept-word">CYFERIO<small>minimal · calm · modern</small></div>
+          </div>
+          <div class="concept-body">
+            <div class="concept-name-row"><span class="concept-name">D · Cloudline</span></div>
+            <p class="concept-personality">Monoline cloud with a single connected node — quiet, uncluttered, almost Scandinavian. Appeals to the modern DevOps-forward buyer who's allergic to "enterprise security" visual clichés (shields, locks, globes).</p>
+            <div class="swatch-row">
+              <div class="swatch"><div class="chip" style="background:#6C5CE7"></div><span class="hex mono">#6C5CE7</span></div>
+              <div class="swatch"><div class="chip" style="background:#FAFAFB;border:1px solid #ddd"></div><span class="hex mono">#FAFAFB</span></div>
+              <div class="swatch"><div class="chip" style="background:#2A2C33"></div><span class="hex mono">#2A2C33</span></div>
+            </div>
+            <p class="type-sample">Display: <b>light-weight sans, generous spacing</b> · Body: <b>system sans</b> · Single accent, everything else neutral</p>
+          </div>
+        </div>
+
+        <!-- CONCEPT E -->
+        <div class="concept e">
+          <div class="concept-hero">
+            <svg class="concept-mark" width="56" height="56" viewBox="0 0 56 56" fill="none">
+              <polygon points="28,4 50,17 50,39 28,52 6,39 6,17" stroke="var(--e-accent)" stroke-width="2" fill="none"/>
+              <polygon points="28,15 39,22 39,34 28,41 17,34 17,22" fill="var(--e-accent)" opacity="0.9"/>
+            </svg>
+            <div class="concept-word">CYFERIO<small>premium · confident · category-leading</small></div>
+          </div>
+          <div class="concept-body">
+            <div class="concept-name-row"><span class="concept-name">E · Cyferio Noir</span></div>
+            <p class="concept-personality">Near-black ground, warm bronze/gold accent, geometric hexagon mark — the "we're the expensive option and worth it" register (Linear/Vercel-adjacent). Highest risk if the buyer is price-sensitive; highest reward if you want to look like the category leader, not a challenger.</p>
+            <div class="swatch-row">
+              <div class="swatch"><div class="chip" style="background:#0A0A0B"></div><span class="hex mono">#0A0A0B</span></div>
+              <div class="swatch"><div class="chip" style="background:#1A1A1C"></div><span class="hex mono">#1A1A1C</span></div>
+              <div class="swatch"><div class="chip" style="background:#C9A15A"></div><span class="hex mono">#C9A15A</span></div>
+              <div class="swatch"><div class="chip" style="background:#F5F1E8"></div><span class="hex mono">#F5F1E8</span></div>
+            </div>
+            <p class="type-sample">Display: <b>bold geometric sans, high weight contrast</b> · Body: <b>system sans</b> · Sparingly used gold, never as a background fill</p>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ============ 5. BRAND GUIDELINES ============ -->
+    <section id="guidelines">
+      <div class="section-head">
+        <span class="section-num">Brand guidelines</span>
+        <h2>If Concept A ships, here's the system</h2>
+        <p class="section-dek">Full guidelines below assume Cipher Signal (A) as the direction — the one I'd actually recommend, for the reasons in the recommendation banner. If you pick a different concept, this section gets rebuilt around that palette instead; the structure stays the same.</p>
+      </div>
+
+      <div class="rec-banner">Why A, specifically: it's the only one of the five that's simultaneously distinctive (nothing else in the comparison table above looks like it), technically literal (signal/cipher, not a generic lock or globe), and dark-mode-native by default — which matters, since the product itself is an admin console IT staff will have open all day.</div>
+
+      <div class="grid-2">
+        <div class="card">
+          <p style="font-weight:700;margin-bottom:12px">Color</p>
+          <div class="swatch-row">
+            <div class="swatch"><div class="chip" style="background:#0B1220"></div><span class="hex mono">#0B1220</span><span class="hex">Ink (bg)</span></div>
+            <div class="swatch"><div class="chip" style="background:#12213B"></div><span class="hex mono">#12213B</span><span class="hex">Surface</span></div>
+            <div class="swatch"><div class="chip" style="background:#23D6C4"></div><span class="hex mono">#23D6C4</span><span class="hex">Primary</span></div>
+            <div class="swatch"><div class="chip" style="background:#F2A93B"></div><span class="hex mono">#F2A93B</span><span class="hex">Warn/alert</span></div>
+            <div class="swatch"><div class="chip" style="background:#E7ECF5"></div><span class="hex mono">#E7ECF5</span><span class="hex">Text</span></div>
+          </div>
+          <p style="font-size:0.86rem;color:var(--muted)">Dark-first by design — light mode inverts to a cool white ground (#F7F9FC) with the same cyan/amber accents desaturated slightly so they don't vibrate against white.</p>
+        </div>
+        <div class="card">
+          <p style="font-weight:700;margin-bottom:12px">Typography</p>
+          <p style="font-size:0.86rem;color:var(--muted);margin-bottom:10px"><b style="color:var(--ink)">Display:</b> a geometric sans at tight negative tracking for headlines — think the weight of Söhne or Neue Montreal, not the two "safe AI-brand" defaults (Inter, Space Grotesk).</p>
+          <p style="font-size:0.86rem;color:var(--muted);margin-bottom:10px"><b style="color:var(--ink)">Body:</b> a plain, highly-legible sans at 16–18px — this is a technical product, body copy should disappear, not perform.</p>
+          <p style="font-size:0.86rem;color:var(--muted)"><b style="color:var(--ink)">Data/UI labels:</b> monospace for anything numeric or code-adjacent (bandwidth figures, MAC addresses, audit-log entries) — reinforces "this is a real technical tool," and doubles as a visual signature distinct from competitors.</p>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:16px">
+        <div class="card">
+          <p style="font-weight:700;margin-bottom:12px">Visual style</p>
+          <ul style="margin:0;padding-left:18px;font-size:0.86rem;color:var(--muted)">
+            <li>Dark-mode-first UI chrome; light mode is a real second theme, not an afterthought</li>
+            <li>Concentric-ring motif reused sparingly as a loading/status indicator, not just the logo</li>
+            <li>No lock icons, no globe icons, no generic "shield" clip-art — the mark itself carries the security meaning</li>
+            <li>Screenshots/UI mockups get real data density — this brand doesn't hide behind whitespace, it's for people who read dashboards all day</li>
+          </ul>
+        </div>
+        <div class="card">
+          <p style="font-weight:700;margin-bottom:12px">What this palette is NOT</p>
+          <ul style="margin:0;padding-left:18px;font-size:0.86rem;color:var(--muted)">
+            <li>Not the cream-and-terracotta "warm SaaS" look every AI-assisted brand defaults to</li>
+            <li>Not a purple-to-blue gradient hero — the accent is a single confident cyan, used flat</li>
+            <li>Not rounded-everything — corners are tightened (8–10px), not the generic 16px "friendly" default</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 6. WEBSITE ARCHITECTURE ============ -->
+    <section id="website">
+      <div class="section-head">
+        <span class="section-num">Website</span>
+        <h2>Cloudflare Pages, not raw Workers</h2>
+        <p class="section-dek">You asked for a recommendation between the two — here's the actual reasoning, not just the answer.</p>
+      </div>
+
+      <div class="card stack">
+        <p><b>Use Cloudflare Pages, with Pages Functions for the one dynamic piece (the contact form).</b></p>
+        <p style="font-size:0.9rem;color:var(--muted)">Pages is purpose-built for exactly this: a static/SSG marketing site with git-based deploys, automatic preview URLs per branch/PR, and zero-config CDN caching. Plain Workers is a general-purpose edge-compute runtime — the right tool if you're building an API or heavy request-time logic, but it means hand-rolling asset serving, routing, and preview deployments that Pages already gives you for free. Pages Functions run on the same Workers runtime under the hood, so you're not giving anything up — you get the static-site ergonomics of Pages and the ability to drop in a serverless function exactly where you need one (the contact form's email-send endpoint, and later, a signup-waitlist API if you add one).</p>
+        <div class="grid-2">
+          <div class="wire">
+            <div class="tag">Static build</div>
+            <p>Astro or plain Vite + a templating layer — no client-side framework needed for a marketing site this size. Ships near-zero JS, which matters for the SEO/performance requirement you listed.</p>
+          </div>
+          <div class="wire">
+            <div class="tag">Dynamic pieces</div>
+            <p>Contact form → Pages Function → email via Resend/Postmark/SES. Optional waitlist signup → same pattern, written to D1 or a Google Sheet via API, whichever's less setup overhead for a v1.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 7. SITEMAP ============ -->
+    <section id="sitemap">
+      <div class="section-head">
+        <span class="section-num">Site structure</span>
+        <h2>Sitemap</h2>
+      </div>
+      <div class="card sitemap">
+        <div class="sm-root"><div class="sm-node">cyferio.com</div></div>
+        <div class="sm-branches">
+          <div class="sm-branch"><div class="sm-node leaf">/features</div></div>
+          <div class="sm-branch"><div class="sm-node leaf">/use-cases</div></div>
+          <div class="sm-branch"><div class="sm-node leaf">/pricing</div></div>
+          <div class="sm-branch"><div class="sm-node leaf">/docs</div></div>
+          <div class="sm-branch"><div class="sm-node leaf">/about</div></div>
+          <div class="sm-branch"><div class="sm-node leaf">/contact</div></div>
+        </div>
+      </div>
+      <p class="footnote">/docs is a placeholder landing (value prop + "full docs coming soon" + link to the GitHub README) until real documentation exists — no point building a docs system before the product's docs are written.</p>
+    </section>
+
+    <!-- ============ 8. HOMEPAGE + PAGE CONTENT PLANS ============ -->
+    <section id="homepage">
+      <div class="section-head">
+        <span class="section-num">Content plan</span>
+        <h2>Page-by-page content</h2>
+      </div>
+
+      <h3 style="font-size:1.05rem;margin-bottom:12px">Home</h3>
+      <div class="stack">
+        <div class="wire"><div class="tag">Hero</div><h4>OpenVPN, Governed.</h4><p>Sub-head: "Cyferio turns any OpenVPN server into a fully governed, self-hosted VPN platform — role-based access, per-device controls, and hard bandwidth enforcement, without per-seat fees." Primary CTA: "See it in action" (demo/screenshot scroll). Secondary CTA: "View on GitHub."</p></div>
+        <div class="wire"><div class="tag">Trust strip</div><p>Row of factual badges, not logos you don't have yet: "Self-hosted — your infrastructure" / "Open architecture, no lock-in" / "Full audit trail on every action" / "MIT-style OSS core" (confirm license before publishing this one).</p></div>
+        <div class="wire"><div class="tag">Product overview (3 columns)</div><ul><li><b>Govern</b> — RBAC, teams, audit log</li><li><b>Restrict</b> — MAC binding, geo/ASN/IP, bandwidth quotas</li><li><b>Observe</b> — reporting, diagnostics, health monitoring</li></ul></div>
+        <div class="wire"><div class="tag">Screenshot section</div><p>Placeholder: dashboard, clients list, and a reports chart — swap in real screenshots once the rebrand ships. Caption each with the actual capability shown, not generic "powerful dashboard" copy.</p></div>
+        <div class="wire"><div class="tag">Closing CTA</div><p>"Running OpenVPN already? Point Cyferio at it in an afternoon." → /contact or a self-hosted quickstart link once docs exist.</p></div>
+      </div>
+
+      <h3 style="font-size:1.05rem;margin:32px 0 12px">Features</h3>
+      <p style="font-size:0.88rem;color:var(--muted);margin-bottom:12px;max-width:62ch">Grouped by job-to-be-done, not an undifferentiated list of 17 bullet points:</p>
+      <div class="grid-3">
+        <div class="wire"><div class="tag">Access governance</div><p>RBAC · Teams · Organization management · Audit log</p></div>
+        <div class="wire"><div class="tag">Connection controls</div><p>MAC address binding · Geo restrictions · ASN restrictions · Device restrictions</p></div>
+        <div class="wire"><div class="tag">Usage enforcement</div><p>Bandwidth quotas · Throughput controls · Diagnostics · Health monitoring</p></div>
+        <div class="wire"><div class="tag">Visibility</div><p>Reporting &amp; analytics · Email notifications</p></div>
+        <div class="wire"><div class="tag">End-user experience</div><p>Self-service portal — own profile, own usage, no ticket needed</p></div>
+        <div class="wire"><div class="tag">Lifecycle</div><p>VPN user lifecycle management — onboarding, linking existing profiles, offboarding</p></div>
+      </div>
+
+      <h3 style="font-size:1.05rem;margin:32px 0 12px">Use Cases</h3>
+      <div class="grid-3">
+        <div class="wire"><div class="tag">MSPs</div><p>Manage VPN access across multiple client environments from one console, with per-client teams and reporting.</p></div>
+        <div class="wire"><div class="tag">Internal IT / security teams</div><p>Answer "who could access what, and when" without stitching together spreadsheets and shell scripts.</p></div>
+        <div class="wire"><div class="tag">Managed VPN providers</div><p>Turn a bare OpenVPN deployment into a product you can actually support at scale.</p></div>
+        <div class="wire"><div class="tag">Remote workforce access</div><p>Device + geo restrictions mean a stolen credential alone isn't enough to connect.</p></div>
+        <div class="wire"><div class="tag">Security-conscious orgs</div><p>Full audit trail and hard quota enforcement for teams that need to prove control, not just claim it.</p></div>
+        <div class="wire"><div class="tag">Regulated / data-sovereign orgs</div><p>Self-hosted means the compliance conversation starts from "it never left our infrastructure."</p></div>
+      </div>
+
+      <h3 style="font-size:1.05rem;margin:32px 0 12px">Pricing (placeholder)</h3>
+      <div class="grid-3">
+        <div class="wire"><div class="tag">Starter</div><h4>Free</h4><p>Self-hosted, community support, full feature set, single-org use. This is the honest floor — the software is self-hosted OSS, so "Starter" should not be artificially crippled.</p></div>
+        <div class="wire"><div class="tag">Professional</div><h4>TBD /mo</h4><p>Priority support, managed updates, optional hosted-for-you option. Needs a real decision on whether Cyferio ever offers a hosted tier — flagged in Decisions Needed below.</p></div>
+        <div class="wire"><div class="tag">Enterprise</div><h4>Custom</h4><p>SSO/SAML, dedicated support, custom SLAs, multi-org / MSP tooling.</p></div>
+      </div>
+      <p class="footnote">These are structural placeholders only — real pricing needs a real decision on the business model (pure OSS + paid support? Hosted SaaS tier? Both?) before publishing numbers.</p>
+
+      <h3 style="font-size:1.05rem;margin:32px 0 12px">Docs, About, Contact</h3>
+      <div class="grid-3">
+        <div class="wire"><div class="tag">Docs</div><p>Placeholder landing: what Cyferio is, link to GitHub README, "full docs coming soon" + email signup for launch notice.</p></div>
+        <div class="wire"><div class="tag">About</div><p>Origin story: built to manage a real OpenVPN deployment, open-sourced because the gap between "OpenVPN works" and "OpenVPN is governable" is universal, not situational.</p></div>
+        <div class="wire"><div class="tag">Contact</div><p>Single form (name, email, message) + direct email address + GitHub Issues link for bug reports specifically.</p></div>
+      </div>
+    </section>
+
+    <!-- ============ 9. GITHUB PRESENCE ============ -->
+    <section id="github">
+      <div class="section-head">
+        <span class="section-num">Open source presence</span>
+        <h2>GitHub</h2>
+      </div>
+      <div class="card stack">
+        <div>
+          <p style="font-weight:700;margin-bottom:6px">Repository description</p>
+          <p class="mono" style="font-size:0.86rem;background:var(--surface-alt);padding:10px 12px;border-radius:8px">Self-hosted OpenVPN management: RBAC, MAC binding, geo/ASN restrictions, bandwidth quotas, and audit-logged administration. → cyferio.com</p>
+        </div>
+        <div>
+          <p style="font-weight:700;margin-bottom:6px">README structure</p>
+          <ul style="margin:0;padding-left:18px;font-size:0.88rem;color:var(--muted)">
+            <li>Logo/wordmark + one-line description + badges row</li>
+            <li>3–5 screenshots (dashboard, clients, reports) directly under the fold — most visitors decide in the first screen</li>
+            <li>"Why Cyferio" — 4 bullets max, same as the homepage's 3-column overview</li>
+            <li>Quickstart (docker compose up, matches this repo's actual deploy path)</li>
+            <li>Feature list, grouped the same way as the Features page (governance / controls / enforcement / visibility)</li>
+            <li>Link to cyferio.com and to the (future) docs</li>
+            <li>License + contribution guidelines</li>
+          </ul>
+        </div>
+        <div>
+          <p style="font-weight:700;margin-bottom:6px">Badges</p>
+          <p style="font-size:0.86rem;color:var(--muted)">Build status, license, latest release tag, and Docker pulls if the image is published somewhere countable — skip vanity badges (stars-over-time charts, etc.) that don't help someone evaluating the project in 10 seconds.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 10. REBRAND CHECKLIST ============ -->
+    <section id="rebrand">
+      <div class="section-head">
+        <span class="section-num">Part 1 — rebrand plan (not yet executed)</span>
+        <h2>What actually needs to change in the repo</h2>
+        <p class="section-dek">Good news found while scoping this: the app already reads its display name from a Settings → Organization value (<code class="mono">app_settings.app_name</code>), used throughout templates and emails — so most of the in-product rebrand is a config change, not a find-and-replace sweep. The checklist below separates the two.</p>
+      </div>
+      <div class="checklist">
+        <div class="check-row"><div class="box"></div><div class="txt"><b>Default app_name → "Cyferio"</b><span>Config default change — covers page titles, email templates, sidebar footer credit, and every other place that already pulls from this setting.</span></div></div>
+        <div class="check-row"><div class="box"></div><div class="txt"><b>README.md</b><span>Full rewrite — project name, description, screenshots, install instructions.</span></div></div>
+        <div class="check-row"><div class="box"></div><div class="txt"><b>Login page branding</b><span>Check for any hardcoded product name outside the app_name-driven template — confirm during implementation, not assumed clean.</span></div></div>
+        <div class="check-row"><div class="box"></div><div class="txt"><b>Repository name / GitHub org</b><span>Your call — renaming the repo breaks existing clone URLs/CI references unless redirects are set up; worth deciding deliberately, not as a side effect.</span></div></div>
+        <div class="check-row"><div class="box"></div><div class="txt"><b>Docs / comments referencing the old working name</b><span>Sweep code comments and docs/*.md for the old project name used as prose (not the app_name variable itself) — cosmetic, low priority, can trail the main rebrand.</span></div></div>
+        <div class="check-row"><div class="box"></div><div class="txt"><b>Screenshots</b><span>Anywhere currently showing the old default app_name in the UI needs a retake once the default changes.</span></div></div>
+      </div>
+    </section>
+
+    <!-- ============ 11. NEXT STEPS ============ -->
+    <section id="next">
+      <div class="section-head">
+        <span class="section-num">Before anything gets built</span>
+        <h2>Decisions I need from you</h2>
+      </div>
+      <div class="checklist">
+        <div class="check-row"><div class="box"></div><div class="txt"><b>Pick a logo direction</b><span>A through E, or "none of these, try again" — everything downstream (site colors, README badges) depends on this.</span></div></div>
+        <div class="check-row"><div class="box"></div><div class="txt"><b>Confirm the business model</b><span>Pure OSS + paid support, a hosted SaaS tier, or both — the Pricing page can't be real until this is decided.</span></div></div>
+        <div class="check-row"><div class="box"></div><div class="txt"><b>Confirm the license</b><span>The homepage trust strip and README both want to state a license — needs to be the actual one you intend to ship under.</span></div></div>
+        <div class="check-row"><div class="box"></div><div class="txt"><b>Repo rename or not</b><span>Decide before I touch any GitHub-facing branding, since it changes what "consistent branding" even means for existing links.</span></div></div>
+      </div>
+    </section>
+
+    <footer class="doc-footer">
+      Proposal only — no site, logo assets, or repo changes have been created yet. Competitive figures sourced via web research, August 2026; verify pricing/feature claims against competitors' current sites before publishing externally.
+    </footer>
+  </main>
+</div>
