@@ -74,7 +74,7 @@ docker compose pull && docker compose up -d
 ```
 
 The `app` service pulls a pre-built image from GHCR
-(`ghcr.io/cloudlative/openvpn-toolkit-app`, public — no `docker login`
+(`ghcr.io/cloudlative/cyferio-app`, public — no `docker login`
 needed) rather than building locally. It's published by
 [`.github/workflows/build.yml`](../.github/workflows/build.yml) whenever a
 version tag (`vX.Y.Z`) is pushed — see [Releases](#releases) below.
@@ -84,7 +84,7 @@ set `IMAGE_TAG=X.Y.Z` in `.env` -- note: **no leading `v`**, even though the
 git tag itself is `vX.Y.Z` (`docker/metadata-action`'s `type=semver` tagging
 strips it, so pushing `v1.0.1` publishes the image as `...:1.0.1`, not
 `...:v1.0.1`). See the
-[Packages page](https://github.com/cloudlative/openvpn-toolkit/pkgs/container/openvpn-toolkit-app)
+[Packages page](https://github.com/cloudlative/cyferio/pkgs/container/cyferio-app)
 for what's been published, before `docker compose pull`.
 
 Find the latest published version tag from the command line (no `gh`/GitHub
@@ -92,8 +92,8 @@ login needed -- GHCR's anonymous token endpoint is enough since the package
 is public):
 
 ```bash
-TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:cloudlative/openvpn-toolkit-app:pull" | grep -oE '"token":"[^"]+"' | cut -d'"' -f4)
-curl -s -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/cloudlative/openvpn-toolkit-app/tags/list" \
+TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:cloudlative/cyferio-app:pull" | grep -oE '"token":"[^"]+"' | cut -d'"' -f4)
+curl -s -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/cloudlative/cyferio-app/tags/list" \
   | grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' | tr -d '"' | sort -V | tail -1
 ```
 
@@ -202,7 +202,7 @@ git push --tags
 ```
 
 That runs the full pipeline (test → build/push → Trivy scan) and publishes
-`ghcr.io/cloudlative/openvpn-toolkit-app:v1.0.0` and `:latest`. A plain
+`ghcr.io/cloudlative/cyferio-app:v1.0.0` and `:latest`. A plain
 `git push` to `master` only runs the test job — no image is built or
 published.
 

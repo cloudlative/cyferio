@@ -116,7 +116,7 @@ services:
     # .env (e.g. sha-abc1234 from a specific Actions run) to deploy an exact
     # version instead of always tracking latest; unset it and it defaults to
     # latest.
-    image: ghcr.io/cloudlative/openvpn-toolkit-app:${IMAGE_TAG:-latest}
+    image: ghcr.io/cloudlative/cyferio-app:${IMAGE_TAG:-latest}
     container_name: openvpn-toolkit-app
     restart: unless-stopped
     # Runs Docker's built-in tini as PID 1 instead of uvicorn directly.
