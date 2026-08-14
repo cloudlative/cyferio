@@ -243,16 +243,17 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 }
 .sidebar .brand:hover { color: #fff; text-decoration: none; opacity: 0.88; }
 .sidebar .brand::before {
-	content: "⚡";
+	content: url("/static/mark.svg");
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	flex: none;
+	box-sizing: border-box;
 	width: 32px;
 	height: 32px;
+	padding: 6px;
 	border-radius: 10px;
 	background: var(--accent-gradient);
-	font-size: 0.95rem;
 	box-shadow: var(--accent-glow);
 }
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
