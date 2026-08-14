@@ -4,6 +4,8 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>{% block title %}{{ app_settings.app_name }}{% endblock %}</title>
+	<link rel="icon" href="/static/favicon.ico" sizes="any">
+	<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 	<link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
 </head>
 <body class="{{ 'has-sidebar' if user }}">
@@ -113,11 +115,7 @@
 		<footer class="content-footer">
 			<div class="content-footer-left"></div>
 			<div class="content-footer-center"></div>
-			<div class="content-footer-right">
-				{% if app_settings.app_footer_credit %}
-				<span class="sidebar-credit">{{ app_settings.app_footer_credit }}</span>
-				{% endif %}
-			</div>
+			<div class="content-footer-right"></div>
 		</footer>
 		{% endif %}
 	</main>

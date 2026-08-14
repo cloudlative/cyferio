@@ -479,12 +479,6 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 .content-footer-right { text-align: right; }
 .content-footer-center { flex: 2; text-align: center; }
 
-/* .sidebar-credit is now rendered in .content-footer-right (see base.html)
-   -- kept as its own class rather than folded into .content-footer-right
-   directly so a future second use (e.g. re-adding it to the sidebar) can
-   reuse the same rule. */
-.sidebar-credit { font-size: 0.72rem; color: var(--text-faint); }
-
 .role-badge {
 	font-size: 0.66rem;
 	padding: 3px 9px;
@@ -1070,7 +1064,6 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 	box-shadow: var(--accent-glow);
 }
 .login-box h1 { display: block; text-align: center; margin: 0; font-size: 1.4rem; }
-.login-box .login-tagline { color: var(--text-muted); font-size: 0.85rem; text-align: center; margin: 0; }
 .login-box button { width: 100%; justify-content: center; margin-top: 10px; padding: 11px; }
 .error-banner { background: var(--danger-bg); color: var(--danger-text); padding: 11px 14px; border-radius: 10px; margin-bottom: 18px; font-size: 0.9rem; font-weight: 600; border: 1px solid rgba(244, 63, 94, 0.3); }
 

@@ -41,9 +41,6 @@ def _reset_runtime_settings():
 
     def _reset():
         r = app_settings.runtime
-        r.app_name = env_settings.APP_NAME
-        r.app_tagline = env_settings.APP_TAGLINE
-        r.app_footer_credit = env_settings.APP_FOOTER_CREDIT
         r.smtp_host = env_settings.SMTP_HOST
         r.smtp_port = env_settings.SMTP_PORT
         r.smtp_username = env_settings.SMTP_USERNAME

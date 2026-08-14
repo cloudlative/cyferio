@@ -39,7 +39,7 @@
 #
 # Usage (run as root, or via sudo):
 #   sudo ./setup-new-machine.sh \
-#     --domain vpn-project.cloudlative.com \
+#     --domain portal.cyferio.com \
 #     --acme-email you@example.com \
 #     [--deploy-user ubuntu] [--image-tag 1.0.36] [--repo-dir /opt/openvpn-toolkit] \
 #     [--use-staging-first] [--force-env] [--skip-stack] [--skip-docker]

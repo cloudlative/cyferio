@@ -17,7 +17,9 @@ class TestGetSettings:
         r = app_client.get("/api/settings")
         assert r.status_code == 200
         body = r.json()
-        assert body["app_name"] == "OpenVPN Toolkit"
+        assert "app_name" not in body
+        assert "app_tagline" not in body
+        assert "app_footer_credit" not in body
         assert body["smtp_configured"] is False
         assert body["smtp_password"] == ""  # nothing set yet
 
@@ -32,24 +34,24 @@ class TestGetSettings:
 
 
 class TestUpdateSettings:
-    def test_admin_can_update_branding(self, app_client):
+    def test_admin_can_update_portal_url(self, app_client):
         login(app_client, "admin", "adminpass123")
-        r = app_client.patch("/api/settings", json={"app_name": "Acme VPN"})
+        r = app_client.patch("/api/settings", json={"portal_url": "https://vpn.example.com"})
         assert r.status_code == 200
-        assert r.json()["app_name"] == "Acme VPN"
-        assert runtime_settings.app_name == "Acme VPN"  # in-process cache refreshed immediately
+        assert r.json()["portal_url"] == "https://vpn.example.com"
+        assert runtime_settings.portal_url == "https://vpn.example.com"  # in-process cache refreshed immediately
 
     def test_viewer_cannot_update_settings(self, app_client):
         login(app_client, "viewer", "viewerpass123")
-        r = app_client.patch("/api/settings", json={"app_name": "Nope"})
+        r = app_client.patch("/api/settings", json={"portal_url": "https://nope.example.com"})
         assert r.status_code == 403
 
-    def test_blank_app_name_falls_back_to_default(self, app_client):
+    def test_blank_portal_url_falls_back_to_default(self, app_client):
         login(app_client, "admin", "adminpass123")
-        app_client.patch("/api/settings", json={"app_name": "Acme VPN"})
-        r = app_client.patch("/api/settings", json={"app_name": None})
+        app_client.patch("/api/settings", json={"portal_url": "https://vpn.example.com"})
+        r = app_client.patch("/api/settings", json={"portal_url": None})
         assert r.status_code == 200
-        assert r.json()["app_name"] == "OpenVPN Toolkit"
+        assert r.json()["portal_url"] is None  # no APP_DOMAIN set in the test env, so no fallback either
 
     def test_invalid_smtp_port_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
@@ -120,7 +122,7 @@ class TestUpdateSettings:
         from vpnadmin.models import AuditLog
 
         login(app_client, "admin", "adminpass123")
-        app_client.patch("/api/settings", json={"app_name": "Acme VPN"})
+        app_client.patch("/api/settings", json={"portal_url": "https://vpn.example.com"})
         entry = db_session.query(AuditLog).filter(AuditLog.action == "update_settings").one()
         assert entry.username == "admin"
 

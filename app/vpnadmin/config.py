@@ -135,22 +135,14 @@ class Settings:
     BOOTSTRAP_ADMIN_USERNAME: str | None = os.environ.get("BOOTSTRAP_ADMIN_USERNAME")
     BOOTSTRAP_ADMIN_PASSWORD: str | None = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD")
 
-    # --- Branding -----------------------------------------------------------
-    # Purely cosmetic, env-driven so a given deployment can relabel the app
-    # (sidebar header, login page, footer credit) without touching templates
-    # or committing anything person/org-specific to this open-source repo.
-    APP_NAME: str = os.environ.get("APP_NAME", "Cyferio")
-    APP_TAGLINE: str = os.environ.get("APP_TAGLINE", "Sign in to manage clients, MACs & live status")
-    APP_FOOTER_CREDIT: str = os.environ.get("APP_FOOTER_CREDIT", "")
-
     # The same domain docker-compose.yml's traefik-config service already
     # requires in .env for routing (see that file's APP_DOMAIN comment) --
     # read here too so app_settings.py's runtime.portal_url can default to
     # "https://{APP_DOMAIN}" without asking an admin to re-enter a value
-    # already configured elsewhere. Settings -> Organization's Portal URL
-    # field can still override this per-deployment (e.g. a different
+    # already configured elsewhere. Settings -> Platform Settings' Portal
+    # URL field can still override this per-deployment (e.g. a different
     # public URL than the routing domain), same "env default, DB override"
-    # shape as every other branding/SMTP setting in this app.
+    # shape as every other SMTP/system setting in this app.
     APP_DOMAIN: str = os.environ.get("APP_DOMAIN", "")
 
     # IANA timezone name (e.g. "UTC", "Asia/Karachi") used to DISPLAY

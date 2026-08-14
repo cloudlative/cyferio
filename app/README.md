@@ -314,6 +314,21 @@ for newly-created accounts are printed once, to that terminal, at that
 moment -- `last-report` intentionally does not (and cannot) show them
 again afterward.
 
+### Dropping legacy branding columns
+
+Deployments that predate the Cyferio rebrand still have unused
+`app_name`/`app_tagline`/`app_footer_credit` columns on `app_settings` (the
+app itself no longer reads or writes them -- branding is now fixed, not
+configurable). Same standalone-script pattern as above, since this repo has
+no Alembic and `init_db()`'s reconciler only ever adds columns, never drops
+them. Safe to skip indefinitely -- these columns being present but unused
+breaks nothing.
+
+```bash
+docker compose exec app python drop_legacy_branding_columns.py preview  # read-only, changes nothing
+docker compose exec app python drop_legacy_branding_columns.py run      # asks for confirmation, then applies it
+```
+
 ### Guardrails
 
 You can't deactivate, delete, or demote your own account, and you can't
