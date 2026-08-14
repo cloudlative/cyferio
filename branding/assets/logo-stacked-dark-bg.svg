@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 150" fill="none">
+  <circle cx="100" cy="52" r="42" stroke="#23D6C4" stroke-width="5.5" stroke-dasharray="224 40" stroke-linecap="round" transform="rotate(-90 100 52)"/>
+  <circle cx="100" cy="52" r="27.5" stroke="#F2A93B" stroke-width="4.5" stroke-dasharray="147 26" stroke-linecap="round" transform="rotate(60 100 52)"/>
+  <circle cx="100" cy="52" r="8" fill="#23D6C4"/>
+  <text x="100" y="132" text-anchor="middle" font-family="Lato" font-weight="900" font-size="34" letter-spacing="-0.6" fill="#E7ECF5">Cyferio</text>
+</svg>
