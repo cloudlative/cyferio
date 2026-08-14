@@ -1,5 +1,7 @@
 # Cyferio
 
+*Pronounced "SY-fer-yo" (/ˈsaɪfəryoʊ/) — from "cipher".*
+
 Self-hosted OpenVPN management: RBAC, MAC binding, geo/ASN restrictions, bandwidth quotas, and audit-logged administration. → [cyferio.com](https://cyferio.com)
 
 Cyferio started as, and still includes, a small self-contained OpenVPN road-warrior installer and management toolkit for Ubuntu/Debian/CentOS/Fedora, now built on a Python-based installer/CLI (`app/services/openvpn/`, `app/cli/openvpn_admin.py`) rather than a bash-script foundation, with:
