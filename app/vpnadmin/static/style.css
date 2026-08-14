@@ -317,6 +317,13 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
    position:fixed removes it from body.has-sidebar's flex flow entirely,
    .content already reclaims the full width with no extra rule needed. */
 @media (max-width: 860px) {
+	/* Chromium still counts a translateX(-100%)'d fixed element toward the
+	   document's horizontal scroll extent, even fully off-screen -- so the
+	   closed drawer alone was adding ~46px of page-level horizontal
+	   overflow with nothing visibly there to explain it. Since nothing on
+	   this breakpoint is meant to scroll sideways anyway, clip it at the
+	   root rather than fight the transform. */
+	body { overflow-x: hidden; }
 	.sidebar-toggle { display: flex; }
 	.sidebar {
 		position: fixed;
