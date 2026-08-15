@@ -15,6 +15,7 @@ import os
 import shutil
 import tarfile
 import tempfile
+import time
 import urllib.request
 from dataclasses import dataclass
 
@@ -64,20 +65,38 @@ class EasyRSA:
 def download_and_extract_easyrsa(easyrsa_dir: str) -> None:
     """Mirrors openvpn-install.sh:1201-1205 -- downloads the pinned EasyRSA
     release tarball and extracts it into easyrsa_dir with the top-level
-    directory stripped (tar's --strip-components 1)."""
+    directory stripped (tar's --strip-components 1).
+
+    Retries transient network failures (up to 3 attempts, short backoff)
+    rather than failing on the first hiccup -- a real install only ever
+    calls this once, so retrying costs nothing on the happy path, and it
+    matters here specifically because this is also what the test suite's
+    session-scoped PKI fixture calls: a single unretried network call
+    means one transient failure fails every cert/client-manager test in
+    the run, not just this one (confirmed happening this way on a fresh
+    GitHub-hosted runner -- reran clean, twice, from an unrelated network,
+    consistent with a transient failure rather than a real bug in the
+    download/extract logic itself)."""
     os.makedirs(easyrsa_dir, exist_ok=True)
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp:
-            tmp_path = tmp.name
-            with urllib.request.urlopen(EASYRSA_URL, timeout=30) as resp:
-                shutil.copyfileobj(resp, tmp)
-        with tarfile.open(tmp_path, "r:gz") as tar:
-            _extract_strip_components(tar, easyrsa_dir, strip=1)
-    except Exception as e:
-        raise CertificateError(f"Failed to download/extract EasyRSA {EASYRSA_VERSION}: {e}") from e
-    finally:
-        if "tmp_path" in locals() and os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    last_error: Exception | None = None
+    for attempt in range(3):
+        if attempt > 0:
+            time.sleep(2 * attempt)  # 2s, then 4s
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp:
+                tmp_path = tmp.name
+                with urllib.request.urlopen(EASYRSA_URL, timeout=30) as resp:
+                    shutil.copyfileobj(resp, tmp)
+            with tarfile.open(tmp_path, "r:gz") as tar:
+                _extract_strip_components(tar, easyrsa_dir, strip=1)
+            return
+        except Exception as e:
+            last_error = e
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+    raise CertificateError(f"Failed to download/extract EasyRSA {EASYRSA_VERSION} after 3 attempts: {last_error}") from last_error
 
 
 def _extract_strip_components(tar: tarfile.TarFile, dest: str, *, strip: int) -> None:
