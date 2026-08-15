@@ -28,41 +28,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # TEMPORARY -- diagnosing whether this runner's network egress is
-  # restricted (suspected cause of the EasyRSA-download test failures in
-  # PR #9). Remove this job once that's confirmed one way or the other.
-  network-diagnostic:
-    name: "TEMP: network diagnostic"
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: DNS + connectivity checks
-        run: |
-          set +e
-          echo "=== DNS resolution ==="
-          getent hosts github.com
-          getent hosts objects.githubusercontent.com
-          getent hosts 1.1.1.1
-
-          echo
-          echo "=== curl: the exact EasyRSA release URL the failing test downloads ==="
-          curl -v -L --max-time 15 -o /dev/null -w "\nDNS:%{time_namelookup}s Connect:%{time_connect}s TLS:%{time_appconnect}s Total:%{time_total}s HTTP:%{http_code}\n" \
-            "https://github.com/OpenVPN/easy-rsa/releases/download/v3.1.7/EasyRSA-3.1.7.tgz" 2>&1
-
-          echo
-          echo "=== curl: plain github.com (control -- same host, no release redirect) ==="
-          curl -v --max-time 15 -o /dev/null -w "\nDNS:%{time_namelookup}s Connect:%{time_connect}s TLS:%{time_appconnect}s Total:%{time_total}s HTTP:%{http_code}\n" \
-            "https://github.com" 2>&1
-
-          echo
-          echo "=== python3 urllib: the EXACT code path certificate_manager.py uses ==="
-          python3 -c "import time, urllib.request; url='https://github.com/OpenVPN/easy-rsa/releases/download/v3.1.7/EasyRSA-3.1.7.tgz'; start=time.time(); [print(f'SUCCESS status={r.status} bytes_read={len(r.read(1024))} elapsed={time.time()-start:.2f}s') for r in [urllib.request.urlopen(url, timeout=30)]]" 2>&1 || echo "python3 urllib call FAILED (see traceback above)"
-
-          echo
-          echo "=== curl: unrelated external host (control -- rules out a blanket block) ==="
-          curl -v --max-time 15 -o /dev/null -w "\nDNS:%{time_namelookup}s Connect:%{time_connect}s TLS:%{time_appconnect}s Total:%{time_total}s HTTP:%{http_code}\n" \
-            "https://example.com" 2>&1
-
   # ---------------------------------------------------------------------
   # Quality
   # ---------------------------------------------------------------------
