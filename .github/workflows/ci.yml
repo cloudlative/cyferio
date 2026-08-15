@@ -310,7 +310,18 @@ jobs:
       # that routine, incidental coverage drift doesn't trip the gate,
       # while still catching a genuine regression (e.g. a large new
       # route/module landing with no tests at all).
-      - run: pytest --cov=vpnadmin --cov=services --cov=cli --cov-report=xml --cov-report=term --cov-fail-under=60 -v
+      #
+      # --timeout=30 (pytest-timeout, thread method): the first real run of
+      # this job hung completely for 20 minutes on a single, ordinarily
+      # trivial test (a bare 401-check with no real work in it) -- reran
+      # locally, twice, with zero issue, so this is a CI-environment-
+      # specific hang, not a bug in the test itself. Root cause wasn't
+      # pinned down before shipping this -- what matters more is that the
+      # job now fails in 30s with a thread-dump traceback pointing at
+      # exactly where it's stuck, instead of silently consuming the full
+      # 20-minute job budget with zero diagnostic output. Follow up on the
+      # actual traceback once this lands.
+      - run: pytest --timeout=30 --timeout-method=thread --cov=vpnadmin --cov=services --cov=cli --cov-report=xml --cov-report=term --cov-fail-under=60 -v
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
