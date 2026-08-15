@@ -166,11 +166,19 @@ jobs:
       # report but exit 0, which would make this check silently
       # non-blocking.
       - run: pip install semgrep==1.173.0
+      # SARIF output goes to $RUNNER_TEMP, outside the repo tree -- writing
+      # it in-repo (even a step before the gating scan) means the second
+      # semgrep invocation picks its own prior output file back up as a
+      # scan target and can match against JSON *inside the SARIF itself*
+      # (verified: `generic.secrets.security.detected-facebook-oauth`
+      # fired on a coincidental string inside semgrep.sarif's own content
+      # on the very first real run of this job -- not a finding in this
+      # repo's actual code at all).
       - run: |
           semgrep scan \
             --config=p/ci --config=p/python --config=p/dockerfile --config=p/secrets \
             --exclude-rule python.lang.security.audit.insecure-file-permissions.insecure-file-permissions \
-            --sarif --output=semgrep.sarif
+            --sarif --output="$RUNNER_TEMP/semgrep.sarif"
           semgrep scan \
             --config=p/ci --config=p/python --config=p/dockerfile --config=p/secrets \
             --exclude-rule python.lang.security.audit.insecure-file-permissions.insecure-file-permissions \
@@ -178,7 +186,7 @@ jobs:
       - uses: github/codeql-action/upload-sarif@66b39da20ccc656acc90dd27ea30f5d458ec33ce # v3.28.19
         if: always()
         with:
-          sarif_file: semgrep.sarif
+          sarif_file: ${{ runner.temp }}/semgrep.sarif
 
   codeql:
     name: "Security: CodeQL"
