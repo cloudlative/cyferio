@@ -102,9 +102,12 @@ jobs:
 
       - name: Resolve image ref
         id: ref
+        env:
+          # Via env, not inline `${{ }}` in the script body -- see the
+          # "Attach SBOM" step's comment for why.
+          BUILD_TAGS: ${{ needs.build-push.outputs.tags }}
         run: |
-          tags="${{ needs.build-push.outputs.tags }}"
-          echo "image=$(echo "$tags" | head -n1)" >> "$GITHUB_OUTPUT"
+          echo "image=$(echo "$BUILD_TAGS" | head -n1)" >> "$GITHUB_OUTPUT"
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
@@ -142,9 +145,12 @@ jobs:
 
       - name: Resolve image ref
         id: ref
+        env:
+          # Via env, not inline `${{ }}` in the script body -- see the
+          # "Attach SBOM" step's comment for why.
+          BUILD_TAGS: ${{ needs.build-push.outputs.tags }}
         run: |
-          tags="${{ needs.build-push.outputs.tags }}"
-          echo "image=$(echo "$tags" | head -n1)" >> "$GITHUB_OUTPUT"
+          echo "image=$(echo "$BUILD_TAGS" | head -n1)" >> "$GITHUB_OUTPUT"
 
       # CycloneDX per the project's chosen format -- SPDX is the action's
       # default, overridden here.
@@ -160,8 +166,14 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Passed via env, not interpolated directly into the script
+          # below (`${{ github.ref_name }}` inline would be a shell-
+          # injection pattern GitHub Actions performs raw string
+          # substitution for, before the shell ever sees it) -- $TAG_NAME
+          # is a real, safely-quoted shell variable instead.
+          TAG_NAME: ${{ github.ref_name }}
         run: |
-          gh release upload "${{ github.ref_name }}" sbom.cyclonedx.json --clobber || \
+          gh release upload "$TAG_NAME" sbom.cyclonedx.json --clobber || \
             echo "No GitHub Release exists yet for this tag -- SBOM is still available as a workflow artifact above."
 
   sign-and-provenance:
@@ -188,7 +200,9 @@ jobs:
       # recorded in the public Rekor transparency log -- no signing key to
       # generate, store as a secret, or rotate.
       - name: Sign image (keyless, GitHub OIDC)
-        run: cosign sign --yes "${{ env.IMAGE_NAME }}@${{ needs.build-push.outputs.digest }}"
+        env:
+          IMAGE_DIGEST: ${{ needs.build-push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE_NAME}@${IMAGE_DIGEST}"
 
       - name: Generate SLSA build provenance
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0

@@ -6,7 +6,25 @@
 useDefault = true
 
 [allowlist]
-description = "Test code that asserts generated OpenVPN client configs contain a real PEM key block -- matches the private-key rule's PEM-header pattern as plain text being compared against, not an actual embedded secret."
+description = '''
+Two categories of false positive, both confirmed by running gitleaks
+against this repo's actual full history before wiring it into CI:
+
+1. app/tests/services/test_config_manager.py asserts generated OpenVPN
+   client configs contain a real PEM key block -- matches the
+   private-key rule's PEM-header pattern as plain text being compared
+   against, not an actual embedded secret.
+2. The wider app/tests/ tree uses realistic-looking fixture passwords
+   (e.g. "brandnewpass123") throughout, by the same fake-but-plausible-
+   data convention this codebase uses everywhere in tests -- these trip
+   the generic entropy-based secret rules on every single test file that
+   exercises auth/password-change flows (16 files, not a one-off), so
+   this is scoped to the whole test tree rather than individually
+   allowlisting each one as they're added. Real credentials belong in
+   env vars / the Settings page, never hardcoded in this app's own
+   source in the first place -- test fixtures are the one place a
+   plausible-looking fake password is expected and reviewed as such.
+'''
 paths = [
-  '''app/tests/services/test_config_manager\.py''',
+  '''app/tests/.*''',
 ]
