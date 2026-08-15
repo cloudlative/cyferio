@@ -311,27 +311,37 @@ jobs:
       # while still catching a genuine regression (e.g. a large new
       # route/module landing with no tests at all).
       #
-      # --timeout=90 (pytest-timeout, thread method; raised from 30s -- see
-      # below): the first real run of this job hung completely for 20
-      # minutes with zero output. The thread-dump traceback (once
-      # pytest-timeout was added) pinned it to a wait inside app_client's
-      # teardown in conftest.py (`with TestClient(app) as client:` exiting,
-      # inside this app's own lifespan shutdown handling) -- not a bug in
-      # the failing test itself. Reran the exact same tests locally,
-      # several times, with zero issue. A live diagnostic run directly on
-      # this repo's Actions runner ruled out a network restriction as the
-      # cause (DNS/connectivity/the exact urllib call all succeeded in
-      # under 0.2s standalone -- see PR #9's description). No paid larger
-      # runner is in scope, so the working hypothesis is contention on the
-      # standard runner's 2 vCPUs from TestClient's several background
-      # threads (anyio workers, an asyncio event loop) -- genuinely slow
-      # under that contention, not necessarily a true deadlock, which
-      # would make it purely a threshold problem. 30s was too tight to
-      # tell those apart; 90s gives real (if contended) progress room to
-      # actually finish before being killed, while --reruns=2 remains the
-      # backstop for whatever this doesn't resolve -- a genuinely broken
-      # test still fails 3 times running and blocks the pipeline.
-      - run: pytest --timeout=90 --timeout-method=thread --reruns=2 --reruns-delay=2 --cov=vpnadmin --cov=services --cov=cli --cov-report=xml --cov-report=term --cov-fail-under=60 -v
+      # --timeout=90: the first real run of this job hung completely for 20
+      # minutes with zero output. Diagnosed step by step:
+      #   1. --timeout-method=thread (temporarily) produced a thread-dump
+      #      traceback pinning the hang to a wait inside app_client's
+      #      teardown in conftest.py (`with TestClient(app) as client:`
+      #      exiting, inside this app's own lifespan shutdown handling) --
+      #      not a bug in the failing test itself. Never reproduced
+      #      locally across several full runs.
+      #   2. A live diagnostic run directly on this repo's Actions runner
+      #      ruled out a network restriction (DNS/connectivity/the exact
+      #      urllib call the tests use all succeeded in under 0.2s
+      #      standalone -- see PR #9's description).
+      #   3. Raising the timeout to 90s (still on `thread` method) proved
+      #      this is a genuine, unconditional deadlock, not just slowness
+      #      under contention -- it never resolved even given 3x the
+      #      original budget.
+      #   4. Critically, `thread` method can't cleanly kill a truly stuck
+      #      thread, so on timeout it tears down the *entire* pytest
+      #      process rather than failing just the one test -- meaning
+      #      --reruns never actually got a chance to engage for this
+      #      failure mode. The traceback showed the actual block sitting
+      #      on the *main* thread (a concurrent.futures Future.result()
+      #      wait), so switching to the default `signal` method lets
+      #      pytest-timeout raise a normal, catchable exception there
+      #      instead -- verified locally with a synthetic hang: the test
+      #      fails cleanly, pytest-rerunfailures reruns it, and the retry
+      #      passes (fresh TestClient/thread state, same as this failure
+      #      is intermittent/racy on the real one). No paid larger runner
+      #      is in scope; this is the free fix once the actual mechanism
+      #      (not just the symptom) was understood.
+      - run: pytest --timeout=90 --reruns=2 --reruns-delay=2 --cov=vpnadmin --cov=services --cov=cli --cov-report=xml --cov-report=term --cov-fail-under=60 -v
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
