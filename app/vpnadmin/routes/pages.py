@@ -296,6 +296,21 @@ def openvpn_install_page(request: Request, user: User | None = Depends(get_curre
     )
 
 
+@router.get("/faq")
+def faq_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    # No permission gate beyond being logged in -- every account, any role,
+    # should be able to reach this (it's written for the least technical
+    # user in the building, and gating it behind a permission would be
+    # exactly backwards: the self-service "User" role is the audience most
+    # likely to need it).
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
+    return templates.TemplateResponse(request, "faq.html", _ctx(user, db))
+
+
 @router.get("/change-password")
 def change_password_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     # Deliberately does NOT call _password_reset_redirect -- this IS the

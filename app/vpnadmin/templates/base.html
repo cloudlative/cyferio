@@ -74,6 +74,12 @@
 			{% if can_manage_openvpn_install %}
 			<a href="/openvpn-install" class="{{ 'active' if request.url.path == '/openvpn-install' }}"><span class="nav-icon">⚙</span>OpenVPN Install</a>
 			{% endif %}
+			{# Unconditional -- no permission gate, matching /profile and
+			   /change-password's "every account, any role" posture. This
+			   is written for the least technical account in the building,
+			   so it stays reachable by everyone rather than being tucked
+			   behind a permission check. #}
+			<a href="/faq" class="{{ 'active' if request.url.path == '/faq' }}"><span class="nav-icon">?</span>FAQ / Help</a>
 		</nav>
 	</aside>
 	<div class="sidebar-backdrop" id="sidebar-backdrop"></div>
