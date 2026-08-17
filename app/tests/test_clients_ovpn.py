@@ -16,6 +16,33 @@ def _reset_smtp(monkeypatch):
     monkeypatch.setattr(runtime_settings, "smtp_from", "vpn@example.com")
 
 
+class TestClientsPageRenders:
+    """Catches Jinja/markup errors in clients.html -- e.g. the Email
+    Profile dialog's user-picker section and the detail panel's Close
+    button, both added without their own template-render test elsewhere."""
+
+    def test_admin_view(self, app_client, monkeypatch):
+        monkeypatch.setattr(clients_mod.cli, "get_clients_snapshot", lambda: [])
+        login(app_client, "admin", "adminpass123")
+        r = app_client.get("/clients")
+        assert r.status_code == 200
+        assert "email-user-picker" in r.text
+
+    def test_viewer_view(self, app_client):
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.get("/clients")
+        assert r.status_code == 200
+        # Admin-only dialog MARKUP (email/policy/ovpn) isn't rendered for
+        # a viewer at all -- see clients.html's {% if can_manage_clients %}
+        # around the <dialog> elements themselves. The JS that operates
+        # them, further down in the same file's {% block scripts %}, ships
+        # in every page's payload regardless of role either way (same
+        # pre-existing shape as showOvpn/openPolicyDialog -- this app
+        # doesn't split its JS bundle per role, only the DOM elements
+        # those functions target), so it isn't what this test checks.
+        assert 'id="email-dialog"' not in r.text
+
+
 class TestShowOvpn:
     def test_admin_can_fetch_ovpn_content(self, app_client, monkeypatch):
         monkeypatch.setattr(clients_mod.cli, "show_ovpn", lambda name: "client\ndev tun\n...")

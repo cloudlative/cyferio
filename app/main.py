@@ -220,9 +220,24 @@ async def lifespan(_app: FastAPI):
         quota_notification_task.cancel()
         for task in (refresh_task, db_snapshot_task, quota_notification_task):
             try:
-                await task
+                # Bounded, not a bare `await task`: each loop's current
+                # tick runs its blocking work via asyncio.to_thread(), and
+                # .cancel() can only mark that task for cancellation --
+                # it can't actually interrupt a real OS thread already
+                # inside a synchronous call (a subprocess invocation, a DB
+                # query). If that call is slow or hangs, an unbounded
+                # await here hangs shutdown itself waiting for it, which
+                # is exactly what made CI's TestClient teardown (each test
+                # runs a full lifespan startup+shutdown) deadlock -- and
+                # would do the same to a real graceful restart/SIGTERM in
+                # production. A timeout means shutdown always completes
+                # promptly; the orphaned thread finishes or dies with the
+                # process either way, it just isn't waited on.
+                await asyncio.wait_for(asyncio.shield(task), timeout=5)
             except asyncio.CancelledError:
                 pass
+            except TimeoutError:
+                logger.warning("Background task %s did not shut down within 5s; abandoning it", task.get_coro())
 
 
 app = FastAPI(title="Cyferio Admin", docs_url="/api/docs", redoc_url=None, lifespan=lifespan)

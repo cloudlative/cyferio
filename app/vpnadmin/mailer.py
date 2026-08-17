@@ -187,6 +187,43 @@ def send_welcome_email(*, to_address: str, username: str, password: str, client_
     )
 
 
+def send_password_reset_email(*, to_address: str, username: str, reset_url: str, ttl_minutes: int) -> None:
+    """Self-service "Forgot password" email (routes/auth.py's
+    forgot_password) -- `reset_url` is the full, already-built link
+    (portal_url + /reset-password?token=...); this function only formats
+    and sends the message, it doesn't know anything about token
+    generation/validation (that's auth.py's issue_password_reset_token/
+    get_user_by_reset_token). Same MailerNotConfigured/SMTPException
+    propagation as every other send_* here -- the caller (forgot_password)
+    already treats a failed send as "couldn't complete the request" while
+    still showing the same generic "if that account exists..." response,
+    so a delivery failure never confirms or denies an account's existence
+    to whoever submitted the form."""
+    if not is_configured():
+        raise MailerNotConfigured("SMTP is not configured.")
+
+    s = app_settings.runtime
+    app_name = s.app_name
+    msg = EmailMessage()
+    msg["Subject"] = f"Reset your password — {app_name}"
+    msg.set_content(
+        f"We received a request to reset the password for your {app_name} account ({username}).\n\n"
+        f"Reset your password here (expires in {ttl_minutes} minutes, works once):\n{reset_url}\n\n"
+        f"Didn't request this? You can safely ignore this email -- your password won't change "
+        f"unless the link above is used.\n\n"
+        f"— {app_name}"
+    )
+    msg.add_alternative(
+        _render_email_template("password_reset.html", username=username, reset_url=reset_url, ttl_minutes=ttl_minutes),
+        subtype="html",
+    )
+
+    _send(
+        host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
+        use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=to_address, msg=msg,
+    )
+
+
 def send_test_email(*, to_address: str, host: str, port: int, username: str, password: str,
                      from_address: str, use_tls: bool) -> None:
     """Sends a short plain test message using whatever SMTP values are

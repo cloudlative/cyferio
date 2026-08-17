@@ -81,6 +81,22 @@
 		<h2>Email VPN Profile</h2>
 		<form id="email-form">
 			<p class="muted" style="margin-top:0">Sends <strong id="email-client-name"></strong>'s .ovpn profile as an email attachment.</p>
+			{# Three states, toggled in JS (openEmailDialog), never all shown at
+			   once:
+			   1. Linked to a portal user with an email on file -- #email-linked-note
+			      shows who it's prefilled from; the field stays editable (an
+			      admin can still override it, e.g. sending to a shared/alternate
+			      address).
+			   2. Not linked to any portal user -- #email-user-picker-field
+			      appears, letting an admin search/select one to pull that user's
+			      email in.
+			   3. Neither has an email -- both stay hidden/empty and the field is
+			      just typed into directly, same as before this feature existed. #}
+			<p class="muted" id="email-linked-note" style="display:none;margin:0 0 14px;font-size:0.85rem"></p>
+			<div class="field" id="email-user-picker-field" style="display:none">
+				<label>Prefill from a portal user <span class="muted">(optional)</span></label>
+				<div id="email-user-picker"></div>
+			</div>
 			<div class="field">
 				<label for="email-address">Recipient Email Address</label>
 				<input type="email" id="email-address" required placeholder="user@example.com">
@@ -180,6 +196,18 @@ const isAdmin = {{ "true" if can_manage_clients else "false" }};
 // (CODE)" label format as the Users page's login-restriction country
 // picker (app.js's ISO_3166_COUNTRIES), for consistency.
 const clientCountryOptions = ISO_3166_COUNTRIES.map(([code, name]) => ({ id: code, label: `${name} (${code})` }));
+
+// Mirrors users.html's own copy (and routes/users.py's/clients.py's
+// server-side is_valid_email) -- real-time UX feedback only, the server
+// is still the actual check either way.
+function emailError(v, { required = false } = {}) {
+	v = (v || "").trim();
+	if (!v) return required ? "Email is required." : null;
+	if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) || v.includes("..") || v.split("@")[0].startsWith(".") || v.split("@")[0].endsWith(".")) {
+		return "That doesn't look like a valid email address.";
+	}
+	return null;
+}
 
 // Best-effort only: GET /api/settings is settings-manage-gated, a
 // narrower permission than what got this page loaded at all -- an editor
@@ -365,7 +393,10 @@ function renderClientDetailPanel() {
 		: null;
 	panel.style.display = "";
 	panel.innerHTML = `
-		<h3 style="margin:0 0 12px">${escapeHtml(selectedClientName)} — Details</h3>
+		<div class="toolbar" style="margin-bottom:12px">
+			<h3 style="margin:0">${escapeHtml(selectedClientName)} — Details</h3>
+			<button type="button" class="btn-secondary btn-sm" id="client-detail-close">Close</button>
+		</div>
 		<div class="form-grid">
 			<div><label>OS</label><div>${escapeHtml(s && s.os && s.os !== "n/a" ? s.os : "—")}</div></div>
 			<div><label>Source IP</label><div class="mono">${session ? escapeHtml(session.source_ip) : "—"}</div></div>
@@ -378,6 +409,15 @@ function renderClientDetailPanel() {
 			<label class="muted" style="font-size:0.78rem">MAC Addresses (<span class="count-badge">${c.mac_count ?? 0}</span>)</label>
 			<div id="client-detail-macs" style="margin-top:6px"><p class="muted">Loading…</p></div>
 		</div>`;
+	// Radio inputs can't be un-clicked natively (once selected, clicking it
+	// again is a no-op) -- this is the only way to deselect/close the panel
+	// short of picking a different row.
+	document.getElementById("client-detail-close").addEventListener("click", () => {
+		selectedClientName = null;
+		renderClients(); // clears the row-selected highlight + radio state
+		updateClientToolbarState();
+		renderClientDetailPanel();
+	});
 	apiFetch(`/api/clients/${encodeURIComponent(selectedClientName)}/macs`).then(data => {
 		const macsEl = document.getElementById("client-detail-macs");
 		if (!macsEl) return; // panel may have re-rendered for a different selection by the time this resolves
@@ -582,11 +622,78 @@ if (isAdmin) {
 	window.showOvpn = showOvpn;
 	document.getElementById("ovpn-dialog-close").addEventListener("click", () => document.getElementById("ovpn-dialog").close());
 
+	// Email Profile workflow (see the dialog's own markup comment for the
+	// three states this toggles between):
+	//   A. Profile linked to a portal user with an email on file -> prefill
+	//      automatically from lastUserLinksByName (already fetched by
+	//      loadClients, no extra request).
+	//   B. Profile not linked to any portal user -> show a searchable
+	//      single-select of every portal user (fetched lazily, once, on
+	//      first use of the picker -- most admins won't need it every
+	//      time); picking one fills the email field from THAT user's
+	//      email (may still be blank if they have none set either).
+	//   C. Neither yields an email -> field just stays exactly as manual
+	//      free-text entry always was.
+	let allUsersCache = null; // [{id, username, email}], fetched once and reused
+	async function ensureUsersLoaded() {
+		if (allUsersCache) return allUsersCache;
+		allUsersCache = await apiFetch("/api/users");
+		return allUsersCache;
+	}
+	const emailUserPicker = createMultiselectDropdown(document.getElementById("email-user-picker"), {
+		placeholder: "Search portal users…", single: true, localFilter: true,
+		emptyLabel: "No users found.", unitLabel: "user", idType: "number",
+	});
+	document.getElementById("email-user-picker").addEventListener("change", () => {
+		const [userId] = emailUserPicker.getSelected();
+		const picked = (allUsersCache || []).find(u => u.id === userId);
+		if (picked) {
+			document.getElementById("email-address").value = picked.email || "";
+			emailAddressValidation.check();
+		}
+	});
+	const emailAddressValidation = attachInlineValidation(document.getElementById("email-address"), (v) => emailError(v, { required: true }));
+
 	let emailingClientName = null;
-	function openEmailDialog(name) {
+	async function openEmailDialog(name) {
 		emailingClientName = name;
 		document.getElementById("email-client-name").textContent = name;
 		document.getElementById("email-address").value = "";
+		const linkedNote = document.getElementById("email-linked-note");
+		const pickerField = document.getElementById("email-user-picker-field");
+		const linkedUser = lastUserLinksByName[name];
+		if (linkedUser) {
+			// Scenario A -- prefill from the already-linked user, no extra
+			// request needed (lastUserLinksByName came from loadClients).
+			pickerField.style.display = "none";
+			if (linkedUser.email) {
+				document.getElementById("email-address").value = linkedUser.email;
+				linkedNote.textContent = `Prefilled from portal user ${linkedUser.display_name || linkedUser.username} -- change it below if you'd rather send elsewhere.`;
+			} else {
+				linkedNote.textContent = `${linkedUser.display_name || linkedUser.username} has no email on file -- enter one manually below.`;
+			}
+			linkedNote.style.display = "";
+		} else {
+			// Scenario B -- no linked user at all, offer the searchable
+			// picker; Scenario C (nobody has an email) just falls out of
+			// this naturally if the admin skips the picker and types one in.
+			linkedNote.style.display = "none";
+			pickerField.style.display = "";
+			emailUserPicker.setSelected([]);
+			emailUserPicker.setOptions([]);
+			ensureUsersLoaded().then(users => {
+				emailUserPicker.setOptions(users.map(u => ({ id: u.id, label: `${u.display_name || u.username}${u.email ? ` (${u.email})` : ""}` })));
+			}).catch(() => { /* picker just stays empty -- manual entry still works */ });
+		}
+		// Clear any leftover invalid-state styling/message from a previous
+		// open of this same reused dialog -- attachInlineValidation only
+		// exposes check(), not a reset, and re-running check() against a
+		// blank field would just immediately show "Email is required."
+		// before the admin has typed anything.
+		const emailInput = document.getElementById("email-address");
+		emailInput.classList.remove("input-invalid");
+		const emailErrorEl = emailInput.nextElementSibling;
+		if (emailErrorEl && emailErrorEl.classList.contains("field-error")) emailErrorEl.textContent = "";
 		document.getElementById("email-dialog").showModal();
 		emailDirty.arm();
 	}
@@ -594,6 +701,10 @@ if (isAdmin) {
 	document.getElementById("email-dialog-cancel").addEventListener("click", () => document.getElementById("email-dialog").close());
 	document.getElementById("email-form").addEventListener("submit", async (ev) => {
 		ev.preventDefault();
+		if (!emailAddressValidation.check()) {
+			toast("Please enter a valid email address.", "error");
+			return;
+		}
 		const email = document.getElementById("email-address").value.trim();
 		const submitBtn = document.getElementById("email-submit");
 		submitBtn.disabled = true;

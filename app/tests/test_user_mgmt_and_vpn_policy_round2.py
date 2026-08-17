@@ -41,6 +41,9 @@ class TestClientUserLinksEndpoint:
         assert r.status_code == 200
         body = r.json()
         assert body["linkeduser"]["username"] == "linkeduser"
+        # clients.html's Email Profile dialog prefills from this -- see
+        # get_client_user_links' own docstring for why it's included.
+        assert body["linkeduser"]["email"] == "linkeduser@example.com"
         assert "some_unlinked_client" not in body
 
 

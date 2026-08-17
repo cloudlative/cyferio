@@ -199,6 +199,19 @@ class User(Base):
     # holder actually knows the current password.
     must_reset_password = Column(Boolean, nullable=False, default=False)
 
+    # Self-service "Forgot password" (routes/auth.py's forgot_password/
+    # reset_password) -- a hash of the emailed token, never the plaintext
+    # (same defense-in-depth reasoning as password_hash itself: a DB leak
+    # alone shouldn't hand out working reset links). Single active token
+    # per account -- requesting a new one overwrites these, invalidating
+    # whatever was emailed before. expires_at enforces the time limit;
+    # both columns are cleared back to NULL the moment the token is
+    # consumed (or replaced), which is what makes it single-use -- there's
+    # no separate "used" flag because a spent/superseded token simply no
+    # longer matches anything in this column.
+    password_reset_token_hash = Column(String(64), nullable=True)
+    password_reset_expires_at = Column(DateTime(timezone=True), nullable=True)
+
     # Set once, only by auth.bootstrap_admin(), on the very first admin
     # account a fresh deployment creates. Used solely to make that specific
     # account's role permanently un-demotable (see routes/users.py) --

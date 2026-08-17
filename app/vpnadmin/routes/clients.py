@@ -160,7 +160,12 @@ def get_client_user_links(_: User = Depends(_require_client_viewer), db: Session
     static-before-dynamic ordering as /revoked and /unassigned."""
     links = db.query(VpnProfileLink).options(selectinload(VpnProfileLink.user)).all()
     return {
-        link.vpn_client_name: {"username": link.user.username, "display_name": link.user.display_name}
+        # `email` added for clients.html's Email Profile dialog -- prefills
+        # the recipient field from the linked portal user's own email
+        # (Scenario A of the Email Profile workflow) instead of always
+        # starting blank. May be None (User.email is optional) -- the
+        # frontend falls back to manual entry when it is.
+        link.vpn_client_name: {"username": link.user.username, "display_name": link.user.display_name, "email": link.user.email}
         for link in links
     }
 
