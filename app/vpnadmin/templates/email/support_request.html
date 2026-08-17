@@ -1,0 +1,21 @@
+{% extends "base_email.html" %}
+{% block content %}
+<h2 style="margin:0 0 12px;font-size:1.2rem;">New support request</h2>
+<p style="color:#aab2cc;line-height:1.6;margin:0 0 18px;">
+	Reply directly to this email to respond to {{ requester_name }} -- it's addressed back to them.
+</p>
+
+<div style="background:#151a29;border:1px solid #3a4460;border-radius:12px;padding:18px 20px;margin:0 0 18px;">
+	<table style="width:100%;border-collapse:collapse;font-size:0.88rem;">
+		<tr><td style="color:#757fa0;padding:3px 0;width:90px;">From</td><td style="color:#f1f3fa;padding:3px 0;">{{ requester_name }} ({{ requester_username }})</td></tr>
+		<tr><td style="color:#757fa0;padding:3px 0;">Email</td><td style="color:#f1f3fa;padding:3px 0;"><a href="mailto:{{ requester_email }}" style="color:#8b9cf7;">{{ requester_email }}</a></td></tr>
+		<tr><td style="color:#757fa0;padding:3px 0;">Submitted</td><td style="color:#f1f3fa;padding:3px 0;">{{ submitted_at }}</td></tr>
+		<tr><td style="color:#757fa0;padding:3px 0;">Subject</td><td style="color:#f1f3fa;padding:3px 0;font-weight:700;">{{ subject }}</td></tr>
+	</table>
+</div>
+
+<div style="background:#151a29;border:1px solid #3a4460;border-radius:12px;padding:18px 20px;">
+	<p style="margin:0 0 8px;font-weight:700;font-size:0.85rem;color:#f1f3fa;">Message</p>
+	<p style="margin:0;color:#d7d9e6;font-size:0.9rem;line-height:1.6;white-space:pre-wrap;">{{ message }}</p>
+</div>
+{% endblock %}

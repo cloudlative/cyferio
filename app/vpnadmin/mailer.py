@@ -49,6 +49,13 @@ class MailerNotConfigured(Exception):
     not a crash."""
 
 
+class NoSupportAddress(Exception):
+    """Raised by send_support_request when SMTP is configured but
+    admin_notification_email itself is blank -- distinct from
+    MailerNotConfigured so routes/support.py can show a message that
+    points at the actual missing piece."""
+
+
 def is_configured() -> bool:
     return bool(app_settings.runtime.smtp_host)
 
@@ -221,6 +228,53 @@ def send_password_reset_email(*, to_address: str, username: str, reset_url: str,
     _send(
         host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
         use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=to_address, msg=msg,
+    )
+
+
+def send_support_request(*, requester_name: str, requester_username: str, requester_email: str,
+                          subject: str, message: str, submitted_at: str) -> None:
+    """FAQ page's "Contact Support" flow (routes/support.py) -- sends to
+    `runtime.admin_notification_email` (the same setting event
+    notifications use, see send_admin_notification's own docstring on
+    that dual purpose). Sets Reply-To to the requester's own address so
+    an admin can just hit Reply in their mail client to respond directly
+    -- every mainstream SMTP provider honors Reply-To (it's a standard
+    RFC 5322 header, not a provider-specific feature), so no fallback
+    path is needed; the requester's email is also included in the body
+    itself as a second, always-visible copy of that same information.
+    Raises MailerNotConfigured if SMTP isn't set up, or NoSupportAddress
+    if admin_notification_email itself is blank (a separate, more
+    specific failure than "SMTP isn't configured" -- the caller shows a
+    different message for each)."""
+    s = app_settings.runtime
+    if not is_configured():
+        raise MailerNotConfigured("SMTP is not configured.")
+    if not s.admin_notification_email:
+        raise NoSupportAddress("No support contact email is configured.")
+
+    app_name = s.app_name
+    msg = EmailMessage()
+    msg["Subject"] = f"[{app_name} Support] {subject}"
+    msg["Reply-To"] = requester_email
+    msg.set_content(
+        f"New support request from {requester_name} ({requester_username}).\n\n"
+        f"From: {requester_name} <{requester_email}>\n"
+        f"Submitted: {submitted_at}\n\n"
+        f"Subject: {subject}\n\n"
+        f"{message}\n\n"
+        f"-- Reply directly to this email to respond to {requester_name}."
+    )
+    msg.add_alternative(
+        _render_email_template(
+            "support_request.html", requester_name=requester_name, requester_username=requester_username,
+            requester_email=requester_email, subject=subject, message=message, submitted_at=submitted_at,
+        ),
+        subtype="html",
+    )
+
+    _send(
+        host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
+        use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=s.admin_notification_email, msg=msg,
     )
 
 
