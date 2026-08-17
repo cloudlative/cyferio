@@ -5,7 +5,9 @@ Sessions use Starlette's built-in SessionMiddleware (a signed, httponly
 cookie -- no server-side session store needed). Passwords are hashed with
 bcrypt via passlib. Two roles: admin (full control) and viewer (read-only).
 """
-from datetime import datetime, timezone
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
@@ -21,6 +23,13 @@ from .models import Role, User
 # attribute and throws on hash/verify -- a real, currently-reproducible
 # break for anyone installing this fresh, not a hypothetical concern.
 _BCRYPT_MAX_BYTES = 72  # bcrypt silently ignores anything beyond this
+
+# Self-service "Forgot password" token lifetime (routes/auth.py). Long
+# enough that a real email round-trip (some providers/spam filters add
+# real delay) doesn't routinely race the expiry, short enough that a
+# stale, unused reset link sitting in an old email isn't a standing risk
+# forever.
+PASSWORD_RESET_TOKEN_TTL_MINUTES = 30
 
 
 def hash_password(password: str) -> str:
@@ -152,3 +161,72 @@ def login_user(request: Request, user: User, db: Session | None = None) -> None:
 
 def logout_user(request: Request) -> None:
     request.session.clear()
+
+
+def _hash_reset_token(token: str) -> str:
+    # SHA-256, not bcrypt -- this isn't a low-entropy human password (it's
+    # a 32-byte secrets.token_urlsafe value, already effectively
+    # unguessable), so bcrypt's deliberate slowness buys nothing here and
+    # this hash needs to be looked up efficiently by exact value, not
+    # verified one-at-a-time the way a login password is.
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def issue_password_reset_token(user: User, db: Session) -> str:
+    """Generates a fresh reset token for `user`, stores only its hash (plus
+    expiry) on the row, and returns the PLAINTEXT token -- the only place
+    it ever exists outside the recipient's inbox, so the caller must email
+    it immediately and never log or persist it itself. Overwrites any
+    previously-issued token for this account, which is what makes an
+    earlier reset link (if one was ever sent) stop working the moment a
+    new one is requested."""
+    token = secrets.token_urlsafe(32)
+    user.password_reset_token_hash = _hash_reset_token(token)
+    user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES)
+    db.commit()
+    return token
+
+
+def _as_aware_utc(dt: datetime) -> datetime:
+    """SQLite (unlike Postgres) doesn't actually round-trip a DateTime
+    column's timezone -- SQLAlchemy's sqlite dialect stores an ISO string
+    and hands back a NAIVE datetime on read regardless of the column being
+    declared DateTime(timezone=True), so a value written as
+    datetime.now(timezone.utc) can come back tzinfo-less from the same
+    column a moment later on that backend. Comparing that directly against
+    another datetime.now(timezone.utc) raises TypeError ("can't compare
+    offset-naive and offset-aware datetimes") -- reproduces reliably under
+    pytest's SQLite fixture, silently invisible under Postgres (this app's
+    real deployment target), which is exactly why it wasn't caught until a
+    test exercised a genuine cross-request DB round-trip. Every timestamp
+    this app ever stores is UTC regardless of backend (see base.html's own
+    comment on this), so treating a naive value as already-UTC here is
+    correct, not a guess."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def get_user_by_reset_token(token: str, db: Session) -> User | None:
+    """Looks up the account a reset token belongs to, or None if the token
+    is unknown, expired, or already consumed (see clear_password_reset_token).
+    Deliberately does NOT distinguish "no such token" from "expired token"
+    in its return value -- both render the same "This reset link is
+    invalid or has expired" message to the caller, same
+    not-revealing-more-than-necessary posture as the login form's generic
+    "Invalid username or password."."""
+    token_hash = _hash_reset_token(token)
+    user = db.query(User).filter(User.password_reset_token_hash == token_hash).first()
+    if user is None:
+        return None
+    if user.password_reset_expires_at is None or _as_aware_utc(user.password_reset_expires_at) < datetime.now(timezone.utc):
+        return None
+    return user
+
+
+def clear_password_reset_token(user: User, db: Session) -> None:
+    """Called once a token has been consumed (password successfully reset)
+    -- clears both columns back to NULL, which is what makes the token
+    single-use: a replay of the same link no longer matches anything in
+    get_user_by_reset_token's lookup."""
+    user.password_reset_token_hash = None
+    user.password_reset_expires_at = None
+    db.commit()

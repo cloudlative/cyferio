@@ -1132,7 +1132,11 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 }
 .login-box h1 { display: block; text-align: center; margin: 0; font-size: 1.4rem; }
 .login-box button { width: 100%; justify-content: center; margin-top: 10px; padding: 11px; }
+.login-forgot { text-align: right; margin: -8px 0 4px; }
+.login-forgot a { color: var(--text-muted); font-size: 0.84rem; text-decoration: none; }
+.login-forgot a:hover { color: var(--accent-2); text-decoration: underline; }
 .error-banner { background: var(--danger-bg); color: var(--danger-text); padding: 11px 14px; border-radius: 10px; margin-bottom: 18px; font-size: 0.9rem; font-weight: 600; border: 1px solid rgba(244, 63, 94, 0.3); }
+.success-banner { background: rgba(16,185,129,0.12); color: #34d399; padding: 11px 14px; border-radius: 10px; margin-bottom: 18px; font-size: 0.9rem; font-weight: 600; border: 1px solid rgba(16,185,129,0.3); }
 
 /* OpenVPN Install page (see openvpn_install.html) -- reuses .error-banner's
    token palette for its "danger zone" banner rather than inventing a new

@@ -145,6 +145,25 @@ class Settings:
     # shape as every other SMTP/system setting in this app.
     APP_DOMAIN: str = os.environ.get("APP_DOMAIN", "")
 
+    # CAPTCHA on /login, /forgot-password, /reset-password (see captcha.py
+    # and routes/auth.py) -- provider-agnostic on purpose: this is a
+    # self-hosted, open-source app (see README's "nothing here hardcodes
+    # any specific ... organization" stance), and a community deployment
+    # has no reason to be forced onto Cloudflare specifically. Set
+    # CAPTCHA_PROVIDER to "turnstile" or "recaptcha" plus that provider's
+    # own SITE_KEY/SECRET_KEY pair below; leave it unset (the default) and
+    # captcha.is_configured() returns False everywhere, so a deployment
+    # that hasn't set this up simply doesn't get CAPTCHA gating rather
+    # than breaking login entirely. Every *_SITE_KEY is public (goes
+    # straight into the page HTML); every *_SECRET_KEY never leaves this
+    # process -- only used server-side against the provider's siteverify
+    # endpoint.
+    CAPTCHA_PROVIDER: str = os.environ.get("CAPTCHA_PROVIDER", "").strip().lower()
+    TURNSTILE_SITE_KEY: str | None = os.environ.get("TURNSTILE_SITE_KEY")
+    TURNSTILE_SECRET_KEY: str | None = os.environ.get("TURNSTILE_SECRET_KEY")
+    RECAPTCHA_SITE_KEY: str | None = os.environ.get("RECAPTCHA_SITE_KEY")
+    RECAPTCHA_SECRET_KEY: str | None = os.environ.get("RECAPTCHA_SECRET_KEY")
+
     # IANA timezone name (e.g. "UTC", "Asia/Karachi") used to DISPLAY
     # timestamps in the browser -- every timestamp this app stores/emits is
     # already UTC (see e.g. host-scripts/openvpn-client-disconnect.py's

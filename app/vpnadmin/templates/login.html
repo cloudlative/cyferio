@@ -43,6 +43,7 @@
 			<h1>{{ app_settings.app_name }}</h1>
 		</div>
 		{% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+		{% if message %}<div class="success-banner">{{ message }}</div>{% endif %}
 		<form method="post" action="/login">
 			<div class="field">
 				<label for="username">Username</label>
@@ -52,6 +53,10 @@
 				<label for="password">Password</label>
 				<input type="password" id="password" name="password" autocomplete="current-password" required>
 			</div>
+			<div class="login-forgot"><a href="/forgot-password">Forgot password?</a></div>
+			{% if captcha %}
+			<div class="{{ captcha.widget_class }}" data-sitekey="{{ captcha.site_key }}" style="margin:16px 0"></div>
+			{% endif %}
 			<button type="submit" class="btn-primary">Log in</button>
 		</form>
 	</div>
@@ -59,6 +64,14 @@
 {% endblock %}
 
 {% block scripts %}
+{% if captcha %}
+{# Implicit rendering (the widget div's class above) is all this page
+   needs: a single static widget per page load, no multi-step/dynamic-
+   render case here. Provider-agnostic -- captcha.widget_js is whichever
+   of Turnstile's/reCAPTCHA's own script URL is actually active (see
+   captcha.py's widget_context). #}
+<script src="{{ captcha.widget_js }}" async defer></script>
+{% endif %}
 {# Only the server-selected theme's animation code is ever sent/run --
    the other 5 themes' canvas/JS are not shipped on this page load at all,
    per the ship-only-what's-needed constraint. Each block below is a

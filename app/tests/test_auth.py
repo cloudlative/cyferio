@@ -1,3 +1,6 @@
+import re
+
+from vpnadmin.app_settings import runtime as runtime_settings
 from vpnadmin.auth import hash_password, verify_password
 from vpnadmin.models import Role, Team, User
 
@@ -81,6 +84,138 @@ class TestFaqPage:
         login(app_client, "viewer", "viewerpass123")
         r = app_client.get("/faq")
         assert r.status_code == 200
+
+
+class TestForgotPasswordFlow:
+    @staticmethod
+    def _mock_smtp(monkeypatch, sent: dict):
+        import vpnadmin.routes.auth as auth_mod
+        monkeypatch.setattr(runtime_settings, "smtp_host", "smtp.example.com")
+
+        def fake_send(*, to_address, username, reset_url, ttl_minutes):
+            sent["to"] = to_address
+            sent["username"] = username
+            sent["reset_url"] = reset_url
+
+        monkeypatch.setattr(auth_mod.mailer, "send_password_reset_email", fake_send)
+
+    def test_page_loads(self, app_client):
+        r = app_client.get("/forgot-password")
+        assert r.status_code == 200
+
+    def test_unknown_email_gets_generic_message_no_mail_sent(self, app_client, monkeypatch):
+        sent = {}
+        self._mock_smtp(monkeypatch, sent)
+        r = app_client.post("/forgot-password", data={"email": "nosuchaccount@example.com"})
+        assert r.status_code == 200
+        assert "if an account" in r.text.lower()
+        assert sent == {}  # no account matched -- never even tried to send
+
+    def test_malformed_email_rejected(self, app_client):
+        r = app_client.post("/forgot-password", data={"email": "not-an-email"})
+        assert r.status_code == 400
+
+    def test_known_email_full_round_trip_resets_password(self, app_client, db_session, monkeypatch):
+        admin = db_session.query(User).filter(User.username == "admin").one()
+        admin.email = "admin@example.com"
+        db_session.commit()
+
+        sent = {}
+        self._mock_smtp(monkeypatch, sent)
+        r = app_client.post("/forgot-password", data={"email": "ADMIN@EXAMPLE.COM"})  # case-insensitive match
+        assert r.status_code == 200
+        assert sent["to"] == "admin@example.com"
+        assert sent["username"] == "admin"
+
+        token = re.search(r"[?&]token=([^&\s\"']+)", sent["reset_url"]).group(1)
+
+        # GET with the real token shows the set-new-password form.
+        r = app_client.get(f"/reset-password?token={token}")
+        assert r.status_code == 200
+        assert "new_password" in r.text
+
+        # Old password still works until the reset is actually submitted.
+        r = login(app_client, "admin", "adminpass123")
+        assert r.status_code == 200
+        app_client.post("/logout")
+
+        r = app_client.post("/reset-password", data={"token": token, "new_password": "BrandNewPass1!", "confirm_password": "BrandNewPass1!"})
+        assert r.status_code == 200
+
+        # New password works, old one no longer does.
+        r = login(app_client, "admin", "BrandNewPass1!")
+        assert r.status_code == 200
+        assert r.url.path == "/"
+        app_client.post("/logout")
+        r = login(app_client, "admin", "adminpass123")
+        assert r.status_code == 401
+
+        # Single-use: the same token can't be replayed.
+        r = app_client.post("/reset-password", data={"token": token, "new_password": "AnotherOne1!", "confirm_password": "AnotherOne1!"})
+        assert r.status_code == 400
+        assert "invalid or has expired" in r.text.lower()
+
+    def test_mismatched_passwords_rejected(self, app_client, db_session, monkeypatch):
+        admin = db_session.query(User).filter(User.username == "admin").one()
+        admin.email = "admin@example.com"
+        db_session.commit()
+        sent = {}
+        self._mock_smtp(monkeypatch, sent)
+        app_client.post("/forgot-password", data={"email": "admin@example.com"})
+        token = re.search(r"[?&]token=([^&\s\"']+)", sent["reset_url"]).group(1)
+
+        r = app_client.post("/reset-password", data={"token": token, "new_password": "BrandNewPass1!", "confirm_password": "Different1!"})
+        assert r.status_code == 400
+        assert "don't match" in r.text.lower()
+
+    def test_weak_new_password_rejected(self, app_client, db_session, monkeypatch):
+        admin = db_session.query(User).filter(User.username == "admin").one()
+        admin.email = "admin@example.com"
+        db_session.commit()
+        sent = {}
+        self._mock_smtp(monkeypatch, sent)
+        app_client.post("/forgot-password", data={"email": "admin@example.com"})
+        token = re.search(r"[?&]token=([^&\s\"']+)", sent["reset_url"]).group(1)
+
+        r = app_client.post("/reset-password", data={"token": token, "new_password": "weak", "confirm_password": "weak"})
+        assert r.status_code == 400
+
+    def test_bogus_token_shows_invalid_state(self, app_client):
+        r = app_client.get("/reset-password?token=not-a-real-token")
+        assert r.status_code == 200
+        assert "invalid or has expired" in r.text.lower()
+
+        r = app_client.post("/reset-password", data={"token": "not-a-real-token", "new_password": "BrandNewPass1!", "confirm_password": "BrandNewPass1!"})
+        assert r.status_code == 400
+
+
+class TestLoginCaptcha:
+    """CAPTCHA gating on /login -- see captcha.py for the provider-agnostic
+    verify()/is_configured() unit tests themselves (tests/test_captcha.py);
+    these cover the login route's own wiring around them."""
+
+    def test_no_captcha_widget_when_unconfigured(self, app_client):
+        r = app_client.get("/login")
+        assert "cf-turnstile" not in r.text
+        assert "g-recaptcha" not in r.text
+
+    def test_login_rejected_without_captcha_when_configured(self, app_client, monkeypatch):
+        import vpnadmin.routes.auth as auth_mod
+        monkeypatch.setattr(auth_mod.captcha, "is_configured", lambda: True)
+        monkeypatch.setattr(auth_mod.captcha, "widget_context", lambda: {"site_key": "x", "widget_js": "https://example.com/x.js", "widget_class": "cf-turnstile"})
+        monkeypatch.setattr(auth_mod.captcha, "verify", lambda token, remote_ip=None: False)
+        r = login(app_client, "admin", "adminpass123")
+        assert r.status_code == 400
+        assert "captcha" in r.text.lower()
+
+    def test_login_succeeds_with_passing_captcha(self, app_client, monkeypatch):
+        import vpnadmin.routes.auth as auth_mod
+        monkeypatch.setattr(auth_mod.captcha, "is_configured", lambda: True)
+        monkeypatch.setattr(auth_mod.captcha, "widget_context", lambda: {"site_key": "x", "widget_js": "https://example.com/x.js", "widget_class": "cf-turnstile"})
+        monkeypatch.setattr(auth_mod.captcha, "verify", lambda token, remote_ip=None: True)
+        r = login(app_client, "admin", "adminpass123")
+        assert r.status_code == 200
+        assert r.url.path == "/"
 
 
 class TestRoleGating:
