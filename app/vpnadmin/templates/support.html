@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Contact Support — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">Contact Support</h1></div>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Didn't find your answer in the <a href="/faq">FAQ</a>? Send a message directly to an administrator -- they'll reply to the email address on your account.</p>
+
+<div class="card" id="support-form-card">
+	<form id="support-form">
+		<div class="field">
+			<label for="support-email">Your Email</label>
+			<input type="email" id="support-email" value="{{ user.email or '' }}" readonly disabled>
+			{% if not user.email %}
+			<p class="field-hint" style="color:var(--warning-text)">Your account has no email address on file -- <a href="/profile">add one under My Profile</a> before submitting a request, so an administrator can reply to you.</p>
+			{% else %}
+			<p class="field-hint">An administrator will reply to this address -- it comes from your account, not editable here.</p>
+			{% endif %}
+		</div>
+		<div class="field">
+			<label for="support-subject">Subject</label>
+			<input type="text" id="support-subject" required maxlength="200" placeholder="e.g. VPN Connection Issue, Account Access Problem, Billing Question">
+		</div>
+		<div class="field">
+			<label for="support-message">Message</label>
+			<textarea id="support-message" rows="8" required maxlength="5000" placeholder="Describe your issue or question in as much detail as you can -- what you were trying to do, what happened instead, and any error messages you saw."></textarea>
+			<p class="field-hint"><span id="support-message-count">0</span> / 5000</p>
+		</div>
+		<div class="dialog-actions" style="justify-content:flex-start">
+			<button type="submit" class="btn-primary" id="support-submit" {{ "disabled" if not user.email }}>Send Request</button>
+		</div>
+	</form>
+</div>
+
+<div class="card" id="support-success-card" style="display:none">
+	<h2 style="margin-top:0">Request Sent</h2>
+	<p id="support-success-message" class="muted" style="margin:0"></p>
+	<div class="dialog-actions" style="justify-content:flex-start;margin-top:14px">
+		<a class="btn btn-secondary" href="/faq">Back to FAQ</a>
+	</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const supportMessageEl = document.getElementById("support-message");
+const supportMessageCount = document.getElementById("support-message-count");
+supportMessageEl.addEventListener("input", () => {
+	supportMessageCount.textContent = supportMessageEl.value.length;
+});
+
+document.getElementById("support-form").addEventListener("submit", async (e) => {
+	e.preventDefault();
+	const subject = document.getElementById("support-subject").value.trim();
+	const message = supportMessageEl.value.trim();
+	if (!subject || !message) {
+		toast("Please fill in both Subject and Message.", "error");
+		return;
+	}
+	const submitBtn = document.getElementById("support-submit");
+	submitBtn.disabled = true;
+	try {
+		const result = await apiFetch("/api/support", { method: "POST", body: { subject, message } });
+		document.getElementById("support-form-card").style.display = "none";
+		document.getElementById("support-success-message").textContent = result.message;
+		document.getElementById("support-success-card").style.display = "";
+	} catch (err) {
+		toast(err.message, "error");
+		submitBtn.disabled = false;
+	}
+});
+</script>
+{% endblock %}

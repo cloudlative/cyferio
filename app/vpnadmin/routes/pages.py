@@ -311,6 +311,19 @@ def faq_page(request: Request, user: User | None = Depends(get_current_user), db
     return templates.TemplateResponse(request, "faq.html", _ctx(user, db))
 
 
+@router.get("/support")
+def support_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Same "every account, any role" posture as /faq -- reachable by
+    # whoever's already logged in, no permission gate. Linked from the
+    # FAQ page's "Still need help?" card.
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
+    return templates.TemplateResponse(request, "support.html", _ctx(user, db))
+
+
 @router.get("/change-password")
 def change_password_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     # Deliberately does NOT call _password_reset_redirect -- this IS the
