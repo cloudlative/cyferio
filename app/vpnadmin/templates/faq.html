@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}FAQ / Help — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">FAQ / Help</h1></div>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Plain-language answers to the questions people ask most. No technical background needed -- if a term comes up that sounds unfamiliar, it's explained right where it's used.</p>
+
+<div class="field faq-search">
+	<label for="faq-search-input">Search the FAQ</label>
+	<input type="search" id="faq-search-input" placeholder="e.g. &quot;password&quot;, &quot;connect&quot;, &quot;phone&quot;&hellip;" autocomplete="off">
+</div>
+
+<div id="faq-no-results" class="card faq-no-results" hidden>
+	<p class="muted" style="margin:0">No questions match "<span id="faq-no-results-term"></span>". Try a different word, or see "Still need help?" below.</p>
+</div>
+
+<div class="card faq-category" data-faq-category>
+	<h2>Getting Started</h2>
+
+	<details class="faq-item" data-faq-item open>
+		<summary>What is a VPN, and why am I being asked to use one?</summary>
+		<div class="faq-answer">
+			<p>A VPN (Virtual Private Network) creates a private, encrypted connection between your device and this organization's network -- like a locked tunnel that keeps what you send and receive hidden from anyone else on the same Wi-Fi or internet connection. It's what lets you securely reach internal systems from home, a coffee shop, or while traveling, the same way you could if you were sitting in the office.</p>
+		</div>
+	</details>
+
+	<details class="faq-item" data-faq-item>
+		<summary>How do I log in to {{ app_settings.app_name }}?</summary>
+		<div class="faq-answer">
+			<p>Go to the login page and enter the username and password your administrator gave you. If this is your very first time logging in, you'll likely be asked to set a new password right away -- that's expected, not an error.</p>
+		</div>
+	</details>
+
+	<details class="faq-item" data-faq-item>
+		<summary>I forgot my password. What do I do?</summary>
+		<div class="faq-answer">
+			<p>This portal doesn't have a self-service "forgot password" link -- contact your administrator and ask them to reset it. Once they do, you'll be asked to choose a new password the next time you log in.</p>
+		</div>
+	</details>
+
+	<details class="faq-item" data-faq-item>
+		<summary>Why does it say "you must reset your password" when I log in?</summary>
+		<div class="faq-answer">
+			<p>This shows up right after your account is created, or any time an administrator resets your password for you. It's a safety check to make sure the temporary password only you and the administrator briefly knew gets replaced with one only you know. Just follow the on-screen form to choose a new password -- you won't be able to use the rest of the site until you do.</p>
+		</div>
+	</details>
+</div>
+
+<div class="card faq-category" data-faq-category>
+	<h2>Connecting to the VPN</h2>
+
+	<details class="faq-item" data-faq-item>
+		<summary>Where do I get my VPN profile / connection file?</summary>
+		<div class="faq-answer">
+			<p>Open <strong>My VPN Profile</strong> from the menu, then use the <strong>Download .ovpn</strong> button. This downloads a single file (ending in <code>.ovpn</code>) that contains everything an OpenVPN app needs to connect as you -- think of it like a personalized key. Keep it somewhere private and don't share it; anyone with the file could connect using your identity.</p>
+		</div>
+	</details>
+
+	<details class="faq-item" data-faq-item>
+		<summary>How do I actually connect once I have the file?</summary>
+		<div class="faq-answer">
+			<p>You need the free OpenVPN Connect app installed on your device first (search for "OpenVPN Connect" on your phone's app store, or download it from <code>openvpn.net/client</code> on a computer). Open the app, choose "Import Profile" or "Add" and select the <code>.ovpn</code> file you downloaded, then tap Connect. You'll only need to import the file once -- after that, connecting is a single tap.</p>
+		</div>
+	</details>
+
+	<details class="faq-item" data-faq-item>
+		<summary>What's a "MAC address" and why is it asking me to add mine?</summary>
+		<div class="faq-answer">
+			<p>Every device (phone, laptop, tablet) has a unique hardware ID called a MAC address -- think of it as a serial number for its network hardware. For security, your VPN profile only lets in devices whose MAC address has been added to your allowed list first, from <strong>My VPN Profile</strong>. If you're connecting from a new device and it won't let you in, this is usually why -- add that device's MAC address there.</p>
+			<p>You can usually find a device's MAC address under its Wi-Fi or network settings, often labeled "Wi-Fi Address" or "Wi-Fi MAC Address".</p>
+		</div>
+	</details>
+
+	<details class="faq-item" data-faq-item>
+		<summary>I can't connect, or my connection keeps dropping. What should I check?</summary>
+		<div class="faq-answer">
+			<p>A few common causes, roughly in order of how often they're the actual problem:</p>
+			<p>1. The device you're using hasn't been added under <strong>My VPN Profile &rarr; Allowed Devices</strong> yet (see the MAC address question above).<br>
+			2. Your monthly bandwidth allowance has run out -- check <strong>My VPN Profile</strong> for your current usage.<br>
+			3. Your account was revoked or is temporarily deactivated -- ask your administrator to check its status.<br>
+			4. The network you're on is blocking VPN traffic (some public/hotel Wi-Fi does this) -- try a different network if possible.</p>
+			<p>If none of these explain it, see "Still need help?" below.</p>
+		</div>
+	</details>
+</div>
+
+<div class="card faq-category" data-faq-category>
+	<h2>My Account &amp; Usage</h2>
+
+	<details class="faq-item" data-faq-item>
+		<summary>How do I change my password?</summary>
+		<div class="faq-answer">
+			<p>Go to <strong>My Profile</strong> (click your name in the top-right corner), where you'll find a form to set a new password. You'll need to enter your current password first.</p>
+		</div>
+	</details>
+
+	<details class="faq-item" data-faq-item>
+		<summary>What does "bandwidth quota" mean, and what happens if I use it all?</summary>
+		<div class="faq-answer">
+			<p>Some accounts have a monthly data allowance (measured in GB) for how much they can send and receive over the VPN. You can see your current usage and remaining allowance under <strong>My VPN Profile</strong>. If you run out before the month ends, your connection may be limited until it resets on the 1st -- if that happens and it's a problem, ask your administrator about increasing your allowance. Accounts with no quota set have unlimited usage.</p>
+		</div>
+	</details>
+
+	<details class="faq-item" data-faq-item>
+		<summary>Is my activity on the VPN private?</summary>
+		<div class="faq-answer">
+			<p>The VPN encrypts your connection so it can't be read by others on the same network, but your organization's administrators can see basic connection details for accounts they manage (when you connected, how much data you used, which device) as part of normal network administration -- the same way any workplace network can see this. If you have questions about your organization's specific privacy policy, ask your administrator.</p>
+		</div>
+	</details>
+
+	<details class="faq-item" data-faq-item>
+		<summary>I got a new phone or laptop -- what do I need to do?</summary>
+		<div class="faq-answer">
+			<p>Two steps: add the new device's MAC address under <strong>My VPN Profile &rarr; Allowed Devices</strong>, then install the OpenVPN Connect app on it and import your <code>.ovpn</code> file (you can download it again from the same page any time -- it doesn't expire after one use). You don't need a new profile for a new device, the same one works everywhere you've added.</p>
+		</div>
+	</details>
+</div>
+
+<div class="card faq-contact">
+	<div>
+		<h2 style="margin-bottom:4px">Still need help?</h2>
+		<p class="muted" style="margin:0">If your question isn't answered above, your administrator can help with anything account- or connection-specific.</p>
+	</div>
+	{% if app_settings.admin_notification_email %}
+	<a class="btn btn-primary" href="mailto:{{ app_settings.admin_notification_email }}">Email your administrator</a>
+	{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+	const input = document.getElementById("faq-search-input");
+	const items = Array.from(document.querySelectorAll("[data-faq-item]"));
+	const categories = Array.from(document.querySelectorAll("[data-faq-category]"));
+	const noResults = document.getElementById("faq-no-results");
+	const noResultsTerm = document.getElementById("faq-no-results-term");
+	// Precompute each item's searchable text once (question + answer),
+	// lowercased -- cheap enough to redo on every keystroke against a
+	// handful of items, but no reason to re-read the DOM each time.
+	const haystacks = items.map((el) => el.textContent.toLowerCase());
+
+	input.addEventListener("input", () => {
+		const term = input.value.trim().toLowerCase();
+		let anyVisible = false;
+		items.forEach((el, i) => {
+			const matches = term === "" || haystacks[i].includes(term);
+			el.hidden = !matches;
+			if (matches) {
+				anyVisible = true;
+				// Auto-expand a match while searching so the answer that
+				// matched is immediately visible, not just its heading --
+				// but only while a search term is active, so the page's
+				// normal open/closed state isn't disturbed by clearing it.
+				if (term !== "") el.open = true;
+			}
+		});
+		categories.forEach((cat) => {
+			const hasVisibleItem = Array.from(cat.querySelectorAll("[data-faq-item]")).some((el) => !el.hidden);
+			cat.hidden = !hasVisibleItem;
+		});
+		noResults.hidden = anyVisible || term === "";
+		noResultsTerm.textContent = input.value.trim();
+	});
+})();
+</script>
+{% endblock %}

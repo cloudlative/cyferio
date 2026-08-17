@@ -718,7 +718,7 @@ button, .btn {
 .btn-sm { padding: 5px 12px; font-size: 0.78rem; }
 button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; }
 
-input[type=text], input[type=password], input[type=date], input[type=email], input[type=tel], select, textarea {
+input[type=text], input[type=password], input[type=date], input[type=email], input[type=tel], input[type=search], select, textarea {
 	padding: 10px 14px;
 	border-radius: 9px;
 	border: 1.5px solid var(--border);
@@ -1364,3 +1364,51 @@ tr.team-row:hover .team-row-view, tr.team-row:focus-visible .team-row-view { opa
 .donut-legend-row:hover { background: var(--surface-hover); }
 .legend-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 9px; vertical-align: middle; }
 .activity-breakdown #activity-stat-grid { margin-bottom: 24px; }
+
+/* --- FAQ page (faq.html) -- plain <details>/<summary> accordion, no JS
+   needed to open/close a single entry (only the search box's show/hide
+   filtering is scripted). Deliberately not reusing .card per-question --
+   a bordered box around every single Q&A reads as heavier/more
+   "technical" than this page is meant to feel; one .card per category
+   with borderless rows inside keeps it closer to a plain document. */
+.faq-search { max-width: 420px; margin-bottom: 24px; }
+.faq-category { margin-bottom: 10px; }
+.faq-category:last-child { margin-bottom: 0; }
+.faq-item { border-bottom: 1px solid var(--border); }
+.faq-item:last-child { border-bottom: none; }
+.faq-item[hidden] { display: none; }
+.faq-item summary {
+	list-style: none;
+	cursor: pointer;
+	padding: 14px 4px;
+	font-weight: 600;
+	color: var(--text);
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::before {
+	content: "+";
+	flex: none;
+	width: 20px;
+	height: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 6px;
+	background: var(--surface-alt);
+	color: var(--accent-2);
+	font-size: 0.95rem;
+	font-weight: 700;
+	transition: transform 0.15s ease;
+}
+.faq-item[open] summary::before { content: "\2212"; transform: rotate(180deg); }
+.faq-item summary:hover { color: var(--accent-2); }
+.faq-item summary:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; border-radius: 6px; }
+.faq-item .faq-answer { padding: 0 4px 16px 34px; color: var(--text-muted); line-height: 1.6; }
+.faq-item .faq-answer p { margin: 0 0 10px; }
+.faq-item .faq-answer p:last-child { margin-bottom: 0; }
+.faq-item .faq-answer code { background: var(--surface-alt); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; font-size: 0.88em; }
+.faq-no-results { text-align: center; padding: 32px 0; }
+.faq-contact { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }

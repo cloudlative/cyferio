@@ -63,6 +63,26 @@ class TestLoginFlow:
         assert r.status_code == 303
 
 
+class TestFaqPage:
+    def test_faq_requires_login(self, app_client):
+        r = app_client.get("/faq", follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/login"
+
+    def test_faq_accessible_to_admin(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.get("/faq")
+        assert r.status_code == 200
+        assert "FAQ" in r.text
+
+    def test_faq_accessible_to_viewer(self, app_client):
+        # No permission gate beyond being logged in -- every role should
+        # reach this, not just admins (see pages.py's faq_page docstring).
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.get("/faq")
+        assert r.status_code == 200
+
+
 class TestRoleGating:
     def test_viewer_can_read_clients_api(self, app_client, monkeypatch):
         import vpnadmin.routes.clients as clients_mod
