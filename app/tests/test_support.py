@@ -9,7 +9,6 @@ from .conftest import login
 
 
 def _configure_smtp(monkeypatch):
-    monkeypatch.setattr(runtime_settings, "smtp_host", "smtp.example.com")
     monkeypatch.setattr(runtime_settings, "admin_notification_email", "admin-inbox@example.com")
 
 
@@ -74,10 +73,15 @@ class TestSubmitSupportRequest:
         r = app_client.post("/api/support", json={"subject": "Help", "message": "x" * 5001})
         assert r.status_code == 422
 
-    def test_smtp_not_configured_returns_400(self, app_client, db_session):
+    def test_smtp_not_configured_returns_400(self, app_client, db_session, monkeypatch):
         admin = db_session.query(User).filter(User.username == "admin").one()
         admin.email = "admin@example.com"
         db_session.commit()
+        # Isolates "no outbound email provider configured" from "no
+        # support address configured" (a separate failure -- see
+        # test_no_support_address_returns_400) -- a support address IS
+        # set here, but no EmailProvider row exists in this fresh test DB.
+        monkeypatch.setattr(runtime_settings, "admin_notification_email", "admin-inbox@example.com")
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/support", json={"subject": "Help", "message": "Something is wrong."})
         assert r.status_code == 400
@@ -87,7 +91,6 @@ class TestSubmitSupportRequest:
         admin = db_session.query(User).filter(User.username == "admin").one()
         admin.email = "admin@example.com"
         db_session.commit()
-        monkeypatch.setattr(runtime_settings, "smtp_host", "smtp.example.com")
         monkeypatch.setattr(runtime_settings, "admin_notification_email", None)
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/support", json={"subject": "Help", "message": "Something is wrong."})
@@ -102,7 +105,7 @@ class TestSubmitSupportRequest:
 
         sent = {}
 
-        def fake_send(*, requester_name, requester_username, requester_email, subject, message, submitted_at):
+        def fake_send(*, db, requester_name, requester_username, requester_email, subject, message, submitted_at):
             sent.update(
                 requester_name=requester_name, requester_username=requester_username,
                 requester_email=requester_email, subject=subject, message=message,

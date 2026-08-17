@@ -97,11 +97,11 @@ def submit_support_request(body: SupportRequest, user: User = Depends(require_us
     submitted_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     try:
         mailer.send_support_request(
-            requester_name=user.display_name, requester_username=user.username, requester_email=user.email,
+            db=db, requester_name=user.display_name, requester_username=user.username, requester_email=user.email,
             subject=body.subject, message=body.message, submitted_at=submitted_at,
         )
     except mailer.MailerNotConfigured:
-        log_action(db, user, "support_request_submitted", target=body.subject, detail="SMTP not configured", success=False)
+        log_action(db, user, "support_request_submitted", target=body.subject, detail="No outbound email provider configured", success=False)
         raise HTTPException(status_code=400, detail="Support requests aren't available right now -- outbound email isn't configured. Contact your administrator directly if you can.")
     except mailer.NoSupportAddress:
         log_action(db, user, "support_request_submitted", target=body.subject, detail="No support contact email configured", success=False)

@@ -6,7 +6,7 @@ from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from .. import mailer, policy_store
-from ..app_settings import ACTIVE_THEME_IDS, SMTP_PASSWORD_PLACEHOLDER, THEME_CHOICES, get_settings_row, refresh_runtime_cache, runtime
+from ..app_settings import ACTIVE_THEME_IDS, THEME_CHOICES, get_settings_row, refresh_runtime_cache, runtime
 from ..audit import log_action
 from ..db import get_db
 from ..models import RoleDef, User
@@ -17,25 +17,12 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 require_admin = require_permission("settings", "manage")  # former auth.require_admin, see permissions.py
 
 
-def _valid_port(v: int | None) -> int | None:
-    if v is not None and not (1 <= v <= 65535):
-        raise ValueError("Port must be between 1 and 65535.")
-    return v
-
-
 class UpdateSettingsRequest(BaseModel):
     """Admin-only. Every field is optional -- omit anything you don't want
     to touch (see model_fields_set usage in the route below); this is a
     partial update, not a full replace. An explicit null clears that field
     back to its environment-variable default (see app_settings.py)."""
     portal_url: str | None = None
-
-    smtp_host: str | None = None
-    smtp_port: int | None = None
-    smtp_username: str | None = None
-    smtp_password: str | None = None  # SMTP_PASSWORD_PLACEHOLDER = leave unchanged
-    smtp_from: str | None = None
-    smtp_use_tls: bool | None = None
 
     min_password_length: int | None = None
     session_timeout_minutes: int | None = None
@@ -68,11 +55,6 @@ class UpdateSettingsRequest(BaseModel):
     timezone: str | None = None
     time_format: str | None = None
 
-    @field_validator("smtp_port")
-    @classmethod
-    def _port_range(cls, v):
-        return _valid_port(v)
-
     @field_validator("portal_url")
     @classmethod
     def _portal_url_format(cls, v: str | None) -> str | None:
@@ -80,13 +62,6 @@ class UpdateSettingsRequest(BaseModel):
         if v and not (v.startswith("http://") or v.startswith("https://")):
             raise ValueError("Portal URL must start with http:// or https://.")
         return v.rstrip("/") if v else v
-
-    @field_validator("smtp_from")
-    @classmethod
-    def _from_format(cls, v: str | None) -> str | None:
-        if v and not mailer.is_valid_email(v):
-            raise ValueError("From-address must be a valid email address.")
-        return v
 
     @field_validator("min_password_length")
     @classmethod
@@ -245,14 +220,6 @@ def _serialize() -> dict:
     s = runtime
     return {
         "portal_url": s.portal_url,
-        "smtp_host": s.smtp_host,
-        "smtp_port": s.smtp_port,
-        "smtp_username": s.smtp_username,
-        # Never round-trip the real secret to the browser.
-        "smtp_password": SMTP_PASSWORD_PLACEHOLDER if s.smtp_password else "",
-        "smtp_from": s.smtp_from,
-        "smtp_use_tls": s.smtp_use_tls,
-        "smtp_configured": bool(s.smtp_host),
         "min_password_length": s.min_password_length,
         "session_timeout_minutes": s.session_timeout_minutes,
         "account_lockout_threshold": s.account_lockout_threshold,
@@ -304,8 +271,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
     fields_set = body.model_fields_set
     changes = []
 
-    for field in ("portal_url", "smtp_host", "smtp_port",
-                   "smtp_username", "smtp_from", "smtp_use_tls", "min_password_length",
+    for field in ("portal_url", "min_password_length",
                    "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
                    "audit_retention_days", "log_failed_login_attempts", "default_new_user_role",
                    "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "admin_notification_email",
@@ -318,19 +284,6 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
             if value != getattr(row, field):
                 setattr(row, field, value)
                 changes.append(field)
-
-    if "smtp_password" in fields_set:
-        new_password = body.smtp_password
-        if new_password != SMTP_PASSWORD_PLACEHOLDER and new_password != row.smtp_password:
-            row.smtp_password = new_password
-            changes.append("smtp_password")
-
-    # Cross-field check on the RESULTING (post-merge) state, not just this
-    # request's own fields -- a username/password set with no host at all
-    # (whether from this request or already-saved) can never actually
-    # authenticate anywhere.
-    if (row.smtp_username or row.smtp_password) and not row.smtp_host:
-        raise HTTPException(status_code=400, detail="SMTP host is required when a username or password is set.")
 
     if (row.notify_admin_on_user_created or row.notify_admin_on_client_revoked or row.notify_admin_on_quota_critical) and not row.admin_notification_email:
         raise HTTPException(status_code=400, detail="An admin notification email is required to enable event notifications.")
@@ -355,62 +308,8 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
     return _serialize()
 
 
-class TestSmtpRequest(BaseModel):
-    """Tests whatever SMTP values are currently in the Settings-page form --
-    not necessarily what's already saved -- against a destination address,
-    without persisting anything."""
-    email: str
-    smtp_host: str
-    smtp_port: int = 587
-    smtp_username: str = ""
-    smtp_password: str = ""
-    smtp_from: str = ""
-    smtp_use_tls: bool = True
-
-    @field_validator("email")
-    @classmethod
-    def _valid_email(cls, v: str) -> str:
-        v = v.strip()
-        if not mailer.is_valid_email(v):
-            raise ValueError("Please enter a valid destination email address.")
-        return v
-
-    @field_validator("smtp_host")
-    @classmethod
-    def _host_required(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("SMTP host is required to send a test email.")
-        return v
-
-    @field_validator("smtp_port")
-    @classmethod
-    def _port_range(cls, v):
-        return _valid_port(v)
-
-
-@router.post("/smtp/test")
-def test_smtp(body: TestSmtpRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    password = body.smtp_password
-    if password == SMTP_PASSWORD_PLACEHOLDER:
-        # The form field still shows the masked placeholder because the
-        # admin hasn't changed it -- test with the currently-effective
-        # saved password, not the literal placeholder string.
-        password = runtime.smtp_password
-
-    try:
-        mailer.send_test_email(
-            to_address=body.email,
-            host=body.smtp_host,
-            port=body.smtp_port,
-            username=body.smtp_username,
-            password=password,
-            from_address=body.smtp_from,
-            use_tls=body.smtp_use_tls,
-        )
-    except Exception as e:
-        log_action(db, admin, "test_smtp_settings", target=body.email, detail=f"failed: {e}", success=False)
-        raise HTTPException(status_code=502, detail=f"Failed to send test email: {e}")
-
-    log_action(db, admin, "test_smtp_settings", target=body.email, detail="sent successfully", success=True)
-    return {"message": f"Test email sent to {body.email}."}
+# Outbound email provider configuration/testing (SMTP, Resend, ...) moved
+# to routes/email_providers.py's own router -- see that module's docstring.
+# The single-SMTP-block /api/settings/smtp/test endpoint that used to live
+# here is gone; its equivalent is now /api/email-providers/{id}/test,
+# scoped to one profile among potentially several.

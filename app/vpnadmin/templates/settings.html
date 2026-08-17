@@ -21,46 +21,11 @@
 
 	<div class="card">
 		<div class="toolbar">
-			<h2 style="margin:0">Outbound Email (SMTP)</h2>
-			<button type="button" class="btn-secondary btn-sm" id="smtp-edit-btn" style="display:none">Edit SMTP Settings</button>
+			<h2 style="margin:0">Outbound Email</h2>
+			<button type="button" class="btn-secondary btn-sm" id="ep-add-btn">Add Provider</button>
 		</div>
-		<p class="muted" style="margin-top:0">Used to email VPN client .ovpn profiles. Leave the host blank to keep this feature disabled.</p>
-		<div class="form-grid">
-			<div class="field">
-				<label for="s-smtp-host">SMTP Host</label>
-				<input type="text" id="s-smtp-host" placeholder="smtp.example.com">
-			</div>
-			<div class="field">
-				<label for="s-smtp-port">SMTP Port</label>
-				<input type="text" id="s-smtp-port" inputmode="numeric" placeholder="587">
-			</div>
-			<div class="field">
-				<label for="s-smtp-username">SMTP Username</label>
-				<input type="text" id="s-smtp-username" placeholder="e.g. apikey or a full email address">
-			</div>
-			<div class="field">
-				<label for="s-smtp-password">SMTP Password</label>
-				<input type="password" id="s-smtp-password" placeholder="Leave as-is to keep the current password" autocomplete="new-password">
-			</div>
-			<div class="field">
-				<label for="s-smtp-from">From Address</label>
-				<input type="email" id="s-smtp-from" placeholder="vpn@example.com">
-			</div>
-			<div class="field">
-				<label for="s-smtp-tls">Connection Security
-					<button type="button" class="info-tip" data-tip="STARTTLS upgrades a plain connection to encrypted after connecting (typically port 587) -- the right choice for almost every SMTP provider. No TLS sends credentials and mail unencrypted; only use it on a trusted private network." aria-label="More info on Connection Security">i</button>
-				</label>
-				<select id="s-smtp-tls">
-					<option value="true">Use STARTTLS</option>
-					<option value="false">No TLS (not recommended)</option>
-				</select>
-			</div>
-		</div>
-		<div class="form-row" style="margin-top:6px">
-			<button type="button" class="btn-secondary" id="smtp-test-btn">Send Test Email</button>
-			<button type="button" class="btn-secondary" id="smtp-cancel-btn" style="display:none">Cancel</button>
-			<span class="muted" id="smtp-status" style="font-size:0.85rem"></span>
-		</div>
+		<p class="muted" style="margin-top:0">Every app email -- VPN profile delivery, password reset, user welcome emails, admin notifications, support requests -- goes out through whichever profile below is marked <strong>Default</strong>. Configure as many as you like (e.g. a backup relay); only the default one is ever actually used.</p>
+		<div id="ep-list"><p class="muted">Loading…</p></div>
 	</div>
 
 	<div class="card">
@@ -150,7 +115,7 @@
 
 	<div class="card">
 		<h2>Notifications</h2>
-		<p class="muted" style="margin-top:0">Controls how long toast/notification popups stay on screen across the whole app, plus optional admin-facing event emails (uses the SMTP settings above).</p>
+		<p class="muted" style="margin-top:0">Controls how long toast/notification popups stay on screen across the whole app, plus optional admin-facing event emails (sent through the default Outbound Email provider above).</p>
 		<div class="form-grid">
 			<div class="field">
 				<label for="s-notification-duration">Notification Duration <span class="muted">(seconds)</span></label>
@@ -239,18 +204,42 @@
 	</div>
 </form>
 
-<dialog id="test-email-dialog">
+<dialog id="ep-form-dialog">
 	<div class="dialog-body">
-		<h2>Send Test Email</h2>
-		<form id="test-email-form">
-			<p class="muted" style="margin-top:0">Tests the SMTP settings currently in this form (even if not saved yet).</p>
+		<h2 id="ep-form-title">Add Email Provider</h2>
+		<form id="ep-form">
 			<div class="field">
-				<label for="test-email-address">Destination Email Address</label>
-				<input type="email" id="test-email-address" required placeholder="you@example.com">
+				<label for="ep-name">Profile Name</label>
+				<input type="text" id="ep-name" required maxlength="100" placeholder="e.g. Primary SMTP, Resend Production">
+			</div>
+			<div class="field">
+				<label for="ep-type">Provider</label>
+				<select id="ep-type"></select>
+			</div>
+			<div id="ep-dynamic-fields"></div>
+			<div class="checkbox-row" style="margin-top:4px">
+				<label class="checkbox-label"><input type="checkbox" id="ep-active" checked> Active <span class="muted">(a disabled profile can't be made the default)</span></label>
 			</div>
 			<div class="dialog-actions">
-				<button type="button" class="btn-secondary" id="test-email-cancel">Cancel</button>
-				<button type="submit" class="btn-primary" id="test-email-submit">Send</button>
+				<button type="button" class="btn-secondary" id="ep-form-cancel">Cancel</button>
+				<button type="submit" class="btn-primary" id="ep-form-submit">Save</button>
+			</div>
+		</form>
+	</div>
+</dialog>
+
+<dialog id="ep-test-dialog">
+	<div class="dialog-body">
+		<h2>Send Test Email</h2>
+		<form id="ep-test-form">
+			<p class="muted" style="margin-top:0">Sends a real test email through <strong id="ep-test-name"></strong>'s current settings (as shown in the form, even if not saved yet).</p>
+			<div class="field">
+				<label for="ep-test-address">Destination Email Address</label>
+				<input type="email" id="ep-test-address" required placeholder="you@example.com">
+			</div>
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" id="ep-test-cancel">Cancel</button>
+				<button type="submit" class="btn-primary" id="ep-test-submit">Send</button>
 			</div>
 		</form>
 	</div>
@@ -330,7 +319,6 @@ function updateThemeActiveNote(savedSetting) {
 // of these fields falls back to an env-var default when left blank (see
 // app_settings.py's refresh_runtime_cache), so blank itself is never an
 // error here.
-const sSmtpPortValidation = attachInlineValidation(document.getElementById("s-smtp-port"), (v) => numberRangeError(v, { min: 1, max: 65535, label: "SMTP port", emptyOk: true }));
 const sMinPwLenValidation = attachInlineValidation(document.getElementById("s-min-pw-len"), (v) => numberRangeError(v, { min: 6, max: 128, label: "Minimum password length", emptyOk: true }));
 const sSessionTimeoutValidation = attachInlineValidation(document.getElementById("s-session-timeout"), (v) => numberRangeError(v, { min: 1, label: "Session timeout", emptyOk: true }));
 const sLockoutThresholdValidation = attachInlineValidation(document.getElementById("s-lockout-threshold"), (v) => numberRangeError(v, { min: 0, label: "Account lockout threshold", emptyOk: true }));
@@ -387,34 +375,10 @@ function populateTimezoneSelect(current) {
 
 // SMTP lock/edit UX -- a new pattern for this app (no existing "locked
 // until Edit is clicked" precedent elsewhere), kept deliberately simple:
-// disabled inputs (still readable via .value for both the save-body
-// builder below and the Test Email button, confirmed disabled doesn't
-// block JS property reads, only native form serialization/typing) plus
-// one Edit button to unlock and one Cancel to discard in-progress edits
-// by just re-fetching from the server (also re-locks, since nothing was
-// actually saved).
-const SMTP_FIELD_IDS = ["s-smtp-host", "s-smtp-port", "s-smtp-username", "s-smtp-password", "s-smtp-from", "s-smtp-tls"];
-function setSmtpLocked(locked) {
-	SMTP_FIELD_IDS.forEach((id) => {
-		const el = document.getElementById(id);
-		if (el) el.disabled = locked;
-	});
-	document.getElementById("smtp-edit-btn").style.display = locked ? "" : "none";
-	document.getElementById("smtp-cancel-btn").style.display = locked ? "none" : "";
-}
-document.getElementById("smtp-edit-btn").addEventListener("click", () => setSmtpLocked(false));
-document.getElementById("smtp-cancel-btn").addEventListener("click", () => loadSettings());
-
 async function loadSettings() {
 	try {
 		const s = await apiFetch("/api/settings");
 		setVal("s-portal-url", s.portal_url);
-		setVal("s-smtp-host", s.smtp_host);
-		setVal("s-smtp-port", s.smtp_port);
-		setVal("s-smtp-username", s.smtp_username);
-		setVal("s-smtp-password", s.smtp_password); // masked placeholder or empty
-		setVal("s-smtp-from", s.smtp_from);
-		document.getElementById("s-smtp-tls").value = String(!!s.smtp_use_tls);
 		setVal("s-min-pw-len", s.min_password_length);
 		setVal("s-session-timeout", s.session_timeout_minutes);
 		setVal("s-lockout-threshold", s.account_lockout_threshold);
@@ -438,14 +402,6 @@ async function loadSettings() {
 		roleSelect.innerHTML = (s.role_choices || []).map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
 		roleSelect.value = s.default_new_user_role || "user";
 		setVal("s-notification-duration", s.notification_duration_ms != null ? (s.notification_duration_ms / 1000) : 1);
-		document.getElementById("smtp-status").textContent = s.smtp_configured ? "Currently configured." : "Not configured -- email features are disabled.";
-		// Locked-until-Edit-clicked: once SMTP is actually saved (not just
-		// tested -- see smtp-test-btn's own dialog copy, "even if not saved
-		// yet"), the fields go read-only so it's unambiguous whether this
-		// card reflects real, persisted settings or an in-progress edit.
-		// Unconfigured (first-time setup) always starts unlocked -- nothing
-		// to protect against accidental edits yet.
-		setSmtpLocked(!!s.smtp_configured);
 
 		_themeChoices = s.theme_choices || [];
 		window._savedLoginTheme = s.login_theme || DEFAULT_THEME_ID;
@@ -467,7 +423,7 @@ document.getElementById("s-login-theme").addEventListener("change", () => {
 document.getElementById("settings-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
 	const numericChecks = [
-		sSmtpPortValidation, sMinPwLenValidation, sSessionTimeoutValidation,
+		sMinPwLenValidation, sSessionTimeoutValidation,
 		sLockoutThresholdValidation, sLockoutMinutesValidation, sDefaultBandwidthValidation,
 		sAdminNotifyEmailValidation, sAuditRetentionValidation, sNotificationDurationValidation,
 		sDbSnapshotRetentionValidation, // null (and filtered out) if this field isn't rendered
@@ -489,12 +445,6 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 	}
 	const body = {
 		portal_url: val("s-portal-url") || null,
-		smtp_host: val("s-smtp-host"),
-		smtp_port: intOrNull(val("s-smtp-port")),
-		smtp_username: val("s-smtp-username"),
-		smtp_password: document.getElementById("s-smtp-password").value, // may be the masked placeholder -- server leaves it alone in that case
-		smtp_from: val("s-smtp-from"),
-		smtp_use_tls: document.getElementById("s-smtp-tls").value === "true",
 		min_password_length: intOrNull(val("s-min-pw-len")),
 		session_timeout_minutes: intOrNull(val("s-session-timeout")),
 		account_lockout_threshold: intOrNull(val("s-lockout-threshold")),
@@ -540,37 +490,196 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 	}
 });
 
-document.getElementById("smtp-test-btn").addEventListener("click", () => {
-	if (!val("s-smtp-host")) {
-		toast("Enter an SMTP host before sending a test email.", "error");
+// --- Outbound Email Providers (Settings -> Outbound Email) ---------------
+// Provider-agnostic by design (see email_providers.py's own docstring):
+// this page never hardcodes SMTP-vs-Resend field lists -- GET
+// /api/email-providers/types returns each registered provider's field
+// spec, and ep-dynamic-fields is built from THAT, so a new provider type
+// shows up here automatically with zero template/JS changes.
+let providerTypes = []; // [{type_key, display_name, fields: [{key,label,input_type,required}]}]
+let providers = []; // current list, refreshed after every mutation
+
+function fieldsForType(typeKey) {
+	return (providerTypes.find(t => t.type_key === typeKey) || {}).fields || [];
+}
+
+async function loadEmailProviders() {
+	const listEl = document.getElementById("ep-list");
+	try {
+		const [types, rows] = await Promise.all([
+			providerTypes.length ? Promise.resolve(providerTypes) : apiFetch("/api/email-providers/types"),
+			apiFetch("/api/email-providers"),
+		]);
+		providerTypes = types;
+		providers = rows;
+		const typeSelect = document.getElementById("ep-type");
+		typeSelect.innerHTML = providerTypes.map(t => `<option value="${escapeHtml(t.type_key)}">${escapeHtml(t.display_name)}</option>`).join("");
+		renderProviderList();
+	} catch (e) {
+		listEl.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+function renderProviderList() {
+	const listEl = document.getElementById("ep-list");
+	if (providers.length === 0) {
+		listEl.innerHTML = '<div class="empty-state">No outbound email provider configured yet -- add one below. Until then, every app email (password reset, VPN profile delivery, notifications, support requests) is disabled.</div>';
 		return;
 	}
-	document.getElementById("test-email-address").value = "";
-	document.getElementById("test-email-dialog").showModal();
-});
-document.getElementById("test-email-cancel").addEventListener("click", () => document.getElementById("test-email-dialog").close());
-closeOnBackdropClick(document.getElementById("test-email-dialog"));
-document.getElementById("test-email-form").addEventListener("submit", async (ev) => {
+	listEl.innerHTML = `<div class="table-scroll"><table>
+		<thead><tr><th>Name</th><th>Provider</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+		<tbody>${providers.map(p => `
+			<tr>
+				<td>${escapeHtml(p.name)}</td>
+				<td>${escapeHtml(p.provider_display_name)}</td>
+				<td>
+					${p.is_default ? '<span class="status-pill status-online">Default</span>' : (p.is_active ? '<span class="status-pill status-offline">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>')}
+				</td>
+				<td style="text-align:right">
+					<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">
+						<button type="button" class="btn-secondary btn-sm" data-ep-edit="${p.id}">Edit</button>
+						<button type="button" class="btn-secondary btn-sm" data-ep-test="${p.id}">Test</button>
+						${!p.is_default ? `<button type="button" class="btn-secondary btn-sm" data-ep-default="${p.id}">Set Default</button>` : ""}
+						${!p.is_default ? `<button type="button" class="btn-danger btn-sm" data-ep-delete="${p.id}">Delete</button>` : ""}
+					</div>
+				</td>
+			</tr>
+		`).join("")}</tbody>
+	</table></div>`;
+
+	listEl.querySelectorAll("[data-ep-edit]").forEach(btn => {
+		btn.addEventListener("click", () => openProviderDialog(providers.find(p => p.id === Number(btn.dataset.epEdit))));
+	});
+	listEl.querySelectorAll("[data-ep-test]").forEach(btn => {
+		btn.addEventListener("click", () => openTestDialog(providers.find(p => p.id === Number(btn.dataset.epTest))));
+	});
+	listEl.querySelectorAll("[data-ep-default]").forEach(btn => {
+		btn.addEventListener("click", async () => {
+			try {
+				await apiFetch(`/api/email-providers/${btn.dataset.epDefault}/set-default`, { method: "POST", body: {} });
+				toast("Default provider updated.", "success");
+				loadEmailProviders();
+			} catch (e) { toast(e.message, "error"); }
+		});
+	});
+	listEl.querySelectorAll("[data-ep-delete]").forEach(btn => {
+		btn.addEventListener("click", async () => {
+			const p = providers.find(x => x.id === Number(btn.dataset.epDelete));
+			const ok = await confirmDialog(`Delete <strong>${escapeHtml(p ? p.name : "this provider")}</strong>? This can't be undone.`, { confirmLabel: "Delete", danger: true });
+			if (!ok) return;
+			try {
+				await apiFetch(`/api/email-providers/${btn.dataset.epDelete}`, { method: "DELETE" });
+				toast("Provider deleted.", "success");
+				loadEmailProviders();
+			} catch (e) { toast(e.message, "error"); }
+		});
+	});
+}
+
+// Renders one <div class="field"> per field spec -- text/email/number
+// inputs directly, password inputs pre-filled with the masked
+// placeholder (unchanged unless the admin actually types over it, same
+// convention app_settings.py's SMTP_PASSWORD_PLACEHOLDER always used),
+// and "select:opt1,opt2,..." input_types as a real <select>.
+function renderDynamicFields(typeKey, existingConfig) {
+	const container = document.getElementById("ep-dynamic-fields");
+	const fields = fieldsForType(typeKey);
+	container.innerHTML = fields.map(f => {
+		const id = `ep-field-${f.key}`;
+		const value = (existingConfig && existingConfig[f.key] != null) ? existingConfig[f.key] : "";
+		const requiredAttr = f.required ? "required" : "";
+		if (f.input_type.startsWith("select:")) {
+			const options = f.input_type.slice("select:".length).split(",");
+			return `<div class="field">
+				<label for="${id}">${escapeHtml(f.label)}${f.required ? "" : ' <span class="muted">(optional)</span>'}</label>
+				<select id="${id}" data-ep-field="${escapeHtml(f.key)}">
+					${options.map(o => `<option value="${escapeHtml(o)}" ${String(value) === o ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}
+				</select>
+			</div>`;
+		}
+		const inputType = f.input_type === "number" ? "number" : (f.input_type === "password" ? "password" : (f.input_type === "email" ? "email" : "text"));
+		return `<div class="field">
+			<label for="${id}">${escapeHtml(f.label)}${f.required ? "" : ' <span class="muted">(optional)</span>'}</label>
+			<input type="${inputType}" id="${id}" data-ep-field="${escapeHtml(f.key)}" value="${escapeHtml(String(value))}" ${requiredAttr} autocomplete="off">
+		</div>`;
+	}).join("");
+}
+
+function collectDynamicFieldsConfig() {
+	const config = {};
+	document.querySelectorAll("#ep-dynamic-fields [data-ep-field]").forEach(el => {
+		config[el.dataset.epField] = el.type === "number" ? intOrNull(el.value.trim()) : el.value.trim();
+	});
+	return config;
+}
+
+let editingProviderId = null; // null = creating a new profile
+function openProviderDialog(existing) {
+	editingProviderId = existing ? existing.id : null;
+	document.getElementById("ep-form-title").textContent = existing ? "Edit Email Provider" : "Add Email Provider";
+	setVal("ep-name", existing ? existing.name : "");
+	const typeSelect = document.getElementById("ep-type");
+	typeSelect.value = existing ? existing.provider_type : (providerTypes[0] && providerTypes[0].type_key);
+	// Provider type is fixed once created -- see routes/email_providers.py's
+	// update_provider docstring for why (its whole field set changes).
+	typeSelect.disabled = !!existing;
+	document.getElementById("ep-active").checked = existing ? existing.is_active : true;
+	renderDynamicFields(typeSelect.value, existing ? existing.config : {});
+	document.getElementById("ep-form-dialog").showModal();
+}
+document.getElementById("ep-add-btn").addEventListener("click", () => openProviderDialog(null));
+document.getElementById("ep-type").addEventListener("change", (e) => renderDynamicFields(e.target.value, {}));
+document.getElementById("ep-form-cancel").addEventListener("click", () => document.getElementById("ep-form-dialog").close());
+closeOnBackdropClick(document.getElementById("ep-form-dialog"));
+
+document.getElementById("ep-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
-	const submitBtn = document.getElementById("test-email-submit");
+	const submitBtn = document.getElementById("ep-form-submit");
+	submitBtn.disabled = true;
+	const body = {
+		name: val("ep-name"),
+		provider_type: document.getElementById("ep-type").value,
+		is_active: document.getElementById("ep-active").checked,
+		config: collectDynamicFieldsConfig(),
+	};
+	try {
+		if (editingProviderId) {
+			await apiFetch(`/api/email-providers/${editingProviderId}`, { method: "PATCH", body });
+		} else {
+			await apiFetch("/api/email-providers", { method: "POST", body });
+		}
+		document.getElementById("ep-form-dialog").close();
+		toast(editingProviderId ? "Provider updated." : "Provider added.", "success");
+		loadEmailProviders();
+	} catch (e) {
+		toast(e.message, "error");
+	} finally {
+		submitBtn.disabled = false;
+	}
+});
+
+let testingProviderId = null;
+function openTestDialog(provider) {
+	if (!provider) return;
+	testingProviderId = provider.id;
+	document.getElementById("ep-test-name").textContent = provider.name;
+	document.getElementById("ep-test-address").value = "";
+	document.getElementById("ep-test-dialog").showModal();
+}
+document.getElementById("ep-test-cancel").addEventListener("click", () => document.getElementById("ep-test-dialog").close());
+closeOnBackdropClick(document.getElementById("ep-test-dialog"));
+document.getElementById("ep-test-form").addEventListener("submit", async (ev) => {
+	ev.preventDefault();
+	const submitBtn = document.getElementById("ep-test-submit");
 	submitBtn.disabled = true;
 	try {
-		const result = await apiFetch("/api/settings/smtp/test", {
-			method: "POST",
-			body: {
-				email: val("test-email-address"),
-				smtp_host: val("s-smtp-host"),
-				smtp_port: intOrNull(val("s-smtp-port")) || 587,
-				smtp_username: val("s-smtp-username"),
-				smtp_password: document.getElementById("s-smtp-password").value,
-				smtp_from: val("s-smtp-from"),
-				smtp_use_tls: document.getElementById("s-smtp-tls").value === "true",
-			},
+		// body.config omitted -- the test endpoint falls back to whatever's
+		// already saved for this profile when none is given (see
+		// routes/email_providers.py's test_provider).
+		const result = await apiFetch(`/api/email-providers/${testingProviderId}/test`, {
+			method: "POST", body: { to_address: val("ep-test-address") },
 		});
-		// Close before toasting -- see clients.html's email-dialog handler
-		// for why (toast() nests inside an open <dialog>; closing the
-		// dialog first, not after, keeps it visible).
-		document.getElementById("test-email-dialog").close();
+		document.getElementById("ep-test-dialog").close();
 		toast(result.message, "success");
 	} catch (e) {
 		toast(e.message, "error");
@@ -579,7 +688,8 @@ document.getElementById("test-email-form").addEventListener("submit", async (ev)
 	}
 });
 
-document.getElementById("refresh-btn").addEventListener("click", loadSettings);
+document.getElementById("refresh-btn").addEventListener("click", () => { loadSettings(); loadEmailProviders(); });
 loadSettings();
+loadEmailProviders();
 </script>
 {% endblock %}

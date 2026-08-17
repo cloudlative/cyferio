@@ -240,6 +240,68 @@ def apply_settings_globals(templates) -> None:
     templates.env.globals["active_theme"] = lambda: resolve_active_theme(runtime.login_theme)
 
 
+def migrate_legacy_smtp_provider(db: Session) -> None:
+    """One-time backfill for the multi-provider Outbound Email system
+    (models.EmailProvider, email_providers.py, routes/email_providers.py):
+    if no EmailProvider row exists yet but legacy SMTP settings ARE
+    configured (either already saved to AppSettings via the old Settings
+    form, or only ever set via SMTP_* env vars on a fresh install that's
+    never touched Settings at all), create a "Primary SMTP" provider
+    profile from them and mark it the default -- so an existing
+    deployment keeps sending exactly the same way after upgrading to this
+    version, with zero manual reconfiguration (see this task's own
+    "Migration & Backward Compatibility" requirement).
+
+    No-op once ANY EmailProvider row exists (whether created by this
+    migration on a previous startup, or an admin adding one directly),
+    so this is safe to call on every startup, not just the first --
+    same idempotent-migration shape as auth.ensure_bootstrap_admin_flag.
+    Also a no-op if nothing was ever configured (a genuinely fresh
+    install with no SMTP_HOST env var and nothing saved) -- there's
+    nothing to migrate, an admin sets up their first provider from
+    scratch via Settings."""
+    import json
+
+    from .email_providers import PROVIDERS
+    from .models import EmailProvider
+
+    if db.query(EmailProvider).first() is not None:
+        return
+    row = get_settings_row(db)
+    host = row.smtp_host if row.smtp_host is not None else env_settings.SMTP_HOST
+    if not host:
+        return
+    port = row.smtp_port if row.smtp_port is not None else env_settings.SMTP_PORT
+    username = row.smtp_username if row.smtp_username is not None else env_settings.SMTP_USERNAME
+    password = row.smtp_password if row.smtp_password is not None else env_settings.SMTP_PASSWORD
+    from_email = row.smtp_from if row.smtp_from is not None else env_settings.SMTP_FROM
+    use_tls = row.smtp_use_tls if row.smtp_use_tls is not None else env_settings.SMTP_USE_TLS
+    config = {
+        "host": host,
+        "port": port,
+        "username": username or "",
+        "password": password or "",
+        # The old single boolean only ever meant STARTTLS-or-plaintext --
+        # see email_providers.SMTPEmailProvider's own comment on why this
+        # is now a real 3-state choice going forward.
+        "encryption": "starttls" if use_tls else "none",
+        "from_email": from_email or username or "",
+        "from_name": "",
+    }
+    # validate_config() isn't called here deliberately -- a legacy config
+    # that was good enough to actually send mail with before this
+    # migration should keep working exactly as-is even if it wouldn't
+    # pass a freshly-tightened validation rule; the SMTP provider's own
+    # PROVIDERS entry both defines the field shape and IS what mailer.py
+    # will send through going forward, so importing it here (rather than
+    # hardcoding "smtp" as a bare string) keeps this migration and the
+    # provider registry from ever silently drifting apart.
+    smtp_type_key = PROVIDERS["smtp"].type_key
+    provider = EmailProvider(name="Primary SMTP", provider_type=smtp_type_key, is_active=True, is_default=True, config=json.dumps(config))
+    db.add(provider)
+    db.commit()
+
+
 def prune_audit_log(db: Session) -> int:
     """Deletes AuditLog entries older than `runtime.audit_retention_days`,
     if a retention period is configured (None/0 = keep forever, no-op).

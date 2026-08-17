@@ -1,12 +1,8 @@
-"""Tests for the admin-only Settings page (branding/SMTP/security/audit
-retention) -- routes/settings.py, app_settings.py, and mailer.py's
-send_test_email path."""
-import smtplib
-
-import pytest
-
-import vpnadmin.routes.settings as settings_mod
-from vpnadmin.app_settings import SMTP_PASSWORD_PLACEHOLDER, runtime as runtime_settings
+"""Tests for the admin-only Settings page (branding/security/audit
+retention) -- routes/settings.py, app_settings.py. Outbound email
+provider configuration/testing moved to routes/email_providers.py --
+see tests/test_email_providers.py for that."""
+from vpnadmin.app_settings import runtime as runtime_settings
 
 from .conftest import login
 
@@ -20,8 +16,11 @@ class TestGetSettings:
         assert "app_name" not in body
         assert "app_tagline" not in body
         assert "app_footer_credit" not in body
-        assert body["smtp_configured"] is False
-        assert body["smtp_password"] == ""  # nothing set yet
+        # SMTP fields moved to /api/email-providers -- no longer part of
+        # this response at all.
+        assert "smtp_host" not in body
+        assert "smtp_password" not in body
+        assert "smtp_configured" not in body
 
     def test_viewer_cannot_view_settings(self, app_client):
         login(app_client, "viewer", "viewerpass123")
@@ -53,22 +52,6 @@ class TestUpdateSettings:
         assert r.status_code == 200
         assert r.json()["portal_url"] is None  # no APP_DOMAIN set in the test env, so no fallback either
 
-    def test_invalid_smtp_port_rejected(self, app_client):
-        login(app_client, "admin", "adminpass123")
-        r = app_client.patch("/api/settings", json={"smtp_port": 99999})
-        assert r.status_code == 422
-
-    def test_invalid_from_address_rejected(self, app_client):
-        login(app_client, "admin", "adminpass123")
-        r = app_client.patch("/api/settings", json={"smtp_from": "not-an-email"})
-        assert r.status_code == 422
-
-    def test_username_without_host_rejected(self, app_client):
-        login(app_client, "admin", "adminpass123")
-        r = app_client.patch("/api/settings", json={"smtp_username": "someone"})
-        assert r.status_code == 400
-        assert "host is required" in r.json()["detail"].lower()
-
     def test_min_password_length_out_of_range_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
         r = app_client.patch("/api/settings", json={"min_password_length": 2})
@@ -78,26 +61,6 @@ class TestUpdateSettings:
         login(app_client, "admin", "adminpass123")
         r = app_client.patch("/api/settings", json={"audit_retention_days": -5})
         assert r.status_code == 422
-
-    def test_password_masked_in_response_not_overwritten_by_placeholder(self, app_client):
-        login(app_client, "admin", "adminpass123")
-        r = app_client.patch("/api/settings", json={"smtp_host": "smtp.example.com", "smtp_password": "hunter2"})
-        assert r.status_code == 200
-        assert r.json()["smtp_password"] == SMTP_PASSWORD_PLACEHOLDER
-        assert runtime_settings.smtp_password == "hunter2"
-
-        # Sending the placeholder back (as the UI does when the field is
-        # untouched) must NOT overwrite the real password with the literal
-        # placeholder string.
-        r = app_client.patch("/api/settings", json={"smtp_password": SMTP_PASSWORD_PLACEHOLDER})
-        assert r.status_code == 200
-        assert runtime_settings.smtp_password == "hunter2"
-
-    def test_password_can_be_cleared_explicitly(self, app_client):
-        login(app_client, "admin", "adminpass123")
-        app_client.patch("/api/settings", json={"smtp_host": "smtp.example.com", "smtp_password": "hunter2"})
-        app_client.patch("/api/settings", json={"smtp_password": ""})
-        assert runtime_settings.smtp_password == ""
 
     def test_password_length_setting_affects_new_user_validation(self, app_client, db_session, monkeypatch):
         from vpnadmin.routes import users as users_mod
@@ -125,71 +88,3 @@ class TestUpdateSettings:
         app_client.patch("/api/settings", json={"portal_url": "https://vpn.example.com"})
         entry = db_session.query(AuditLog).filter(AuditLog.action == "update_settings").one()
         assert entry.username == "admin"
-
-
-class TestSmtpTestEmail:
-    def test_success_path(self, app_client, monkeypatch):
-        sent = {}
-
-        def fake_send(*, to_address, host, port, username, password, from_address, use_tls):
-            sent.update(to_address=to_address, host=host, port=port)
-
-        monkeypatch.setattr(settings_mod.mailer, "send_test_email", fake_send)
-        login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/settings/smtp/test", json={
-            "email": "me@example.com", "smtp_host": "smtp.example.com", "smtp_port": 587,
-        })
-        assert r.status_code == 200
-        assert sent == {"to_address": "me@example.com", "host": "smtp.example.com", "port": 587}
-
-    def test_failure_surfaces_smtp_error_reason(self, app_client, monkeypatch):
-        def fake_send(**kwargs):
-            raise smtplib.SMTPAuthenticationError(535, b"Authentication failed")
-
-        monkeypatch.setattr(settings_mod.mailer, "send_test_email", fake_send)
-        login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/settings/smtp/test", json={
-            "email": "me@example.com", "smtp_host": "smtp.example.com",
-        })
-        assert r.status_code == 502
-        assert "authentication failed" in r.json()["detail"].lower()
-
-    def test_missing_host_rejected(self, app_client):
-        login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/settings/smtp/test", json={"email": "me@example.com", "smtp_host": ""})
-        assert r.status_code == 422
-
-    def test_invalid_destination_email_rejected(self, app_client):
-        login(app_client, "admin", "adminpass123")
-        r = app_client.post("/api/settings/smtp/test", json={"email": "nope", "smtp_host": "smtp.example.com"})
-        assert r.status_code == 422
-
-    def test_placeholder_password_substitutes_saved_password(self, app_client, monkeypatch):
-        login(app_client, "admin", "adminpass123")
-        app_client.patch("/api/settings", json={"smtp_host": "smtp.example.com", "smtp_password": "realpass"})
-
-        seen = {}
-
-        def fake_send(*, to_address, host, port, username, password, from_address, use_tls):
-            seen["password"] = password
-
-        monkeypatch.setattr(settings_mod.mailer, "send_test_email", fake_send)
-        r = app_client.post("/api/settings/smtp/test", json={
-            "email": "me@example.com", "smtp_host": "smtp.example.com",
-            "smtp_password": SMTP_PASSWORD_PLACEHOLDER,
-        })
-        assert r.status_code == 200
-        assert seen["password"] == "realpass"
-
-    def test_viewer_cannot_test_smtp(self, app_client):
-        login(app_client, "viewer", "viewerpass123")
-        r = app_client.post("/api/settings/smtp/test", json={"email": "me@example.com", "smtp_host": "smtp.example.com"})
-        assert r.status_code == 403
-
-    def test_test_email_does_not_persist_settings(self, app_client, monkeypatch):
-        monkeypatch.setattr(settings_mod.mailer, "send_test_email", lambda **kw: None)
-        login(app_client, "admin", "adminpass123")
-        app_client.post("/api/settings/smtp/test", json={
-            "email": "me@example.com", "smtp_host": "not-saved.example.com",
-        })
-        assert runtime_settings.smtp_host == ""  # unaffected -- dry run only

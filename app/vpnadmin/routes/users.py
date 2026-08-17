@@ -839,7 +839,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
 
     if app_settings.runtime.notify_admin_on_user_created:
         mailer.send_admin_notification(
-            subject=f"New user created: {body.username}",
+            db=db, subject=f"New user created: {body.username}",
             body=(
                 f"{admin.username} created a new user account.\n\n"
                 f"Username: {body.username}\n"
@@ -869,7 +869,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
             # sent from here, never as a later "resend" (see mailer.py's
             # send_welcome_email docstring for the full reasoning).
             mailer.send_welcome_email(
-                to_address=body.email, username=body.username, password=body.password,
+                db=db, to_address=body.email, username=body.username, password=body.password,
                 client_name=effective_client_name, ovpn_content=ovpn_content, recipient_name=recipient_name,
             )
             log_action(db, admin, "email_ovpn", target=body.username, detail=f"welcome email sent to {body.email} (on creation)", success=True)

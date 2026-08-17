@@ -257,7 +257,7 @@ def revoke_client(name: str, user: User = Depends(_require_client_manager), db: 
     vpn_identity_sync.sync_after_client_revoke(db, name)
     if app_settings.runtime.notify_admin_on_client_revoked:
         mailer.send_admin_notification(
-            subject=f"VPN client revoked: {name}",
+            db=db, subject=f"VPN client revoked: {name}",
             body=f"{user.username} revoked VPN client '{name}'.\n\n{result}",
         )
     return {"message": f"Client '{name}' revoked successfully."}
@@ -430,8 +430,8 @@ class EmailOvpnRequest(BaseModel):
 def email_client_ovpn(name: str, body: EmailOvpnRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
-    if not mailer.is_configured():
-        raise HTTPException(status_code=400, detail="SMTP is not configured.")
+    if not mailer.is_configured(db):
+        raise HTTPException(status_code=400, detail="No outbound email provider is configured.")
     try:
         content = cli.show_ovpn(name)
     except ScriptError as e:
@@ -439,10 +439,10 @@ def email_client_ovpn(name: str, body: EmailOvpnRequest, user: User = Depends(_r
         log_action(db, user, "email_ovpn", target=name, detail=e.message, success=False)
         raise HTTPException(status_code=400, detail=friendly)
     try:
-        mailer.send_ovpn_profile(to_address=body.email, client_name=name, ovpn_content=content)
+        mailer.send_ovpn_profile(db=db, to_address=body.email, client_name=name, ovpn_content=content)
     except Exception as e:
         log_action(db, user, "email_ovpn", target=name, detail=f"send to {body.email} failed: {e}", success=False)
-        raise HTTPException(status_code=502, detail="Failed to send email. Check SMTP settings and try again.")
+        raise HTTPException(status_code=502, detail="Failed to send email. Check your outbound email provider settings and try again.")
     log_action(db, user, "email_ovpn", target=name, detail=f"sent to {body.email}", success=True)
     return {"message": f"Profile for '{name}' emailed to {body.email}."}
 
