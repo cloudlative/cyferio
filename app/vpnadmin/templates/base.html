@@ -32,15 +32,16 @@
 			<!--
 				Deliberate ordering (not just insertion order -- see git
 				history for the RBAC-era build-up that left it as one):
+				Users first (an admin's most frequent destination) ->
 				Overview -> Personal -> core VPN resource ops ->
 				observability -> identity/access -> configuration ->
-				host-level/destructive actions last. Same shape most
-				enterprise admin consoles converge on (AWS/GCP/Cloudflare-
-				style: general-purpose first, IAM/settings lower, anything
-				host-level or hard-to-reverse isolated at the very bottom).
-				Every permission gate below is unchanged from before this
-				reorder -- only position moved, not visibility logic.
+				host-level/destructive actions last. Every permission gate
+				below is unchanged from before this reorder -- only
+				position moved, not visibility logic.
 			-->
+			{% if is_admin %}
+			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
+			{% endif %}
 			{% if can_view_dashboard %}
 			<a href="/" class="{{ 'active' if request.url.path == '/' }}"><span class="nav-icon">◆</span>Dashboard</a>
 			{% endif %}
@@ -62,7 +63,6 @@
 			{% endif %}
 			{% if is_admin %}
 			<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
-			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
 			<a href="/users/activity" class="{{ 'active' if request.url.path == '/users/activity' }}"><span class="nav-icon">☰</span>Users Activity</a>
 			{% endif %}
 			{% if can_manage_roles %}
