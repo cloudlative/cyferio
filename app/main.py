@@ -25,14 +25,14 @@ from vpnadmin import cli_wrapper
 # (which has no such attribute) instead of this one, crashing the
 # snapshot loop's very first tick on every startup.
 from vpnadmin import health as health_data
-from vpnadmin.app_settings import prune_audit_log, prune_db_stat_snapshots, refresh_runtime_cache
+from vpnadmin.app_settings import migrate_legacy_smtp_provider, prune_audit_log, prune_db_stat_snapshots, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_admin
 from vpnadmin import geo_lists, mailer
 from vpnadmin import app_settings
 from vpnadmin.models import QuotaNotification
-from vpnadmin.routes import auth, clients, diagnostics, geo, health, me_vpn, notifications, openvpn_install, pages, reports, roles, settings as settings_routes, status, support, teams, users
+from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, me_vpn, notifications, openvpn_install, pages, reports, roles, settings as settings_routes, status, support, teams, users
 from vpnadmin.routes.reports import _load_rows
 
 logger = logging.getLogger(__name__)
@@ -200,6 +200,12 @@ async def lifespan(_app: FastAPI):
         refresh_runtime_cache(db)
         prune_audit_log(db)
         prune_db_stat_snapshots(db)
+        # One-time backfill: turns already-configured legacy SMTP settings
+        # into the first EmailProvider row (marked default) so an upgrade
+        # keeps sending mail exactly as before with no manual step -- see
+        # that function's own docstring. No-op once any EmailProvider row
+        # exists, so safe on every startup, not just the first.
+        migrate_legacy_smtp_provider(db)
     finally:
         db.close()
     # Kick the City/ASN pick-list build (or a disk-cache load) off in a
@@ -269,6 +275,7 @@ app.include_router(openvpn_install.router)
 app.include_router(reports.router)
 app.include_router(notifications.router)
 app.include_router(support.router)
+app.include_router(email_providers.router)
 
 
 @app.get("/healthz")

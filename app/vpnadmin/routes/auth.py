@@ -295,7 +295,7 @@ async def forgot_password_submit(request: Request, email: str = Form(...), db: S
         reset_url = f"{base_url}/reset-password?token={token}"
         try:
             mailer.send_password_reset_email(
-                to_address=user.email, username=user.username, reset_url=reset_url,
+                db=db, to_address=user.email, username=user.username, reset_url=reset_url,
                 ttl_minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES,
             )
             log_action(db, user, "password_reset_requested", target=user.username, success=True)

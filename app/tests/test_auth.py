@@ -1,6 +1,5 @@
 import re
 
-from vpnadmin.app_settings import runtime as runtime_settings
 from vpnadmin.auth import hash_password, verify_password
 from vpnadmin.models import Role, Team, User
 
@@ -89,10 +88,12 @@ class TestFaqPage:
 class TestForgotPasswordFlow:
     @staticmethod
     def _mock_smtp(monkeypatch, sent: dict):
+        # Replaces the whole send function, so it never touches
+        # mailer._resolve_default_provider/the EmailProvider table at
+        # all -- no EmailProvider row needs to exist in these tests.
         import vpnadmin.routes.auth as auth_mod
-        monkeypatch.setattr(runtime_settings, "smtp_host", "smtp.example.com")
 
-        def fake_send(*, to_address, username, reset_url, ttl_minutes):
+        def fake_send(*, db, to_address, username, reset_url, ttl_minutes):
             sent["to"] = to_address
             sent["username"] = username
             sent["reset_url"] = reset_url

@@ -1,17 +1,28 @@
 """
-Minimal SMTP mailer used for two things: emailing a VPN client's .ovpn
-profile, and sending a Settings-page test email to verify SMTP config
-before saving it. Deliberately stdlib-only (smtplib + email.message) -- no
-new pip dependency for what's a small, well-trodden piece of functionality.
+Outbound email -- used for: emailing a VPN client's .ovpn profile, the
+new-user welcome email, self-service password reset, the Contact Support
+form, admin event notifications, and Settings-page provider test sends.
+
+Every send_* function here builds the message content (Jinja template +
+plaintext fallback) exactly as it always has, then hands it to
+email_providers.py's currently-configured DEFAULT provider (SMTP, Resend,
+...) via _resolve_default_provider() -- this module doesn't know or care
+which provider is active, only email_providers.py's PROVIDERS registry
+does. See that module's docstring for the full provider-abstraction
+design, and app_settings.py's docstring for why this reads a live DB
+query (via `db`) rather than the cached `runtime` object every other
+setting uses -- sending mail is already I/O-bound and comparatively rare,
+so there's no hot-path cost to always being current.
 """
+import json
 import re
-import smtplib
-from email.message import EmailMessage
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from sqlalchemy.orm import Session
 
-from . import app_settings
+from . import app_settings, email_providers
+from .email_providers import OutboundMessage
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -45,52 +56,71 @@ def _render_email_template(name: str, **context) -> str:
 
 
 class MailerNotConfigured(Exception):
-    """Raised when SMTP_HOST is unset -- callers turn this into a clean 400,
-    not a crash."""
+    """Raised when no outbound email provider is configured (or none is
+    both active and marked default) -- callers turn this into a clean
+    400, not a crash."""
 
 
 class NoSupportAddress(Exception):
-    """Raised by send_support_request when SMTP is configured but
+    """Raised by send_support_request when a provider IS configured but
     admin_notification_email itself is blank -- distinct from
     MailerNotConfigured so routes/support.py can show a message that
     points at the actual missing piece."""
-
-
-def is_configured() -> bool:
-    return bool(app_settings.runtime.smtp_host)
 
 
 def is_valid_email(address: str) -> bool:
     return bool(_EMAIL_RE.match(address.strip()))
 
 
-def _send(*, host: str, port: int, username: str, password: str, use_tls: bool,
-          from_address: str, to_address: str, msg: EmailMessage) -> None:
-    """Low-level send shared by send_ovpn_profile (uses the saved/effective
-    settings) and send_test_email (uses whatever's currently in the
-    Settings-page form, not necessarily saved yet). Lets smtplib's own
-    exceptions (SMTPException and friends) propagate as-is -- callers
-    translate those into clean API responses, and for the test-email path
-    specifically, surface the underlying reason to the admin rather than a
-    generic "failed"."""
-    msg["From"] = from_address or username
-    msg["To"] = to_address
-    with smtplib.SMTP(host, port, timeout=15) as server:
-        if use_tls:
-            server.starttls()
-        if username:
-            server.login(username, password)
-        server.send_message(msg)
+def _resolve_default_provider(db: Session) -> tuple[email_providers.EmailProviderBase, dict, str] | None:
+    """Returns (provider_impl, config_dict, provider_row_name) for the
+    current default+active EmailProvider row, or None if none exists/
+    qualifies -- the single place every send_* function below asks "how
+    do we actually send mail right now". A live DB read, not cached on
+    `app_settings.runtime` (unlike almost every other setting) -- Provider
+    CRUD (routes/email_providers.py) would otherwise need its own cache-
+    invalidation path kept in sync with every create/update/delete/
+    set-default action, which is exactly the kind of place a forgotten
+    invalidation call turns into a silent "why is it still using the old
+    provider" bug. The DB round trip this costs is negligible next to the
+    network I/O of the send itself."""
+    from .models import EmailProvider
+
+    row = db.query(EmailProvider).filter(EmailProvider.is_default.is_(True), EmailProvider.is_active.is_(True)).first()
+    if row is None:
+        return None
+    provider = email_providers.get_provider(row.provider_type)
+    config = json.loads(row.config or "{}")
+    return provider, config, row.name
 
 
-def send_ovpn_profile(*, to_address: str, client_name: str, ovpn_content: str, recipient_name: str | None = None) -> None:
+def is_configured(db: Session) -> bool:
+    return _resolve_default_provider(db) is not None
+
+
+def _send(db: Session, message: OutboundMessage) -> None:
+    """Shared dispatch every send_* function below funnels through --
+    resolves the default provider and calls its send(), translating "no
+    provider configured" into MailerNotConfigured (a distinct, callers-
+    already-handle-it exception) rather than letting a bare None-unpack
+    crash. ProviderSendError (a real delivery failure) propagates as-is,
+    same as smtplib.SMTPException used to before the provider
+    abstraction -- every existing caller already catches it via a bare
+    `except Exception`, so this is a transparent swap."""
+    resolved = _resolve_default_provider(db)
+    if resolved is None:
+        raise MailerNotConfigured("No outbound email provider is configured.")
+    provider, config, _name = resolved
+    provider.send(config=config, message=message)
+
+
+def send_ovpn_profile(*, db: Session, to_address: str, client_name: str, ovpn_content: str, recipient_name: str | None = None) -> None:
     """Sends `client_name`'s .ovpn profile as an attachment to `to_address`,
     using the templates/email/vpn_profile.html template (extends
     base_email.html -- see that pair's own docstring for why this is a
-    reusable framework, not a one-off) and the currently-effective SMTP
-    settings (Settings-page override, falling back to env vars -- see
-    app_settings.py). Raises MailerNotConfigured if SMTP isn't set up, or
-    smtplib.SMTPException (propagated as-is) on a real delivery failure.
+    reusable framework, not a one-off) and whichever provider is currently
+    the default (see _resolve_default_provider). Raises MailerNotConfigured
+    if none is, or ProviderSendError on a real delivery failure.
 
     `recipient_name`, if given, personalizes the greeting ("Welcome,
     Alice -- ...") -- optional because the existing "Email Profile" button
@@ -98,15 +128,9 @@ def send_ovpn_profile(*, to_address: str, client_name: str, ovpn_content: str, r
     necessarily tied to a portal account with a known name; the new
     create-user "send VPN profile via email" checkbox (routes/users.py)
     does have one and passes it through."""
-    if not is_configured():
-        raise MailerNotConfigured("SMTP is not configured.")
-
-    s = app_settings.runtime
-    app_name = s.app_name
-    msg = EmailMessage()
-    msg["Subject"] = f"Your VPN profile for {client_name} — {app_name}"
+    app_name = app_settings.runtime.app_name
     greeting = f"Hi {recipient_name}," if recipient_name else "Hello,"
-    msg.set_content(
+    text_body = (
         f"{greeting}\n\n"
         f"Your VPN configuration profile for \"{client_name}\" is attached "
         f"({client_name}.ovpn). Import it into your OpenVPN client to connect.\n\n"
@@ -114,24 +138,16 @@ def send_ovpn_profile(*, to_address: str, client_name: str, ovpn_content: str, r
         f"If you weren't expecting this email, you can safely ignore it.\n\n"
         f"— {app_name}"
     )
-    msg.add_alternative(
-        _render_email_template("vpn_profile.html", client_name=client_name, recipient_name=recipient_name),
-        subtype="html",
+    html_body = _render_email_template("vpn_profile.html", client_name=client_name, recipient_name=recipient_name)
+    message = OutboundMessage(
+        to_address=to_address, subject=f"Your VPN profile for {client_name} — {app_name}",
+        text_body=text_body, html_body=html_body,
+        attachments=[(f"{client_name}.ovpn", ovpn_content.encode("utf-8"), "application/octet-stream")],
     )
-    msg.add_attachment(
-        ovpn_content.encode("utf-8"),
-        maintype="application",
-        subtype="octet-stream",
-        filename=f"{client_name}.ovpn",
-    )
-
-    _send(
-        host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
-        use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=to_address, msg=msg,
-    )
+    _send(db, message)
 
 
-def send_welcome_email(*, to_address: str, username: str, password: str, client_name: str,
+def send_welcome_email(*, db: Session, to_address: str, username: str, password: str, client_name: str,
                         ovpn_content: str, recipient_name: str | None = None) -> None:
     """Onboarding email for the "Send VPN Profile via Email" checkbox
     (routes/users.py's create_user) -- unlike send_ovpn_profile above
@@ -150,19 +166,13 @@ def send_welcome_email(*, to_address: str, username: str, password: str, client_
     to a new user out of band, since it's hashed immediately after this
     request and never recoverable again. The template itself recommends
     changing it after first login. Raises MailerNotConfigured/
-    smtplib.SMTPException same as send_ovpn_profile -- caller decides how
-    to handle a failed send (see create_user's own fire-and-forget
-    handling)."""
-    if not is_configured():
-        raise MailerNotConfigured("SMTP is not configured.")
-
+    ProviderSendError same as send_ovpn_profile -- caller decides how to
+    handle a failed send (see create_user's own fire-and-forget handling)."""
     s = app_settings.runtime
     app_name = s.app_name
-    msg = EmailMessage()
-    msg["Subject"] = f"Welcome to {app_name} — your account is ready"
     greeting = f"Hi {recipient_name}," if recipient_name else "Hello,"
     portal_line = f"Portal: {s.portal_url}\n" if s.portal_url else ""
-    msg.set_content(
+    text_body = (
         f"{greeting}\n\n"
         f"An account has been created for you on {app_name}.\n\n"
         f"{portal_line}"
@@ -174,89 +184,63 @@ def send_welcome_email(*, to_address: str, username: str, password: str, client_
         f"Keep this email, your password, and the attached file private.\n\n"
         f"— {app_name}"
     )
-    msg.add_alternative(
-        _render_email_template(
-            "welcome.html", username=username, password=password, client_name=client_name,
-            recipient_name=recipient_name, portal_url=s.portal_url,
-        ),
-        subtype="html",
+    html_body = _render_email_template(
+        "welcome.html", username=username, password=password, client_name=client_name,
+        recipient_name=recipient_name, portal_url=s.portal_url,
     )
-    msg.add_attachment(
-        ovpn_content.encode("utf-8"),
-        maintype="application",
-        subtype="octet-stream",
-        filename=f"{client_name}.ovpn",
+    message = OutboundMessage(
+        to_address=to_address, subject=f"Welcome to {app_name} — your account is ready",
+        text_body=text_body, html_body=html_body,
+        attachments=[(f"{client_name}.ovpn", ovpn_content.encode("utf-8"), "application/octet-stream")],
     )
-
-    _send(
-        host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
-        use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=to_address, msg=msg,
-    )
+    _send(db, message)
 
 
-def send_password_reset_email(*, to_address: str, username: str, reset_url: str, ttl_minutes: int) -> None:
+def send_password_reset_email(*, db: Session, to_address: str, username: str, reset_url: str, ttl_minutes: int) -> None:
     """Self-service "Forgot password" email (routes/auth.py's
     forgot_password) -- `reset_url` is the full, already-built link
     (portal_url + /reset-password?token=...); this function only formats
     and sends the message, it doesn't know anything about token
     generation/validation (that's auth.py's issue_password_reset_token/
-    get_user_by_reset_token). Same MailerNotConfigured/SMTPException
+    get_user_by_reset_token). Same MailerNotConfigured/ProviderSendError
     propagation as every other send_* here -- the caller (forgot_password)
     already treats a failed send as "couldn't complete the request" while
     still showing the same generic "if that account exists..." response,
     so a delivery failure never confirms or denies an account's existence
     to whoever submitted the form."""
-    if not is_configured():
-        raise MailerNotConfigured("SMTP is not configured.")
-
-    s = app_settings.runtime
-    app_name = s.app_name
-    msg = EmailMessage()
-    msg["Subject"] = f"Reset your password — {app_name}"
-    msg.set_content(
+    app_name = app_settings.runtime.app_name
+    text_body = (
         f"We received a request to reset the password for your {app_name} account ({username}).\n\n"
         f"Reset your password here (expires in {ttl_minutes} minutes, works once):\n{reset_url}\n\n"
         f"Didn't request this? You can safely ignore this email -- your password won't change "
         f"unless the link above is used.\n\n"
         f"— {app_name}"
     )
-    msg.add_alternative(
-        _render_email_template("password_reset.html", username=username, reset_url=reset_url, ttl_minutes=ttl_minutes),
-        subtype="html",
-    )
-
-    _send(
-        host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
-        use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=to_address, msg=msg,
-    )
+    html_body = _render_email_template("password_reset.html", username=username, reset_url=reset_url, ttl_minutes=ttl_minutes)
+    message = OutboundMessage(to_address=to_address, subject=f"Reset your password — {app_name}", text_body=text_body, html_body=html_body)
+    _send(db, message)
 
 
-def send_support_request(*, requester_name: str, requester_username: str, requester_email: str,
+def send_support_request(*, db: Session, requester_name: str, requester_username: str, requester_email: str,
                           subject: str, message: str, submitted_at: str) -> None:
     """FAQ page's "Contact Support" flow (routes/support.py) -- sends to
     `runtime.admin_notification_email` (the same setting event
     notifications use, see send_admin_notification's own docstring on
     that dual purpose). Sets Reply-To to the requester's own address so
     an admin can just hit Reply in their mail client to respond directly
-    -- every mainstream SMTP provider honors Reply-To (it's a standard
-    RFC 5322 header, not a provider-specific feature), so no fallback
-    path is needed; the requester's email is also included in the body
-    itself as a second, always-visible copy of that same information.
-    Raises MailerNotConfigured if SMTP isn't set up, or NoSupportAddress
-    if admin_notification_email itself is blank (a separate, more
-    specific failure than "SMTP isn't configured" -- the caller shows a
-    different message for each)."""
+    -- Reply-To is a standard RFC 5322 header both providers honor, not a
+    provider-specific feature; the requester's email is also included in
+    the body itself as a second, always-visible copy of that same
+    information. Raises MailerNotConfigured if no provider is set up, or
+    NoSupportAddress if admin_notification_email itself is blank -- a
+    separate, more specific failure than "no provider configured" -- the
+    caller shows a different message for each."""
     s = app_settings.runtime
-    if not is_configured():
-        raise MailerNotConfigured("SMTP is not configured.")
     if not s.admin_notification_email:
         raise NoSupportAddress("No support contact email is configured.")
 
     app_name = s.app_name
-    msg = EmailMessage()
-    msg["Subject"] = f"[{app_name} Support] {subject}"
-    msg["Reply-To"] = requester_email
-    msg.set_content(
+    text_body = (
         f"New support request from {requester_name} ({requester_username}).\n\n"
         f"From: {requester_name} <{requester_email}>\n"
         f"Submitted: {submitted_at}\n\n"
@@ -264,64 +248,58 @@ def send_support_request(*, requester_name: str, requester_username: str, reques
         f"{message}\n\n"
         f"-- Reply directly to this email to respond to {requester_name}."
     )
-    msg.add_alternative(
-        _render_email_template(
-            "support_request.html", requester_name=requester_name, requester_username=requester_username,
-            requester_email=requester_email, subject=subject, message=message, submitted_at=submitted_at,
-        ),
-        subtype="html",
+    html_body = _render_email_template(
+        "support_request.html", requester_name=requester_name, requester_username=requester_username,
+        requester_email=requester_email, subject=subject, message=message, submitted_at=submitted_at,
     )
-
-    _send(
-        host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
-        use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=s.admin_notification_email, msg=msg,
+    outbound = OutboundMessage(
+        to_address=s.admin_notification_email, subject=f"[{app_name} Support] {subject}",
+        text_body=text_body, html_body=html_body, reply_to=requester_email,
     )
+    _send(db, outbound)
 
 
-def send_test_email(*, to_address: str, host: str, port: int, username: str, password: str,
-                     from_address: str, use_tls: bool) -> None:
-    """Sends a short plain test message using whatever SMTP values are
-    currently in the Settings-page form -- NOT necessarily what's already
-    saved -- so an admin can verify a config before committing to it. Never
-    touches the DB/runtime cache; purely a dry-run send. Raises
-    smtplib.SMTPException (or socket errors etc) as-is on failure; the
-    route handler surfaces that reason to the admin."""
+def send_test_email_via_config(*, provider_type: str, config: dict, to_address: str) -> None:
+    """Settings-page "Test" button (per EmailProvider profile) -- sends a
+    short confirmation message through the EXACT config passed in
+    (already validate_config()'d by the caller), NOT necessarily the
+    saved/default provider: an admin needs to test a profile they're
+    still editing, or a non-default one, before committing to it. Never
+    touches app_settings.runtime or the DB; purely a dry-run send. Raises
+    ProviderSendError (or ProviderConfigError if config itself is
+    malformed) as-is -- the route handler surfaces that reason to the
+    admin."""
     app_name = app_settings.runtime.app_name
-    msg = EmailMessage()
-    msg["Subject"] = f"Test email from {app_name}"
-    msg.set_content(
-        f"This is a test email from {app_name} to confirm your SMTP settings are working.\n\n"
-        f"If you received this, outbound email is configured correctly."
+    provider = email_providers.get_provider(provider_type)
+    message = OutboundMessage(
+        to_address=to_address,
+        subject=f"Test email from {app_name}",
+        text_body=(
+            f"This is a test email from {app_name} to confirm this outbound email provider is configured correctly.\n\n"
+            f"If you received this, delivery through this provider is working."
+        ),
     )
-    _send(
-        host=host, port=port, username=username, password=password,
-        use_tls=use_tls, from_address=from_address, to_address=to_address, msg=msg,
-    )
+    provider.send(config=config, message=message)
 
 
-def send_admin_notification(*, subject: str, body: str) -> bool:
+def send_admin_notification(*, db: Session, subject: str, body: str) -> bool:
     """Fire-and-forget event notification to `runtime.admin_notification_email`
     (Settings -> Notifications) -- used by routes/users.py's create_user and
     routes/clients.py's revoke_client when the matching
     `notify_admin_on_*` toggle is on. Deliberately swallows delivery
     failures (returns False, logs nothing itself -- callers already run
     inside an audit-logged request and can note the failure there if they
-    choose to) rather than letting a broken/unreachable SMTP server turn an
+    choose to) rather than letting a broken/unreachable provider turn an
     otherwise-successful user-creation or client-revoke into a 500: the
     notification is a courtesy, not a precondition for the action it's
     reporting on. Returns True on a successful send, False if not
     configured or if the send itself failed."""
     s = app_settings.runtime
-    if not is_configured() or not s.admin_notification_email:
+    if not s.admin_notification_email:
         return False
-    msg = EmailMessage()
-    msg["Subject"] = f"[{s.app_name}] {subject}"
-    msg.set_content(body)
+    message = OutboundMessage(to_address=s.admin_notification_email, subject=f"[{s.app_name}] {subject}", text_body=body)
     try:
-        _send(
-            host=s.smtp_host, port=s.smtp_port, username=s.smtp_username, password=s.smtp_password,
-            use_tls=s.smtp_use_tls, from_address=s.smtp_from, to_address=s.admin_notification_email, msg=msg,
-        )
+        _send(db, message)
         return True
     except Exception:
         return False

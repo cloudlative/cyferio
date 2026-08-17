@@ -1,19 +1,7 @@
 """Tests for the .ovpn view/copy and email-delivery client actions."""
-import pytest
-
 import vpnadmin.routes.clients as clients_mod
-from vpnadmin.app_settings import runtime as runtime_settings
 
 from .conftest import login
-
-
-@pytest.fixture(autouse=True)
-def _reset_smtp(monkeypatch):
-    # mailer.py reads the in-process runtime settings cache (app_settings.py),
-    # not config.settings directly -- it's admin-editable via the Settings
-    # page now, seeded from config.settings only as a fallback default.
-    monkeypatch.setattr(runtime_settings, "smtp_host", "")
-    monkeypatch.setattr(runtime_settings, "smtp_from", "vpn@example.com")
 
 
 class TestClientsPageRenders:
@@ -68,7 +56,7 @@ class TestEmailOvpn:
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/clients/alice/email-ovpn", json={"email": "user@example.com"})
         assert r.status_code == 400
-        assert "not configured" in r.json()["detail"].lower()
+        assert "no outbound email provider" in r.json()["detail"].lower()
 
     def test_invalid_email_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
@@ -76,12 +64,18 @@ class TestEmailOvpn:
         assert r.status_code == 422
 
     def test_success_path_sends_mail(self, app_client, monkeypatch):
-        monkeypatch.setattr(runtime_settings, "smtp_host", "smtp.example.com")
+        # is_configured(db) is now a live EmailProvider-table check (see
+        # mailer._resolve_default_provider) rather than a runtime.smtp_host
+        # read -- bypassed directly here, same "replace the function under
+        # test" pattern already used for send_ovpn_profile below, rather
+        # than creating a real EmailProvider row this test doesn't
+        # otherwise need.
+        monkeypatch.setattr(clients_mod.mailer, "is_configured", lambda db: True)
         monkeypatch.setattr(clients_mod.cli, "show_ovpn", lambda name: "content")
 
         sent = {}
 
-        def fake_send(*, to_address, client_name, ovpn_content):
+        def fake_send(*, db, to_address, client_name, ovpn_content):
             sent["to"] = to_address
             sent["name"] = client_name
 

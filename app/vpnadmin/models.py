@@ -362,7 +362,15 @@ class AppSettings(Base):
     # that routing domain.
     portal_url = Column(String(512), nullable=True)
 
-    # Outbound email (see config.py's SMTP_* / mailer.py)
+    # Outbound email (see config.py's SMTP_* / mailer.py) -- DEPRECATED as
+    # of the multi-provider EmailProvider table below: mailer.py no longer
+    # reads these directly, only db.migrate_legacy_smtp_provider() does,
+    # once, to seed an initial "Primary SMTP" EmailProvider row from
+    # whatever's already here (or the env-var fallback) on first startup
+    # after upgrading. Kept (not dropped) both because this app's
+    # migration approach only ever ADDs (see db.py's _sync_missing_columns
+    # docstring) and so an admin's already-configured SMTP settings aren't
+    # silently lost if that one-time migration is ever re-examined.
     smtp_host = Column(String(255), nullable=True)
     smtp_port = Column(Integer, nullable=True)
     smtp_username = Column(String(255), nullable=True)
@@ -476,6 +484,49 @@ class AppSettings(Base):
 
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
+
+
+class EmailProvider(Base):
+    """One configured outbound-email delivery profile (Settings ->
+    Outbound Email) -- an admin can define several (e.g. a primary SMTP
+    relay and a Resend account), but exactly one is ever both `is_active`
+    and `is_default` at a time, and that's the ONE mailer.py ever actually
+    sends through (see mailer._resolve_default_provider). Every other row
+    just sits configured-but-unused until an admin switches the default,
+    or is used one-off via its own "Test" button in the UI (routes/
+    email_providers.py's test endpoint), which bypasses is_default/
+    is_active entirely -- testing a profile doesn't require it to be live.
+
+    `config` is a JSON blob (not one column per field) specifically so
+    each provider TYPE can have its own field set without a schema
+    migration every time a new provider is added -- see email_providers.py's
+    module docstring for the full provider-abstraction design. Never
+    contains anything this app wouldn't already store in plaintext
+    elsewhere (AppSettings.smtp_password was always plaintext too); no new
+    encryption introduced here, consistent with that existing baseline."""
+    __tablename__ = "email_providers"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)  # admin-chosen label, e.g. "Primary SMTP", "Resend Production"
+    # Matches an email_providers.PROVIDERS registry key ("smtp", "resend",
+    # ...) -- plain string, not a DB-native Enum, so adding a new provider
+    # type never needs _sync_enum_values()'s ALTER TYPE dance (see db.py).
+    provider_type = Column(String(32), nullable=False)
+    # Active = usable at all (shows up as a candidate default, can be
+    # tested); a disabled profile is kept configured but can't be made
+    # the default and is skipped if it somehow still were (defense in
+    # depth -- routes/email_providers.py's set_default already refuses to
+    # activate a disabled profile as default in the first place).
+    is_active = Column(Boolean, nullable=False, default=True)
+    # Exactly one row may ever have this true -- enforced at the
+    # application level (routes/email_providers.py's set_default clears
+    # every other row's flag in the same transaction), not a DB
+    # constraint, since SQLite has no native partial-unique-index support
+    # portable to Postgres without dialect-specific DDL.
+    is_default = Column(Boolean, nullable=False, default=False)
+    config = Column(Text, nullable=False, default="{}")  # JSON-encoded, provider-specific -- see email_providers.py
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
 class AuditLog(Base):
