@@ -16,6 +16,7 @@ so there's no hot-path cost to always being current.
 """
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -271,13 +272,27 @@ def send_test_email_via_config(*, provider_type: str, config: dict, to_address: 
     admin."""
     app_name = app_settings.runtime.app_name
     provider = email_providers.get_provider(provider_type)
+    from_address = config.get("from_email") or None
+    sent_at = datetime.now(timezone.utc).strftime("%b %d, %Y at %H:%M UTC")
+    text_body = (
+        f"This is a test email from {app_name} to confirm this outbound email provider ({provider.display_name}) is configured correctly.\n\n"
+        f"If you received this, delivery through this provider is working.\n\n"
+        f"Sent to: {to_address}\n"
+        + (f"From: {from_address}\n" if from_address else "")
+        + f"Sent: {sent_at}"
+    )
+    html_body = _render_email_template(
+        "test_email.html",
+        provider_label=provider.display_name,
+        to_address=to_address,
+        from_address=from_address,
+        sent_at=sent_at,
+    )
     message = OutboundMessage(
         to_address=to_address,
         subject=f"Test email from {app_name}",
-        text_body=(
-            f"This is a test email from {app_name} to confirm this outbound email provider is configured correctly.\n\n"
-            f"If you received this, delivery through this provider is working."
-        ),
+        text_body=text_body,
+        html_body=html_body,
     )
     provider.send(config=config, message=message)
 
