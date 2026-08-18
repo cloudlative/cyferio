@@ -43,7 +43,7 @@
 			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
 			{% endif %}
 			{% if can_view_dashboard %}
-			<a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' }}"><span class="nav-icon">◆</span>Dashboard</a>
+			<a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' }}"><span class="nav-icon">⊞</span>Dashboard</a>
 			{% endif %}
 			{% if has_own_vpn_profile %}
 			<a href="/my-vpn-profile" class="{{ 'active' if request.url.path == '/my-vpn-profile' }}"><span class="nav-icon">⚡</span>My VPN Profile</a>
@@ -59,7 +59,7 @@
 			<a href="/health" class="{{ 'active' if request.url.path == '/health' }}"><span class="nav-icon">♥</span>Health</a>
 			{% endif %}
 			{% if can_view_reports %}
-			<a href="/reports" class="{{ 'active' if request.url.path == '/reports' }}"><span class="nav-icon">▦</span>Reports</a>
+			<a href="/reports" class="{{ 'active' if request.url.path == '/reports' }}"><span class="nav-icon">▥</span>Reports</a>
 			{% endif %}
 			{% if is_admin %}
 			<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
@@ -72,7 +72,7 @@
 			<a href="/settings" class="{{ 'active' if request.url.path == '/settings' }}"><span class="nav-icon">⛭</span>Settings</a>
 			{% endif %}
 			{% if can_manage_openvpn_install %}
-			<a href="/openvpn-install" class="{{ 'active' if request.url.path == '/openvpn-install' }}"><span class="nav-icon">⚙</span>OpenVPN Install</a>
+			<a href="/openvpn-install" class="{{ 'active' if request.url.path == '/openvpn-install' }}"><span class="nav-icon">⇩</span>OpenVPN Install</a>
 			{% endif %}
 			{# Unconditional -- no permission gate, matching /profile and
 			   /change-password's "every account, any role" posture. This

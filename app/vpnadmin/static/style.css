@@ -268,13 +268,15 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	border-radius: 9px;
 	transition: background 0.15s ease, color 0.15s ease;
 }
-.sidebar nav a .nav-icon { font-size: 1rem; width: 18px; text-align: center; opacity: 0.8; }
+.sidebar nav a .nav-icon { font-size: 1.3rem; width: 22px; text-align: center; opacity: 0.92; }
 .sidebar nav a:hover { text-decoration: none; color: var(--text); background: var(--surface); }
+.sidebar nav a:hover .nav-icon { opacity: 1; }
 .sidebar nav a.active {
 	color: #fff;
 	background: linear-gradient(90deg, rgba(99,102,241,0.22), rgba(99,102,241,0.04));
 	box-shadow: inset 2px 0 0 var(--accent-2);
 }
+.sidebar nav a.active .nav-icon { opacity: 1; }
 
 /* Hamburger toggle (base.html's #sidebar-toggle, .content-header-left) --
    hidden by default, only shown once the sidebar itself goes off-canvas
