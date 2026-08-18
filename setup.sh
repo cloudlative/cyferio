@@ -132,8 +132,18 @@ note_change() { CHANGES+=("$1"); log "  -> $1"; }
 MODE=""
 DOMAIN=""
 ACME_EMAIL=""
-MAXMIND_KEY=""
+# MAXMIND_KEY_SET declared *before* MAXMIND_KEY itself, deliberately: a
+# `*_KEY=<empty>` line immediately followed by another `*_KEY`-shaped
+# variable name trips gitleaks' generic-api-key rule, which spans the
+# newline looking for a value and grabs the next line's `VAR_NAME=0` as if
+# it were the secret. Genuinely tested against a local gitleaks run, not
+# just an offline guess -- neither an unquoted empty assignment alone nor
+# a quoted `""` avoided this on its own; only separating the two `*_KEY`
+# lines actually clears the finding. See .gitleaks.toml for why this
+# needs explaining at all (this used to be an allowlist entry that, it
+# turned out, never actually matched in practice).
 MAXMIND_KEY_SET=0
+MAXMIND_KEY=
 DEPLOY_USER="ubuntu"
 IMAGE_TAG="latest"
 REPO_DIR="$SETUP_DIR"
