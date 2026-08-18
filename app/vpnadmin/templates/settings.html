@@ -120,7 +120,10 @@
 			</div>
 			<div class="field">
 				<label for="s-turnstile-secret-key">Turnstile Secret Key</label>
-				<input type="text" id="s-turnstile-secret-key" class="mono" autocomplete="off">
+				<div style="display:flex;gap:8px">
+					<input type="text" id="s-turnstile-secret-key" class="mono" autocomplete="off" style="flex:1">
+					<button type="button" class="btn-secondary btn-sm" id="s-turnstile-secret-key-edit-btn" style="display:none">Edit</button>
+				</div>
 			</div>
 		</div>
 		<div class="form-grid" id="s-captcha-recaptcha-fields" style="display:none">
@@ -130,7 +133,10 @@
 			</div>
 			<div class="field">
 				<label for="s-recaptcha-secret-key">reCAPTCHA Secret Key</label>
-				<input type="text" id="s-recaptcha-secret-key" class="mono" autocomplete="off">
+				<div style="display:flex;gap:8px">
+					<input type="text" id="s-recaptcha-secret-key" class="mono" autocomplete="off" style="flex:1">
+					<button type="button" class="btn-secondary btn-sm" id="s-recaptcha-secret-key-edit-btn" style="display:none">Edit</button>
+				</div>
 			</div>
 		</div>
 		<div class="form-row" style="margin-top:14px">
@@ -489,6 +495,8 @@ async function loadSettings() {
 		setVal("s-turnstile-secret-key", s.turnstile_secret_key);
 		setVal("s-recaptcha-site-key", s.recaptcha_site_key);
 		setVal("s-recaptcha-secret-key", s.recaptcha_secret_key);
+		applyMaskedSecretLock("s-turnstile-secret-key", "s-turnstile-secret-key-edit-btn");
+		applyMaskedSecretLock("s-recaptcha-secret-key", "s-recaptcha-secret-key-edit-btn");
 		updateCaptchaFieldVisibility();
 	} catch (e) {
 		toast(e.message, "error");
@@ -501,6 +509,34 @@ function updateCaptchaFieldVisibility() {
 	document.getElementById("s-captcha-recaptcha-fields").style.display = provider === "recaptcha" ? "" : "none";
 }
 document.getElementById("s-captcha-provider").addEventListener("change", updateCaptchaFieldVisibility);
+
+// Masked-secret lock/edit UX for the CAPTCHA secret keys: a saved secret
+// loads greyed out (disabled, matching style.css's input:disabled look)
+// showing the "••••••••" mask, not a live editable field an admin could
+// accidentally overtype or partially paste into. Edit clears it and hands
+// control back, at which point val() reads whatever gets typed. Leaving a
+// field alone re-submits the mask unchanged, which routes/settings.py's
+// PATCH already treats as "keep the existing secret" (same convention as
+// the MaxMind license key field).
+function applyMaskedSecretLock(inputId, editBtnId) {
+	const input = document.getElementById(inputId);
+	const editBtn = document.getElementById(editBtnId);
+	const masked = input.value === "••••••••";
+	input.disabled = masked;
+	editBtn.style.display = masked ? "" : "none";
+}
+function wireMaskedSecretEdit(inputId, editBtnId) {
+	const input = document.getElementById(inputId);
+	const editBtn = document.getElementById(editBtnId);
+	editBtn.addEventListener("click", () => {
+		input.disabled = false;
+		input.value = "";
+		input.focus();
+		editBtn.style.display = "none";
+	});
+}
+wireMaskedSecretEdit("s-turnstile-secret-key", "s-turnstile-secret-key-edit-btn");
+wireMaskedSecretEdit("s-recaptcha-secret-key", "s-recaptcha-secret-key-edit-btn");
 
 document.getElementById("s-geoip-validate-btn").addEventListener("click", async () => {
 	const key = val("s-maxmind-key");
