@@ -1,0 +1,16 @@
+# gitleaks fingerprint ignore file (https://github.com/gitleaks/gitleaks#gitleaksignore).
+#
+# .gitleaks.toml's [allowlist] regexes only apply to content matching --
+# they can't reach a finding that's permanently baked into git history's
+# immutable blobs. These are the exact commits where setup.sh's
+# `MAXMIND_KEY=""` default (a false positive -- see the fix commit's own
+# message for the full root-cause writeup) briefly existed before being
+# fixed forward. Full-history gitleaks scans on push/tag events (see
+# ci.yml's secret-scan job) will re-flag these on every single run
+# forever otherwise, since the old commits themselves never change.
+#
+# Verified via a local `gitleaks detect --source . -v` against this exact
+# state of master -- these are the only two fingerprints it reports, not a
+# guess.
+9c554b6d91d245a6f9735e51695c94c65f364df6:setup.sh:generic-api-key:135
+1300d7dc8e1d93eaadbb6dda5e6dcd84f01e87cc:setup.sh:generic-api-key:135
