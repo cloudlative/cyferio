@@ -17,6 +17,23 @@
 </div>
 
 <div class="card">
+	<h2>VPN Access Restriction</h2>
+	<p class="muted" style="margin-top:-6px">Restrict your own VPN connections to one country. This only affects your VPN, never your ability to sign in to this portal. Leave unrestricted if you connect from more than one place.</p>
+	<form id="login-country-form">
+		<div class="form-row">
+			<div class="field">
+				<label for="vp-login-country">Permitted Country (VPN only)</label>
+				<select id="vp-login-country"></select>
+				<p class="field-hint" id="vp-login-country-hint"></p>
+			</div>
+		</div>
+		<div class="form-row" style="margin-top:14px">
+			<button type="submit" class="btn-primary" id="login-country-save-btn">Save Restriction</button>
+		</div>
+	</form>
+</div>
+
+<div class="card">
 	<div class="toolbar"><h2 style="margin:0">Current Session</h2></div>
 	<div id="vp-session"><p class="muted">Loading…</p></div>
 </div>
@@ -48,11 +65,39 @@
 
 {% block scripts %}
 <script>
+// Searchable country <select> (native browser type-ahead) -- same
+// ISO_3166_COUNTRIES list and populateCountrySelect() helper the admin-side
+// Login Restrictions pickers build on, just a single value here rather
+// than a multi-select (see routes/users.py's UpdateProfileRequest.
+// login_country docstring for why this is one field, not a toggle+list
+// pair). Writes through PATCH /api/users/me's login_country -- straight to
+// policy_store (VPN Access Restrictions), never touching Portal Login
+// Restrictions -- see that field's own docstring for the full picture.
+const loginCountrySelect = document.getElementById("vp-login-country");
+populateCountrySelect(loginCountrySelect, "");
+
+function renderLoginCountryHint(policy) {
+	const hintEl = document.getElementById("vp-login-country-hint");
+	const countries = (policy && policy.allowed_countries) || [];
+	if (countries.length > 1) {
+		// An admin set a multi-country VPN allowlist directly (Clients page
+		// -> Manage Restrictions) -- this single-select can only show/save
+		// one at a time, and saving here will collapse it down to just the
+		// selected country.
+		hintEl.textContent = `An admin has restricted this VPN profile to ${countries.length} countries. Saving here replaces that list with just the one you pick.`;
+	} else {
+		hintEl.textContent = "Leave blank to allow VPN connections from any country.";
+	}
+}
+
 async function loadMyProfile() {
 	try {
 		const p = await apiFetch("/api/me/vpn-profile");
 		document.getElementById("vp-name").textContent = p.vpn_client_name;
 		document.getElementById("vp-linked-at").textContent = p.linked_at ? fmtTimestamp(p.linked_at) : "—";
+		const currentCountries = (p.policy && p.policy.allowed_countries) || [];
+		loginCountrySelect.value = currentCountries[0] || "";
+		renderLoginCountryHint(p.policy);
 		const statusEl = document.getElementById("vp-status");
 		if (p.client_info && p.client_info.in_db === false) {
 			statusEl.innerHTML = '<span class="status-pill status-revoked">Not registered</span>';
@@ -132,6 +177,20 @@ async function loadMyProfile() {
 		document.getElementById("profile-summary").innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
 	}
 }
+
+document.getElementById("login-country-form").addEventListener("submit", async (ev) => {
+	ev.preventDefault();
+	try {
+		await apiFetch("/api/users/me", {
+			method: "PATCH",
+			body: { login_country: loginCountrySelect.value || null },
+		});
+		toast(loginCountrySelect.value ? `VPN login restricted to ${loginCountrySelect.options[loginCountrySelect.selectedIndex].text}.` : "VPN login country restriction removed.");
+		await loadMyProfile();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
 
 document.getElementById("vp-add-mac-form").addEventListener("submit", async (e) => {
 	e.preventDefault();
