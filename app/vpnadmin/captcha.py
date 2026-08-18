@@ -21,8 +21,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .config import settings
-
 # (widget script URL, siteverify URL) per provider -- everything both
 # providers need beyond the site/secret key pair itself.
 _PROVIDERS = {
@@ -45,11 +43,25 @@ _PROVIDERS = {
 }
 
 
+def _active_provider() -> str:
+    """Settings-page override (app_settings.runtime.captcha_provider) wins
+    over the CAPTCHA_PROVIDER env var, same DB-overrides-env layering as
+    every other AppSettings-backed value (see app_settings.py's
+    refresh_runtime_cache). Imported lazily to avoid a circular import at
+    module load time (app_settings imports from this package's models,
+    this module is imported early by routes/auth.py)."""
+    from . import app_settings
+    return app_settings.runtime.captcha_provider
+
+
 def _active_keys() -> tuple[str | None, str | None]:
-    if settings.CAPTCHA_PROVIDER == "turnstile":
-        return settings.TURNSTILE_SITE_KEY, settings.TURNSTILE_SECRET_KEY
-    if settings.CAPTCHA_PROVIDER == "recaptcha":
-        return settings.RECAPTCHA_SITE_KEY, settings.RECAPTCHA_SECRET_KEY
+    from . import app_settings
+
+    provider = _active_provider()
+    if provider == "turnstile":
+        return app_settings.runtime.turnstile_site_key, app_settings.runtime.turnstile_secret_key
+    if provider == "recaptcha":
+        return app_settings.runtime.recaptcha_site_key, app_settings.runtime.recaptcha_secret_key
     return None, None
 
 
@@ -68,7 +80,7 @@ def widget_context() -> dict | None:
     if not is_configured():
         return None
     site_key, _ = _active_keys()
-    p = _PROVIDERS[settings.CAPTCHA_PROVIDER]
+    p = _PROVIDERS[_active_provider()]
     return {"site_key": site_key, "widget_js": p["widget_js"], "widget_class": p["widget_class"]}
 
 
@@ -89,7 +101,7 @@ def verify(token: str, *, remote_ip: str | None = None) -> bool:
     site_key, secret_key = _active_keys()
     if not token or not secret_key:
         return False
-    siteverify_url = _PROVIDERS[settings.CAPTCHA_PROVIDER]["siteverify_url"]
+    siteverify_url = _PROVIDERS[_active_provider()]["siteverify_url"]
     body = urllib.parse.urlencode(
         {"secret": secret_key, "response": token, **({"remoteip": remote_ip} if remote_ip else {})}
     ).encode("ascii")
@@ -102,14 +114,51 @@ def verify(token: str, *, remote_ip: str | None = None) -> bool:
     return bool(result.get("success"))
 
 
+def diagnostic_check() -> dict:
+    """Settings-page "Test" button support (routes/settings.py's
+    POST /api/settings/captcha/test) -- deliberately NOT built on top of
+    verify() above, because verify() collapses "the provider correctly
+    rejected an invalid token" and "a network error/wrong secret key
+    happened" into the same `False` on purpose (see its own docstring --
+    that's the right behavior for the real login-gating path, but it's
+    exactly the distinction a diagnostic check needs to surface). Submits
+    the same kind of deliberately-invalid token, but reports transport
+    failures and malformed responses as their own `error` outcome instead
+    of silently returning as if the token were just rejected."""
+    if not is_configured():
+        return {"reachable": False, "error": "CAPTCHA is not configured."}
+    _, secret_key = _active_keys()
+    siteverify_url = _PROVIDERS[_active_provider()]["siteverify_url"]
+    body = urllib.parse.urlencode({"secret": secret_key, "response": "test-invalid-token-000000"}).encode("ascii")
+    req = urllib.request.Request(siteverify_url, data=body, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            status = resp.status
+            result = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        return {"reachable": False, "error": f"Provider returned HTTP {e.code} -- check the secret key."}
+    except (urllib.error.URLError, TimeoutError):
+        return {"reachable": False, "error": "Could not reach the provider -- check network connectivity."}
+    except ValueError:
+        return {"reachable": False, "error": "Provider response was not valid JSON."}
+    # A well-formed response at all (regardless of success/failure on this
+    # deliberately-bogus token) means the secret key was accepted and the
+    # provider is reachable -- both providers respond 200 with a JSON body
+    # even when rejecting the token itself, only a bad SECRET key or a
+    # malformed request produces something other than a normal 200+JSON
+    # response.
+    return {"reachable": status == 200 and isinstance(result, dict) and "success" in result, "error": None}
+
+
 def extract_token(form: dict) -> str:
     """Reads whichever field name the active provider's widget actually
     submits -- `cf-turnstile-response` (Turnstile) or `g-recaptcha-response`
     (reCAPTCHA) -- out of a form dict (request.form())/Form(...)-parsed
     body. Returns "" if unconfigured or the field is absent, same
     fail-closed shape as verify() itself."""
-    if settings.CAPTCHA_PROVIDER == "turnstile":
+    provider = _active_provider()
+    if provider == "turnstile":
         return (form.get("cf-turnstile-response") or "").strip()
-    if settings.CAPTCHA_PROVIDER == "recaptcha":
+    if provider == "recaptcha":
         return (form.get("g-recaptcha-response") or "").strip()
     return ""

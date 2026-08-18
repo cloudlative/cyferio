@@ -141,11 +141,12 @@
 				<h3>Top Source IPs</h3>
 				<div id="pua-top-ips"><p class="muted">No data in range.</p></div>
 			</div>
+			{% if features.geoip %}
 			<div class="ua-chart-card">
 				<h3>Country Distribution</h3>
 				<div class="chart-canvas-mount"><canvas id="pua-country-dist"></canvas></div>
-				<p class="muted" style="font-size:0.78rem;margin:8px 0 0">Requires MaxMind GeoLite2 databases to be present on the server -- shows nothing if they aren't (same as the Users page's country/city/ASN restriction pickers).</p>
 			</div>
+			{% endif %}
 			<div class="ua-chart-card">
 				<h3>Session Duration</h3>
 				<div id="pua-duration-summary" style="display:flex;gap:20px;margin-bottom:12px;flex-wrap:wrap"></div>
@@ -583,10 +584,16 @@ function renderPuaCharts() {
 	document.getElementById("pua-top-ips").innerHTML = (ipSummary.top_ips || []).length
 		? ipSummary.top_ips.map(r => `<div class="metric-row"><span class="mono">${escapeHtml(r.ip)}</span><span class="muted">${uaSessionCountLabel(r.count)}</span></div>`).join("")
 		: '<p class="muted">No data yet.</p>';
-	renderChart(
-		document.getElementById("pua-country-dist"),
-		buildChartJsConfig("donut", (ipSummary.country_distribution || []).map(r => ({ label: countryName(r.country), value: r.count })), { valueFormatter: uaSessionCountLabel }),
-	);
+	// Card is conditionally rendered based on the geoip feature flag (see
+	// the markup above) -- canvas is null otherwise, so this is skipped
+	// rather than crashing the rest of the page's charts.
+	const countryDistCanvas = document.getElementById("pua-country-dist");
+	if (countryDistCanvas) {
+		renderChart(
+			countryDistCanvas,
+			buildChartJsConfig("donut", (ipSummary.country_distribution || []).map(r => ({ label: countryName(r.country), value: r.count })), { valueFormatter: uaSessionCountLabel }),
+		);
+	}
 
 	// Session Duration Analytics.
 	const durations = rows.map(r => r.duration_seconds || 0).filter(d => d > 0);

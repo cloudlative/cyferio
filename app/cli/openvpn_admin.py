@@ -21,6 +21,8 @@ import argparse
 import dataclasses
 import json
 import os
+import re
+import subprocess
 import sys
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -59,6 +61,89 @@ def _err(e: OpenVPNError) -> int:
         "error": {"type": type(e).__name__, "detail": e.detail, "context": e.context},
     }))
     return 1
+
+
+_VPN_TOOLS_CONF = "/etc/openvpn/vpn-tools.conf"
+_MAXMIND_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{10,}$")
+
+
+def _upsert_maxmind_key(license_key: str) -> str:
+    """Idempotently sets MAXMIND_LICENSE_KEY in vpn-tools.conf -- the exact
+    same read/compare/sed-or-append logic setup.sh's own MaxMind Phase 3
+    already implements in bash, ported here so the Settings page's
+    "geoip-update" host action can do the identical thing without shelling
+    out to setup.sh itself (which does a lot more than this one step).
+    Returns a short human-readable status string for the caller's `data`.
+    Format-validated the same way setup.sh's own --maxmind-key check is --
+    a sanity check against an obvious paste error, not a full MaxMind-side
+    validation (that already happens client-side, see routes/settings.py's
+    /api/settings/geoip/validate, before this action is ever invoked)."""
+    if not _MAXMIND_KEY_RE.match(license_key):
+        raise ValidationError(
+            "License key doesn't look like a valid MaxMind license key "
+            "(expected 10+ alphanumeric/_/- characters).", value=license_key,
+        )
+
+    os.makedirs(os.path.dirname(_VPN_TOOLS_CONF), exist_ok=True)
+    if not os.path.exists(_VPN_TOOLS_CONF):
+        open(_VPN_TOOLS_CONF, "a").close()
+
+    with open(_VPN_TOOLS_CONF, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+
+    key_line = f"MAXMIND_LICENSE_KEY={license_key}"
+    found = False
+    changed = False
+    for i, line in enumerate(lines):
+        if line.startswith("MAXMIND_LICENSE_KEY="):
+            found = True
+            if line != key_line:
+                lines[i] = key_line
+                changed = True
+            break
+
+    if found:
+        status = "updated" if changed else "unchanged"
+    else:
+        lines += ["", "# MaxMind GeoLite2 license key -- set by the Settings page.", key_line]
+        status = "set"
+
+    if status != "unchanged":
+        with open(_VPN_TOOLS_CONF, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    os.chmod(_VPN_TOOLS_CONF, 0o640)
+    return status
+
+
+def _geoip_update(license_key: str | None) -> dict:
+    """Handles the Settings page's "Save & Refresh Databases" action --
+    optionally upserts the license key (see _upsert_maxmind_key above),
+    then runs the existing geoip-update.sh unchanged (see that script's own
+    header for what it does: geoipupdate if available, else a direct
+    per-edition HTTPS download; Country must succeed for overall success,
+    City/ASN failures are logged but don't fail this call, same as the
+    weekly systemd-timer-triggered run). geoip-update.sh lives at the repo
+    root -- _REPO_ROOT (module-level, see this file's own path-bootstrap
+    at the top) is exactly that directory, since this script's own known
+    location is app/cli/openvpn_admin.py."""
+    key_status = None
+    if license_key:
+        key_status = _upsert_maxmind_key(license_key)
+
+    script_path = os.path.join(_REPO_ROOT, "geoip-update.sh")
+    if not os.path.isfile(script_path):
+        raise OpenVPNError(f"geoip-update.sh not found at {script_path}.", path=script_path)
+
+    result = subprocess.run(
+        ["/bin/bash", script_path],
+        capture_output=True, text=True, timeout=300,
+    )
+    if result.returncode != 0:
+        raise OpenVPNError(
+            "geoip-update.sh failed -- see output for which edition(s) and why.",
+            exit_code=result.returncode, output=(result.stdout + result.stderr).strip()[-4000:],
+        )
+    return {"key_status": key_status, "output": result.stdout.strip()[-4000:]}
 
 
 def _paths_from_args(args: argparse.Namespace) -> OpenVPNPaths:
@@ -165,6 +250,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
 
     p = sub.add_parser(
+        "geoip-update",
+        help="Write MAXMIND_LICENSE_KEY into vpn-tools.conf (if given) and run geoip-update.sh -- "
+        "the host action Settings -> Geo/IP (MaxMind) triggers after a key is saved/changed.",
+    )
+    p.add_argument(
+        "--license-key", default=None,
+        help="MaxMind GeoLite2 license key to write into vpn-tools.conf before refreshing. "
+        "Omit to just re-run geoip-update.sh against whatever key is already there.",
+    )
+
+    p = sub.add_parser(
         "install-host-scripts",
         help="Deploy/repair the MAC-binding + per-client-restriction enforcement scripts "
         "(host-scripts/) on an ALREADY-installed server -- a fresh `install` already does "
@@ -260,6 +356,8 @@ def main(argv: list[str] | None = None) -> int:
             with ManagementClient(paths.management_socket) as mc:
                 result = mc.kill(name)
             return _ok({"name": name, "result": result})
+        elif args.action == "geoip-update":
+            return _ok(_geoip_update(args.license_key))
         elif args.action == "install-host-scripts":
             changes = host_scripts_manager.install_host_scripts(paths)
             restarted = False

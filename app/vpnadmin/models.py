@@ -493,6 +493,40 @@ class AppSettings(Base):
     # "24h" or "12h" -- paired with timezone above, same fmtTimestamp().
     time_format = Column(String(8), nullable=True)
 
+    # Optional integrations (see features.py) -- MaxMind GeoIP. The app
+    # previously had NO knowledge of the license key at all; it only lived
+    # in the host's /etc/openvpn/vpn-tools.conf, read by the host-side
+    # geoip-update.sh. Storing it here lets the Settings page manage it
+    # (add/update/disable/re-enable, see routes/settings.py's geoip
+    # endpoints) without SSHing in -- saving a key here still only takes
+    # effect on the host once routes/settings.py triggers the
+    # "geoip-update" host_executor action, which writes it into
+    # vpn-tools.conf and re-runs geoip-update.sh; this column is the
+    # source of truth the app shows back to the admin, not a live mirror
+    # of whatever's on the host filesystem (see geoip_enabled's own note
+    # on why enabling still checks file presence, not just this key).
+    # Plaintext, same precedent as smtp_password above -- no new
+    # encryption introduced for this column.
+    maxmind_license_key = Column(String(64), nullable=True)
+    # NULL/false = disabled even if a key IS stored -- lets an admin turn
+    # GeoIP off without losing/re-entering the key (see the "disable
+    # without reinstalling" / "re-enable later" requirements). True alone
+    # isn't sufficient for the feature to actually be usable -- see
+    # features.geoip_enabled(), which also checks the .mmdb file exists.
+    geoip_enabled = Column(Boolean, nullable=True)
+
+    # Optional integrations -- CAPTCHA. Mirrors config.py's env-var-only
+    # CAPTCHA_PROVIDER/TURNSTILE_*/RECAPTCHA_* as DB overrides, same
+    # nullable-column-falls-back-to-env-var layering as every setting
+    # above (see captcha.py's _active_keys(), updated to check these
+    # first). NULL provider = CAPTCHA disabled (falls back to whatever
+    # CAPTCHA_PROVIDER the environment has, including blank).
+    captcha_provider = Column(String(16), nullable=True)
+    turnstile_site_key = Column(String(255), nullable=True)
+    turnstile_secret_key = Column(String(255), nullable=True)  # plaintext, same precedent as smtp_password
+    recaptcha_site_key = Column(String(255), nullable=True)
+    recaptcha_secret_key = Column(String(255), nullable=True)  # plaintext, same precedent as smtp_password
+
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
 

@@ -65,6 +65,15 @@ static_version = _compute_static_version()
 # PATCH endpoint treats this exact string as "unchanged, don't touch it".
 SMTP_PASSWORD_PLACEHOLDER = "••••••••"
 
+# Same masking convention, reused verbatim, for the MaxMind license key and
+# both CAPTCHA providers' secret keys (turnstile_secret_key/
+# recaptcha_secret_key) -- see routes/settings.py's _serialize()/
+# update_settings(). Site keys (Turnstile/reCAPTCHA) are NOT masked: they're
+# public by design (shipped straight into the login page's HTML for every
+# visitor), so round-tripping them to the Settings page is no different
+# from any other non-secret field.
+SECRET_PLACEHOLDER = "••••••••"
+
 # The 6 named login/app themes, in rotation order -- must match the ids
 # used in static/style.css's `[data-theme="..."]` rules and
 # templates/partials/theme_bg_*.html. "auto" (rotation) is a settings value,
@@ -158,6 +167,25 @@ class _RuntimeSettings:
         self.timezone = env_settings.APP_TIMEZONE
         self.time_format = env_settings.APP_TIME_FORMAT
 
+        # Optional integrations (see features.py). geoip_enabled defaults
+        # to True (not False/NULL) here specifically because GeoIP was
+        # NEVER previously gated by any "enabled" flag -- it just worked
+        # whenever the .mmdb files happened to exist. An already-working
+        # deployment upgrading to this version must keep working exactly
+        # as before with zero admin action (see the plan's "Migration &
+        # rollout" section); defaulting True (ANDed with the actual file-
+        # presence check in features.geoip_enabled()) preserves that,
+        # while a genuinely fresh install with no .mmdb yet still
+        # correctly shows nothing until an admin configures it, since the
+        # file-presence half of that AND is what's actually false there.
+        self.geoip_enabled = True
+        self.maxmind_license_key = None  # no prior env var for this -- app never stored it before this feature
+        self.captcha_provider = env_settings.CAPTCHA_PROVIDER
+        self.turnstile_site_key = env_settings.TURNSTILE_SITE_KEY
+        self.turnstile_secret_key = env_settings.TURNSTILE_SECRET_KEY
+        self.recaptcha_site_key = env_settings.RECAPTCHA_SITE_KEY
+        self.recaptcha_secret_key = env_settings.RECAPTCHA_SECRET_KEY
+
 
 runtime = _RuntimeSettings()
 
@@ -215,6 +243,16 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.login_theme = row.login_theme or env_settings.LOGIN_THEME
     runtime.timezone = row.timezone or env_settings.APP_TIMEZONE
     runtime.time_format = row.time_format or env_settings.APP_TIME_FORMAT
+
+    # See _RuntimeSettings.__init__'s comment on why geoip_enabled defaults
+    # True, not False, when never explicitly set.
+    runtime.geoip_enabled = row.geoip_enabled if row.geoip_enabled is not None else True
+    runtime.maxmind_license_key = row.maxmind_license_key
+    runtime.captcha_provider = row.captcha_provider if row.captcha_provider is not None else env_settings.CAPTCHA_PROVIDER
+    runtime.turnstile_site_key = row.turnstile_site_key if row.turnstile_site_key is not None else env_settings.TURNSTILE_SITE_KEY
+    runtime.turnstile_secret_key = row.turnstile_secret_key if row.turnstile_secret_key is not None else env_settings.TURNSTILE_SECRET_KEY
+    runtime.recaptcha_site_key = row.recaptcha_site_key if row.recaptcha_site_key is not None else env_settings.RECAPTCHA_SITE_KEY
+    runtime.recaptcha_secret_key = row.recaptcha_secret_key if row.recaptcha_secret_key is not None else env_settings.RECAPTCHA_SECRET_KEY
 
     # Mirrors the one setting host-scripts/quota_enforcer.py needs but has
     # no DB access to read directly -- see policy_store.write_global_defaults

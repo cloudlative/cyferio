@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from .. import features
 from ..app_settings import apply_settings_globals
 from ..auth import get_current_user
 from ..db import get_db
@@ -70,6 +71,12 @@ def _ctx(user: User, db: Session, **extra) -> dict:
         # so Reports' own nav link/page stays visible under "can_view_reports"
         # even to accounts that can't see this specific section within it.
         "can_view_db_reporting": has_permission_any_scope(db, user, "db_reporting", "view"),
+        # Optional-integration state (see features.py) -- every template
+        # gets this for free via _ctx() the same way the flags above
+        # already work, so any page can do `{% if features.geoip %}`/
+        # `{% if features.captcha %}` around a section without its own
+        # route needing to know or care.
+        "features": {key: features.is_enabled(key) for key in features.FEATURES},
         **extra,
     }
 

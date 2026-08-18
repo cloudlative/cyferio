@@ -82,6 +82,63 @@
 	</div>
 
 	<div class="card">
+		<h2>Geo/IP (MaxMind)</h2>
+		<p class="muted" style="margin-top:0">Powers country/city/ASN/IP restrictions and geo reports app-wide (Clients, Users, My VPN Profile, Reports). Disabled and completely hidden from every page until a valid license key is saved here.</p>
+		<div class="form-grid">
+			<div class="field">
+				<label class="checkbox-label"><input type="checkbox" id="s-geoip-enabled"> Enable Geo/IP</label>
+			</div>
+			<div class="field">
+				<label for="s-maxmind-key">MaxMind License Key</label>
+				<input type="text" id="s-maxmind-key" class="mono" placeholder="Free at maxmind.com/en/geolite2/signup" autocomplete="off">
+				<p class="field-hint" id="s-geoip-db-status"></p>
+			</div>
+		</div>
+		<div class="form-row" style="margin-top:14px;gap:8px">
+			<button type="button" class="btn-secondary" id="s-geoip-validate-btn">Validate Key</button>
+			<button type="button" class="btn-secondary" id="s-geoip-refresh-btn">Save &amp; Refresh Databases</button>
+		</div>
+	</div>
+
+	<div class="card">
+		<h2>CAPTCHA</h2>
+		<p class="muted" style="margin-top:0">Bot-mitigation challenge on Login, Forgot Password, and Reset Password. Disabled and hidden from those pages until a provider and both keys are saved here.</p>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-captcha-provider">Provider</label>
+				<select id="s-captcha-provider">
+					<option value="">Disabled</option>
+					<option value="turnstile">Cloudflare Turnstile</option>
+					<option value="recaptcha">Google reCAPTCHA</option>
+				</select>
+			</div>
+		</div>
+		<div class="form-grid" id="s-captcha-turnstile-fields" style="display:none">
+			<div class="field">
+				<label for="s-turnstile-site-key">Turnstile Site Key</label>
+				<input type="text" id="s-turnstile-site-key" class="mono" autocomplete="off">
+			</div>
+			<div class="field">
+				<label for="s-turnstile-secret-key">Turnstile Secret Key</label>
+				<input type="text" id="s-turnstile-secret-key" class="mono" autocomplete="off">
+			</div>
+		</div>
+		<div class="form-grid" id="s-captcha-recaptcha-fields" style="display:none">
+			<div class="field">
+				<label for="s-recaptcha-site-key">reCAPTCHA Site Key</label>
+				<input type="text" id="s-recaptcha-site-key" class="mono" autocomplete="off">
+			</div>
+			<div class="field">
+				<label for="s-recaptcha-secret-key">reCAPTCHA Secret Key</label>
+				<input type="text" id="s-recaptcha-secret-key" class="mono" autocomplete="off">
+			</div>
+		</div>
+		<div class="form-row" style="margin-top:14px">
+			<button type="button" class="btn-secondary" id="s-captcha-test-btn">Test</button>
+		</div>
+	</div>
+
+	<div class="card">
 		<h2>User Management</h2>
 		<div class="form-grid">
 			<div class="field">
@@ -410,10 +467,88 @@ async function loadSettings() {
 
 		populateTimezoneSelect(s.timezone || "UTC");
 		document.getElementById("s-time-format").value = s.time_format || "24h";
+
+		// Optional integrations (see features.py) -- secret fields
+		// (maxmind_license_key/turnstile_secret_key/recaptcha_secret_key)
+		// round-trip the masked placeholder verbatim when already set;
+		// re-submitting an untouched field sends that same placeholder
+		// back, which the PATCH endpoint recognizes as "leave unchanged"
+		// (see routes/settings.py's own comment on this).
+		document.getElementById("s-geoip-enabled").checked = !!s.geoip_enabled;
+		setVal("s-maxmind-key", s.maxmind_license_key);
+		const dbBits = [];
+		if (!s.geoip_country_db_present) dbBits.push("Country db missing");
+		if (!s.geoip_city_db_present) dbBits.push("City db missing");
+		if (!s.geoip_asn_db_present) dbBits.push("ASN db missing");
+		document.getElementById("s-geoip-db-status").textContent = dbBits.length
+			? `${dbBits.join(", ")} -- Save & Refresh Databases below once a key is set.`
+			: "All 3 GeoLite2 databases are present on disk.";
+
+		document.getElementById("s-captcha-provider").value = s.captcha_provider || "";
+		setVal("s-turnstile-site-key", s.turnstile_site_key);
+		setVal("s-turnstile-secret-key", s.turnstile_secret_key);
+		setVal("s-recaptcha-site-key", s.recaptcha_site_key);
+		setVal("s-recaptcha-secret-key", s.recaptcha_secret_key);
+		updateCaptchaFieldVisibility();
 	} catch (e) {
 		toast(e.message, "error");
 	}
 }
+
+function updateCaptchaFieldVisibility() {
+	const provider = document.getElementById("s-captcha-provider").value;
+	document.getElementById("s-captcha-turnstile-fields").style.display = provider === "turnstile" ? "" : "none";
+	document.getElementById("s-captcha-recaptcha-fields").style.display = provider === "recaptcha" ? "" : "none";
+}
+document.getElementById("s-captcha-provider").addEventListener("change", updateCaptchaFieldVisibility);
+
+document.getElementById("s-geoip-validate-btn").addEventListener("click", async () => {
+	const key = val("s-maxmind-key");
+	if (!key || key === "••••••••") {
+		toast("Enter a license key first.", "error");
+		return;
+	}
+	try {
+		const result = await apiFetch("/api/settings/geoip/validate", { method: "POST", body: { license_key: key } });
+		toast(result.valid ? "Key is valid." : "MaxMind rejected this key -- check it's correct and not revoked.", result.valid ? "success" : "error");
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+document.getElementById("s-geoip-refresh-btn").addEventListener("click", async () => {
+	const btn = document.getElementById("s-geoip-refresh-btn");
+	btn.disabled = true;
+	btn.textContent = "Saving…";
+	try {
+		// Save first (so the host action has a key to work with even if
+		// this is the very first save), then trigger the actual refresh --
+		// two separate requests, same "PATCH just saves, action endpoints
+		// do the side-effecting work" split as everywhere else in this app.
+		await apiFetch("/api/settings", { method: "PATCH", body: {
+			geoip_enabled: document.getElementById("s-geoip-enabled").checked,
+			maxmind_license_key: val("s-maxmind-key") || null,
+		} });
+		btn.textContent = "Refreshing databases…";
+		await apiFetch("/api/settings/geoip/refresh", { method: "POST" });
+		toast("GeoIP databases refreshed.");
+		loadSettings();
+	} catch (e) {
+		toast(e.message, "error");
+	} finally {
+		btn.disabled = false;
+		btn.textContent = "Save & Refresh Databases";
+	}
+});
+
+document.getElementById("s-captcha-test-btn").addEventListener("click", async () => {
+	try {
+		const result = await apiFetch("/api/settings/captcha/test", { method: "POST" });
+		toast(result.reachable ? `${result.provider} is reachable and the secret key is accepted.` : (result.error || "Test failed."), result.reachable ? "success" : "error");
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
 
 document.getElementById("s-login-theme").addEventListener("change", () => {
 	renderThemeDescription();
@@ -471,6 +606,20 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		login_theme: document.getElementById("s-login-theme").value,
 		timezone: document.getElementById("s-timezone").value,
 		time_format: document.getElementById("s-time-format").value,
+		// geoip_enabled/maxmind_license_key are deliberately NOT included
+		// here -- they're saved through their own dedicated "Save &
+		// Refresh Databases" button/PATCH below instead (same "own form,
+		// own save action" split Outbound Email already uses). Bundling
+		// them into this general save would mean an admin saving an
+		// unrelated field (timezone, session timeout, ...) fails with
+		// "A MaxMind license key is required to enable Geo/IP" any time
+		// the Enable Geo/IP checkbox is on but no key is saved yet --
+		// exactly the cross-contamination this split avoids.
+		captcha_provider: document.getElementById("s-captcha-provider").value,
+		turnstile_site_key: val("s-turnstile-site-key") || null,
+		turnstile_secret_key: val("s-turnstile-secret-key") || null,
+		recaptcha_site_key: val("s-recaptcha-site-key") || null,
+		recaptcha_secret_key: val("s-recaptcha-secret-key") || null,
 	};
 	try {
 		await apiFetch("/api/settings", { method: "PATCH", body });

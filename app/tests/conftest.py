@@ -50,6 +50,17 @@ def _reset_runtime_settings():
         r.min_password_length = 8
         r.session_timeout_minutes = max(1, env_settings.SESSION_MAX_AGE_SECONDS // 60)
         r.audit_retention_days = None
+        # Optional integrations (see features.py) -- same leak risk as the
+        # fields above, e.g. test_settings.py saving a CAPTCHA/GeoIP config
+        # via the real PATCH endpoint must not bleed into an unrelated
+        # auth test that expects CAPTCHA disabled and GeoIP degraded.
+        r.geoip_enabled = True  # see app_settings.py's own comment on why True, not False, is the "untouched" default
+        r.maxmind_license_key = None
+        r.captcha_provider = env_settings.CAPTCHA_PROVIDER
+        r.turnstile_site_key = env_settings.TURNSTILE_SITE_KEY
+        r.turnstile_secret_key = env_settings.TURNSTILE_SECRET_KEY
+        r.recaptcha_site_key = env_settings.RECAPTCHA_SITE_KEY
+        r.recaptcha_secret_key = env_settings.RECAPTCHA_SECRET_KEY
 
     _reset()
     yield

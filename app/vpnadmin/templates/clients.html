@@ -142,8 +142,11 @@
 			</fieldset>
 			<fieldset>
 				<legend>VPN Access Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				{% if features.geoip %}
 				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the client's connecting IP at each VPN connection attempt -- MaxMind-based, so these are approximate, not exact-location guarantees. These affect VPN connections only. They're independent from a linked portal user's own Portal Login Restrictions (Edit User on the Users page) -- setting one has no effect on the other.</p>
+				{% endif %}
 				<div class="field-stack">
+					{% if features.geoip %}
 					<div class="field">
 						<label>Restrict by country <span class="muted">(blank = any country)</span></label>
 						<div id="policy-country-ms"></div>
@@ -164,6 +167,7 @@
 							<div id="policy-asns-ms"></div>
 						</div>
 					</div>
+					{% endif %}
 					<div class="field">
 						<label for="policy-allowed-ips">Restrict by IP address <span class="muted">(blank = any IP)</span></label>
 						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>

@@ -16,6 +16,7 @@
 	</div>
 </div>
 
+{% if features.geoip %}
 <div class="card">
 	<h2>VPN Access Restriction</h2>
 	<p class="muted" style="margin-top:-6px">Restrict your own VPN connections to one country. This only affects your VPN, never your ability to sign in to this portal. Leave unrestricted if you connect from more than one place.</p>
@@ -32,6 +33,7 @@
 		</div>
 	</form>
 </div>
+{% endif %}
 
 <div class="card">
 	<div class="toolbar"><h2 style="margin:0">Current Session</h2></div>
@@ -73,11 +75,16 @@
 // pair). Writes through PATCH /api/users/me's login_country -- straight to
 // policy_store (VPN Access Restrictions), never touching Portal Login
 // Restrictions -- see that field's own docstring for the full picture.
+// The whole "VPN Access Restriction" card (and therefore every element
+// referenced below) is conditionally rendered based on the geoip feature
+// flag (see the template markup above) -- null when GeoIP isn't
+// configured, so every reference is guarded rather than assumed present.
 const loginCountrySelect = document.getElementById("vp-login-country");
-populateCountrySelect(loginCountrySelect, "");
+if (loginCountrySelect) populateCountrySelect(loginCountrySelect, "");
 
 function renderLoginCountryHint(policy) {
 	const hintEl = document.getElementById("vp-login-country-hint");
+	if (!hintEl) return;
 	const countries = (policy && policy.allowed_countries) || [];
 	if (countries.length > 1) {
 		// An admin set a multi-country VPN allowlist directly (Clients page
@@ -96,7 +103,7 @@ async function loadMyProfile() {
 		document.getElementById("vp-name").textContent = p.vpn_client_name;
 		document.getElementById("vp-linked-at").textContent = p.linked_at ? fmtTimestamp(p.linked_at) : "—";
 		const currentCountries = (p.policy && p.policy.allowed_countries) || [];
-		loginCountrySelect.value = currentCountries[0] || "";
+		if (loginCountrySelect) loginCountrySelect.value = currentCountries[0] || "";
 		renderLoginCountryHint(p.policy);
 		const statusEl = document.getElementById("vp-status");
 		if (p.client_info && p.client_info.in_db === false) {
@@ -178,7 +185,7 @@ async function loadMyProfile() {
 	}
 }
 
-document.getElementById("login-country-form").addEventListener("submit", async (ev) => {
+document.getElementById("login-country-form")?.addEventListener("submit", async (ev) => {
 	ev.preventDefault();
 	try {
 		await apiFetch("/api/users/me", {

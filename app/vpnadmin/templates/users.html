@@ -129,8 +129,11 @@
 
 			<fieldset style="margin-top:16px">
 				<legend>Portal Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				{% if features.geoip %}
 				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees. These affect signing in to this web portal only -- they have no effect on VPN connections. To restrict VPN access instead, use VPN Access Restrictions below.</p>
+				{% endif %}
 				<div class="field-stack">
+					{% if features.geoip %}
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="u-restrict-country"> Restrict by country
 							<button type="button" class="info-tip" data-tip="Sign-in is only allowed from the countries you select below. Leave the list empty to allow any country." aria-label="More info on Restrict by country">i</button>
@@ -156,6 +159,7 @@
 							<div id="u-asns-ms"></div>
 						</div>
 					</div>
+					{% endif %}
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="u-restrict-ip"> Restrict by IP address
 							<button type="button" class="info-tip" data-tip="Sign-in is only allowed from the exact IPs or CIDR ranges listed below. Leave the list empty to allow any IP." aria-label="More info on Restrict by IP address">i</button>
@@ -168,8 +172,11 @@
 
 			<fieldset style="margin-top:16px">
 				<legend>VPN Access Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				{% if features.geoip %}
 				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the client's connecting IP at each VPN connection attempt. These affect VPN connections only -- they have no effect on portal sign-in. Independent from Portal Login Restrictions above.</p>
+				{% endif %}
 				<div class="field-stack">
+					{% if features.geoip %}
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-country"> Restrict by country</label>
 						<p class="field-hint">Empty list = any country.</p>
@@ -193,6 +200,7 @@
 							<div id="u-vpn-asns-ms"></div>
 						</div>
 					</div>
+					{% endif %}
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-ip"> Restrict by IP address</label>
 						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
@@ -309,8 +317,11 @@
 			</fieldset>
 			<fieldset>
 				<legend>Portal Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				{% if features.geoip %}
 				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees. These affect signing in to this web portal only -- they have no effect on VPN connections.</p>
+				{% endif %}
 				<div class="field-stack">
+					{% if features.geoip %}
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="e-restrict-country"> Restrict by country</label>
 						<p class="field-hint">Empty list = any country.</p>
@@ -334,6 +345,7 @@
 							<div id="e-asns-ms"></div>
 						</div>
 					</div>
+					{% endif %}
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="e-restrict-ip"> Restrict by IP address</label>
 						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
@@ -343,9 +355,12 @@
 			</fieldset>
 			<fieldset id="e-vpn-restrictions-fieldset">
 				<legend>VPN Access Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				{% if features.geoip %}
 				<p class="muted" style="margin-top:0" id="e-vpn-restrictions-intro">GeoIP and network (ASN) lookups on the client's connecting IP at each VPN connection attempt. These affect VPN connections only -- they have no effect on portal sign-in. Independent from Portal Login Restrictions above. Editing here and on the Clients page's Manage Restrictions dialog both edit the same restriction.</p>
+				{% endif %}
 				<p class="muted" id="e-vpn-restrictions-no-profile" style="display:none">No VPN profile is linked yet -- link one above, then reopen Edit User to set VPN Access Restrictions.</p>
 				<div class="field-stack" id="e-vpn-restrictions-fields">
+					{% if features.geoip %}
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-country"> Restrict by country</label>
 						<p class="field-hint">Empty list = any country.</p>
@@ -369,6 +384,7 @@
 							<div id="e-vpn-asns-ms"></div>
 						</div>
 					</div>
+					{% endif %}
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-ip"> Restrict by IP address</label>
 						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>

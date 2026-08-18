@@ -5,9 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy.orm import Session
 
-from .. import mailer, policy_store
-from ..app_settings import ACTIVE_THEME_IDS, THEME_CHOICES, get_settings_row, refresh_runtime_cache, runtime
+from .. import captcha, mailer, policy_store
+from ..app_settings import ACTIVE_THEME_IDS, SECRET_PLACEHOLDER, THEME_CHOICES, get_settings_row, refresh_runtime_cache, runtime
 from ..audit import log_action
+from ..config import settings as env_settings
 from ..db import get_db
 from ..models import RoleDef, User
 from ..permissions import require_permission
@@ -15,6 +16,8 @@ from ..permissions import require_permission
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 require_admin = require_permission("settings", "manage")  # former auth.require_admin, see permissions.py
+
+_CAPTCHA_PROVIDERS = ("turnstile", "recaptcha")
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -54,6 +57,54 @@ class UpdateSettingsRequest(BaseModel):
 
     timezone: str | None = None
     time_format: str | None = None
+
+    # Optional integrations (see features.py) -- MaxMind GeoIP.
+    geoip_enabled: bool | None = None
+    maxmind_license_key: str | None = None
+
+    # Optional integrations -- CAPTCHA. captcha_provider "" (empty string,
+    # distinct from None/omitted) explicitly disables CAPTCHA -- see its
+    # own validator below for why that distinction matters for a PATCH
+    # endpoint where "field omitted" already means something else (leave
+    # unchanged).
+    captcha_provider: str | None = None
+    turnstile_site_key: str | None = None
+    turnstile_secret_key: str | None = None
+    recaptcha_site_key: str | None = None
+    recaptcha_secret_key: str | None = None
+
+    @field_validator("maxmind_license_key")
+    @classmethod
+    def _maxmind_key_format(cls, v: str | None) -> str | None:
+        # Same sanity-only format check as setup.sh's --maxmind-key and
+        # cli/openvpn_admin.py's _upsert_maxmind_key -- an obvious paste
+        # error caught here, before ever reaching the host action. Real
+        # validation against MaxMind's own service happens via the
+        # separate POST /api/settings/geoip/validate endpoint below, which
+        # the Settings page calls before Save, not as part of this schema.
+        v = (v or "").strip() or None
+        if v == SECRET_PLACEHOLDER:
+            return v  # "unchanged" sentinel, handled in update_settings() below
+        if v and not re.match(r"^[A-Za-z0-9_-]{10,}$", v):
+            raise ValueError("Doesn't look like a valid MaxMind license key (expected 10+ alphanumeric/_/- characters).")
+        return v
+
+    @field_validator("captcha_provider")
+    @classmethod
+    def _captcha_provider_choice(cls, v: str | None) -> str | None:
+        # "" is a real, meaningful value here ("explicitly disabled"), NOT
+        # normalized to None the way most other optional string fields on
+        # this schema are -- None means "field omitted, don't touch",
+        # blank-string None-coalescing would make "disable CAPTCHA" and
+        # "leave CAPTCHA alone" indistinguishable over this PATCH endpoint.
+        if v is not None and v != "" and v not in _CAPTCHA_PROVIDERS:
+            raise ValueError(f"CAPTCHA provider must be blank (disabled), or one of: {', '.join(_CAPTCHA_PROVIDERS)}.")
+        return v
+
+    @field_validator("turnstile_site_key", "turnstile_secret_key", "recaptcha_site_key", "recaptcha_secret_key")
+    @classmethod
+    def _captcha_key_strip(cls, v: str | None) -> str | None:
+        return (v or "").strip() or None
 
     @field_validator("portal_url")
     @classmethod
@@ -243,6 +294,16 @@ def _serialize() -> dict:
         "login_theme": s.login_theme or "auto",
         "timezone": s.timezone,
         "time_format": s.time_format,
+        # Optional integrations -- see features.py.
+        "geoip_enabled": s.geoip_enabled,
+        "maxmind_license_key": SECRET_PLACEHOLDER if s.maxmind_license_key else None,
+        "captcha_provider": s.captcha_provider or "",
+        # Site keys are public by design (shipped to every visitor's
+        # browser already) -- not masked, unlike the two secret keys below.
+        "turnstile_site_key": s.turnstile_site_key,
+        "turnstile_secret_key": SECRET_PLACEHOLDER if s.turnstile_secret_key else None,
+        "recaptcha_site_key": s.recaptcha_site_key,
+        "recaptcha_secret_key": SECRET_PLACEHOLDER if s.recaptcha_secret_key else None,
     }
 
 
@@ -259,6 +320,14 @@ def get_settings(_: User = Depends(require_admin), db: Session = Depends(get_db)
         {"slug": r.slug, "name": r.name}
         for r in db.query(RoleDef).filter(RoleDef.slug != "super_admin").order_by(RoleDef.name).all()
     ]
+    # Lets the Settings page distinguish "toggled on but the DB hasn't
+    # downloaded yet" from "actually working" -- see features.geoip_enabled's
+    # own AND-with-file-presence logic, surfaced here for the UI (Diagnostics-
+    # style status line under the GeoIP card), not just enforced server-side.
+    from pathlib import Path
+    body["geoip_country_db_present"] = Path(env_settings.GEOIP_DB_PATH).is_file()
+    body["geoip_city_db_present"] = Path(env_settings.GEOIP_CITY_DB_PATH).is_file()
+    body["geoip_asn_db_present"] = Path(env_settings.GEOIP_ASN_DB_PATH).is_file()
     return body
 
 
@@ -278,12 +347,52 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                    "notify_admin_on_user_created", "notify_admin_on_client_revoked",
                    "quota_notify_warning_pct", "quota_notify_critical_pct", "notify_admin_on_quota_critical",
                    "reports_default_range_days", "db_snapshot_retention_days", "maintenance_mode", "maintenance_message",
-                   "notification_duration_ms", "login_theme", "timezone", "time_format"):
+                   "notification_duration_ms", "login_theme", "timezone", "time_format",
+                   "geoip_enabled"):
         if field in fields_set:
             value = getattr(body, field)
             if value != getattr(row, field):
                 setattr(row, field, value)
                 changes.append(field)
+
+    # Secret-bearing fields: an incoming value exactly equal to
+    # SECRET_PLACEHOLDER means "unchanged" (the Settings page always
+    # round-trips whatever GET returned, which is the placeholder for any
+    # already-set secret -- see _serialize()) -- same convention
+    # email_providers.py's own PATCH endpoint already established. Site
+    # keys (turnstile_site_key/recaptcha_site_key) are plain fields, not
+    # secrets, and go through the loop above unmasked.
+    for field in ("maxmind_license_key", "turnstile_secret_key", "recaptcha_secret_key"):
+        if field in fields_set:
+            value = getattr(body, field)
+            if value == SECRET_PLACEHOLDER:
+                continue
+            if value != getattr(row, field):
+                setattr(row, field, value)
+                changes.append(field)
+
+    if "captcha_provider" in fields_set:
+        # "" is the real "explicitly disabled" value (see the schema's own
+        # validator) -- distinct from omitted, which reaches this branch
+        # not at all (fields_set check above).
+        new_provider = body.captcha_provider or None
+        if new_provider != row.captcha_provider:
+            row.captcha_provider = new_provider
+            changes.append("captcha_provider")
+    if "turnstile_site_key" in fields_set and body.turnstile_site_key != row.turnstile_site_key:
+        row.turnstile_site_key = body.turnstile_site_key
+        changes.append("turnstile_site_key")
+    if "recaptcha_site_key" in fields_set and body.recaptcha_site_key != row.recaptcha_site_key:
+        row.recaptcha_site_key = body.recaptcha_site_key
+        changes.append("recaptcha_site_key")
+
+    if row.captcha_provider == "turnstile" and not (row.turnstile_site_key and row.turnstile_secret_key):
+        raise HTTPException(status_code=400, detail="Turnstile requires both a site key and a secret key.")
+    if row.captcha_provider == "recaptcha" and not (row.recaptcha_site_key and row.recaptcha_secret_key):
+        raise HTTPException(status_code=400, detail="reCAPTCHA requires both a site key and a secret key.")
+
+    if row.geoip_enabled and not row.maxmind_license_key:
+        raise HTTPException(status_code=400, detail="A MaxMind license key is required to enable Geo/IP.")
 
     if (row.notify_admin_on_user_created or row.notify_admin_on_client_revoked or row.notify_admin_on_quota_critical) and not row.admin_notification_email:
         raise HTTPException(status_code=400, detail="An admin notification email is required to enable event notifications.")
@@ -306,6 +415,115 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
         refresh_runtime_cache(db)
         log_action(db, admin, "update_settings", detail="; ".join(changes))
     return _serialize()
+
+
+# --- Optional integrations: MaxMind GeoIP -----------------------------------
+
+class ValidateGeoipKeyRequest(BaseModel):
+    license_key: str
+
+
+@router.post("/geoip/validate")
+def validate_geoip_key(body: ValidateGeoipKeyRequest, _: User = Depends(require_admin)):
+    """Checks a MaxMind license key against MaxMind's own download
+    endpoint -- the SAME URL geoip-update.sh's fetch_edition already
+    downloads from -- but only reads the HTTP status (200 = valid, 401/403
+    = bad/revoked key), never the response body, so this is fast (no
+    multi-MB archive transfer) and stdlib-only (urllib, same "no new
+    dependency" convention as captcha.py/mailer.py). Called by the
+    Settings page's "Validate Key" button, BEFORE Save -- this never
+    writes anything, purely a read-only check against MaxMind."""
+    import urllib.error
+    import urllib.request
+
+    key = body.license_key.strip()
+    if not re.match(r"^[A-Za-z0-9_-]{10,}$", key):
+        raise HTTPException(status_code=400, detail="Doesn't look like a valid MaxMind license key.")
+    url = f"https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&license_key={key}&suffix=tar.gz"
+    try:
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            valid = resp.status == 200
+    except urllib.error.HTTPError as e:
+        valid = False
+        if e.code not in (401, 403):
+            # An unexpected status (not the two MaxMind uses for a bad
+            # key) -- surface it rather than silently reporting "invalid",
+            # which would be misleading if e.g. MaxMind itself is down.
+            raise HTTPException(status_code=502, detail=f"MaxMind returned an unexpected status ({e.code}) -- try again shortly.")
+    except (urllib.error.URLError, TimeoutError):
+        raise HTTPException(status_code=502, detail="Could not reach MaxMind to validate this key -- check network connectivity and try again.")
+    return {"valid": valid}
+
+
+def _host_executor_config():
+    from services.system.host_executor import HostExecutorConfig
+
+    if not env_settings.HOST_SSH_TARGET or not env_settings.HOST_SSH_KEY_PATH:
+        raise HTTPException(
+            status_code=400,
+            detail="Host executor is not configured -- set HOST_SSH_TARGET and "
+            "HOST_SSH_KEY_PATH (see .env.example) before GeoIP refresh can run.",
+        )
+    return HostExecutorConfig(
+        ssh_key_path=env_settings.HOST_SSH_KEY_PATH,
+        ssh_target=env_settings.HOST_SSH_TARGET,
+        remote_script_path=env_settings.HOST_SSH_REMOTE_SCRIPT_PATH,
+        use_sudo=env_settings.HOST_SSH_USE_SUDO,
+        timeout_seconds=max(env_settings.HOST_SSH_TIMEOUT_SECONDS, 300),  # a real download can take longer than a session kill
+        ssh_port=env_settings.HOST_SSH_PORT,
+    )
+
+
+@router.post("/geoip/refresh")
+def refresh_geoip(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Triggers the host-side "geoip-update" action (see
+    cli/openvpn_admin.py's _geoip_update / host_executor.py) -- writes the
+    currently-saved maxmind_license_key into the host's vpn-tools.conf (if
+    set) and re-runs geoip-update.sh. Separate from PATCH /api/settings on
+    purpose: PATCH only ever touches the DB, fast and side-effect-free;
+    this is the one explicit action that reaches out over SSH and can take
+    up to a few minutes (3 full GeoLite2 editions), so the Settings page
+    calls it explicitly (its "Save & Refresh Databases" button) rather
+    than it being an invisible side effect of every settings save,
+    including ones that never touched GeoIP at all."""
+    from services.openvpn.exceptions import HostExecutorError, OpenVPNError
+    from services.system.host_executor import run_host_command
+
+    row = get_settings_row(db)
+    if not row.geoip_enabled:
+        raise HTTPException(status_code=400, detail="Enable Geo/IP and save before refreshing.")
+    if not row.maxmind_license_key:
+        raise HTTPException(status_code=400, detail="No MaxMind license key is saved yet.")
+
+    config = _host_executor_config()
+    try:
+        args = ["--license-key", row.maxmind_license_key]
+        data = run_host_command(config, "geoip-update", *args)
+    except (OpenVPNError, HostExecutorError) as e:
+        raise HTTPException(status_code=502, detail=f"GeoIP refresh failed: {e.detail}")
+    log_action(db, admin, "geoip_refresh", detail="triggered via Settings")
+    return data
+
+
+# --- Optional integrations: CAPTCHA ------------------------------------------
+
+@router.post("/captcha/test")
+def test_captcha(_: User = Depends(require_admin)):
+    """Calls the ACTIVE (already-saved) provider's siteverify with a
+    deliberately-invalid token and checks for a well-formed JSON response.
+    This proves the secret key is accepted and the provider is reachable
+    -- it can NOT prove the full widget flow works (that needs a real
+    solved challenge from an actual browser, which this save-time check
+    has no way to produce) -- the Settings page's "Test" button surfaces
+    this distinction in its own copy, not just here."""
+    if not captcha.is_configured():
+        raise HTTPException(status_code=400, detail="No CAPTCHA provider is configured yet.")
+    result = captcha.diagnostic_check()
+    result["provider"] = runtime.captcha_provider
+    result["note"] = ("This confirms the secret key is accepted and the provider is reachable -- "
+                       "it does not exercise the actual widget, which needs a real browser round-trip.")
+    return result
 
 
 # Outbound email provider configuration/testing (SMTP, Resend, ...) moved
