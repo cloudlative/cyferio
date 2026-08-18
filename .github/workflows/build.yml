@@ -110,7 +110,13 @@ jobs:
           echo "image=$(echo "$tags" | head -n1)" >> "$GITHUB_OUTPUT"
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.36.0
+        # Pinned to the exact commit v0.36.0 resolves to, not the mutable
+        # tag itself -- flagged by Semgrep's github-actions-mutable-action-
+        # tag rule, citing trivy-action's own past history of tag-
+        # repointing supply-chain compromises. A tag can be silently
+        # repointed by the action owner (or an attacker who compromises
+        # their account); a commit SHA can't be.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.ref.outputs.image }}
           format: sarif
