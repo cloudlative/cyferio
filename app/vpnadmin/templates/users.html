@@ -536,8 +536,8 @@ closeOnBackdropClick(document.getElementById("add-user-dialog"));
 // selection from the just-created user).
 function resetAddUserForm() {
 	document.getElementById("add-user-form").reset();
-	document.getElementById("u-password").type = "password";
-	document.getElementById("u-password-confirm").type = "password";
+	resetPasswordVisibility(document.getElementById("u-password"));
+	resetPasswordVisibility(document.getElementById("u-password-confirm"));
 	addTeamMs.reset();
 	addPhone.reset();
 	addCountriesMs.reset();
@@ -1099,9 +1099,9 @@ function openEdit(u) {
 	document.getElementById("e-role").disabled = editingUserIsBootstrapAdmin;
 	document.getElementById("e-active").disabled = editingUserIsBootstrapAdmin;
 	document.getElementById("e-password").value = "";
-	document.getElementById("e-password").type = "password";
+	resetPasswordVisibility(document.getElementById("e-password"));
 	document.getElementById("e-password-confirm").value = "";
-	document.getElementById("e-password-confirm").type = "password";
+	resetPasswordVisibility(document.getElementById("e-password-confirm"));
 	document.getElementById("e-restrict-country").checked = !!u.restrict_login_by_country;
 	editCountriesMs.setSelected(u.allowed_login_countries || []);
 	document.getElementById("e-restrict-city").checked = !!u.restrict_login_by_city;

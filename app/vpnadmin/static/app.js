@@ -1932,3 +1932,77 @@ document.addEventListener("click", (e) => {
 	refresh();
 	setInterval(refresh, 60000);
 })();
+
+/**
+ * Show/hide toggle for every password field app-wide -- login, forgot/reset
+ * password, change-password, profile, and every password input in the Users
+ * page's Add/Edit/Reset-Password dialogs. One pass over
+ * `input[type="password"]` here rather than per-template wiring, so a new
+ * password field added anywhere later gets the toggle for free with zero
+ * extra markup -- same "just works everywhere" shape as the .info-tip
+ * delegated handler above.
+ *
+ * Every match gets wrapped in a `.password-toggle-wrap` (position:relative)
+ * so the toggle button can sit absolutely inside it without touching the
+ * input's own layout role -- this matters for e.g. `.password-field-row`
+ * (users.html's Reset Password dialog), where the input is itself a flex
+ * item next to a "Generate" button: swapping in a wrapper div rather than
+ * inserting the button as the input's own next sibling keeps that existing
+ * flex pairing intact (see .password-toggle-wrap's `flex: 1` in style.css).
+ * Runs once at script-load time, not on DOMContentLoaded -- this <script>
+ * tag is the last thing base.html renders, after every block's markup
+ * (including the dialogs below), so the DOM is already complete by the time
+ * this line runs (same assumption every other top-level IIFE in this file
+ * already makes).
+ *
+ * Toggling `type` between "password" and "text" never touches `name`,
+ * `id`, `required`, `autocomplete`, or the field's current `value` --
+ * those are unrelated attributes/properties, so nothing about what the
+ * form submits changes because the toggle was clicked.
+ */
+(function initPasswordToggles() {
+	const EYE_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+	const EYE_OFF_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a20.3 20.3 0 0 1 5.06-6.06M9.9 4.24A10.4 10.4 0 0 1 12 4c7 0 11 8 11 8a20.28 20.28 0 0 1-3.22 4.44M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+	document.querySelectorAll('input[type="password"]').forEach((input) => {
+		// Already wrapped (defensive -- nothing currently calls this twice,
+		// but harmless to guard against a future double-init).
+		if (input.closest(".password-toggle-wrap")) return;
+
+		const wrap = document.createElement("div");
+		wrap.className = "password-toggle-wrap";
+		input.parentNode.insertBefore(wrap, input);
+		wrap.appendChild(input);
+
+		const btn = document.createElement("button");
+		btn.type = "button"; // never "submit" -- must not trigger the surrounding <form>
+		btn.className = "password-toggle-btn";
+		btn.setAttribute("aria-label", "Show password");
+		btn.innerHTML = EYE_ICON;
+		wrap.appendChild(btn);
+
+		btn.addEventListener("click", () => {
+			const showing = input.type === "text";
+			input.type = showing ? "password" : "text";
+			btn.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+			btn.innerHTML = showing ? EYE_ICON : EYE_OFF_ICON;
+		});
+	});
+
+	// A handful of templates (users.html's Add/Edit User dialogs) reset a
+	// password input's `.type` back to "password" straight from their own
+	// form-reset code, bypassing the click handler above entirely -- doing
+	// that with a bare `el.type = "password"` would leave the toggle button
+	// showing its "hide"/eye-slash state (and stale aria-label) even though
+	// the field itself is masked again. Exposed globally so those reset
+	// paths can call this instead of touching `.type` directly, keeping the
+	// button's icon/label in sync with the field's actual visibility.
+	window.resetPasswordVisibility = function (input) {
+		if (!input) return;
+		input.type = "password";
+		const btn = input.closest(".password-toggle-wrap")?.querySelector(".password-toggle-btn");
+		if (!btn) return;
+		btn.setAttribute("aria-label", "Show password");
+		btn.innerHTML = EYE_ICON;
+	};
+})();

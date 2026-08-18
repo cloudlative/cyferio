@@ -968,6 +968,41 @@ input[type="radio"]:disabled { opacity: 0.5; cursor: not-allowed; }
 .password-field-row input { flex: 1; min-width: 0; }
 .password-field-row button { flex: 0 0 auto; white-space: nowrap; }
 
+/* --- Password show/hide toggle (app.js's initPasswordToggles) ----------
+   Wraps every input[type=password] app-wide. `flex: 1` here (not on the
+   input directly, per initPasswordToggles' own docstring) is what keeps
+   `.password-field-row`'s input+"Generate"-button flex pairing intact once
+   the input is one level deeper inside this wrapper -- harmless outside a
+   flex parent (a `flex` value on a non-flex-item is simply ignored). Extra
+   right padding on the input makes room for the button without it
+   overlapping typed text; same border/background/radius language as every
+   other text input in style.css, just scoped narrowly enough not to need
+   redeclaring those here. */
+.password-toggle-wrap { position: relative; flex: 1; min-width: 0; }
+.password-toggle-wrap input[type="password"],
+.password-toggle-wrap input[type="text"] { padding-right: 42px; }
+.password-toggle-btn {
+	position: absolute;
+	top: 50%;
+	right: 4px;
+	transform: translateY(-50%);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	padding: 0;
+	border: none;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--text-faint);
+	box-shadow: none;
+	cursor: pointer;
+}
+.password-toggle-btn:hover { color: var(--text-muted); background: var(--surface-alt); transform: translateY(-50%); }
+.password-toggle-btn:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; color: var(--accent-2); }
+.password-toggle-btn svg { display: block; }
+
 /* Generic input+button row -- same flex layout as .password-field-row
    above, just not password-specific (e.g. the OpenVPN Install page's Port
    field + "Default" reset button). Kept as its own class rather than
