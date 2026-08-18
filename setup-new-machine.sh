@@ -399,30 +399,46 @@ SCRIPT
 
 	# authorized_keys entry for $DEPLOY_USER -- appended, never overwritten
 	# wholesale (that file may already carry the operator's own login
-	# key). Matches either the current or the pre-rename -C comment
-	# string -- a box whose key file got renamed above (reusing the same
-	# bytes) still has the OLD comment baked into that already-written
-	# authorized_keys line, since ssh-keygen embeds -C at generation time
-	# and that branch never regenerates the key. The line's content can
-	# still be stale even when the comment matches, though: its
-	# command="$FORCED_COMMAND_SCRIPT" path is REPO_DIR-dependent, and a
-	# box migrated from /opt/openvpn-toolkit to /opt/cyferio has an old
-	# path baked in that a bare "comment already present -> skip" check
-	# would leave broken forever (same "detect stale content, replace in
-	# place" reasoning host_scripts_manager.py's server.conf block uses).
+	# key). Matched by the actual KEY MATERIAL (the "type base64blob"
+	# fields), not by the -C comment string -- found live on a box
+	# provisioned before a naming convention settled ("openvpn-toolkit-
+	# host-executor", no "-app-" in the middle, unlike every other box's
+	# "openvpn-toolkit-app-host-executor"): matching on comment text is
+	# only ever as good as having enumerated every historical variant,
+	# and this one wasn't. A key's base64 material can't have that kind
+	# of drift, so it's the one thing safe to match on regardless of
+	# whatever comment any past version of this script (or a manual
+	# setup) happened to embed. The line's content can still be stale
+	# even when the key matches: its command="$FORCED_COMMAND_SCRIPT"
+	# path is REPO_DIR-dependent, and a box migrated from
+	# /opt/openvpn-toolkit to /opt/cyferio has an old path baked in that
+	# a bare "this key is already present -> skip" check would leave
+	# broken forever (same "detect stale content, replace in place"
+	# reasoning host_scripts_manager.py's server.conf block uses) --
+	# found exactly this live on a real box: the stale line's forced-
+	# command script no longer existed at its old path, so every
+	# invocation over this key failed with "No such file or directory"
+	# until the entry was corrected.
 	mkdir -p "$DEPLOY_USER_SSH_DIR"
 	touch "$DEPLOY_USER_SSH_DIR/authorized_keys"
 	chmod 700 "$DEPLOY_USER_SSH_DIR"
 	chmod 600 "$DEPLOY_USER_SSH_DIR/authorized_keys"
 	chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_USER_SSH_DIR"
+	KEY_MATERIAL=$(awk '{print $1, $2}' "$DEPLOY_KEY.pub")
 	DESIRED_AUTHKEYS_LINE=$(printf 'command="%s",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty %s' \
 		"$FORCED_COMMAND_SCRIPT" "$(cat "$DEPLOY_KEY.pub")")
 	if grep -qF "$DESIRED_AUTHKEYS_LINE" "$DEPLOY_USER_SSH_DIR/authorized_keys" 2>/dev/null; then
 		log "  authorized_keys entry for $DEPLOY_USER already present and up to date -- left as-is."
-	elif grep -qE "openvpn-toolkit-app-host-executor|cyferio-app-host-executor" "$DEPLOY_USER_SSH_DIR/authorized_keys" 2>/dev/null; then
-		sed -i -E "/openvpn-toolkit-app-host-executor|cyferio-app-host-executor/d" "$DEPLOY_USER_SSH_DIR/authorized_keys"
+	elif grep -qF "$KEY_MATERIAL" "$DEPLOY_USER_SSH_DIR/authorized_keys" 2>/dev/null; then
+		# Drop every line carrying this key's material (there could be
+		# more than one stale duplicate left over from an earlier bad
+		# run) and append one fresh, correct line.
+		grep -vF "$KEY_MATERIAL" "$DEPLOY_USER_SSH_DIR/authorized_keys" > "$DEPLOY_USER_SSH_DIR/authorized_keys.tmp"
+		mv "$DEPLOY_USER_SSH_DIR/authorized_keys.tmp" "$DEPLOY_USER_SSH_DIR/authorized_keys"
+		chmod 600 "$DEPLOY_USER_SSH_DIR/authorized_keys"
+		chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_USER_SSH_DIR/authorized_keys"
 		printf '%s\n' "$DESIRED_AUTHKEYS_LINE" >> "$DEPLOY_USER_SSH_DIR/authorized_keys"
-		log "  updated a stale authorized_keys entry for $DEPLOY_USER (command= path or comment had changed)."
+		log "  updated a stale authorized_keys entry for $DEPLOY_USER (command= path had changed)."
 	else
 		printf '%s\n' "$DESIRED_AUTHKEYS_LINE" >> "$DEPLOY_USER_SSH_DIR/authorized_keys"
 		log "  added authorized_keys entry for $DEPLOY_USER"
@@ -430,8 +446,11 @@ SCRIPT
 
 	# Clean up any earlier root-based setup from before this script existed
 	# (see the migration this was written for) -- safe no-op if none exists.
-	if [[ -f /root/.ssh/authorized_keys ]] && grep -qE "openvpn-toolkit-app-host-executor|cyferio-app-host-executor" /root/.ssh/authorized_keys 2>/dev/null; then
-		sed -i -E '/openvpn-toolkit-app-host-executor|cyferio-app-host-executor/d' /root/.ssh/authorized_keys
+	# Matched by key material, same reasoning as above.
+	if [[ -f /root/.ssh/authorized_keys ]] && grep -qF "$KEY_MATERIAL" /root/.ssh/authorized_keys 2>/dev/null; then
+		grep -vF "$KEY_MATERIAL" /root/.ssh/authorized_keys > /root/.ssh/authorized_keys.tmp
+		mv /root/.ssh/authorized_keys.tmp /root/.ssh/authorized_keys
+		chmod 600 /root/.ssh/authorized_keys
 		log "  removed a pre-existing root authorized_keys entry for this key (migrating off root login)."
 	fi
 
