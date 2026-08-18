@@ -116,7 +116,10 @@
 		<div class="form-grid" id="s-captcha-turnstile-fields" style="display:none">
 			<div class="field">
 				<label for="s-turnstile-site-key">Turnstile Site Key</label>
-				<input type="text" id="s-turnstile-site-key" class="mono" autocomplete="off">
+				<div style="display:flex;gap:8px">
+					<input type="text" id="s-turnstile-site-key" class="mono" autocomplete="off" style="flex:1">
+					<button type="button" class="btn-secondary btn-sm" id="s-turnstile-site-key-edit-btn" style="display:none">Edit</button>
+				</div>
 			</div>
 			<div class="field">
 				<label for="s-turnstile-secret-key">Turnstile Secret Key</label>
@@ -497,6 +500,7 @@ async function loadSettings() {
 		setVal("s-recaptcha-secret-key", s.recaptcha_secret_key);
 		applyMaskedSecretLock("s-turnstile-secret-key", "s-turnstile-secret-key-edit-btn");
 		applyMaskedSecretLock("s-recaptcha-secret-key", "s-recaptcha-secret-key-edit-btn");
+		applyFilledFieldLock("s-turnstile-site-key", "s-turnstile-site-key-edit-btn");
 		updateCaptchaFieldVisibility();
 	} catch (e) {
 		toast(e.message, "error");
@@ -510,22 +514,33 @@ function updateCaptchaFieldVisibility() {
 }
 document.getElementById("s-captcha-provider").addEventListener("change", updateCaptchaFieldVisibility);
 
-// Masked-secret lock/edit UX for the CAPTCHA secret keys: a saved secret
-// loads greyed out (disabled, matching style.css's input:disabled look)
-// showing the "••••••••" mask, not a live editable field an admin could
-// accidentally overtype or partially paste into. Edit clears it and hands
-// control back, at which point val() reads whatever gets typed. Leaving a
-// field alone re-submits the mask unchanged, which routes/settings.py's
-// PATCH already treats as "keep the existing secret" (same convention as
-// the MaxMind license key field).
-function applyMaskedSecretLock(inputId, editBtnId) {
+// Lock/edit UX for the CAPTCHA fields: once a value is already saved, the
+// field loads greyed out (disabled, matching style.css's input:disabled
+// look) instead of a live editable field an admin could accidentally
+// overtype or partially paste into. Edit clears it and hands control
+// back, at which point val() reads whatever gets typed. Two variants:
+// SECRET keys lock on the "••••••••" mask specifically (routes/settings.py's
+// PATCH treats that exact placeholder as "keep the existing secret", same
+// convention as the MaxMind license key field) -- leaving one alone
+// re-submits the mask unchanged. The Turnstile SITE key isn't a secret
+// (it's meant to be public, unmasked in every GET response), so it locks
+// on "already has any value" instead -- there's no placeholder to leave
+// unchanged, so Edit clearing it means the next save genuinely replaces
+// it, same as typing over any other field once unlocked.
+function applyFieldLock(inputId, editBtnId, isLocked) {
 	const input = document.getElementById(inputId);
 	const editBtn = document.getElementById(editBtnId);
-	const masked = input.value === "••••••••";
-	input.disabled = masked;
-	editBtn.style.display = masked ? "" : "none";
+	const locked = isLocked(input.value);
+	input.disabled = locked;
+	editBtn.style.display = locked ? "" : "none";
 }
-function wireMaskedSecretEdit(inputId, editBtnId) {
+function applyMaskedSecretLock(inputId, editBtnId) {
+	applyFieldLock(inputId, editBtnId, (v) => v === "••••••••");
+}
+function applyFilledFieldLock(inputId, editBtnId) {
+	applyFieldLock(inputId, editBtnId, (v) => v !== "");
+}
+function wireFieldEdit(inputId, editBtnId) {
 	const input = document.getElementById(inputId);
 	const editBtn = document.getElementById(editBtnId);
 	editBtn.addEventListener("click", () => {
@@ -535,8 +550,9 @@ function wireMaskedSecretEdit(inputId, editBtnId) {
 		editBtn.style.display = "none";
 	});
 }
-wireMaskedSecretEdit("s-turnstile-secret-key", "s-turnstile-secret-key-edit-btn");
-wireMaskedSecretEdit("s-recaptcha-secret-key", "s-recaptcha-secret-key-edit-btn");
+wireFieldEdit("s-turnstile-secret-key", "s-turnstile-secret-key-edit-btn");
+wireFieldEdit("s-recaptcha-secret-key", "s-recaptcha-secret-key-edit-btn");
+wireFieldEdit("s-turnstile-site-key", "s-turnstile-site-key-edit-btn");
 
 document.getElementById("s-geoip-validate-btn").addEventListener("click", async () => {
 	const key = val("s-maxmind-key");
