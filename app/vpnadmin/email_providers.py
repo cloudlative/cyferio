@@ -204,7 +204,18 @@ class ResendEmailProvider(EmailProviderBase):
         req = urllib.request.Request(
             self._API_URL,
             data=json.dumps(body).encode("utf-8"),
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                # Cloudflare fronts api.resend.com and blocks urllib's
+                # default "Python-urllib/3.x" User-Agent as bot traffic
+                # (HTML "error code: 1010" body, surfaced here as an
+                # opaque 403 with no JSON message) -- a plain browser-
+                # shaped UA clears it. Confirmed live against a real
+                # account: identical request succeeds once this header
+                # is present.
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            },
             method="POST",
         )
         try:
