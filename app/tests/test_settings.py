@@ -103,7 +103,7 @@ class TestGeoipSettings:
 
     def test_key_round_trips_masked(self, app_client):
         login(app_client, "admin", "adminpass123")
-        r = app_client.patch("/api/settings", json={"maxmind_license_key": "abcdefghij0123456789"})
+        r = app_client.patch("/api/settings", json={"maxmind_license_key": "test-fixture-0000000000"})
         assert r.status_code == 200
         assert r.json()["maxmind_license_key"] == "••••••••"
 
@@ -111,11 +111,11 @@ class TestGeoipSettings:
         from vpnadmin.models import AppSettings
 
         login(app_client, "admin", "adminpass123")
-        app_client.patch("/api/settings", json={"maxmind_license_key": "abcdefghij0123456789"})
+        app_client.patch("/api/settings", json={"maxmind_license_key": "test-fixture-0000000000"})
         r = app_client.patch("/api/settings", json={"maxmind_license_key": "••••••••", "portal_url": "https://vpn.example.com"})
         assert r.status_code == 200
         row = db_session.query(AppSettings).one()
-        assert row.maxmind_license_key == "abcdefghij0123456789"
+        assert row.maxmind_license_key == "test-fixture-0000000000"
 
     def test_malformed_key_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")
@@ -127,7 +127,7 @@ class TestGeoipSettings:
 
         login(app_client, "admin", "adminpass123")
         r = app_client.patch("/api/settings", json={
-            "geoip_enabled": True, "maxmind_license_key": "abcdefghij0123456789",
+            "geoip_enabled": True, "maxmind_license_key": "test-fixture-0000000000",
         })
         assert r.status_code == 200
         row = db_session.query(AppSettings).one()
