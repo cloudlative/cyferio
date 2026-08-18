@@ -129,7 +129,7 @@
 
 			<fieldset style="margin-top:16px">
 				<legend>Portal Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
-				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees. These affect signing in to this web portal only -- they have no effect on VPN connections. To restrict VPN access instead, use Manage Restrictions on the Clients page.</p>
+				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees. These affect signing in to this web portal only -- they have no effect on VPN connections. To restrict VPN access instead, use VPN Access Restrictions below.</p>
 				<div class="field-stack">
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="u-restrict-country"> Restrict by country
@@ -162,6 +162,41 @@
 						</label>
 						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
 						<textarea id="u-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
+					</div>
+				</div>
+			</fieldset>
+
+			<fieldset style="margin-top:16px">
+				<legend>VPN Access Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the client's connecting IP at each VPN connection attempt. These affect VPN connections only -- they have no effect on portal sign-in. Independent from Portal Login Restrictions above.</p>
+				<div class="field-stack">
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-country"> Restrict by country</label>
+						<p class="field-hint">Empty list = any country.</p>
+						<div id="u-vpn-countries-ms"></div>
+					</div>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-city"> Restrict by city</label>
+						<p class="field-hint">Pick a country, then select any number of cities. Empty list = any city.</p>
+						<p class="field-hint" id="u-vpn-cities-building" style="display:none">City list is still building -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="u-vpn-city-country"><option value="">Loading countries…</option></select>
+							<div id="u-vpn-cities-ms"></div>
+						</div>
+					</div>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-asn"> Restrict by network (ASN)</label>
+						<p class="field-hint">Identifies the connecting ISP/network. Empty list = any network.</p>
+						<p class="field-hint" id="u-vpn-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="u-vpn-asn-country"><option value="">Any country (search all networks)</option></select>
+							<div id="u-vpn-asns-ms"></div>
+						</div>
+					</div>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-ip"> Restrict by IP address</label>
+						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
+						<textarea id="u-vpn-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
 					</div>
 				</div>
 			</fieldset>
@@ -303,12 +338,39 @@
 				</div>
 			</fieldset>
 			<fieldset id="e-vpn-restrictions-fieldset">
-				<legend>VPN Access Restrictions <span class="muted" style="text-transform:none;font-weight:500">(read-only here)</span></legend>
-				<p class="muted" style="margin-top:0" id="e-vpn-restrictions-intro">These affect VPN connections only -- they have no effect on portal sign-in. Independent from Portal Login Restrictions above.</p>
-				<div id="e-vpn-restrictions-summary" class="restriction-chips"></div>
-				<p class="muted" id="e-vpn-restrictions-none" style="display:none">No VPN access restrictions set for this client.</p>
-				<p class="muted" id="e-vpn-restrictions-no-profile" style="display:none">No VPN profile is linked yet -- link one above to set VPN access restrictions.</p>
-				<a href="/clients" class="btn-secondary btn-sm" id="e-vpn-restrictions-link" style="margin-top:10px;display:inline-block">Manage on Clients page →</a>
+				<legend>VPN Access Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<p class="muted" style="margin-top:0" id="e-vpn-restrictions-intro">GeoIP and network (ASN) lookups on the client's connecting IP at each VPN connection attempt. These affect VPN connections only -- they have no effect on portal sign-in. Independent from Portal Login Restrictions above. Editing here and on the Clients page's Manage Restrictions dialog both edit the same restriction.</p>
+				<p class="muted" id="e-vpn-restrictions-no-profile" style="display:none">No VPN profile is linked yet -- link one above, then reopen Edit User to set VPN Access Restrictions.</p>
+				<div class="field-stack" id="e-vpn-restrictions-fields">
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-country"> Restrict by country</label>
+						<p class="field-hint">Empty list = any country.</p>
+						<div id="e-vpn-countries-ms"></div>
+					</div>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-city"> Restrict by city</label>
+						<p class="field-hint">Pick a country, then select any number of cities. Empty list = any city.</p>
+						<p class="field-hint" id="e-vpn-cities-building" style="display:none">City list is still building -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="e-vpn-city-country"><option value="">Loading countries…</option></select>
+							<div id="e-vpn-cities-ms"></div>
+						</div>
+					</div>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-asn"> Restrict by network (ASN)</label>
+						<p class="field-hint">Identifies the connecting ISP/network. Empty list = any network.</p>
+						<p class="field-hint" id="e-vpn-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
+						<div class="geo-picker-row">
+							<select id="e-vpn-asn-country"><option value="">Any country (search all networks)</option></select>
+							<div id="e-vpn-asns-ms"></div>
+						</div>
+					</div>
+					<div class="field">
+						<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-ip"> Restrict by IP address</label>
+						<p class="field-hint">One IP or CIDR range per line, e.g. 203.0.113.5 or 10.0.0.0/24.</p>
+						<textarea id="e-vpn-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
+					</div>
+				</div>
 			</fieldset>
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="edit-cancel">Cancel</button>
@@ -381,6 +443,26 @@ const addCitiesMs = createGeoPicker({ mountEl: document.getElementById("u-cities
 const editCitiesMs = createGeoPicker({ mountEl: document.getElementById("e-cities-ms"), countrySelectEl: document.getElementById("e-city-country"), kind: "cities", buildingEl: document.getElementById("e-cities-building"), pickerOpts: CITY_PICKER_OPTS });
 const addAsnsMs = createGeoPicker({ mountEl: document.getElementById("u-asns-ms"), countrySelectEl: document.getElementById("u-asn-country"), kind: "asns", buildingEl: document.getElementById("u-asns-building"), pickerOpts: ASN_PICKER_OPTS });
 const editAsnsMs = createGeoPicker({ mountEl: document.getElementById("e-asns-ms"), countrySelectEl: document.getElementById("e-asn-country"), kind: "asns", buildingEl: document.getElementById("e-asns-building"), pickerOpts: ASN_PICKER_OPTS });
+
+// VPN Access Restrictions -- same widgets as Portal Login Restrictions
+// above (and the Clients page's own Manage Restrictions dialog), just
+// bound to the "u-vpn-"/"e-vpn-" element IDs and a separate set of
+// picker instances, so a Portal pick never touches VPN state or vice
+// versa.
+const addVpnCountriesMs = createMultiselectDropdown(document.getElementById("u-vpn-countries-ms"), {
+	placeholder: "Any country", idType: "string", emptyLabel: "No countries found.", unitLabel: "countries",
+	localFilter: true, searchPlaceholder: "Type to search countries…",
+});
+const editVpnCountriesMs = createMultiselectDropdown(document.getElementById("e-vpn-countries-ms"), {
+	placeholder: "Any country", idType: "string", emptyLabel: "No countries found.", unitLabel: "countries",
+	localFilter: true, searchPlaceholder: "Type to search countries…",
+});
+addVpnCountriesMs.setOptions(countryOptions);
+editVpnCountriesMs.setOptions(countryOptions);
+const addVpnCitiesMs = createGeoPicker({ mountEl: document.getElementById("u-vpn-cities-ms"), countrySelectEl: document.getElementById("u-vpn-city-country"), kind: "cities", buildingEl: document.getElementById("u-vpn-cities-building"), pickerOpts: CITY_PICKER_OPTS });
+const editVpnCitiesMs = createGeoPicker({ mountEl: document.getElementById("e-vpn-cities-ms"), countrySelectEl: document.getElementById("e-vpn-city-country"), kind: "cities", buildingEl: document.getElementById("e-vpn-cities-building"), pickerOpts: CITY_PICKER_OPTS });
+const addVpnAsnsMs = createGeoPicker({ mountEl: document.getElementById("u-vpn-asns-ms"), countrySelectEl: document.getElementById("u-vpn-asn-country"), kind: "asns", buildingEl: document.getElementById("u-vpn-asns-building"), pickerOpts: ASN_PICKER_OPTS });
+const editVpnAsnsMs = createGeoPicker({ mountEl: document.getElementById("e-vpn-asns-ms"), countrySelectEl: document.getElementById("e-vpn-asn-country"), kind: "asns", buildingEl: document.getElementById("e-vpn-asns-building"), pickerOpts: ASN_PICKER_OPTS });
 
 const addPhone = createPhoneInput(document.getElementById("u-phone-mount"));
 const editPhone = createPhoneInput(document.getElementById("e-phone-mount"));
@@ -457,6 +539,9 @@ function resetAddUserForm() {
 	addCountriesMs.reset();
 	addCitiesMs.reset();
 	addAsnsMs.reset();
+	addVpnCountriesMs.reset();
+	addVpnCitiesMs.reset();
+	addVpnAsnsMs.reset();
 	// The form's own native .reset() above already puts the radios back to
 	// "new" (it's the one marked `checked` in the markup) -- this just
 	// syncs the two sections' visibility/required-ness to match, same as
@@ -687,6 +772,19 @@ function vpnRestrictionChipsHtml(u) {
 	return chips;
 }
 
+// Combines both restriction sets for the Users table's single
+// "Restrictions" column, each under its own small label so they never
+// read as one merged restriction -- the two are fully independent (see
+// Edit User's two separate fieldsets).
+function combinedRestrictionCellHtml(u) {
+	const portalHtml = userRestrictionChipsHtml(u);
+	const vpnChips = vpnRestrictionChipsHtml(u);
+	const rows = [];
+	if (portalHtml !== "—") rows.push(`<div class="restriction-row"><span class="restriction-row-label">Portal:</span>${portalHtml}</div>`);
+	if (vpnChips.length) rows.push(`<div class="restriction-row"><span class="restriction-row-label">VPN:</span><div class="restriction-chips">${vpnChips.join("")}</div></div>`);
+	return rows.length ? rows.join("") : "—";
+}
+
 function renderUsers() {
 	const el = document.getElementById("users-table");
 	const filtered = lastUsers.filter(matchesSearch);
@@ -710,7 +808,7 @@ function renderUsers() {
 				<td class="muted">${u.teams && u.teams.length ? escapeHtml(u.teams.join(", ")) : "—"}</td>
 				<td><span class="role-badge role-${u.role}">${u.role}</span>${u.is_bootstrap_admin ? ' <span class="muted" style="font-size:0.78em">(bootstrap)</span>' : ""}</td>
 				<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
-				<td>${userRestrictionChipsHtml(u)}</td>
+				<td>${combinedRestrictionCellHtml(u)}</td>
 				<td class="muted">${fmtDate(u.created_at)}</td>
 				<td class="muted">${fmtDate(u.last_login_at)}</td>
 				<td class="text-right">
@@ -847,38 +945,37 @@ document.getElementById("e-vpn-attach-btn").addEventListener("click", async () =
 		const updated = await apiFetch(`/api/users/${editingUserId}/vpn-link`, { method: "POST", body: { vpn_client_name: vpnClientName } });
 		toast(`VPN profile '${vpnClientName}' attached.`);
 		await refreshVpnLinkSection(updated);
+		renderVpnRestrictionsSummary(updated);
 		loadUsers();
 	} catch (e) {
 		toast(e.message, "error");
 	}
 });
 
-// Populates the read-only "VPN Access Restrictions" panel in Edit User --
-// edited on the Clients page's Manage Restrictions dialog, never here (see
-// vpnRestrictionChipsHtml above and routes/users.py's _serialize).
+// Populates Edit User's editable "VPN Access Restrictions" fieldset --
+// same fields/pickers as Manage Restrictions on the Clients page (they
+// edit the exact same policy_store entry), just reachable from this
+// dialog too. Requires a linked VPN profile: with none, there's no client
+// to hold a policy for yet, so the fields are hidden in favor of a note
+// pointing at the "attach an existing profile" control above.
 function renderVpnRestrictionsSummary(u) {
-	const summaryEl = document.getElementById("e-vpn-restrictions-summary");
-	const noneEl = document.getElementById("e-vpn-restrictions-none");
+	const fieldsEl = document.getElementById("e-vpn-restrictions-fields");
 	const noProfileEl = document.getElementById("e-vpn-restrictions-no-profile");
-	const linkEl = document.getElementById("e-vpn-restrictions-link");
 	if (!u.vpn_client_name) {
-		summaryEl.innerHTML = "";
-		noneEl.style.display = "none";
+		fieldsEl.style.display = "none";
 		noProfileEl.style.display = "";
-		linkEl.style.display = "none";
 		return;
 	}
 	noProfileEl.style.display = "none";
-	linkEl.style.display = "";
-	linkEl.title = `Manage Restrictions for '${u.vpn_client_name}'`;
-	const chips = vpnRestrictionChipsHtml(u);
-	if (!chips.length) {
-		summaryEl.innerHTML = "";
-		noneEl.style.display = "";
-		return;
-	}
-	noneEl.style.display = "none";
-	summaryEl.innerHTML = chips.join("");
+	fieldsEl.style.display = "";
+	document.getElementById("e-vpn-restrict-country").checked = !!u.vpn_restrict_by_country;
+	editVpnCountriesMs.setSelected(u.vpn_allowed_countries || []);
+	document.getElementById("e-vpn-restrict-city").checked = !!u.vpn_restrict_by_city;
+	editVpnCitiesMs.setSelected(u.vpn_allowed_cities || []);
+	document.getElementById("e-vpn-restrict-asn").checked = !!u.vpn_restrict_by_asn;
+	editVpnAsnsMs.setSelected(u.vpn_allowed_asns || []);
+	document.getElementById("e-vpn-restrict-ip").checked = !!u.vpn_restrict_by_ip;
+	document.getElementById("e-vpn-allowed-ips").value = (u.vpn_allowed_ips || []).join("\n");
 }
 
 function openEdit(u) {
@@ -950,6 +1047,18 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 			const raw = document.getElementById("e-bandwidth").value.trim();
 			return raw ? Number(raw) : null;
 		})(),
+		// VPN Access Restrictions -- separate fields, separate storage
+		// (policy_store), see UpdateUserRequest's own docstring. Harmless to
+		// send even when this user has no linked VPN profile yet: update_user
+		// only applies these once a client_name exists.
+		vpn_restrict_by_country: document.getElementById("e-vpn-restrict-country").checked,
+		vpn_allowed_countries: editVpnCountriesMs.getSelected(),
+		vpn_restrict_by_city: document.getElementById("e-vpn-restrict-city").checked,
+		vpn_allowed_cities: editVpnCitiesMs.getSelected(),
+		vpn_restrict_by_asn: document.getElementById("e-vpn-restrict-asn").checked,
+		vpn_allowed_asns: editVpnAsnsMs.getSelected(),
+		vpn_restrict_by_ip: document.getElementById("e-vpn-restrict-ip").checked,
+		vpn_allowed_ips: parseLineList(document.getElementById("e-vpn-allowed-ips").value),
 	};
 	if (!editingUserIsBootstrapAdmin) {
 		body.role = document.getElementById("e-role").value;
@@ -1032,6 +1141,17 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 					const raw = document.getElementById("u-bandwidth").value.trim();
 					return raw ? Number(raw) : null;
 				})(),
+				// VPN Access Restrictions -- separate fields, separate storage
+				// (policy_store), applied to the just-created/linked client. See
+				// CreateUserRequest's own docstring.
+				vpn_restrict_by_country: document.getElementById("u-vpn-restrict-country").checked,
+				vpn_allowed_countries: addVpnCountriesMs.getSelected(),
+				vpn_restrict_by_city: document.getElementById("u-vpn-restrict-city").checked,
+				vpn_allowed_cities: addVpnCitiesMs.getSelected(),
+				vpn_restrict_by_asn: document.getElementById("u-vpn-restrict-asn").checked,
+				vpn_allowed_asns: addVpnAsnsMs.getSelected(),
+				vpn_restrict_by_ip: document.getElementById("u-vpn-restrict-ip").checked,
+				vpn_allowed_ips: parseLineList(document.getElementById("u-vpn-allowed-ips").value),
 				send_vpn_profile_email: document.getElementById("u-send-vpn-email").checked,
 			},
 		});

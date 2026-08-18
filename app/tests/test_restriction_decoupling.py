@@ -170,3 +170,78 @@ class TestMigrateDecouplePortalAndVpnRestrictions:
         # it already ran once (restrictions_decoupled_at is set).
         app_settings.migrate_decouple_portal_and_vpn_restrictions(db_session)
         assert policy_store.get_policy("legacyuser2").get("allowed_countries") in (None, [])
+
+
+class TestInlineVpnAccessRestrictionsOnCreateAndEditUser:
+    """Add User and Edit User now configure VPN Access Restrictions
+    directly (vpn_restrict_by_*/vpn_allowed_* fields), not just Portal
+    Login Restrictions -- no separate trip to the Clients page required."""
+
+    def test_create_user_applies_vpn_restrictions_to_new_profile(self, app_client, monkeypatch, tmp_path):
+        from vpnadmin.routes import users as users_mod
+        monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
+        monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/users", json={
+            "username": "createvpnr", "password": "Somepass123!", "first_name": "CreateVpnR",
+            "email": "createvpnr@example.com", "mac": "aa:bb:cc:dd:ee:30",
+            "vpn_restrict_by_country": True, "vpn_allowed_countries": ["PK"],
+            "vpn_restrict_by_ip": True, "vpn_allowed_ips": ["203.0.113.5"],
+            # Deliberately no Portal restriction in this request -- must
+            # stay off, proving the two field sets are independent even at
+            # creation time.
+        })
+        assert r.status_code == 201
+        body = r.json()
+        assert body["vpn_restrict_by_country"] is True
+        assert body["vpn_allowed_countries"] == ["PK"]
+        assert body["vpn_restrict_by_ip"] is True
+        assert body["vpn_allowed_ips"] == ["203.0.113.5"]
+        assert body["restrict_login_by_country"] is False
+        assert policy_store.get_policy("createvpnr")["allowed_countries"] == ["PK"]
+        assert policy_store.get_policy("createvpnr")["allowed_ips"] == ["203.0.113.5"]
+
+    def test_edit_user_applies_vpn_restrictions_to_linked_profile(self, app_client, db_session, monkeypatch, tmp_path):
+        user_id = _create_user_with_profile(app_client, "editvpnr", "31", monkeypatch, tmp_path)
+        r = app_client.patch(f"/api/users/{user_id}", json={
+            "vpn_restrict_by_city": True, "vpn_allowed_cities": ["Lahore"],
+        })
+        assert r.status_code == 200
+        assert r.json()["vpn_restrict_by_city"] is True
+        assert r.json()["vpn_allowed_cities"] == ["Lahore"]
+        assert policy_store.get_policy("editvpnr")["allowed_cities"] == ["Lahore"]
+        # Portal columns remain untouched by this PATCH.
+        user = db_session.query(User).filter(User.username == "editvpnr").one()
+        assert user.restrict_login_by_city is False
+
+    def test_edit_user_vpn_restriction_kinds_are_independently_touched(self, app_client, monkeypatch, tmp_path):
+        """Editing one VPN restriction kind (e.g. country) must not clear a
+        different kind (e.g. ASN) that was set in an earlier, separate
+        PATCH -- same per-kind touched-ness guarantee Portal restrictions
+        already had."""
+        user_id = _create_user_with_profile(app_client, "editvpnr2", "32", monkeypatch, tmp_path)
+        app_client.patch(f"/api/users/{user_id}", json={
+            "vpn_restrict_by_asn": True, "vpn_allowed_asns": ["AS12345"],
+        })
+        r = app_client.patch(f"/api/users/{user_id}", json={
+            "vpn_restrict_by_country": True, "vpn_allowed_countries": ["AE"],
+        })
+        assert r.status_code == 200
+        assert r.json()["vpn_allowed_countries"] == ["AE"]
+        assert r.json()["vpn_allowed_asns"] == ["AS12345"]
+
+    def test_edit_user_without_linked_profile_ignores_vpn_fields_gracefully(self, app_client, db_session):
+        # A user with no vpn_profile_link (the rare cert-created-but-DB-
+        # failed edge case) -- sending VPN restriction fields must not
+        # error, just have nothing to apply them to.
+        from vpnadmin.models import RoleDef, User as UserModel
+        role = db_session.query(RoleDef).filter(RoleDef.slug == "viewer").one()
+        orphan = UserModel(username="novpnuser", password_hash="x", role_id=role.id, first_name="No", email="novpn@example.com")
+        db_session.add(orphan)
+        db_session.commit()
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch(f"/api/users/{orphan.id}", json={
+            "vpn_restrict_by_country": True, "vpn_allowed_countries": ["PK"],
+        })
+        assert r.status_code == 200
+        assert r.json()["vpn_client_name"] is None

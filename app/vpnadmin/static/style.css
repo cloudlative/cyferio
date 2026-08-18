@@ -1015,6 +1015,14 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 .restriction-chip.chip-city { background: rgba(236, 72, 153, 0.14); color: #f9a8d4; border-color: rgba(236, 72, 153, 0.32); }
 .restriction-chip.chip-asn { background: rgba(168, 85, 247, 0.14); color: #d8b4fe; border-color: rgba(168, 85, 247, 0.32); }
 .restriction-chip.chip-ip { background: rgba(52, 211, 153, 0.14); color: #6ee7b7; border-color: rgba(52, 211, 153, 0.32); }
+/* Users table's combined Restrictions cell -- Portal Login Restrictions
+   and VPN Access Restrictions stacked under their own small label so the
+   two independent restriction sets never read as one combined restriction
+   (see users.html's combinedRestrictionCellHtml). */
+.restriction-row { display: flex; align-items: center; gap: 6px; }
+.restriction-row + .restriction-row { margin-top: 4px; }
+.restriction-row-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); flex-shrink: 0; }
+.restriction-row .restriction-chips { margin-top: 0; }
 
 .filter-bar { display: flex; gap: 8px; margin-bottom: 16px; }
 .filter-chip {
