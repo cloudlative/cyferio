@@ -1,4 +1,4 @@
-FROM python:3.12-alpine
+FROM python:3.14-alpine
 
 # Baked in at build time from the git tag driving this build (see
 # .github/workflows/build.yml's build-args) -- read at runtime via
