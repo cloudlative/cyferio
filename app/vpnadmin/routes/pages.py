@@ -3,7 +3,6 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from . import openvpn_install
 from ..app_settings import apply_settings_globals
 from ..auth import get_current_user
 from ..db import get_db
@@ -71,13 +70,6 @@ def _ctx(user: User, db: Session, **extra) -> dict:
         # so Reports' own nav link/page stays visible under "can_view_reports"
         # even to accounts that can't see this specific section within it.
         "can_view_db_reporting": has_permission_any_scope(db, user, "db_reporting", "view"),
-        # Phase 1 Python service layer's web-triggered install/uninstall
-        # page (see routes/openvpn_install.py) -- own object, admin-only by
-        # default (see permissions.py's OBJECTS comment for why). Also
-        # bootstrap-admin-only (see routes/openvpn_install.py's module
-        # docstring) -- no role/permission grant opens this up further, so
-        # the nav link stays hidden from every other account too.
-        "can_manage_openvpn_install": has_permission(db, user, "openvpn_install", "execute") and user.is_bootstrap_admin,
         **extra,
     }
 
@@ -294,31 +286,6 @@ def roles_page(request: Request, user: User | None = Depends(get_current_user), 
     if not has_permission(db, user, "roles", "manage"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "roles.html", _ctx(user, db))
-
-
-@router.get("/openvpn-install")
-def openvpn_install_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
-    if user is None:
-        return RedirectResponse("/login", status_code=303)
-    redirect = _password_reset_redirect(user, request)
-    if redirect is not None:
-        return redirect
-    # Bootstrap-admin-only, not just openvpn_install/execute -- see
-    # routes/openvpn_install.py's module docstring for why.
-    if not has_permission(db, user, "openvpn_install", "execute") or not user.is_bootstrap_admin:
-        return RedirectResponse("/", status_code=303)
-    # Step-up re-auth: rendered even when not yet elevated -- the template
-    # shows a "confirm your password" gate card instead of the real
-    # Status/Install/Uninstall content in that case (see openvpn_install.py's
-    # is_elevated()/ELEVATED_TTL_MINUTES).
-    needs_verification = not openvpn_install.is_elevated(request)
-    return templates.TemplateResponse(
-        request, "openvpn_install.html",
-        _ctx(
-            user, db, needs_verification=needs_verification,
-            elevated_ttl_minutes=openvpn_install.ELEVATED_TTL_MINUTES,
-        ),
-    )
 
 
 @router.get("/faq")

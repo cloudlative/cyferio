@@ -93,15 +93,15 @@ class Settings:
     # hardware; status/list calls should be near-instant.
     SCRIPT_TIMEOUT_SECONDS: int = int(os.environ.get("SCRIPT_TIMEOUT_SECONDS", 30))
 
-    # --- Host executor (Phase 1 Python service layer, install/uninstall only) --
+    # --- Host executor (Phase 1 Python service layer) --------------------------
     # Used by services/system/host_executor.py to run the ONE whitelisted
     # remote command (app/cli/openvpn_admin.py) over SSH for genuinely
     # host-namespace operations -- see the migration plan's §2a. HOST_SSH_TARGET
-    # unset by default: the web-triggered Install action (routes/
-    # openvpn_install.py) returns a clear 400 until it's configured, same
-    # fail-soft pattern SMTP_HOST already uses above. NOT used for
-    # cert/client/MAC operations, which stay in-process via cli_wrapper.py
-    # exactly as today.
+    # unset by default: the live-session actions (routes/clients.py --
+    # list/disconnect current connections) return a clear 400/degrade until
+    # it's configured, same fail-soft pattern SMTP_HOST already uses above.
+    # NOT used for cert/client/MAC operations, which stay in-process via
+    # cli_wrapper.py exactly as today.
     #
     # HOST_SSH_KEY_PATH is the path *inside this container* -- defaults to
     # docker-compose.yml's bind-mount target, which is a fixed path

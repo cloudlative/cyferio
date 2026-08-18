@@ -2,9 +2,9 @@
 client's MAC right after install -- closing services/openvpn/installer.py's
 own documented gap (its docstring: the bash-script-parity behavior where the
 first client's cert is created but never registered in DB_FILE, so it can't
-pass the MAC check until a separate add_mac/restore call). See
-routes/openvpn_install.py's post_install, which now requires a mac and
-passes it through as --client-mac."""
+pass the MAC check until a separate add_mac/restore call). The `install`
+action's caller requires a mac whenever a client name is given, and passes
+it through as --client-mac."""
 import json
 
 import pytest
@@ -22,7 +22,7 @@ class _FakeInstallResult:
 
 def test_install_action_with_client_name_requires_mac(monkeypatch, capsys):
     # --client-mac is no longer required=True at the argparse level (a first
-    # client is optional -- see installer.py/routes/openvpn_install.py), but
+    # client is optional -- see installer.py), but
     # main() itself still enforces the "MAC required if a client name is
     # given" pairing and reports it the same structured-JSON way every other
     # validation failure in this module does (see build_parser()'s own

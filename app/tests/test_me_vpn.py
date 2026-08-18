@@ -26,9 +26,7 @@ def _tmp_policy_files(tmp_path, monkeypatch):
 def _make_self_service_user(db_session, username, *, vpn_client_name=None, password="somepass123"):
     """A "User"-role (self-service) account -- this role isn't in the
     legacy Role enum (see models.py's Role docstring), so it has to be
-    looked up by slug and assigned via role_id directly, same pattern
-    test_openvpn_install_access.py's _make_admin() uses for the admin
-    role."""
+    looked up by slug and assigned via role_id directly."""
     role = db_session.query(RoleDef).filter_by(slug="user").first()
     user = User(username=username, password_hash=hash_password(password), role_id=role.id)
     db_session.add(user)

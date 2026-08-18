@@ -280,11 +280,8 @@ def reset_client_usage(name: str, user: User = Depends(_require_client_manager),
 
 
 def _host_executor_config() -> HostExecutorConfig:
-    """Same shape as routes/openvpn_install.py's own copy -- not shared
-    code between the two routers (each is a thin, independently-readable
-    wrapper around config.settings, matching this app's general tolerance
-    for this kind of small duplication over introducing a shared module
-    for two call sites)."""
+    """Thin wrapper around config.settings, building the HostExecutorConfig
+    used by this router's live-session actions (list/disconnect)."""
     if not settings.HOST_SSH_TARGET or not settings.HOST_SSH_KEY_PATH:
         raise HTTPException(
             status_code=400,

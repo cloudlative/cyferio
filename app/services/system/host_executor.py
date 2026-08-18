@@ -1,10 +1,12 @@
 """SSH-based remote execution of the one whitelisted host-namespace command
 (app/cli/openvpn_admin.py) -- the Phase 1 plan's §2a "thinnest possible
 preview of the Phase 4 Host Agent". Used ONLY for genuinely host-namespace
-operations (install/uninstall today; any future firewall/systemd change
-tomorrow) -- everything else (cert/client/MAC operations that only touch the
-already-bind-mounted /etc/openvpn) stays in-process, no SSH hop, exactly as
-app/vpnadmin/cli_wrapper.py already does.
+operations (today: live OpenVPN session listing/disconnect, see
+vpnadmin/routes/clients.py -- installing/uninstalling OpenVPN itself is now
+a host-side step, see the repo root's setup.sh/openvpn-install.sh, not a
+web-triggered action) -- everything else (cert/client/MAC operations that
+only touch the already-bind-mounted /etc/openvpn) stays in-process, no SSH
+hop, exactly as app/vpnadmin/cli_wrapper.py already does.
 
 Security model (see the plan for the full rationale): the app container's
 own Docker privileges are unchanged by this module -- no network_mode:host,
