@@ -83,6 +83,31 @@ def _ctx(user: User, db: Session, **extra) -> dict:
 
 
 @router.get("/")
+def root(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    """The app's landing route -- not a page of its own. Every other page's
+    permission-denied fallback still targets "/" (unchanged, see e.g.
+    clients_page below), so this has to keep resolving to *something*
+    reachable for any authenticated account, not just admins.
+
+    Landing priority: Users (an admin's most frequent destination, see the
+    sidebar nav's own ordering comment) -> Dashboard (for roles that can see
+    the fleet overview but not the Users page, e.g. a reports-only editor)
+    -> the self-service fallback (My VPN Profile / My Profile) that the old
+    dashboard route used for accounts with neither.
+    """
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
+    if has_permission(db, user, "users", "manage"):
+        return RedirectResponse("/users", status_code=303)
+    if has_permission_any_scope(db, user, "dashboard", "view"):
+        return RedirectResponse("/dashboard", status_code=303)
+    return RedirectResponse("/my-vpn-profile" if user.vpn_profile_link is not None else "/profile", status_code=303)
+
+
+@router.get("/dashboard")
 def dashboard(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
