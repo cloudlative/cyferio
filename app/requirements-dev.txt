@@ -1,3 +1,11 @@
 -r requirements.txt
 pytest==9.0.3
 httpx==0.28.1
+
+# CI tooling (see .github/workflows/ci.yml) -- not needed to run the app,
+# only to lint/typecheck/test it.
+ruff==0.16.3
+mypy==2.3.1
+pytest-cov==6.0.0
+pytest-timeout==2.3.1
+pytest-rerunfailures==15.0

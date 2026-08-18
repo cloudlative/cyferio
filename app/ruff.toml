@@ -1,0 +1,37 @@
+# Ruff configuration for the FastAPI app (see .github/workflows/ci.yml's
+# lint-python job). Scoped deliberately: this repo has never run a linter
+# before, so `select` starts at Ruff's own documented default rule set
+# (E4/E7/E9 pycodestyle subset + F pyflakes) rather than an aspirational
+# "everything" list that would immediately drown a first-time gate in
+# hundreds of pre-existing, uncategorized findings across 100+ files this
+# PR is explicitly not allowed to touch (CI/tooling-only scope). Widen
+# `select` in a follow-up once the codebase has had a dedicated cleanup
+# pass -- see the CI PR description for specific suggestions (flake8-bugbear
+# for the FastAPI `Depends(...)`-in-default pattern needs a per-rule
+# ignore, flake8-datetimez for naive-datetime bugs, etc).
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+
+# Pre-existing unused-import (F401) findings on current master, left
+# untouched -- fixing them is real app-code editing, out of scope for a
+# CI/tooling-only change (see PR description's "Follow-up" section for the
+# full list and recommended fix). Any *new* F401 anywhere else, including
+# new lines added to these same files, still fails the gate normally --
+# per-file-ignores only silences the rule file-wide, so treat clearing
+# this list (by fixing the import and removing the entry together) as a
+# tracked follow-up, not something to let grow.
+[lint.per-file-ignores]
+"services/openvpn/client_manager.py" = ["F401"]
+"services/openvpn/crl_manager.py" = ["F401"]
+"services/system/process_manager.py" = ["F401"]
+"tests/services/test_management_client.py" = ["F401"]
+"tests/test_db_migration.py" = ["F401"]
+"tests/test_openvpn_admin_cli_install.py" = ["F401"]
+"tests/test_reports.py" = ["F401"]
+"tests/test_vpn_status_parsing.py" = ["F401"]
+"vpnadmin/migration_engine.py" = ["F401"]
+"vpnadmin/routes/reports.py" = ["F401"]
+"vpnadmin/routes/users.py" = ["F401"]
