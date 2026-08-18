@@ -29,10 +29,14 @@ class TestLoginFlow:
         r = app_client.get("/login")
         assert r.status_code == 200
 
-    def test_correct_login_redirects_home(self, app_client):
+    def test_correct_login_redirects_to_users(self, app_client):
+        # Users is the default landing page for an account that can manage
+        # users (see pages.py's root() route) -- httpx TestClient follows
+        # redirects by default, so this exercises the full "/" -> "/users"
+        # chain, not just the login endpoint's own immediate redirect.
         r = login(app_client, "admin", "adminpass123")
-        assert r.status_code == 200  # httpx TestClient follows redirects by default
-        assert r.url.path == "/"
+        assert r.status_code == 200
+        assert r.url.path == "/users"
 
     def test_wrong_password_rejected(self, app_client):
         r = login(app_client, "admin", "wrongpassword")
@@ -53,10 +57,29 @@ class TestLoginFlow:
         assert r.status_code == 303
         assert r.headers["location"] == "/login"
 
+    def test_root_requires_login(self, app_client):
+        r = app_client.get("/dashboard", follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/login"
+
     def test_dashboard_accessible_after_login(self, app_client):
         login(app_client, "admin", "adminpass123")
-        r = app_client.get("/")
+        r = app_client.get("/dashboard")
         assert r.status_code == 200
+
+    def test_root_lands_on_users_for_admin(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.get("/", follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/users"
+
+    def test_root_lands_on_dashboard_when_no_users_permission(self, app_client):
+        # "viewer" can view the dashboard but doesn't have users:manage --
+        # should fall through to /dashboard, not /users.
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.get("/", follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/dashboard"
 
     def test_logout_clears_session(self, app_client):
         login(app_client, "admin", "adminpass123")
@@ -146,7 +169,7 @@ class TestForgotPasswordFlow:
         # New password works, old one no longer does.
         r = login(app_client, "admin", "BrandNewPass1!")
         assert r.status_code == 200
-        assert r.url.path == "/"
+        assert r.url.path == "/users"
         app_client.post("/logout")
         r = login(app_client, "admin", "adminpass123")
         assert r.status_code == 401
@@ -216,7 +239,7 @@ class TestLoginCaptcha:
         monkeypatch.setattr(auth_mod.captcha, "verify", lambda token, remote_ip=None: True)
         r = login(app_client, "admin", "adminpass123")
         assert r.status_code == 200
-        assert r.url.path == "/"
+        assert r.url.path == "/users"
 
 
 class TestRoleGating:

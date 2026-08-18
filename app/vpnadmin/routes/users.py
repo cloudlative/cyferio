@@ -515,6 +515,31 @@ class UpdateProfileRequest(BaseModel):
     current_password: str | None = None
     new_password: str | None = None
 
+    # Self-service VPN login country restriction -- a single ISO 3166-1
+    # alpha-2 code (unlike the admin-side restrict_login_by_country +
+    # allowed_login_countries PAIR in UpdateUserRequest, which supports a
+    # multi-country allowlist). Deliberately a single field, not a
+    # toggle+list pair: the user-facing control is "pick one country, or
+    # leave it blank," not "manage a list." See update_my_profile() below
+    # for how this collapses onto the same User.restrict_login_by_country/
+    # allowed_login_countries columns an admin edits, and how it's synced
+    # onto the linked VPN profile's client_policy.json (the mechanism that
+    # actually gates VPN connections, not just portal login -- see
+    # geo_validators.py's module docstring). Explicit "" or null clears the
+    # restriction entirely; omitted from the request leaves it untouched
+    # (model_fields_set, same convention as every other field here).
+    login_country: str | None = None
+
+    @field_validator("login_country")
+    @classmethod
+    def _login_country(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().upper()
+        if not v:
+            return None
+        return _valid_country_list([v])[0]
+
     @field_validator("new_password")
     @classmethod
     def _pw(cls, v: str | None) -> str | None:
@@ -665,6 +690,25 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
                 setattr(user, field, value)
                 changes.append(field)
 
+    # VPN Login Country: collapses login_country onto the same toggle+list
+    # pair an admin edits via UpdateUserRequest (restrict_login_by_country +
+    # allowed_login_countries) -- see UpdateProfileRequest.login_country's
+    # docstring. A blank/null value clears the restriction; a code sets it
+    # to exactly that one country, overwriting whatever list (single- or
+    # multi-country) was there before, admin-set or not -- consistent with
+    # "administrators should still retain the ability to manage, override,
+    # or clear" running in both directions: this endpoint can just as
+    # easily override an admin-set restriction, same single-source-of-truth
+    # column either side writes to.
+    restriction_touched = "login_country" in body.model_fields_set
+    if restriction_touched:
+        new_restrict = body.login_country is not None
+        new_countries = json.dumps([body.login_country]) if body.login_country else None
+        if new_restrict != user.restrict_login_by_country or new_countries != user.allowed_login_countries:
+            user.restrict_login_by_country = new_restrict
+            user.allowed_login_countries = new_countries
+            changes.append(f"login_country {body.login_country or '(cleared)'}")
+
     # Team membership is deliberately NOT self-service for anyone (not even
     # admins/editors editing their own account) -- UpdateProfileRequest has
     # no team_ids field at all. Assignment happens only through admin/editor
@@ -688,7 +732,25 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
     if changes:
         db.commit()
         log_action(db, user, "update_own_profile", target=user.username, detail=", ".join(changes))
-    return _serialize(user)
+
+    # Sync the country restriction onto the linked VPN profile's policy --
+    # the mechanism host-scripts/openvpn-mac-addr-check.py actually enforces
+    # VPN connections against, same write path update_user() uses for an
+    # admin-driven edit (see its own "Sync VPN-profile-level restrictions"
+    # comment above). No-op if this account has no linked profile yet.
+    client_name = user.vpn_profile_link.vpn_client_name if user.vpn_profile_link else None
+    policy = policy_store.get_policy(client_name) if client_name else {}
+    if client_name and restriction_touched:
+        try:
+            policy = policy_store.set_policy(
+                client_name,
+                allowed_countries=[body.login_country] if body.login_country else None,
+            )
+            log_action(db, user, "update_own_profile", target=user.username, detail="synced VPN profile login-country restriction")
+        except (PolicyValidationError, OSError) as e:
+            log_action(db, user, "update_own_profile", target=user.username,
+                       detail=f"VPN profile login-country restriction could not be applied: {e}", success=False)
+    return _serialize(user, {client_name: policy} if client_name else {})
 
 
 @router.post("", status_code=201)
