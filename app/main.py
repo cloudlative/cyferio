@@ -25,7 +25,7 @@ from vpnadmin import cli_wrapper
 # (which has no such attribute) instead of this one, crashing the
 # snapshot loop's very first tick on every startup.
 from vpnadmin import health as health_data
-from vpnadmin.app_settings import migrate_legacy_smtp_provider, prune_audit_log, prune_db_stat_snapshots, refresh_runtime_cache
+from vpnadmin.app_settings import migrate_decouple_portal_and_vpn_restrictions, migrate_legacy_smtp_provider, prune_audit_log, prune_db_stat_snapshots, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_admin
@@ -206,6 +206,12 @@ async def lifespan(_app: FastAPI):
         # that function's own docstring. No-op once any EmailProvider row
         # exists, so safe on every startup, not just the first.
         migrate_legacy_smtp_provider(db)
+        # One-time backfill: copies each user's already-effective Portal
+        # Login Restrictions into their linked VPN profile's policy before
+        # the Portal->VPN auto-sync (routes/users.py) is removed for good --
+        # see that function's own docstring for why this needs a real
+        # one-time marker rather than being safely re-runnable.
+        migrate_decouple_portal_and_vpn_restrictions(db)
     finally:
         db.close()
     # Kick the City/ASN pick-list build (or a disk-cache load) off in a

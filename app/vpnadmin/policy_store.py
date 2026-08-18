@@ -218,13 +218,18 @@ def set_policy(name: str, *,
     "the underlying tool validates its own inputs" even though here "the
     underlying tool" is this module itself rather than a script.
 
-    allowed_countries/allowed_cities/allowed_asns/allowed_ips together
-    replace the VPN-connection half of what used to be called "Login
-    Restrictions" on the User side and, before this change, only a single
-    `country` string here -- see docs/rbac_identity_design.md and
-    routes/users.py's create_user/update_user for how a User's own
-    restrictions now sync onto these same four fields for its linked VPN
-    profile.
+    allowed_countries/allowed_cities/allowed_asns/allowed_ips are this
+    client's VPN Access Restrictions -- independent from a linked User's
+    own Portal Login Restrictions (User.restrict_login_by_*/
+    allowed_login_*, enforced only by routes/auth.py's login check). The
+    two used to be silently kept in sync by routes/users.py's
+    create_user/update_user (a coupling bug: an admin restricting a
+    user's VPN could only do so by ALSO restricting that same user's
+    portal sign-in, and vice versa); see
+    app_settings.migrate_decouple_portal_and_vpn_restrictions's docstring
+    for the one-time backfill that separated them for good. This function
+    -- reached only via routes/clients.py's PUT /{name}/policy -- is now
+    the sole write path for these four fields.
 
     quota_enforcement_policy: "soft" (the pre-existing, only-ever behavior --
     an already-connected session that crosses its bandwidth_monthly_gb

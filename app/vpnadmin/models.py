@@ -378,6 +378,17 @@ class AppSettings(Base):
     smtp_from = Column(String(255), nullable=True)
     smtp_use_tls = Column(Boolean, nullable=True)
 
+    # Internal migration bookkeeping, not an admin-editable setting (not
+    # read by EffectiveSettings, never shown on the Settings page) -- same
+    # "store it here anyway, it's the one singleton row every deployment
+    # already has" pragmatism as the deprecated smtp_* columns above.
+    # NULL = app_settings.migrate_decouple_portal_and_vpn_restrictions()
+    # hasn't run yet for this deployment; a timestamp = it ran (once) at
+    # that moment. See that function's docstring for why this needs a
+    # real one-time marker rather than being safely re-run on every
+    # startup like most of this app's other self-healing migrations.
+    restrictions_decoupled_at = Column(DateTime(timezone=True), nullable=True)
+
     # Security
     min_password_length = Column(Integer, nullable=True)
     session_timeout_minutes = Column(Integer, nullable=True)

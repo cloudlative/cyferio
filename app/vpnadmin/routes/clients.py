@@ -542,16 +542,16 @@ class PolicyRequest(BaseModel):
     itself stays field-level partial for consistency with the rest of
     this app.
 
-    allowed_countries/allowed_cities/allowed_asns/allowed_ips are
-    per-client lists chosen independently, same shape and validation
-    (geo_validators.py) as a portal User's own Login Restrictions
-    (routes/users.py's CreateUserRequest/UpdateUserRequest) -- there is no
-    deployment-wide "the one restricted country" concept; every client can
-    be restricted differently, or not at all. See policy_store.py's
-    module docstring for how a linked User's restrictions sync onto these
-    same fields automatically; this endpoint is the other way to set them
-    (unlinked clients, or a VPN-only restriction that intentionally
-    differs from the linked user's own login restrictions)."""
+    allowed_countries/allowed_cities/allowed_asns/allowed_ips are VPN
+    Access Restrictions -- per-client lists chosen independently, same
+    shape and validation (geo_validators.py) as a portal User's own
+    Portal Login Restrictions (routes/users.py's CreateUserRequest/
+    UpdateUserRequest), but a completely separate, unsynced set of
+    storage: this is the ONLY write path into these four fields on
+    client_policy.json. A linked user's Portal Login Restrictions never
+    flow into this policy (and this policy never flows back onto the
+    user) -- see app_settings.migrate_decouple_portal_and_vpn_restrictions's
+    docstring for why that used to be true and no longer is."""
     allowed_os: list[str] | None = None
     bandwidth_monthly_gb: float | None = None
     allowed_countries: list[str] | None = None
