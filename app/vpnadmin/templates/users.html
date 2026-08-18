@@ -13,7 +13,7 @@
 		</div>
 	</div>
 	<div class="field" style="max-width:320px;margin-bottom:16px">
-		<input type="text" id="user-search" placeholder="Search by name, username, or team…">
+		<input type="text" id="user-search" placeholder="Search by name, username, team, or VPN profile…">
 	</div>
 	<div id="users-table"><p class="muted">Loading…</p></div>
 </div>
@@ -710,7 +710,7 @@ async function loadTeamOptions() {
 
 function matchesSearch(u) {
 	if (!userSearchTerm) return true;
-	const haystack = `${u.display_name} ${u.username} ${(u.teams || []).join(" ")}`.toLowerCase();
+	const haystack = `${u.display_name} ${u.username} ${(u.teams || []).join(" ")} ${u.vpn_client_name || ""}`.toLowerCase();
 	return haystack.includes(userSearchTerm);
 }
 
@@ -798,13 +798,14 @@ function renderUsers() {
 		return;
 	}
 	el.innerHTML = `<table>
-		<thead><tr><th>User</th><th>Teams</th><th>Role</th><th>Status</th><th>Restrictions</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
+		<thead><tr><th>User</th><th>VPN Profile</th><th>Teams</th><th>Role</th><th>Status</th><th>Restrictions</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
 		<tbody>${filtered.map(u => `
 			<tr data-id="${u.id}">
 				<td>
 					<div>${escapeHtml(u.display_name)}</div>
 					<div class="muted" style="font-size:0.82em">${escapeHtml(u.username)}${u.username === currentUsername ? " (you)" : ""}</div>
 				</td>
+				<td class="mono">${u.vpn_client_name ? escapeHtml(u.vpn_client_name) : '<span class="muted">— unlinked —</span>'}</td>
 				<td class="muted">${u.teams && u.teams.length ? escapeHtml(u.teams.join(", ")) : "—"}</td>
 				<td><span class="role-badge role-${u.role}">${u.role}</span>${u.is_bootstrap_admin ? ' <span class="muted" style="font-size:0.78em">(bootstrap)</span>' : ""}</td>
 				<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
