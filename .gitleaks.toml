@@ -1,0 +1,29 @@
+# gitleaks config (see .github/workflows/ci.yml's secret-scan job).
+#
+# Extends gitleaks' own default ruleset rather than replacing it, and adds
+# a narrow, individually-justified allowlist -- same discipline as
+# .trivyignore's own header comment: every entry here is investigated
+# before being added, never a blanket suppression.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives, individually justified below"
+regexes = [
+  # "brandnewpass123" -- a literal, hardcoded test fixture password used by
+  # app/tests/test_auth.py to exercise the password-change endpoint
+  # (wrong-current-password, too-short-new-password, and success cases).
+  # Its entropy is high enough to trip the generic-api-key heuristic, but
+  # it is not a credential to any real system -- it only ever reaches an
+  # in-memory SQLite DB created fresh per test (see tests/conftest.py's
+  # db_session fixture) and is never used outside this test file.
+  '''brandnewpass123''',
+  # `MAXMIND_KEY=""` -- an empty-string shell variable *declaration* (the
+  # default before a user supplies their own MaxMind license key
+  # interactively or via a flag), not a credential. Its high entropy
+  # relative to length trips generic-api-key the same way any short
+  # quoted literal next to a KEY-shaped variable name does. Scoped to
+  # this exact assignment (not a bare `MAXMIND_KEY` match) so a real,
+  # non-empty key accidentally hardcoded later would still be caught.
+  '''MAXMIND_KEY=""''',
+]

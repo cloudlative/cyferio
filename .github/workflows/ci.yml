@@ -1,0 +1,365 @@
+name: CI
+
+# Runs on every push to master and every PR targeting master -- quality,
+# security, compliance, supply-chain, and test gates for this repo's
+# actual stack (Python/FastAPI in app/, bash installer scripts at the repo
+# root, one vanilla app.js, Docker + docker-compose). No Terraform/K8s/
+# Helm anywhere in this repo, so none of that is faked here.
+#
+# Every job below is independent (no artificial `needs:` chains) so they
+# all run in parallel and a failure in one doesn't block the others from
+# reporting. build.yml's build-push job calls this workflow via
+# `workflow_call` and gates the release build on all of these passing.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- Quality -------------------------------------------------------
+  lint-python:
+    name: Lint (ruff)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff==0.16.3
+      - name: ruff check
+        run: ruff check .
+      # Not a hard gate yet: the codebase has never been through
+      # `ruff format` and this PR is CI/tooling-only (no app-code edits),
+      # so ~94 pre-existing files would fail a blocking check on day one.
+      # Surfaced here so drift is visible; see the PR description's
+      # "Follow-up" section for the plan to turn this blocking after a
+      # dedicated one-time formatting pass.
+      - name: ruff format --check (informational)
+        continue-on-error: true
+        run: ruff format --check .
+
+  typecheck-python:
+    name: Typecheck (mypy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      # Informational only -- see app/mypy.ini's header comment. ~212
+      # pre-existing errors as of this workflow's introduction, almost all
+      # SQLAlchemy Column[T]-vs-T narrowing mypy can't see through without
+      # extra stubs this repo doesn't otherwise need. Tracked as follow-up,
+      # not fixed here (CI/tooling-only scope).
+      #
+      # continue-on-error at the *step* level, deliberately not the job
+      # level: a job-level continue-on-error still reports that job's
+      # overall check run as failed (red X) in the PR checks list even
+      # though it doesn't block merge -- only step-level continue-on-error
+      # makes the job's own check genuinely green while still logging the
+      # failure inline for visibility.
+      - name: mypy
+        continue-on-error: true
+        run: mypy .
+
+  lint-shell:
+    name: Lint shell scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        # --severity=error: this repo has never been linted before: the
+        # default (style/info-level) severity turns up ~20 pre-existing
+        # SC2162/SC2034/SC2164 findings across the installer scripts (see
+        # PR description's "Follow-up" section). error-level is clean on
+        # current master and catches genuine correctness bugs (unquoted
+        # expansions that break on spaces, etc).
+        run: shellcheck --severity=error ./*.sh
+
+  lint-js:
+    name: Lint app.js (eslint)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: eslint
+        run: npx --yes eslint@9 --no-config-lookup -c eslint.config.mjs app/vpnadmin/static/*.js
+
+  lint-dockerfile:
+    name: Lint Dockerfile (hadolint)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3.4.0
+        with:
+          dockerfile: app/Dockerfile
+          # Two pre-existing DL3018/DL3013 ("pin versions in apk add/pip
+          # install") warnings on current master -- see PR description's
+          # "Follow-up" section. error-level only, so those don't block.
+          failure-threshold: error
+
+  # ---- Security --------------------------------------------------------
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # gitleaks/gitleaks-action@v2 refuses to run at all on any
+      # organization-owned repo without a paid GITLEAKS_LICENSE secret
+      # ("cloudlative is an organization. License key is required.") --
+      # confirmed live on this repo, not assumed from docs; true
+      # regardless of the repo's public/private visibility. Running the
+      # underlying open-source gitleaks CLI directly instead: same
+      # detection engine, same .gitleaks.toml config, no license needed.
+      - name: Install gitleaks
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            | tar -xz -C /usr/local/bin gitleaks
+      # On a pull_request, scan only the commits this PR actually
+      # introduces (base.sha..head.sha) -- not this PR's diff against a
+      # single-commit baseline, but genuinely new commits. Scanning full
+      # history (--log-opts unset) on every PR run is wrong for a busy
+      # repo with multiple concurrent branches: `actions/checkout`
+      # fetches every remote branch's history, and gitleaks scans every
+      # ref reachable from what got fetched -- so a PR run would flag
+      # *any* branch's pre-existing findings repo-wide, forever, not just
+      # what that PR introduces (confirmed live: a concurrent, unrelated
+      # branch's commit showed up as a "new" finding on this PR's own
+      # run). Full-history scans still make sense on push to master
+      # (catches anything that slipped past PR review) and are cheap
+      # enough to run every time.
+      - name: gitleaks (PR diff only)
+        if: github.event_name == 'pull_request'
+        run: gitleaks detect --source . --redact -v --log-opts="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+      - name: gitleaks (full history)
+        if: github.event_name != 'pull_request'
+        run: gitleaks detect --source . --redact -v
+
+  sast:
+    name: SAST (semgrep)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      # `semgrep scan`, not `semgrep ci` -- the `ci` subcommand's
+      # PR-only-diff filtering and Semgrep App login/dashboard integration
+      # aren't needed here (no Semgrep App account, see PR description's
+      # "deliberately excluded" list), just a plain SARIF-producing scan
+      # of the whole tree, uploaded to the Security tab like every other
+      # scanner in this workflow.
+      #
+      # Not a hard gate (continue-on-error): this repo has never run
+      # semgrep before -- 49 pre-existing findings across app code on
+      # first scan (mostly python.lang.security.audit.insecure-file-
+      # permissions from openvpn-install.sh's own 0o770/0o666 PKI-file
+      # permission choices, mirrored in the Python port under services/).
+      # Fixing those is real app-code editing, out of scope for a
+      # CI/tooling-only PR -- see the PR description's "Follow-up"
+      # section for the full list and a suggested triage.
+      - name: semgrep
+        continue-on-error: true
+        run: semgrep scan --sarif --output semgrep.sarif --config p/ci --config p/python --config p/dockerfile
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: python
+      - uses: github/codeql-action/analyze@v3
+
+  # ---- Compliance --------------------------------------------------------
+  iac-scan:
+    name: IaC scan (checkov)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Installed directly rather than via bridgecrewio/checkov-action --
+      # verified locally that checkov (3.3.11, matching that action's
+      # pinned image) has no dedicated docker-compose policy pack in this
+      # version (only `dockerfile`, `kubernetes`, `terraform`, etc. --
+      # `--framework docker_compose` errors as unrecognized). Scanning
+      # docker-compose.yml still has value here as a secrets/YAML pass
+      # (redundant with gitleaks, but cheap and catches the same class of
+      # mistake from a second angle); the real policy coverage is the
+      # Dockerfile scan. Two pre-existing findings there: CKV_DOCKER_2 (no
+      # HEALTHCHECK) and CKV_DOCKER_3 (no non-root USER) -- both
+      # deliberate (see app/Dockerfile's own comments: the container needs
+      # root to read/write the bind-mounted, root-owned /etc/openvpn and
+      # run easyrsa) rather than oversights, but left for follow-up
+      # discussion rather than silently suppressed.
+      - name: Install checkov
+        run: pip install checkov
+      - name: checkov (soft-fail -- see job comment)
+        run: |
+          checkov -f app/Dockerfile -f docker-compose.yml \
+            -o cli -o sarif \
+            --output-file-path console,checkov-results.sarif \
+            --compact --soft-fail
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+  # ---- Supply chain -------------------------------------------------
+  python-deps-audit:
+    name: Python dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pip-audit + pip-licenses
+        run: pip install pip-audit pip-licenses
+      - name: pip-audit (vulnerabilities)
+        run: pip-audit -r requirements.txt
+      - name: pip-licenses (report only)
+        if: always()
+        run: |
+          pip install -r requirements.txt
+          pip-licenses --format=markdown --output-file=licenses.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-licenses
+          path: app/licenses.md
+
+  osv-scan:
+    name: OSV scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google/osv-scanner-action/osv-scanner-action@v2.5.1
+        with:
+          scan-args: |-
+            --recursive
+            --format=sarif
+            --output=osv-results.sarif
+            ./app
+        continue-on-error: true
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: osv-results.sarif
+
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4.9.0
+
+  # ---- Testing --------------------------------------------------------
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # app/tests/services/test_certificate_manager.py's session-scoped PKI
+      # fixture calls services.openvpn.certificate_manager.
+      # generate_tls_crypt_key(), which shells out to the real `openvpn
+      # --genkey --secret` binary (not just easyrsa/openssl) -- confirmed
+      # missing on ubuntu-24.04 runners by default (34 test errors,
+      # "Command not found: 'openvpn'", on this PR's first live CI run).
+      # ubuntu-24.04 ships openvpn 2.6.x in its default apt repos, same
+      # major version openvpn-install.sh itself installs in production.
+      - name: Install openvpn (needed by the cert-manager test fixture)
+        run: sudo apt-get update && sudo apt-get install -y openvpn
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run tests
+        # --timeout=120: a genuine hang (see git history's fix to
+        # main.py's lifespan shutdown, commit 71191ef) fails clearly
+        # instead of running to this job's 25m ceiling.
+        # --reruns=1: defensive-only. A previous CI attempt (PR #9, before
+        # that lifespan fix landed) saw an intermittent runner-only
+        # TestClient-teardown deadlock and a flaky network-dependent
+        # fixture; neither reproduced across a clean local run of the full
+        # suite (467 passed, 1 skipped, 0 failures) after that fix, but
+        # --reruns is cheap insurance against genuine runner-only flakes
+        # this local run can't rule out. See the PR description for the
+        # full story.
+        # --cov-fail-under=65: measured baseline was 70% on a clean local
+        # run (`pytest --cov=vpnadmin --cov-report=term-missing`); 65 is a
+        # small buffer under that, not a round number picked from nowhere.
+        run: |
+          pytest -v --timeout=120 --reruns=1 \
+            --cov=vpnadmin --cov-report=xml --cov-report=term-missing \
+            --cov-fail-under=65
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-xml
+          path: app/coverage.xml

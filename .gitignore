@@ -19,6 +19,14 @@ __pycache__/
 *.pyc
 .venv/
 
+# Local runs of the CI tooling introduced in .github/workflows/ci.yml
+# (ruff/mypy/pytest-cov) -- never checked in, same as any other tool cache.
+.coverage
+coverage.xml
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 # Web app runtime artifacts, never the code itself. docker-compose.yml and
 # .env now live at the repo root (moved out of app/); app/data/ stays put
 # since that's still where the app's SQLite file / bind mount lives.

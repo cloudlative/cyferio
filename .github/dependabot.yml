@@ -1,0 +1,26 @@
+version: 2
+updates:
+  # app/requirements.txt + app/requirements-dev.txt (requirements-dev.txt
+  # `-r requirements.txt`s the base file, but Dependabot's pip ecosystem
+  # scans both files independently when both exist in the directory).
+  - package-ecosystem: pip
+    directory: /app
+    schedule:
+      interval: weekly
+    groups:
+      pip:
+        patterns: ["*"]
+
+  # app/Dockerfile's base image (python:3.12-alpine).
+  - package-ecosystem: docker
+    directory: /app
+    schedule:
+      interval: weekly
+
+  # This repo's own CI/CD pipeline (ci.yml, build.yml, and every
+  # actions/*, docker/*, etc. dependency they pin) -- supply-chain
+  # hygiene for the pipeline itself, not just the application.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
