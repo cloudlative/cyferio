@@ -351,6 +351,8 @@ class CreateUserRequest(BaseModel):
             )
         return self
 
+    # Portal Login Restrictions -- User.restrict_login_by_*/allowed_login_*,
+    # enforced only by routes/auth.py's login check.
     restrict_login_by_country: bool = False
     allowed_login_countries: list[str] = []
     restrict_login_by_ip: bool = False
@@ -378,6 +380,43 @@ class CreateUserRequest(BaseModel):
     @field_validator("allowed_login_asns")
     @classmethod
     def _asns(cls, v: list[str]) -> list[str]:
+        return _valid_asn_list(v)
+
+    # VPN Access Restrictions -- a completely separate set from the Portal
+    # ones above, applied to the just-created client's policy_store entry
+    # (see create_user() below), same as Manage Restrictions on the
+    # Clients page would do. Independent storage (client_policy.json, not
+    # a User column) and independent enforcement (host-scripts/
+    # openvpn-mac-addr-check.py, not routes/auth.py's login check) -- see
+    # app_settings.migrate_decouple_portal_and_vpn_restrictions's docstring
+    # for why these must never be synced with the Portal fields above.
+    vpn_restrict_by_country: bool = False
+    vpn_allowed_countries: list[str] = []
+    vpn_restrict_by_ip: bool = False
+    vpn_allowed_ips: list[str] = []
+    vpn_restrict_by_city: bool = False
+    vpn_allowed_cities: list[str] = []
+    vpn_restrict_by_asn: bool = False
+    vpn_allowed_asns: list[str] = []
+
+    @field_validator("vpn_allowed_countries")
+    @classmethod
+    def _vpn_countries(cls, v: list[str]) -> list[str]:
+        return _valid_country_list(v)
+
+    @field_validator("vpn_allowed_ips")
+    @classmethod
+    def _vpn_ips(cls, v: list[str]) -> list[str]:
+        return _valid_ip_list(v)
+
+    @field_validator("vpn_allowed_cities")
+    @classmethod
+    def _vpn_cities(cls, v: list[str]) -> list[str]:
+        return _valid_city_list(v)
+
+    @field_validator("vpn_allowed_asns")
+    @classmethod
+    def _vpn_asns(cls, v: list[str]) -> list[str]:
         return _valid_asn_list(v)
 
     @field_validator("username")
@@ -474,6 +513,41 @@ class UpdateUserRequest(BaseModel):
     @field_validator("allowed_login_asns")
     @classmethod
     def _asns(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_asn_list(v) if v is not None else v
+
+    # VPN Access Restrictions -- edits this user's linked client's
+    # policy_store entry directly (see update_user() below), completely
+    # separate from the Portal Login Restriction fields above. None means
+    # "not provided in this PATCH" (model_fields_set decides, same
+    # convention as every other field here); an explicit []/false clears
+    # that restriction kind.
+    vpn_restrict_by_country: bool | None = None
+    vpn_allowed_countries: list[str] | None = None
+    vpn_restrict_by_ip: bool | None = None
+    vpn_allowed_ips: list[str] | None = None
+    vpn_restrict_by_city: bool | None = None
+    vpn_allowed_cities: list[str] | None = None
+    vpn_restrict_by_asn: bool | None = None
+    vpn_allowed_asns: list[str] | None = None
+
+    @field_validator("vpn_allowed_countries")
+    @classmethod
+    def _vpn_countries(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_country_list(v) if v is not None else v
+
+    @field_validator("vpn_allowed_ips")
+    @classmethod
+    def _vpn_ips(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_ip_list(v) if v is not None else v
+
+    @field_validator("vpn_allowed_cities")
+    @classmethod
+    def _vpn_cities(cls, v: list[str] | None) -> list[str] | None:
+        return _valid_city_list(v) if v is not None else v
+
+    @field_validator("vpn_allowed_asns")
+    @classmethod
+    def _vpn_asns(cls, v: list[str] | None) -> list[str] | None:
         return _valid_asn_list(v) if v is not None else v
 
     @field_validator("password")
@@ -883,25 +957,21 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         )
     log_action(db, admin, "create_user", target=body.username, detail=f"role={role_def.slug}")
 
-    # Sync VPN-profile-level OS/bandwidth onto the just-created client, same
-    # write path as Manage Restrictions on the Clients page. Best-effort:
-    # both fields are already validated at the Pydantic level above, so
-    # this should never actually raise -- but the user/link/cert all
-    # already exist at this point, so a failure here (e.g. a filesystem
-    # hiccup writing client_policy.json) must not undo any of that. Skipped
-    # entirely (no file write at all) when neither is set -- matches
-    # policy_store's own "no policy entry = fully unrestricted" default,
-    # avoids touching client_policy.json for the common case.
+    # Sync VPN-profile-level OS/bandwidth/Access Restrictions onto the
+    # just-created client, same write path as Manage Restrictions on the
+    # Clients page. Best-effort: every field here is already validated at
+    # the Pydantic level above, so this should never actually raise -- but
+    # the user/link/cert all already exist at this point, so a failure
+    # here (e.g. a filesystem hiccup writing client_policy.json) must not
+    # undo any of that. Skipped entirely (no file write at all) when
+    # nothing was set -- matches policy_store's own "no policy entry =
+    # fully unrestricted" default, avoids touching client_policy.json for
+    # the common case.
     #
-    # Deliberately NOT syncing restrict_login_by_country/city/asn/ip here --
-    # those are Portal Login Restrictions (enforced only by routes/auth.py's
-    # login check, via the User columns set right below) and are
-    # independent from VPN Access Restrictions (enforced only by
-    # host-scripts/openvpn-mac-addr-check.py, via policy_store's
-    # allowed_countries/cities/asns/ips on the SAME client_policy.json this
-    # call touches for allowed_os/bandwidth). An admin who wants to also
-    # restrict this client's VPN connections sets that separately, via the
-    # Clients page's Manage Restrictions dialog -- see
+    # vpn_restrict_by_*/vpn_allowed_* (VPN Access Restrictions) are a
+    # completely separate field set from restrict_login_by_*/
+    # allowed_login_* (Portal Login Restrictions, set on the User columns
+    # right below) -- deliberately NOT derived from each other. See
     # app_settings.migrate_decouple_portal_and_vpn_restrictions's docstring
     # for the full history of why these two used to be (wrongly) coupled.
     # Settings -> VPN Management's org-wide default only fills in when this
@@ -911,12 +981,17 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     # env-var/DB-row-default pair in this app (see app_settings.py).
     effective_bandwidth = body.bandwidth_monthly_gb if body.bandwidth_monthly_gb is not None else app_settings.runtime.default_bandwidth_monthly_gb
     policy = {}
-    if body.allowed_os or effective_bandwidth:
+    if body.allowed_os or effective_bandwidth or body.vpn_restrict_by_country or body.vpn_restrict_by_city \
+            or body.vpn_restrict_by_asn or body.vpn_restrict_by_ip:
         try:
             policy = policy_store.set_policy(
                 effective_client_name,
                 allowed_os=body.allowed_os or None,
                 bandwidth_monthly_gb=effective_bandwidth,
+                allowed_countries=body.vpn_allowed_countries if body.vpn_restrict_by_country else None,
+                allowed_cities=body.vpn_allowed_cities if body.vpn_restrict_by_city else None,
+                allowed_asns=body.vpn_allowed_asns if body.vpn_restrict_by_asn else None,
+                allowed_ips=body.vpn_allowed_ips if body.vpn_restrict_by_ip else None,
             )
         except (PolicyValidationError, OSError) as e:
             log_action(db, admin, "create_user", target=body.username,
@@ -1112,30 +1187,49 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     elif became_active:
         vpn_identity_sync.sync_after_portal_reactivate(db, target)
 
-    # Sync VPN-profile-level OS/bandwidth onto the linked client's policy --
-    # a no-op if this user has no linked profile yet (the rare
-    # cert-created-but-DB-failed edge case; there's nothing to sync onto
-    # until an admin attaches one via the vpn-link endpoint below).
+    # Sync VPN-profile-level OS/bandwidth/Access Restrictions onto the
+    # linked client's policy -- a no-op if this user has no linked profile
+    # yet (the rare cert-created-but-DB-failed edge case; there's nothing
+    # to sync onto until an admin attaches one via the vpn-link endpoint
+    # below).
     #
-    # Deliberately NOT syncing restrict_login_by_country/city/asn/ip (just
-    # committed onto `target` above) into policy_store here -- Portal Login
-    # Restrictions and VPN Access Restrictions are independent as of this
-    # change; see the long comment in create_user() above and
-    # app_settings.migrate_decouple_portal_and_vpn_restrictions's docstring
-    # for the full rationale. An admin edits VPN Access Restrictions for
-    # this same client directly via the Clients page's Manage Restrictions
-    # dialog (PUT /api/clients/{name}/policy), which this PATCH never
-    # touches.
+    # vpn_restrict_by_*/vpn_allowed_* are VPN Access Restrictions, edited
+    # here (Edit User) or equally via the Clients page's Manage
+    # Restrictions dialog (PUT /api/clients/{name}/policy) -- both write
+    # the exact same policy_store entry, so either surface reflects the
+    # other's edits. Deliberately NOT derived from
+    # restrict_login_by_country/city/asn/ip (just committed onto `target`
+    # above, Portal Login Restrictions) -- the two field sets are fully
+    # independent; see app_settings.migrate_decouple_portal_and_vpn_
+    # restrictions's docstring for the full rationale.
+    #
+    # Each restriction kind's touched-ness is judged from ITS OWN
+    # toggle+list pair in this PATCH (not "any restriction field present"),
+    # same reasoning Portal's own restrict_login_by_country +
+    # allowed_login_countries pairing needed before -- the Edit User form
+    # always submits a kind's toggle and list together, so treating them as
+    # one unit here is safe and avoids a stray, unrelated field in
+    # model_fields_set accidentally overwriting a restriction kind nobody
+    # touched.
+    vpn_country_touched = bool({"vpn_restrict_by_country", "vpn_allowed_countries"} & body.model_fields_set)
+    vpn_city_touched = bool({"vpn_restrict_by_city", "vpn_allowed_cities"} & body.model_fields_set)
+    vpn_asn_touched = bool({"vpn_restrict_by_asn", "vpn_allowed_asns"} & body.model_fields_set)
+    vpn_ip_touched = bool({"vpn_restrict_by_ip", "vpn_allowed_ips"} & body.model_fields_set)
     client_name = target.vpn_profile_link.vpn_client_name if target.vpn_profile_link else None
     policy = policy_store.get_policy(client_name) if client_name else {}
-    if client_name and ("allowed_os" in body.model_fields_set or "bandwidth_monthly_gb" in body.model_fields_set):
+    if client_name and ("allowed_os" in body.model_fields_set or "bandwidth_monthly_gb" in body.model_fields_set
+                         or vpn_country_touched or vpn_city_touched or vpn_asn_touched or vpn_ip_touched):
         try:
             policy = policy_store.set_policy(
                 client_name,
                 allowed_os=body.allowed_os if "allowed_os" in body.model_fields_set else ...,
                 bandwidth_monthly_gb=body.bandwidth_monthly_gb if "bandwidth_monthly_gb" in body.model_fields_set else ...,
+                allowed_countries=(body.vpn_allowed_countries if body.vpn_restrict_by_country else None) if vpn_country_touched else ...,
+                allowed_cities=(body.vpn_allowed_cities if body.vpn_restrict_by_city else None) if vpn_city_touched else ...,
+                allowed_asns=(body.vpn_allowed_asns if body.vpn_restrict_by_asn else None) if vpn_asn_touched else ...,
+                allowed_ips=(body.vpn_allowed_ips if body.vpn_restrict_by_ip else None) if vpn_ip_touched else ...,
             )
-            log_action(db, admin, "update_user", target=target.username, detail="synced VPN profile OS/bandwidth")
+            log_action(db, admin, "update_user", target=target.username, detail="synced VPN profile restrictions")
         except (PolicyValidationError, OSError) as e:
             log_action(db, admin, "update_user", target=target.username,
                        detail=f"VPN profile restrictions could not be applied: {e}", success=False)
