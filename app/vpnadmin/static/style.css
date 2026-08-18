@@ -1177,6 +1177,14 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 }
 .login-box h1 { display: block; text-align: center; margin: 0; font-size: 1.4rem; }
 .login-box button { width: 100%; justify-content: center; margin-top: 10px; padding: 11px; }
+/* .login-box button's width:100% above (0,1,1 specificity) otherwise beats
+   .password-toggle-btn's own 30px width (0,1,0), stretching the toggle
+   button to cover the entire password field on login.html/reset_password.html
+   and silently blocking every mouse click into the input -- keyboard/Tab
+   focus still worked, so this was easy to miss without an actual click
+   test. Re-declared here at (0,2,0) specificity to win back the small
+   icon-button size inside .login-box specifically. */
+.login-box .password-toggle-btn { width: 30px; margin-top: 0; padding: 0; }
 .login-forgot { text-align: right; margin: -8px 0 4px; }
 .login-forgot a { color: var(--text-muted); font-size: 0.84rem; text-decoration: none; }
 .login-forgot a:hover { color: var(--accent-2); text-decoration: underline; }
