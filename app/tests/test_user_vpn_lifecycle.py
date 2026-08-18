@@ -105,7 +105,10 @@ class TestVpnLink:
         r = app_client.post(f"/api/users/{other.id}/vpn-link", json={"vpn_client_name": "taken-cert"})
         assert r.status_code == 409
 
-    def test_cannot_attach_when_user_already_linked(self, app_client, db_session):
+    def test_reassign_replaces_existing_link(self, app_client, db_session):
+        # Task feedback: "Remove the immutable behavior for the VPN
+        # Profile association... Allow administrators to modify an
+        # existing VPN Profile assignment."
         target = User(username="already-linked", password_hash="x", role=Role.viewer)
         db_session.add(target)
         db_session.commit()
@@ -114,6 +117,95 @@ class TestVpnLink:
 
         login(app_client, "admin", "adminpass123")
         r = app_client.post(f"/api/users/{target.id}/vpn-link", json={"vpn_client_name": "another-cert"})
+        assert r.status_code == 201
+        assert r.json()["vpn_client_name"] == "another-cert"
+
+        # Exactly one link for this user, pointing at the new client -- the
+        # old one is gone (not duplicated, not left dangling).
+        links = db_session.query(VpnProfileLink).filter(VpnProfileLink.user_id == target.id).all()
+        assert len(links) == 1
+        assert links[0].vpn_client_name == "another-cert"
+        # The old client is now unassigned, not deleted -- available to
+        # attach to another user.
+        assert db_session.query(VpnProfileLink).filter(VpnProfileLink.vpn_client_name == "existing-cert").first() is None
+
+    def test_reassign_to_already_linked_client_rejected(self, app_client, db_session):
+        owner = User(username="owner2", password_hash="x", role=Role.viewer)
+        target = User(username="reassign-me", password_hash="x", role=Role.viewer)
+        db_session.add_all([owner, target])
+        db_session.commit()
+        db_session.add_all([
+            VpnProfileLink(user_id=owner.id, vpn_client_name="owner2-cert", link_source="manual_admin_link"),
+            VpnProfileLink(user_id=target.id, vpn_client_name="reassign-me-cert", link_source="manual_admin_link"),
+        ])
+        db_session.commit()
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post(f"/api/users/{target.id}/vpn-link", json={"vpn_client_name": "owner2-cert"})
+        assert r.status_code == 409
+        # Rejected before touching anything -- target keeps its original link.
+        link = db_session.query(VpnProfileLink).filter(VpnProfileLink.user_id == target.id).one()
+        assert link.vpn_client_name == "reassign-me-cert"
+
+    def test_reassign_to_same_client_rejected(self, app_client, db_session):
+        target = User(username="same-client-user", password_hash="x", role=Role.viewer)
+        db_session.add(target)
+        db_session.commit()
+        db_session.add(VpnProfileLink(user_id=target.id, vpn_client_name="same-cert", link_source="manual_admin_link"))
+        db_session.commit()
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post(f"/api/users/{target.id}/vpn-link", json={"vpn_client_name": "same-cert"})
+        assert r.status_code == 400
+
+    def test_reassign_does_not_carry_over_portal_restrictions(self, app_client, db_session, monkeypatch, tmp_path):
+        # Regression guard for the coupling bug this session already fixed
+        # once for create_user/update_user (see
+        # app_settings.migrate_decouple_portal_and_vpn_restrictions) --
+        # link_vpn_profile must not re-introduce it.
+        from vpnadmin import policy_store
+        from vpnadmin.config import settings
+        monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
+        target = User(
+            username="restrictedportal", password_hash="x", role=Role.viewer,
+            restrict_login_by_country=True, allowed_login_countries='["PK"]',
+        )
+        db_session.add(target)
+        db_session.commit()
+        db_session.add(VpnProfileLink(user_id=target.id, vpn_client_name="old-cert", link_source="manual_admin_link"))
+        db_session.commit()
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post(f"/api/users/{target.id}/vpn-link", json={"vpn_client_name": "new-cert"})
+        assert r.status_code == 201
+        assert policy_store.get_policy("new-cert").get("allowed_countries") in (None, [])
+
+
+class TestVpnUnlink:
+    def test_clear_assignment(self, app_client, db_session):
+        target = User(username="clearme", password_hash="x", role=Role.viewer)
+        db_session.add(target)
+        db_session.commit()
+        db_session.add(VpnProfileLink(user_id=target.id, vpn_client_name="clearme-cert", link_source="manual_admin_link"))
+        db_session.commit()
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.delete(f"/api/users/{target.id}/vpn-link")
+        assert r.status_code == 200
+        assert r.json()["vpn_client_name"] is None
+        assert db_session.query(VpnProfileLink).filter(VpnProfileLink.user_id == target.id).first() is None
+        # Client itself still exists as far as this app's DB is concerned
+        # (no VpnProfileLink row referencing it, i.e. unassigned) -- this
+        # endpoint never touches cli_wrapper/the underlying cert.
+        assert db_session.query(VpnProfileLink).filter(VpnProfileLink.vpn_client_name == "clearme-cert").first() is None
+
+    def test_clear_with_no_link_rejected(self, app_client, db_session):
+        target = User(username="nolinktoclear", password_hash="x", role=Role.viewer)
+        db_session.add(target)
+        db_session.commit()
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.delete(f"/api/users/{target.id}/vpn-link")
         assert r.status_code == 400
 
 

@@ -1242,13 +1242,20 @@ class VpnLinkRequest(BaseModel):
 
 @router.post("/{user_id}/vpn-link", status_code=201)
 def link_vpn_profile(user_id: int, body: VpnLinkRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """Attaches an existing, unlinked VPN profile to a user that doesn't
-    have one yet (task feedback: "For existing VPN profiles... Edit a
-    User. Select an existing VPN profile from a dropdown."). Mirrors
-    vpn_identity_sync.auto_link_new_client's "link an existing user"
-    branch, but for the inverse trigger (an admin picking the profile from
-    Edit User, not a cert being created) -- link_source records that
-    distinction (manual_admin_link vs. created_with_profile).
+    """Attaches an existing, unlinked VPN profile to a user -- or, if the
+    user already has one linked, REPLACES that link with this one (task
+    feedback: "Remove the immutable behavior for the VPN Profile
+    association... Allow administrators to modify an existing VPN Profile
+    assignment... Replace it with another available VPN Profile"). The
+    previous link, if any, is simply deleted: its VPN client itself (cert,
+    MAC allowlist, connection history, usage, VPN Access Restrictions) is
+    completely untouched and becomes unassigned again -- exactly the same
+    state as a client that was never linked to any portal account, visible
+    again via GET /api/clients/unassigned for attaching elsewhere later.
+    Mirrors vpn_identity_sync.auto_link_new_client's "link an existing
+    user" branch, but for the inverse trigger (an admin picking the
+    profile from Edit User, not a cert being created) -- link_source
+    records that distinction (manual_admin_link vs. created_with_profile).
 
     VpnProfileLink.vpn_client_name is unique at the DB level, so a race
     between two admins attaching the same just-unassigned profile to two
@@ -1257,41 +1264,66 @@ def link_vpn_profile(user_id: int, body: VpnLinkRequest, admin: User = Depends(r
     target = db.get(User, user_id)
     if target is None or target.deleted:
         raise HTTPException(status_code=404, detail="User not found.")
-    if target.vpn_profile_link is not None:
-        raise HTTPException(status_code=400, detail=f"'{target.username}' already has a linked VPN profile ('{target.vpn_profile_link.vpn_client_name}').")
     name = body.vpn_client_name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="VPN profile name is required.")
+    existing_link = target.vpn_profile_link
+    if existing_link is not None and existing_link.vpn_client_name == name:
+        raise HTTPException(status_code=400, detail=f"'{target.username}' is already linked to '{name}'.")
     if db.query(VpnProfileLink).filter(VpnProfileLink.vpn_client_name == name).first() is not None:
         raise HTTPException(status_code=409, detail=f"'{name}' is already linked to another user.")
+    previous_name = existing_link.vpn_client_name if existing_link is not None else None
+    if existing_link is not None:
+        db.delete(existing_link)
+        db.flush()  # clears the user_id unique slot before the insert below reuses it, same transaction
     db.add(VpnProfileLink(user_id=target.id, vpn_client_name=name, link_source="manual_admin_link", linked_by=admin.username))
     try:
         db.commit()
     except Exception:
         db.rollback()
         raise HTTPException(status_code=409, detail=f"'{name}' was just linked to another user -- pick a different profile.")
-    log_action(db, admin, "link_vpn_profile", target=target.username, detail=name)
+    if previous_name:
+        log_action(db, admin, "reassign_vpn_profile", target=target.username, detail=f"'{previous_name}' -> '{name}'")
+    else:
+        log_action(db, admin, "link_vpn_profile", target=target.username, detail=name)
 
-    # Push this user's already-configured Device & Access Policy / Location
-    # & Network Restrictions onto the profile it's just been attached to --
-    # same "the User side is the sync source" direction as create_user/
-    # update_user above. This profile may have been sitting unassigned with
-    # its own (possibly different, possibly none) restrictions from before
-    # the link -- the user's settings win, since they're what an admin was
-    # just looking at when they chose to attach this profile.
-    policy = {}
-    try:
-        policy = policy_store.set_policy(
-            name,
-            allowed_countries=json.loads(target.allowed_login_countries or "[]") if target.restrict_login_by_country else None,
-            allowed_cities=json.loads(target.allowed_login_cities or "[]") if target.restrict_login_by_city else None,
-            allowed_asns=json.loads(target.allowed_login_asns or "[]") if target.restrict_login_by_asn else None,
-            allowed_ips=json.loads(target.allowed_login_ips or "[]") if target.restrict_login_by_ip else None,
-        )
-    except (PolicyValidationError, OSError) as e:
-        log_action(db, admin, "link_vpn_profile", target=target.username,
-                   detail=f"VPN profile restrictions could not be synced: {e}", success=False)
-    return _serialize(target, {name: policy})
+    # Deliberately NOT syncing this user's Portal Login Restrictions (or
+    # anything else) onto the (re)attached client's policy -- VPN Access
+    # Restrictions are edited directly (Manage Restrictions on the Clients
+    # page, or Edit User's own VPN Access Restrictions fieldset), never
+    # derived from a User's Portal columns or carried over from whatever
+    # was previously linked. See app_settings.migrate_decouple_portal_
+    # and_vpn_restrictions's docstring for why that sync existed once and
+    # was removed. The (re)attached client keeps exactly the policy it
+    # already had -- its own restrictions, OS/bandwidth quota, usage
+    # history -- untouched by this call, same as picking it from the
+    # unassigned list on day one.
+    return _serialize(target, {name: policy_store.get_policy(name)})
+
+
+@router.delete("/{user_id}/vpn-link")
+def unlink_vpn_profile(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Clears a user's VPN Profile assignment without deleting or revoking
+    anything -- task feedback: "Administrators should be able to... Clear
+    the assignment if appropriate." The VPN client itself (cert, MAC
+    allowlist, connection history, usage, VPN Access Restrictions) is
+    completely untouched; it simply becomes unassigned again, exactly like
+    a client that was never linked to any portal account, and is visible
+    again via GET /api/clients/unassigned for attaching elsewhere. Actually
+    revoking/deleting the underlying VPN client stays a deliberate, separate
+    action on the Clients page -- this endpoint only ever touches the
+    User<->VpnProfileLink association."""
+    target = db.get(User, user_id)
+    if target is None or target.deleted:
+        raise HTTPException(status_code=404, detail="User not found.")
+    link = target.vpn_profile_link
+    if link is None:
+        raise HTTPException(status_code=400, detail=f"'{target.username}' has no linked VPN profile to clear.")
+    client_name = link.vpn_client_name
+    db.delete(link)
+    db.commit()
+    log_action(db, admin, "unlink_vpn_profile", target=target.username, detail=client_name)
+    return _serialize(target, {})
 
 
 @router.delete("/{user_id}")
