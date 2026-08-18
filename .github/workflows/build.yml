@@ -110,7 +110,7 @@ jobs:
           echo "image=$(echo "$tags" | head -n1)" >> "$GITHUB_OUTPUT"
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.ref.outputs.image }}
           format: sarif
