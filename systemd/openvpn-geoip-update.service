@@ -5,6 +5,6 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash /opt/openvpn-toolkit/geoip-update.sh
+ExecStart=/bin/bash /opt/cyferio/geoip-update.sh
 StandardOutput=append:/var/log/openvpn-geoip-update.log
 StandardError=append:/var/log/openvpn-geoip-update.log

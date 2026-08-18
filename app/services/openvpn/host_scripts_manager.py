@@ -57,8 +57,20 @@ QUOTA_ENFORCER_TIMER = "openvpn-quota-enforcer.timer"
 # "already wired" and skip re-appending a duplicate block, and lets an
 # admin see at a glance in server.conf which lines this tool owns vs. the
 # original bash-parity content above them.
-SERVER_CONF_MARKER_BEGIN = "# --- BEGIN openvpn-toolkit per-client restriction hooks (managed) ---"
-SERVER_CONF_MARKER_END = "# --- END openvpn-toolkit per-client restriction hooks ---"
+SERVER_CONF_MARKER_BEGIN = "# --- BEGIN cyferio per-client restriction hooks (managed) ---"
+SERVER_CONF_MARKER_END = "# --- END cyferio per-client restriction hooks ---"
+
+# The project was renamed from "openvpn-toolkit" to "cyferio" (2026-08-19)
+# -- these are the markers any server provisioned before that rename
+# already has baked into its real, live server.conf. install_host_scripts()
+# below recognizes either form so an already-provisioned server gets its
+# block transparently upgraded to the new marker text on next run, the
+# same "detect stale content, replace in place" self-healing this function
+# already did for the pre-`management`-directive case (see the comment at
+# that call site) -- never a second parallel block, never a silent no-op
+# that leaves the old marker text stuck forever.
+_LEGACY_SERVER_CONF_MARKER_BEGIN = "# --- BEGIN openvpn-toolkit per-client restriction hooks (managed) ---"
+_LEGACY_SERVER_CONF_MARKER_END = "# --- END openvpn-toolkit per-client restriction hooks ---"
 
 
 def render_server_conf_additions(paths: OpenVPNPaths) -> str:
@@ -290,7 +302,16 @@ def install_host_scripts(paths: OpenVPNPaths, *, os_info: package_manager.OSInfo
     with open(paths.server_conf, encoding="utf-8") as f:
         server_conf = f.read()
     desired_block = render_server_conf_additions(paths)
-    if SERVER_CONF_MARKER_BEGIN not in server_conf:
+    # Recognize either marker form -- a server provisioned before the
+    # openvpn-toolkit -> cyferio rename has the legacy text baked into its
+    # real server.conf (see _LEGACY_SERVER_CONF_MARKER_BEGIN's docstring).
+    if SERVER_CONF_MARKER_BEGIN in server_conf:
+        begin_marker, end_marker = SERVER_CONF_MARKER_BEGIN, SERVER_CONF_MARKER_END
+    elif _LEGACY_SERVER_CONF_MARKER_BEGIN in server_conf:
+        begin_marker, end_marker = _LEGACY_SERVER_CONF_MARKER_BEGIN, _LEGACY_SERVER_CONF_MARKER_END
+    else:
+        begin_marker = None
+    if begin_marker is None:
         with open(paths.server_conf, "a", encoding="utf-8") as f:
             if not server_conf.endswith("\n"):
                 f.write("\n")
@@ -305,9 +326,11 @@ def install_host_scripts(paths: OpenVPNPaths, *, os_info: package_manager.OSInfo
         # check silently left `management` (and anything else a future
         # version adds to this block) out forever. Replace the whole
         # marked region in place whenever it doesn't match what this
-        # version would render, rather than only ever appending once.
-        start = server_conf.index(SERVER_CONF_MARKER_BEGIN)
-        end = server_conf.index(SERVER_CONF_MARKER_END) + len(SERVER_CONF_MARKER_END)
+        # version would render, rather than only ever appending once --
+        # this is also what upgrades a legacy-marker block (see above) to
+        # the current marker text, since the two can never compare equal.
+        start = server_conf.index(begin_marker)
+        end = server_conf.index(end_marker) + len(end_marker)
         existing_block = server_conf[start:end] + "\n"
         if existing_block.rstrip("\n") != desired_block.rstrip("\n"):
             new_conf = server_conf[:start] + desired_block + server_conf[end:].lstrip("\n")

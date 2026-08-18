@@ -3,9 +3,9 @@
 # name from the containing directory) regardless of which directory it's
 # run from now that it's at the repo root -- keeps it bound to the existing
 # `app_pgdata`/`app_traefik-acme` named volumes and the containers already
-# running under that project, instead of Compose inferring a new
-# "openvpn-toolkit" project name from the repo root's directory name and
-# trying to stand up parallel volumes/containers alongside them.
+# running under that project, instead of Compose inferring a new project
+# name from the repo root's directory name (e.g. "cyferio") and trying to
+# stand up parallel volumes/containers alongside them.
 name: app
 
 services:
@@ -22,7 +22,7 @@ services:
   # picks up the change without a restart.
   traefik-config:
     image: alpine:3.20
-    container_name: openvpn-toolkit-traefik-config
+    container_name: cyferio-traefik-config
     restart: "no"
     env_file: .env
     volumes:
@@ -56,7 +56,7 @@ services:
 
   traefik:
     image: traefik:v3.5
-    container_name: openvpn-toolkit-traefik
+    container_name: cyferio-traefik
     restart: unless-stopped
     depends_on:
       traefik-config:
@@ -117,7 +117,7 @@ services:
     # version instead of always tracking latest; unset it and it defaults to
     # latest.
     image: ghcr.io/cloudlative/cyferio-app:${IMAGE_TAG:-latest}
-    container_name: openvpn-toolkit-app
+    container_name: cyferio-app
     restart: unless-stopped
     # Runs Docker's built-in tini as PID 1 instead of uvicorn directly.
     # Belt-and-suspenders zombie reaper: uvicorn/Python never calls wait()
@@ -162,8 +162,8 @@ services:
       #     runs whatever's checked out on the host (no image rebuild to
       #     pick up a script change). Point OPENVPN_INSTALL_SCRIPT/
       #     VPN_STATUS_SCRIPT in .env at these same in-container paths.
-      - ./openvpn-install.sh:/opt/openvpn-toolkit/openvpn-install.sh:ro
-      - ./vpn-status.py:/opt/openvpn-toolkit/vpn-status.py:ro
+      - ./openvpn-install.sh:/opt/cyferio/openvpn-install.sh:ro
+      - ./vpn-status.py:/opt/cyferio/vpn-status.py:ro
 
       # --- Only needed in SQLite mode (default) -- persists the app's own
       #     database (users, audit log) across container recreation. Not
@@ -187,7 +187,7 @@ services:
       # --- Phase 1 host_executor.py (live OpenVPN session actions,
       #     vpnadmin/routes/clients.py): a scoped SSH deploy key,
       #     read-only, always mounted at the fixed in-container path
-      #     /run/secrets/openvpn-toolkit-deploy-key (matches config.py's
+      #     /run/secrets/cyferio-deploy-key (matches config.py's
       #     HOST_SSH_KEY_PATH default). HOST_SSH_KEY_SOURCE_PATH below picks
       #     WHERE ON THE HOST that key actually lives -- deliberately a
       #     different env var than HOST_SSH_KEY_PATH, even though both
@@ -204,7 +204,7 @@ services:
       #     default: the live-session actions (Clients page) fail soft with
       #     a clear 400/empty list (see clients.py's _host_executor_config)
       #     until this is set up, same fail-soft pattern SMTP already uses.
-      # - ${HOST_SSH_KEY_SOURCE_PATH:-./secrets/openvpn-toolkit-deploy-key}:/run/secrets/openvpn-toolkit-deploy-key:ro
+      # - ${HOST_SSH_KEY_SOURCE_PATH:-./secrets/cyferio-deploy-key}:/run/secrets/cyferio-deploy-key:ro
     # This app manipulates root-owned files under /etc/openvpn and runs
     # easyrsa, so it runs as root inside the container (the image's
     # default user). USE_SUDO=false in .env reflects that no privilege
@@ -216,7 +216,7 @@ services:
   # to use it instead of the default SQLite file (see .env.example).
   postgres:
     image: postgres:16-alpine
-    container_name: openvpn-toolkit-db
+    container_name: cyferio-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-vpnadmin}

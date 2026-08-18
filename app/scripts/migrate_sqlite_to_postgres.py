@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 One-time data migration: copy every row from an existing SQLite
-openvpn-toolkit database into a fresh Postgres database, preserving IDs,
+cyferio database into a fresh Postgres database, preserving IDs,
 foreign keys, and timestamps exactly.
 
 Reuses the app's own SQLAlchemy models (vpnadmin.models) against BOTH
@@ -10,7 +10,7 @@ hand-translated SQL -- so this only has to move rows, not guess at types.
 
 Usage:
     python3 scripts/migrate_sqlite_to_postgres.py \
-        --sqlite-url sqlite:////opt/openvpn-toolkit/app/data/app.db \
+        --sqlite-url sqlite:////opt/cyferio/app/data/app.db \
         --postgres-url postgresql://vpnadmin:***@localhost:5432/vpnadmin
 
 Safe to re-run: Postgres tables are created if missing (create_all), and
@@ -60,7 +60,7 @@ def _row_counts(engine):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sqlite-url", required=True, help="e.g. sqlite:////opt/openvpn-toolkit/app/data/app.db")
+    parser.add_argument("--sqlite-url", required=True, help="e.g. sqlite:////opt/cyferio/app/data/app.db")
     parser.add_argument("--postgres-url", required=True, help="e.g. postgresql://user:pass@host:5432/dbname")
     parser.add_argument("--verify-only", action="store_true", help="Only print row counts on both sides, migrate nothing")
     args = parser.parse_args()

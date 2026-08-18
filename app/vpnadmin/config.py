@@ -69,15 +69,15 @@ class Settings:
 
     # --- Underlying toolkit scripts --------------------------------------
     # Paths to the two CLI tools this app is a frontend for. Defaults match
-    # a fresh `git clone` of this repo placed at /opt/openvpn-toolkit; in a
+    # a fresh `git clone` of this repo placed at /opt/cyferio; in a
     # Docker deployment these are bind-mounted from the host (see
     # docker-compose.yml) and these env vars should point at the mounted
     # paths instead.
     OPENVPN_INSTALL_SCRIPT: str = os.environ.get(
-        "OPENVPN_INSTALL_SCRIPT", "/opt/openvpn-toolkit/openvpn-install.sh"
+        "OPENVPN_INSTALL_SCRIPT", "/opt/cyferio/openvpn-install.sh"
     )
     VPN_STATUS_SCRIPT: str = os.environ.get(
-        "VPN_STATUS_SCRIPT", "/opt/openvpn-toolkit/vpn-status.py"
+        "VPN_STATUS_SCRIPT", "/opt/cyferio/vpn-status.py"
     )
 
     # Whether to prefix script invocations with `sudo`. Default true (the
@@ -114,11 +114,11 @@ class Settings:
     # everything through) and silently overrides the in-container path this
     # app actually reads from, pointing it at a path that only exists on the
     # host, not in here.
-    HOST_SSH_KEY_PATH: str = os.environ.get("HOST_SSH_KEY_PATH", "/run/secrets/openvpn-toolkit-deploy-key")
+    HOST_SSH_KEY_PATH: str = os.environ.get("HOST_SSH_KEY_PATH", "/run/secrets/cyferio-deploy-key")
     HOST_SSH_TARGET: str = os.environ.get("HOST_SSH_TARGET", "")  # "user@host"
     HOST_SSH_PORT: int = int(os.environ.get("HOST_SSH_PORT", 22))
     HOST_SSH_REMOTE_SCRIPT_PATH: str = os.environ.get(
-        "HOST_SSH_REMOTE_SCRIPT_PATH", "/opt/openvpn-toolkit/app/cli/openvpn_admin.py"
+        "HOST_SSH_REMOTE_SCRIPT_PATH", "/opt/cyferio/app/cli/openvpn_admin.py"
     )
     HOST_SSH_USE_SUDO: bool = _env_bool("HOST_SSH_USE_SUDO", True)
     HOST_SSH_TIMEOUT_SECONDS: int = int(os.environ.get("HOST_SSH_TIMEOUT_SECONDS", 180))

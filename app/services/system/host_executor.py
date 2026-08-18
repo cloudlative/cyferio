@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class HostExecutorConfig:
     ssh_key_path: str
     ssh_target: str  # "user@host", e.g. "ubuntu@34.182.51.24"
-    remote_script_path: str = "/opt/openvpn-toolkit/app/cli/openvpn_admin.py"
+    remote_script_path: str = "/opt/cyferio/app/cli/openvpn_admin.py"
     use_sudo: bool = True
     timeout_seconds: int = 120
     ssh_port: int = 22

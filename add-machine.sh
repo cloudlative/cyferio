@@ -44,7 +44,7 @@
 #      it to --user's home rather than generating a fresh one (avoids
 #      re-registering a new key with GitHub for no reason).
 #   2. Register the public half as a READ-ONLY deploy key on
-#      cloudlative/openvpn-toolkit via `gh repo deploy-key add`, run HERE
+#      cloudlative/cyferio via `gh repo deploy-key add`, run HERE
 #      (skips cleanly if a key with this exact content is already
 #      registered).
 #   3. Add an SSH config alias under --user's home so git operations
@@ -58,7 +58,7 @@
 #
 # Usage:
 #   ./add-machine.sh --host 203.0.113.10 [--user ubuntu] \
-#     [--repo cloudlative/openvpn-toolkit] [--repo-dir /opt/openvpn-toolkit] \
+#     [--repo cloudlative/cyferio] [--repo-dir /opt/cyferio] \
 #     [--key-title "<label shown in GitHub's deploy-key list>"]
 #
 # After this, log into --host and run setup-new-machine.sh there.
@@ -67,8 +67,8 @@ set -euo pipefail
 
 HOST=""
 SSH_USER="ubuntu"
-GH_REPO="cloudlative/openvpn-toolkit"
-REPO_DIR="/opt/openvpn-toolkit"
+GH_REPO="cloudlative/cyferio"
+REPO_DIR="/opt/cyferio"
 KEY_TITLE=""
 
 log() { echo "[add-machine] $*"; }
@@ -103,18 +103,29 @@ SSH "true" >/dev/null 2>&1 || die "Cannot SSH to $SSH_TARGET (key-based, non-int
 # $SSH_USER's own context (that's who the SSH() connection logs in as) --
 # no need to reference an absolute home-directory path from here.
 log "Phase 1: deploy keypair on $HOST (as $SSH_USER)"
-OLD_ROOT_KEY="/root/.ssh/openvpn-toolkit-deploy"
-if SSH "test -f ~/.ssh/openvpn-toolkit-deploy"; then
-	log "  key already exists at ~/.ssh/openvpn-toolkit-deploy on $HOST -- reusing."
+DEPLOY_KEY_NAME="cyferio-deploy"
+LEGACY_DEPLOY_KEY_NAME="openvpn-toolkit-deploy"
+OLD_ROOT_KEY="/root/.ssh/$LEGACY_DEPLOY_KEY_NAME"
+if SSH "test -f ~/.ssh/$DEPLOY_KEY_NAME"; then
+	log "  key already exists at ~/.ssh/$DEPLOY_KEY_NAME on $HOST -- reusing."
+elif SSH "test -f ~/.ssh/$LEGACY_DEPLOY_KEY_NAME"; then
+	# The project was renamed from "openvpn-toolkit" to "cyferio"
+	# (2026-08-19) -- a box provisioned before that has the keypair under
+	# the old filename. Rename in place rather than generate a new one:
+	# the same key bytes are already registered as a GitHub deploy key
+	# (keyed by content, not filename), so this needs no re-registration.
+	log "  found an older-named key (~/.ssh/$LEGACY_DEPLOY_KEY_NAME) from before the openvpn-toolkit -> cyferio rename -- renaming it to ~/.ssh/$DEPLOY_KEY_NAME instead of generating a new one."
+	SSH "mv ~/.ssh/$LEGACY_DEPLOY_KEY_NAME ~/.ssh/$DEPLOY_KEY_NAME && mv ~/.ssh/$LEGACY_DEPLOY_KEY_NAME.pub ~/.ssh/$DEPLOY_KEY_NAME.pub"
+	log "  renamed."
 elif SSH "sudo test -f $OLD_ROOT_KEY" 2>/dev/null; then
 	log "  found an older root-owned key from a previous version of this script -- migrating it to $SSH_USER's home instead of generating a new one."
-	SSH "mkdir -p ~/.ssh && chmod 700 ~/.ssh && sudo cp $OLD_ROOT_KEY ~/.ssh/openvpn-toolkit-deploy && sudo cp ${OLD_ROOT_KEY}.pub ~/.ssh/openvpn-toolkit-deploy.pub && sudo chown $SSH_USER:$SSH_USER ~/.ssh/openvpn-toolkit-deploy ~/.ssh/openvpn-toolkit-deploy.pub && chmod 600 ~/.ssh/openvpn-toolkit-deploy && chmod 644 ~/.ssh/openvpn-toolkit-deploy.pub && sudo rm -f $OLD_ROOT_KEY ${OLD_ROOT_KEY}.pub"
+	SSH "mkdir -p ~/.ssh && chmod 700 ~/.ssh && sudo cp $OLD_ROOT_KEY ~/.ssh/$DEPLOY_KEY_NAME && sudo cp ${OLD_ROOT_KEY}.pub ~/.ssh/$DEPLOY_KEY_NAME.pub && sudo chown $SSH_USER:$SSH_USER ~/.ssh/$DEPLOY_KEY_NAME ~/.ssh/$DEPLOY_KEY_NAME.pub && chmod 600 ~/.ssh/$DEPLOY_KEY_NAME && chmod 644 ~/.ssh/$DEPLOY_KEY_NAME.pub && sudo rm -f $OLD_ROOT_KEY ${OLD_ROOT_KEY}.pub"
 	log "  migrated; removed the old root-owned copy."
 else
-	SSH "mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -t ed25519 -f ~/.ssh/openvpn-toolkit-deploy -N '' -C 'openvpn-toolkit-deploy@$HOST' -q"
+	SSH "mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -t ed25519 -f ~/.ssh/$DEPLOY_KEY_NAME -N '' -C '$DEPLOY_KEY_NAME@$HOST' -q"
 	log "  generated new key on $HOST"
 fi
-PUBLIC_KEY=$(SSH "cat ~/.ssh/openvpn-toolkit-deploy.pub")
+PUBLIC_KEY=$(SSH "cat ~/.ssh/$DEPLOY_KEY_NAME.pub")
 [[ -n "$PUBLIC_KEY" ]] || die "Could not read the generated public key back from $HOST."
 
 # --- Phase 2: register with GitHub (runs HERE, where gh is authenticated) --
@@ -138,7 +149,7 @@ else
 Host $ALIAS
     HostName github.com
     User git
-    IdentityFile ~/.ssh/openvpn-toolkit-deploy
+    IdentityFile ~/.ssh/$DEPLOY_KEY_NAME
     IdentitiesOnly yes
 CFG
 chmod 600 ~/.ssh/config"
@@ -150,9 +161,17 @@ if SSH "sudo grep -q '^Host $ALIAS\$' /root/.ssh/config 2>/dev/null"; then
 	SSH "sudo sed -i '/^Host $ALIAS\$/,/^\$/d' /root/.ssh/config" || true
 	log "  removed the old root-based alias entry (already migrated in Phase 1)."
 fi
+# Deliberately NOT cleaning up a pre-rename "github.com-openvpn-toolkit"
+# alias here, even though $ALIAS is now named differently -- an already-
+# cloned box's .git/config remote url still literally references that old
+# alias hostname (Phase 4 below only ever `git fetch`s an existing clone,
+# it doesn't rewrite the remote url), so deleting it would leave that
+# clone's git operations broken until someone re-points the remote. The
+# old alias staying around as a harmless duplicate is the safe failure
+# mode; a broken git remote is not.
 # Prime known_hosts non-interactively so Phase 4's clone doesn't hang on a
 # host-key prompt.
-SSH "ssh -o StrictHostKeyChecking=accept-new -T git@github.com -i ~/.ssh/openvpn-toolkit-deploy" >/dev/null 2>&1 || true
+SSH "ssh -o StrictHostKeyChecking=accept-new -T git@github.com -i ~/.ssh/$DEPLOY_KEY_NAME" >/dev/null 2>&1 || true
 
 # --- Phase 4: create/own the repo dir, then clone (or update) as $SSH_USER -
 log "Phase 4: repo at $REPO_DIR on $HOST"

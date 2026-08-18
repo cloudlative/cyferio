@@ -25,9 +25,9 @@
 #   1. A DNS A record for --domain already pointing at this host's public IP
 #      (needed for Let's Encrypt's HTTP-01 challenge to succeed).
 #   2. This repo already cloned here (private repo -- add a read-only GitHub
-#      deploy key first: `ssh-keygen -t ed25519 -f ~/.ssh/openvpn-toolkit-deploy`,
-#      then `gh repo deploy-key add --repo cloudlative/openvpn-toolkit
-#      ~/.ssh/openvpn-toolkit-deploy.pub`, then clone via that key -- or just
+#      deploy key first: `ssh-keygen -t ed25519 -f ~/.ssh/cyferio-deploy`,
+#      then `gh repo deploy-key add --repo cloudlative/cyferio
+#      ~/.ssh/cyferio-deploy.pub`, then clone via that key -- or just
 #      use add-machine.sh, which does exactly this).
 #
 # Idempotent: every phase checks its own current state before acting, so
@@ -42,7 +42,7 @@
 #     --domain portal.cyferio.com \
 #     --acme-email you@example.com \
 #     [--captcha-provider turnstile --turnstile-site-key XXX --turnstile-secret-key YYY] \
-#     [--deploy-user ubuntu] [--image-tag 1.0.36] [--repo-dir /opt/openvpn-toolkit] \
+#     [--deploy-user ubuntu] [--image-tag 1.0.36] [--repo-dir /opt/cyferio] \
 #     [--use-staging-first] [--force-env] [--skip-stack] [--skip-docker]
 #
 # Flags:
@@ -74,7 +74,7 @@
 #                            setup_host_executor() for why.
 #   --image-tag TAG         Sets IMAGE_TAG in .env (default: latest).
 #   --repo-dir DIR          Where this repo is checked out (default:
-#                            /opt/openvpn-toolkit -- must match
+#                            /opt/cyferio -- must match
 #                            HOST_SSH_REMOTE_SCRIPT_PATH's directory).
 #   --use-staging-first     Request a Let's Encrypt STAGING cert first,
 #                            verify it issues, then switch to production and
@@ -139,7 +139,7 @@ RECAPTCHA_SITE_KEY=
 RECAPTCHA_SECRET_KEY=
 DEPLOY_USER="ubuntu"
 IMAGE_TAG="latest"
-REPO_DIR="/opt/openvpn-toolkit"
+REPO_DIR="/opt/cyferio"
 USE_STAGING_FIRST=0
 FORCE_ENV=0
 SKIP_STACK=0
@@ -226,10 +226,15 @@ if [[ -z "$DOMAIN" && -f "$REPO_DIR/.env" ]]; then
 fi
 
 SECRETS_DIR="$REPO_DIR/secrets"
-DEPLOY_KEY="$SECRETS_DIR/openvpn-toolkit-deploy-key"
+DEPLOY_KEY="$SECRETS_DIR/cyferio-deploy-key"
+# The project was renamed from "openvpn-toolkit" to "cyferio" (2026-08-19)
+# -- setup_host_executor() below detects and migrates a box provisioned
+# under these old names instead of generating a parallel duplicate set.
+LEGACY_DEPLOY_KEY="$SECRETS_DIR/openvpn-toolkit-deploy-key"
 FORCED_COMMAND_SCRIPT="$REPO_DIR/scripts/ssh_forced_command.sh"
 REMOTE_SCRIPT_PATH="$REPO_DIR/app/cli/openvpn_admin.py"
-SUDOERS_FILE="/etc/sudoers.d/openvpn-toolkit-host-executor"
+SUDOERS_FILE="/etc/sudoers.d/cyferio-host-executor"
+LEGACY_SUDOERS_FILE="/etc/sudoers.d/openvpn-toolkit-host-executor"
 DEPLOY_USER_HOME=$(getent passwd "$DEPLOY_USER" | cut -d: -f6)
 DEPLOY_USER_SSH_DIR="$DEPLOY_USER_HOME/.ssh"
 
@@ -336,8 +341,17 @@ setup_host_executor() {
 	mkdir -p "$SECRETS_DIR"
 	if [[ -f "$DEPLOY_KEY" ]]; then
 		log "  key already exists at $DEPLOY_KEY -- reusing."
+	elif [[ -f "$LEGACY_DEPLOY_KEY" ]]; then
+		# Renamed in place rather than regenerated -- the authorized_keys
+		# entry below is keyed off this file's actual bytes (via
+		# $DEPLOY_KEY.pub), not its filename or -C comment, so reusing it
+		# needs no new authorized_keys/sudoers churn beyond what this
+		# function already does unconditionally on every run.
+		log "  found an older-named key ($LEGACY_DEPLOY_KEY) from before the openvpn-toolkit -> cyferio rename -- renaming it to $DEPLOY_KEY instead of generating a new one."
+		mv "$LEGACY_DEPLOY_KEY" "$DEPLOY_KEY"
+		mv "${LEGACY_DEPLOY_KEY}.pub" "${DEPLOY_KEY}.pub"
 	else
-		ssh-keygen -t ed25519 -f "$DEPLOY_KEY" -N "" -C "openvpn-toolkit-app-host-executor" -q
+		ssh-keygen -t ed25519 -f "$DEPLOY_KEY" -N "" -C "cyferio-app-host-executor" -q
 		log "  generated new key at $DEPLOY_KEY"
 	fi
 	chmod 600 "$DEPLOY_KEY"
@@ -346,7 +360,7 @@ setup_host_executor() {
 	mkdir -p "$(dirname "$FORCED_COMMAND_SCRIPT")"
 	cat > "$FORCED_COMMAND_SCRIPT" <<SCRIPT
 #!/bin/bash
-# Restricts the openvpn-toolkit-app-executor SSH key (see
+# Restricts the cyferio-app-host-executor SSH key (see
 # services/system/host_executor.py) to exactly one command shape:
 #   sudo -n python3 $REMOTE_SCRIPT_PATH <action> [args...]
 # Installed as the forced \`command=\` for that key in $DEPLOY_USER's
@@ -378,28 +392,46 @@ SCRIPT
 	install -m 440 -o root -g root "$tmp_sudoers" "$SUDOERS_FILE"
 	rm -f "$tmp_sudoers"
 	log "  installed sudoers grant at $SUDOERS_FILE"
+	if [[ -f "$LEGACY_SUDOERS_FILE" ]]; then
+		rm -f "$LEGACY_SUDOERS_FILE"
+		log "  removed the older-named sudoers file at $LEGACY_SUDOERS_FILE (superseded by $SUDOERS_FILE)."
+	fi
 
 	# authorized_keys entry for $DEPLOY_USER -- appended, never overwritten
-	# (that file may already carry the operator's own login key).
+	# wholesale (that file may already carry the operator's own login
+	# key). Matches either the current or the pre-rename -C comment
+	# string -- a box whose key file got renamed above (reusing the same
+	# bytes) still has the OLD comment baked into that already-written
+	# authorized_keys line, since ssh-keygen embeds -C at generation time
+	# and that branch never regenerates the key. The line's content can
+	# still be stale even when the comment matches, though: its
+	# command="$FORCED_COMMAND_SCRIPT" path is REPO_DIR-dependent, and a
+	# box migrated from /opt/openvpn-toolkit to /opt/cyferio has an old
+	# path baked in that a bare "comment already present -> skip" check
+	# would leave broken forever (same "detect stale content, replace in
+	# place" reasoning host_scripts_manager.py's server.conf block uses).
 	mkdir -p "$DEPLOY_USER_SSH_DIR"
 	touch "$DEPLOY_USER_SSH_DIR/authorized_keys"
 	chmod 700 "$DEPLOY_USER_SSH_DIR"
 	chmod 600 "$DEPLOY_USER_SSH_DIR/authorized_keys"
 	chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_USER_SSH_DIR"
-	if ! grep -q "openvpn-toolkit-app-host-executor" "$DEPLOY_USER_SSH_DIR/authorized_keys" 2>/dev/null; then
-		{
-			printf 'command="%s",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty %s\n' \
-				"$FORCED_COMMAND_SCRIPT" "$(cat "$DEPLOY_KEY.pub")"
-		} >> "$DEPLOY_USER_SSH_DIR/authorized_keys"
-		log "  added authorized_keys entry for $DEPLOY_USER"
+	DESIRED_AUTHKEYS_LINE=$(printf 'command="%s",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty %s' \
+		"$FORCED_COMMAND_SCRIPT" "$(cat "$DEPLOY_KEY.pub")")
+	if grep -qF "$DESIRED_AUTHKEYS_LINE" "$DEPLOY_USER_SSH_DIR/authorized_keys" 2>/dev/null; then
+		log "  authorized_keys entry for $DEPLOY_USER already present and up to date -- left as-is."
+	elif grep -qE "openvpn-toolkit-app-host-executor|cyferio-app-host-executor" "$DEPLOY_USER_SSH_DIR/authorized_keys" 2>/dev/null; then
+		sed -i -E "/openvpn-toolkit-app-host-executor|cyferio-app-host-executor/d" "$DEPLOY_USER_SSH_DIR/authorized_keys"
+		printf '%s\n' "$DESIRED_AUTHKEYS_LINE" >> "$DEPLOY_USER_SSH_DIR/authorized_keys"
+		log "  updated a stale authorized_keys entry for $DEPLOY_USER (command= path or comment had changed)."
 	else
-		log "  authorized_keys entry for $DEPLOY_USER already present -- left as-is."
+		printf '%s\n' "$DESIRED_AUTHKEYS_LINE" >> "$DEPLOY_USER_SSH_DIR/authorized_keys"
+		log "  added authorized_keys entry for $DEPLOY_USER"
 	fi
 
 	# Clean up any earlier root-based setup from before this script existed
 	# (see the migration this was written for) -- safe no-op if none exists.
-	if [[ -f /root/.ssh/authorized_keys ]] && grep -q "openvpn-toolkit-app-host-executor" /root/.ssh/authorized_keys 2>/dev/null; then
-		sed -i '/openvpn-toolkit-app-host-executor/d' /root/.ssh/authorized_keys
+	if [[ -f /root/.ssh/authorized_keys ]] && grep -qE "openvpn-toolkit-app-host-executor|cyferio-app-host-executor" /root/.ssh/authorized_keys 2>/dev/null; then
+		sed -i -E '/openvpn-toolkit-app-host-executor|cyferio-app-host-executor/d' /root/.ssh/authorized_keys
 		log "  removed a pre-existing root authorized_keys entry for this key (migrating off root login)."
 	fi
 
@@ -429,7 +461,7 @@ write_env() {
 		log "  $env_file already exists -- leaving it otherwise untouched (pass --force-env to regenerate)."
 		# Still make sure the values this script cares about are present...
 		_ensure_env_line "$env_file" "HOST_SSH_TARGET" "$DEPLOY_USER@$(_private_ip)"
-		_ensure_env_line "$env_file" "HOST_SSH_KEY_SOURCE_PATH" "./secrets/openvpn-toolkit-deploy-key"
+		_ensure_env_line "$env_file" "HOST_SSH_KEY_SOURCE_PATH" "./secrets/cyferio-deploy-key"
 		# ...and if HOST_SSH_TARGET already exists but under a different
 		# user than --deploy-user (e.g. re-running this script with
 		# --deploy-user ubuntu against a box previously set up with root),
@@ -528,7 +560,7 @@ POSTGRES_PASSWORD=$pg_password
 POSTGRES_DB=vpnadmin
 
 HOST_SSH_TARGET=$DEPLOY_USER@$(_private_ip)
-HOST_SSH_KEY_SOURCE_PATH=./secrets/openvpn-toolkit-deploy-key
+HOST_SSH_KEY_SOURCE_PATH=./secrets/cyferio-deploy-key
 HOST_SSH_PORT=22
 HOST_SSH_REMOTE_SCRIPT_PATH=$REMOTE_SCRIPT_PATH
 HOST_SSH_USE_SUDO=true

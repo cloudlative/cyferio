@@ -36,7 +36,7 @@ elif [[ -e /etc/fedora-release ]]; then
 elif [[ -e /etc/alpine-release ]]; then
 	# Not a real target for the interactive installer/OS-package-setup
 	# flow below (which this branch deliberately never reaches -- see
-	# app/Dockerfile) -- this is the openvpn-toolkit web app's own
+	# app/Dockerfile) -- this is the cyferio web app's own
 	# container, which only ever invokes this script's client/MAC
 	# management subcommands (--add-user, --add-mac, --lint-mac-db, etc.) against
 	# an OpenVPN server that's already installed and running on the real

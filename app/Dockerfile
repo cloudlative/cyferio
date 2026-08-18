@@ -94,7 +94,7 @@ COPY cli ./cli
 # (see docker-compose.yml) rather than baked into the image, so the
 # container always runs whatever version is checked out on the host --
 # no image rebuild needed just to pick up a script change.
-RUN mkdir -p /opt/openvpn-toolkit /app/data
+RUN mkdir -p /opt/cyferio /app/data
 
 EXPOSE 8000
 

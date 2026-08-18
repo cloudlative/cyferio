@@ -75,11 +75,11 @@ http:
           - "2c0f:f248::/32"
 
   routers:
-    openvpn-toolkit:
+    cyferio:
       rule: "Host(`${APP_DOMAIN}`)"
       entryPoints:
         - websecure
-      service: openvpn-toolkit
+      service: cyferio
       middlewares:
         - ${CLIENT_IP_TRUST_MIDDLEWARE}
       tls:
@@ -107,7 +107,7 @@ http:
       service: ping@internal
 
   services:
-    openvpn-toolkit:
+    cyferio:
       loadBalancer:
         servers:
           # "app" resolves via Docker Compose's built-in DNS to the `app`

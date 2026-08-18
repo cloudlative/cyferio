@@ -7,7 +7,7 @@ read-modify-write of client_policy.json to this small standalone script.
 
 This is intentionally a SEPARATE file from host-scripts/policy_lib.py
 (imported by the client-connect/disconnect scripts) -- this one ships in
-the git repo / wherever openvpn-install.sh lives (e.g. /opt/openvpn-toolkit),
+the git repo / wherever openvpn-install.sh lives (e.g. /opt/cyferio),
 while policy_lib.py is deployed only alongside the connect/disconnect
 scripts under /etc/openvpn/server/. The two locations are not guaranteed
 to be the same machine layout across every self-hosted install, so this

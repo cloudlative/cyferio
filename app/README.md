@@ -158,9 +158,9 @@ brand-new box's) and that you can already SSH to the target host as
 `--user` — it only bootstraps *repo* access, not your own login to the box.
 It generates an ed25519 keypair **on the target host** (the private half
 never leaves it), registers the public half as a read-only deploy key on
-`cloudlative/openvpn-toolkit` from here, wires up an SSH config alias on
+`cloudlative/cyferio` from here, wires up an SSH config alias on
 the host so git resolves it unambiguously, and clones (or `git fetch`s, if
-already cloned) into `/opt/openvpn-toolkit`. Idempotent — safe to re-run
+already cloned) into `/opt/cyferio`. Idempotent — safe to re-run
 against a box that already has some or all of this done (as it will be, the
 next time you pull newer commits onto an existing box).
 
@@ -170,7 +170,7 @@ domain/ACME email if the portal is wanted? MaxMind GeoIP?), or fully
 non-interactive via flags:
 
 ```bash
-sudo /opt/openvpn-toolkit/setup.sh --mode webapp \
+sudo /opt/cyferio/setup.sh --mode webapp \
   --domain vpn.example.com \
   --acme-email you@example.com \
   --use-staging-first    # first time on a genuinely new domain
@@ -250,7 +250,7 @@ copy is complete before cutting `DATABASE_URL` over:
 
 ```bash
 python3 scripts/migrate_sqlite_to_postgres.py \
-  --sqlite-url sqlite:////opt/openvpn-toolkit/app/data/app.db \
+  --sqlite-url sqlite:////opt/cyferio/app/data/app.db \
   --postgres-url postgresql://vpnadmin:<password>@localhost:5432/vpnadmin
 ```
 

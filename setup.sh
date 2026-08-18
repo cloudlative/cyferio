@@ -22,7 +22,7 @@
 #   From your own machine:
 #     ./add-machine.sh --host 203.0.113.10 --user ubuntu
 #     ssh ubuntu@203.0.113.10
-#     cd /opt/openvpn-toolkit && sudo ./setup.sh
+#     cd /opt/cyferio && sudo ./setup.sh
 #
 # What setup.sh itself does, in order:
 #   1. Refuses to run on a machine it doesn't recognize as its own (see
@@ -70,7 +70,7 @@
 #   Every phase checks current state before acting (same pattern
 #   setup-new-machine.sh already uses) -- safe to re-run any number of
 #   times. On first successful run, this script writes a marker file at
-#   /etc/openvpn-toolkit/.setup-provisioned recording that THIS script
+#   /etc/cyferio/.setup-provisioned recording that THIS script
 #   provisioned the machine. On every subsequent run, if OpenVPN or the app
 #   stack already looks installed (server.conf exists, or REPO_DIR/.env
 #   exists) but that marker is MISSING, this script refuses to touch
@@ -79,7 +79,7 @@
 #   and reconciling it automatically would be exactly the wrong thing to
 #   do. If you're certain a given box genuinely was set up by this script
 #   before the marker existed, create the marker file by hand to proceed:
-#     sudo mkdir -p /etc/openvpn-toolkit && sudo touch /etc/openvpn-toolkit/.setup-provisioned
+#     sudo mkdir -p /etc/cyferio && sudo touch /etc/cyferio/.setup-provisioned
 #
 # Usage (run as root, or via sudo), OpenVPN only:
 #   sudo ./setup.sh --mode openvpn
@@ -88,7 +88,7 @@
 #   sudo ./setup.sh --mode webapp --domain portal.example.com \
 #     --acme-email you@example.com [--maxmind-key XXXXXXXXXXXXXXXX] \
 #     [--captcha-provider turnstile --turnstile-site-key XXX --turnstile-secret-key YYY] \
-#     [--deploy-user ubuntu] [--image-tag 1.0.36] [--repo-dir /opt/openvpn-toolkit] \
+#     [--deploy-user ubuntu] [--image-tag 1.0.36] [--repo-dir /opt/cyferio] \
 #     [--use-staging-first] [--force-env] [--skip-stack] [--skip-docker] \
 #     [--proxy-mode auto|cloudflare|direct] [--sqlite]
 #
@@ -246,7 +246,7 @@ done
 
 # --- Foreign-machine guard ---------------------------------------------------
 # See this script's own header ("Idempotency & the foreign-machine guard").
-MARKER_DIR="/etc/openvpn-toolkit"
+MARKER_DIR="/etc/cyferio"
 MARKER_FILE="$MARKER_DIR/.setup-provisioned"
 
 _looks_already_installed() {
