@@ -71,9 +71,6 @@
 			{% if is_admin %}
 			<a href="/settings" class="{{ 'active' if request.url.path == '/settings' }}"><span class="nav-icon">⛭</span>Settings</a>
 			{% endif %}
-			{% if can_manage_openvpn_install %}
-			<a href="/openvpn-install" class="{{ 'active' if request.url.path == '/openvpn-install' }}"><span class="nav-icon">⇩</span>OpenVPN Install</a>
-			{% endif %}
 			{# Unconditional -- no permission gate, matching /profile and
 			   /change-password's "every account, any role" posture. This
 			   is written for the least technical account in the building,

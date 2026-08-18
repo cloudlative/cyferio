@@ -1148,13 +1148,6 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 .error-banner { background: var(--danger-bg); color: var(--danger-text); padding: 11px 14px; border-radius: 10px; margin-bottom: 18px; font-size: 0.9rem; font-weight: 600; border: 1px solid rgba(244, 63, 94, 0.3); }
 .success-banner { background: rgba(16,185,129,0.12); color: #34d399; padding: 11px 14px; border-radius: 10px; margin-bottom: 18px; font-size: 0.9rem; font-weight: 600; border: 1px solid rgba(16,185,129,0.3); }
 
-/* OpenVPN Install page (see openvpn_install.html) -- reuses .error-banner's
-   token palette for its "danger zone" banner rather than inventing a new
-   one, since it's the same semantic (destructive-action warning). */
-.ovi-danger-banner { background: var(--danger-bg); color: var(--danger-text); border: 1px solid rgba(244, 63, 94, 0.3); }
-.ovi-gate-card { max-width: 480px; }
-.ovi-section-heading { font-size: 0.92rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 22px 0 10px; }
-.ovi-section-heading:first-of-type { margin-top: 0; }
 .field-hint { color: var(--text-muted); font-size: 0.8rem; margin: 5px 0 0; }
 
 /* z-index alone can't beat a native <dialog>'s top-layer, which is why

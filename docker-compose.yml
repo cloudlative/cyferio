@@ -184,8 +184,8 @@ services:
       - /sys:/hostsys:ro
       - /:/hostfs:ro
 
-      # --- Phase 1 host_executor.py (web-triggered install/uninstall,
-      #     vpnadmin/routes/openvpn_install.py): a scoped SSH deploy key,
+      # --- Phase 1 host_executor.py (live OpenVPN session actions,
+      #     vpnadmin/routes/clients.py): a scoped SSH deploy key,
       #     read-only, always mounted at the fixed in-container path
       #     /run/secrets/openvpn-toolkit-deploy-key (matches config.py's
       #     HOST_SSH_KEY_PATH default). HOST_SSH_KEY_SOURCE_PATH below picks
@@ -201,9 +201,9 @@ services:
       #     key should be restricted host-side (authorized_keys `command=`
       #     forced-command wrapper, see the migration plan's §2a) to running
       #     exactly app/cli/openvpn_admin.py, nothing else. Commented out by
-      #     default: the Install/Uninstall admin action fails soft with a
-      #     clear 400 (see openvpn_install.py's _host_executor_config) until
-      #     this is set up, same fail-soft pattern SMTP already uses.
+      #     default: the live-session actions (Clients page) fail soft with
+      #     a clear 400/empty list (see clients.py's _host_executor_config)
+      #     until this is set up, same fail-soft pattern SMTP already uses.
       # - ${HOST_SSH_KEY_SOURCE_PATH:-./secrets/openvpn-toolkit-deploy-key}:/run/secrets/openvpn-toolkit-deploy-key:ro
     # This app manipulates root-owned files under /etc/openvpn and runs
     # easyrsa, so it runs as root inside the container (the image's

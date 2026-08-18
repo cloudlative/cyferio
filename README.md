@@ -23,7 +23,10 @@ Cyferio started as, and still includes, a small self-contained OpenVPN road-warr
 
 | File | Purpose |
 |---|---|
+| `setup.sh` | Guided, idempotent entrypoint that orchestrates `add-machine.sh`/`openvpn-install.sh`/`setup-new-machine.sh` below — the recommended way to bring up a new machine, OpenVPN-only or OpenVPN + the web app portal. Interactive prompts by default, flags for automation; see `./setup.sh --help` |
+| `add-machine.sh` | Step 0 for a web-app-portal deployment, run from YOUR OWN machine, not the target host — bootstraps the new box's read-only deploy-key access to this repo and clones it there |
 | `openvpn-install.sh` | Installer + client management (add/revoke/list/check/lint), interactive menu or CLI flags |
+| `setup-new-machine.sh` | One-time bootstrap for the web app portal (Docker, host-executor SSH key, `.env`, Traefik/Let's Encrypt, `docker compose up`) — orchestrated by `setup.sh`, or run directly |
 | `vpn-status.py` | Live connection status, all-clients view, bandwidth, rejected-attempt auditing |
 | `vpn-tools.conf.example` | Copy to `/etc/openvpn/vpn-tools.conf` to override any default path/setting |
 | `completions/*.bash` | Optional bash tab-completion for both tools' CLI flags |
@@ -34,6 +37,20 @@ Cyferio started as, and still includes, a small self-contained OpenVPN road-warr
 ```bash
 git clone https://github.com/cloudlative/cyferio.git
 cd cyferio
+sudo ./setup.sh
+```
+
+Guided prompts walk you through OpenVPN-only vs. OpenVPN + the web app
+portal (domain/ACME email if the portal is wanted, plus an optional MaxMind
+GeoIP setup) — see `./setup.sh --help` for the fully non-interactive flag
+form, and [app/README.md's "First-time setup on a new machine"](app/README.md#first-time-setup-on-a-new-machine)
+for the web-app-portal path in full (it needs one extra step, `add-machine.sh`,
+run from your own machine first).
+
+Prefer just the OpenVPN installer/management tool on its own, no
+orchestration? `openvpn-install.sh` still works exactly as it always has:
+
+```bash
 sudo bash openvpn-install.sh
 ```
 
@@ -159,7 +176,7 @@ Enforcement happens **on the OpenVPN host itself**, in scripts under `host-scrip
 
 **Automated (recommended):** the Python installer (`app/services/openvpn/host_scripts_manager.py`) now handles all of this itself:
 
-- A **fresh install** (`app/cli/openvpn_admin.py install`, or the web app's OpenVPN Install page) deploys and wires everything above automatically, before the OpenVPN service's first start — no separate step, no restart needed, fully enforcing from boot.
+- A **fresh install** via `app/cli/openvpn_admin.py install` deploys and wires everything above automatically, before the OpenVPN service's first start — no separate step, no restart needed, fully enforcing from boot.
 - An **already-installed server** (predating this change, or one that skipped this before) can be brought up to date with:
   ```bash
   sudo python3 app/cli/openvpn_admin.py install-host-scripts          # stage files + server.conf change only

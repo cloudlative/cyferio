@@ -508,7 +508,7 @@ const uPhoneValidation = attachInlineValidation(addPhone.getLocalInputEl(), () =
 const ePhoneValidation = attachInlineValidation(editPhone.getLocalInputEl(), () => phoneError(editPhone.getValue()));
 // macError() is the shared helper in app.js (mirrors services.openvpn.
 // validator.normalize_mac's tolerance) -- required here (Add User's MAC
-// field is mandatory), unlike its optional use on the OpenVPN Install page.
+// field is mandatory).
 const uMacValidation = attachInlineValidation(document.getElementById("u-mac"), (v) => (v || "").trim() ? macError(v) : "Device MAC Address is required.");
 const uBandwidthValidation = attachInlineValidation(document.getElementById("u-bandwidth"), bandwidthError);
 const eBandwidthValidation = attachInlineValidation(document.getElementById("e-bandwidth"), bandwidthError);

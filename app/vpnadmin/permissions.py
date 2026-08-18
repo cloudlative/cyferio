@@ -42,12 +42,6 @@ OBJECTS: dict[str, str] = {
     # role's blanket grant below (unlike "reports"/"health", which viewer
     # already has) -- admin/super_admin only, by default.
     "db_reporting": "Database Reporting",
-    # Phase 1 Python service layer's web-triggered install/uninstall (see
-    # routes/openvpn_install.py) -- deliberately its own object, not folded
-    # into "vpn_profiles", since it's a host-namespace action (SSH-executed,
-    # see host_executor.py) with much higher blast radius than a normal
-    # client add/revoke and should be grantable independently.
-    "openvpn_install": "OpenVPN Install/Uninstall",
 }
 
 ACTIONS = ("view", "create", "update", "delete", "execute", "manage")
@@ -101,7 +95,7 @@ _SYSTEM_ROLES: dict[str, dict] = {
         "Matches the pre-RBAC 'viewer' role exactly.",
         "permissions": {
             obj: {"view": True} for obj in OBJECTS
-            if obj not in ("settings", "roles", "openvpn_install", "db_reporting")
+            if obj not in ("settings", "roles", "db_reporting")
         },
         "scopes": {},
     },

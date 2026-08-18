@@ -25,10 +25,10 @@ ENV APP_VERSION=${APP_VERSION}
 # the bind-mounted host /etc/openvpn directory. Alpine's default shell is
 # busybox ash, not bash, so bash has to be installed explicitly (unlike the
 # Debian slim image, which included it already).
-# openssh-client -- Phase 1's host_executor.py (vpnadmin/routes/
-# openvpn_install.py) shells out to the system `ssh` binary for the one
-# whitelisted remote install/uninstall command; not present in the base
-# Alpine image by default.
+# openssh-client -- Phase 1's host_executor.py (vpnadmin/routes/clients.py's
+# live-session actions) shells out to the system `ssh` binary for the one
+# whitelisted remote command; not present in the base Alpine image by
+# default.
 RUN apk add --no-cache bash openssl ca-certificates openssh-client
 
 WORKDIR /app
@@ -75,8 +75,8 @@ COPY vpnadmin ./vpnadmin
 COPY scripts ./scripts
 # Phase 1 Python OpenVPN service layer (see
 # /home/hackx/.claude/plans/openvpn-bash-to-python-migration-lazy-neumann.md).
-# `services/` is imported by vpnadmin/routes/openvpn_install.py's
-# host_executor call; `cli/` is NOT run inside this container (it runs on
+# `services/` is imported by vpnadmin/routes/clients.py's host_executor
+# call; `cli/` is NOT run inside this container (it runs on
 # the host over SSH, see host_executor.py) but is still packaged here so a
 # built image also serves as a self-contained copy of that entrypoint for
 # reference/debugging.

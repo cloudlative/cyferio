@@ -8,8 +8,8 @@ single source of truth for all VPN logic; this app doesn't reimplement any
 of it, only calls it and renders the result.
 
 > **Status**: production-ready — deploys behind Traefik (automatic Let's
-> Encrypt TLS) with a PostgreSQL backend; see `docker-compose.yml` and
-> `setup-new-machine.sh` for a full self-hosted install.
+> Encrypt TLS) with a PostgreSQL backend; see `docker-compose.yml` and the
+> repo root's `setup.sh` for a full self-hosted install.
 
 ## Features
 
@@ -140,8 +140,9 @@ though the file exists. Set `OVPN_OUTPUT_DIR=/etc/openvpn/client` (see
 
 ### First-time setup on a new machine
 
-Two scripts, run in order, take a fresh box from nothing to a running,
-web-installable portal:
+One guided entrypoint, `setup.sh` (repo root), takes a fresh box the rest
+of the way to a running portal, but it can't do the very first step itself
+(see why below) — so it's still two steps in practice:
 
 **1. `add-machine.sh` (repo root) — run from YOUR OWN machine, not the
 target host.** Bootstraps the new box's read-only access to this private
@@ -163,34 +164,40 @@ already cloned) into `/opt/openvpn-toolkit`. Idempotent — safe to re-run
 against a box that already has some or all of this done (as it will be, the
 next time you pull newer commits onto an existing box).
 
-**2. `setup-new-machine.sh` (repo root) — run ON the target host** (`ssh`
-in first). Prerequisites this one doesn't cover:
-
-1. Docker + the Compose plugin already installed on the host.
-2. A DNS A record for your domain already pointing at the host's public IP.
-
-Then:
+**2. `setup.sh` (repo root) — run ON the target host** (`ssh` in first).
+Guided prompts by default (OpenVPN only, or OpenVPN + this web app portal?
+domain/ACME email if the portal is wanted? MaxMind GeoIP?), or fully
+non-interactive via flags:
 
 ```bash
-sudo /opt/openvpn-toolkit/setup-new-machine.sh \
+sudo /opt/openvpn-toolkit/setup.sh --mode webapp \
   --domain vpn.example.com \
   --acme-email you@example.com \
   --use-staging-first    # first time on a genuinely new domain
 ```
 
-This automates everything else a fresh host needs to get the OpenVPN
-Install page's web-triggered install/uninstall working (see
-[Roles & Permissions](#roles--permissions) and
-`app/vpnadmin/routes/openvpn_install.py`): generating the scoped SSH
-"host executor" key + forced-command wrapper + sudoers grant, writing
-`.env`, enabling the deploy-key volume mount, and bringing the stack up
-(Let's Encrypt staging cert first if requested, then production).
+`setup.sh` orchestrates `openvpn-install.sh` (installs OpenVPN itself, if
+not already installed) and, for `--mode webapp`, `setup-new-machine.sh`
+(everything else a fresh host needs for this portal: generating the scoped
+SSH "host executor" key + forced-command wrapper + sudoers grant, writing
+`.env`, enabling the deploy-key volume mount, and bringing the stack up).
+See [Roles & Permissions](#roles--permissions) for what the host executor
+now backs (live session listing/disconnect, `app/vpnadmin/routes/clients.py`)
+— the web app no longer has an install/uninstall page of its own; installing
+OpenVPN is `setup.sh`'s/`openvpn-install.sh`'s job, not something triggered
+from the UI.
 
-Re-running it (e.g. after changing `--deploy-user`, or just to pick up
-config-file changes from a newer commit) is safe — every phase checks its
-own current state first, so keys/sudoers/`authorized_keys` entries aren't
-duplicated and an existing `.env` is left alone unless you pass
-`--force-env`. See `setup-new-machine.sh --help` for the full flag list.
+Re-running `setup.sh` (e.g. after changing `--deploy-user`, or just to pick
+up config-file changes from a newer commit) is safe — every phase checks
+its own current state first, so nothing already correct is redone or
+duplicated, and it reports either what changed or "nothing to do". It
+refuses to touch a machine it doesn't recognize as its own (e.g. real
+production set up some other way) — see `setup.sh --help` for the full
+flag list and that safety mechanism's details.
+
+Prefer the three scripts directly instead of `setup.sh`? They still work
+exactly as before — `setup.sh` only orchestrates them, it doesn't replace
+them. `setup-new-machine.sh --help` has its own full flag list.
 
 **Why the host-executor key logs in as a regular deploy user (`ubuntu` by
 default), never root**: even with the forced-command wrapper restricting
