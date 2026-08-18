@@ -172,6 +172,78 @@
 	--side-2: #170d22;
 	--side-3: #140a1e;
 }
+/* The 4 themes below were added 2026-08-19 to bring the total to 10 --
+   same "tint every neutral toward the accent hue" rule as the original 6
+   above, each deliberately picked a hue family none of those 6 already
+   used (crimson / fuchsia-indigo / lime / slate-cyan). */
+[data-theme="lattice"] {
+	--bg: #1a0a0a;
+	--bg-elevated: #240e0e;
+	--surface: #2e1313;
+	--surface-alt: #3a1717;
+	--surface-hover: #461c1c;
+	--border: #5c2323;
+	--border-light: #74302f;
+	--accent: #dc2626;
+	--accent-2: #ef4444;
+	--accent-3: #fca5a5;
+	--accent-gradient: linear-gradient(135deg, #dc2626 0%, #ef4444 55%, #fca5a5 130%);
+	--accent-glow: 0 0 0 1px rgba(220, 38, 38, 0.4), 0 4px 20px rgba(220, 38, 38, 0.25);
+	--side-1: #190909;
+	--side-2: #200c0c;
+	--side-3: #1a0808;
+}
+[data-theme="flux"] {
+	--bg: #150a1e;
+	--bg-elevated: #1d0e29;
+	--surface: #251334;
+	--surface-alt: #2f1841;
+	--surface-hover: #3a1e4f;
+	--border: #4c2a66;
+	--border-light: #61397f;
+	--accent: #c026d3;
+	--accent-2: #818cf8;
+	--accent-3: #f0abfc;
+	--accent-gradient: linear-gradient(135deg, #c026d3 0%, #a855f7 55%, #818cf8 130%);
+	--accent-glow: 0 0 0 1px rgba(192, 38, 211, 0.4), 0 4px 20px rgba(192, 38, 211, 0.25);
+	--side-1: #14091c;
+	--side-2: #180b22;
+	--side-3: #150a1e;
+}
+[data-theme="pulse"] {
+	--bg: #0c1206;
+	--bg-elevated: #121a09;
+	--surface: #17220c;
+	--surface-alt: #1e2b10;
+	--surface-hover: #253514;
+	--border: #34481b;
+	--border-light: #445d24;
+	--accent: #65a30d;
+	--accent-2: #84cc16;
+	--accent-3: #bef264;
+	--accent-gradient: linear-gradient(135deg, #65a30d 0%, #84cc16 55%, #bef264 130%);
+	--accent-glow: 0 0 0 1px rgba(101, 163, 13, 0.4), 0 4px 20px rgba(101, 163, 13, 0.25);
+	--side-1: #0b1106;
+	--side-2: #0e1608;
+	--side-3: #0c1305;
+}
+[data-theme="relay"] {
+	--bg: #10141a;
+	--bg-elevated: #161c24;
+	--surface: #1c232d;
+	--surface-alt: #232c38;
+	--surface-hover: #2b3543;
+	--border: #3a4655;
+	--border-light: #4b596b;
+	--accent: #64748b;
+	--accent-2: #94a3b8;
+	--accent-3: #67e8f9;
+	--accent-gradient: linear-gradient(135deg, #64748b 0%, #94a3b8 55%, #67e8f9 130%);
+	--accent-glow: 0 0 0 1px rgba(100, 116, 139, 0.4), 0 4px 20px rgba(100, 116, 139, 0.25);
+	--side-1: #0f131a;
+	--side-2: #131a22;
+	--side-3: #101519;
+}
 
 * { box-sizing: border-box; }
 
@@ -426,13 +498,17 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	background: var(--accent);
 	box-shadow: 0 0 0 2px var(--surface), 0 0 6px 1px rgba(0,0,0,0.25);
 }
-.theme-swatch-auto { background: conic-gradient(#6366f1, #0ea5e9, #059669, #d97706, #7c3aed, #6366f1); }
+.theme-swatch-auto { background: conic-gradient(#6366f1, #0ea5e9, #059669, #d97706, #7c3aed, #dc2626, #c026d3, #65a30d, #64748b, #6366f1); }
 .theme-swatch-constellation { background: linear-gradient(135deg, #6366f1, #22d3ee); }
 .theme-swatch-contour { background: linear-gradient(135deg, #0ea5e9, #5eead4); }
 .theme-swatch-ingress { background: linear-gradient(135deg, #1d4ed8, #67e8f9); }
 .theme-swatch-cipher { background: linear-gradient(135deg, #059669, #34d399); }
 .theme-swatch-perimeter { background: linear-gradient(135deg, #d97706, #fbbf24); }
 .theme-swatch-horizon { background: linear-gradient(135deg, #7c3aed, #f472b6); }
+.theme-swatch-lattice { background: linear-gradient(135deg, #dc2626, #fca5a5); }
+.theme-swatch-flux { background: linear-gradient(135deg, #c026d3, #818cf8); }
+.theme-swatch-pulse { background: linear-gradient(135deg, #65a30d, #bef264); }
+.theme-swatch-relay { background: linear-gradient(135deg, #64748b, #67e8f9); }
 
 .theme-quick-panel {
 	display: none;
@@ -1076,10 +1152,13 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 
 /* --- Login ------------------------------------------------------------
    Background is theme-driven (see app_settings.py's active_theme()):
-   login.html renders exactly one of the 6 `.login-bg` variants below,
+   login.html renders exactly one of the 10 `.login-bg` variants below,
    server-selected, plus a `data-theme-bg="<id>"` attribute on
-   `.login-page` that these rules key off. Each variant's colors/shapes
-   are ported verbatim from the approved theme preview. --------------- */
+   `.login-page` that these rules key off. The original 6 variants' colors/
+   shapes are ported verbatim from the approved theme preview; the 4 added
+   2026-08-19 (lattice/flux/pulse/relay) are all canvas-based, following
+   the same size()/init()/frame() shape as constellation/ingress/cipher/
+   horizon below. --------------- */
 .login-page {
 	display: flex;
 	align-items: center;
@@ -1098,6 +1177,10 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 		#0b0d18;
 }
 .login-page[data-theme-bg="horizon"] { background: #0a0c17; }
+.login-page[data-theme-bg="lattice"] { background: #12060a; }
+.login-page[data-theme-bg="flux"] { background: #0f0817; }
+.login-page[data-theme-bg="pulse"] { background: #070c04; }
+.login-page[data-theme-bg="relay"] { background: #0a0d12; }
 
 .login-bg { position: absolute; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
 .login-bg canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }

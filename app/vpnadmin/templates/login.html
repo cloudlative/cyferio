@@ -24,6 +24,14 @@
 		{% elif theme == "horizon" %}
 			<div class="glow"></div>
 			<canvas id="theme-canvas"></canvas>
+		{% elif theme == "lattice" %}
+			<canvas id="theme-canvas"></canvas>
+		{% elif theme == "flux" %}
+			<canvas id="theme-canvas"></canvas>
+		{% elif theme == "pulse" %}
+			<canvas id="theme-canvas"></canvas>
+		{% elif theme == "relay" %}
+			<canvas id="theme-canvas"></canvas>
 		{% endif %}
 	</div>
 	<div class="login-box">
@@ -302,6 +310,241 @@
 			ctx.strokeStyle = grad;
 			ctx.lineWidth = 1;
 			ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x + b.width, b.y); ctx.stroke();
+		}
+		if (!reduceMotion) requestAnimationFrame(frame);
+	}
+	window.addEventListener("resize", init);
+	init(); frame();
+	if (reduceMotion) frame();
+})();
+</script>
+{% elif theme == "lattice" %}
+<script>
+(function () {
+	// Threat Lattice: a faint hex grid (SOC/heatmap feel) where random
+	// cells periodically "flare" -- fill in with a fading crimson glow,
+	// like a live monitoring board lighting up. Genuinely new geometry
+	// among these themes (none of the others tessellate hexagons), not
+	// just a recolor of an existing pattern.
+	const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	const canvas = document.getElementById("theme-canvas");
+	const ctx = canvas.getContext("2d");
+	let w, h, dpr, cells;
+	const cellSize = 34;
+	function size() {
+		dpr = Math.min(window.devicePixelRatio || 1, 2);
+		w = canvas.clientWidth; h = canvas.clientHeight;
+		canvas.width = w * dpr; canvas.height = h * dpr;
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	}
+	function hexPath(cx, cy, s) {
+		ctx.beginPath();
+		for (let i = 0; i < 6; i++) {
+			const a = (Math.PI / 3) * i - Math.PI / 6;
+			const x = cx + s * Math.cos(a), y = cy + s * Math.sin(a);
+			if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+		}
+		ctx.closePath();
+	}
+	function init() {
+		size();
+		cells = [];
+		const dx = cellSize * Math.sqrt(3), dy = cellSize * 1.5;
+		let row = 0;
+		for (let y = -cellSize; y < h + cellSize; y += dy, row++) {
+			const offset = (row % 2) * (dx / 2);
+			for (let x = -cellSize + offset; x < w + cellSize; x += dx) {
+				cells.push({ x, y, flare: 0 });
+			}
+		}
+	}
+	function maybeFlare() {
+		if (reduceMotion) return;
+		if (Math.random() < 0.035) {
+			const c = cells[Math.floor(Math.random() * cells.length)];
+			if (c.flare <= 0) c.flare = 1;
+		}
+	}
+	function frame() {
+		ctx.clearRect(0, 0, w, h);
+		ctx.lineWidth = 1;
+		ctx.strokeStyle = "rgba(220,38,38,0.10)";
+		for (const c of cells) { hexPath(c.x, c.y, cellSize * 0.94); ctx.stroke(); }
+		maybeFlare();
+		for (const c of cells) {
+			if (c.flare > 0) {
+				hexPath(c.x, c.y, cellSize * 0.94);
+				ctx.fillStyle = `rgba(220,38,38,${0.22 * c.flare})`;
+				ctx.fill();
+				ctx.strokeStyle = `rgba(252,165,165,${0.45 * c.flare})`;
+				ctx.stroke();
+				if (!reduceMotion) c.flare -= 0.018;
+			}
+		}
+		if (!reduceMotion) requestAnimationFrame(frame);
+	}
+	window.addEventListener("resize", init);
+	init(); frame();
+	if (reduceMotion) frame();
+})();
+</script>
+{% elif theme == "flux" %}
+<script>
+(function () {
+	// Quantum Flux: soft glowing orbs drifting past each other, each
+	// pulsing gently in opacity -- deliberately no connecting lines (the
+	// one thing that would make this read as a recolor of Constellation).
+	const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	const canvas = document.getElementById("theme-canvas");
+	const ctx = canvas.getContext("2d");
+	const colors = ["192,38,211", "168,85,247", "129,140,248"];
+	let w, h, dpr, orbs, t = 0;
+	function size() {
+		dpr = Math.min(window.devicePixelRatio || 1, 2);
+		w = canvas.clientWidth; h = canvas.clientHeight;
+		canvas.width = w * dpr; canvas.height = h * dpr;
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	}
+	function init() {
+		size();
+		const count = Math.max(10, Math.round((w * h) / 90000));
+		orbs = Array.from({ length: count }, () => ({
+			x: Math.random() * w, y: Math.random() * h,
+			vx: (Math.random() - 0.5) * 0.09, vy: (Math.random() - 0.5) * 0.09,
+			r: 40 + Math.random() * 70,
+			color: colors[Math.floor(Math.random() * colors.length)],
+			phase: Math.random() * Math.PI * 2,
+		}));
+	}
+	function frame() {
+		t += 0.008;
+		ctx.clearRect(0, 0, w, h);
+		for (const o of orbs) {
+			if (!reduceMotion) {
+				o.x += o.vx; o.y += o.vy;
+				if (o.x < -o.r) o.x = w + o.r; if (o.x > w + o.r) o.x = -o.r;
+				if (o.y < -o.r) o.y = h + o.r; if (o.y > h + o.r) o.y = -o.r;
+			}
+			const pulse = reduceMotion ? 0.7 : 0.55 + 0.45 * Math.sin(t + o.phase);
+			const grad = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, o.r);
+			grad.addColorStop(0, `rgba(${o.color},${0.16 * pulse})`);
+			grad.addColorStop(1, `rgba(${o.color},0)`);
+			ctx.fillStyle = grad;
+			ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill();
+		}
+		if (!reduceMotion) requestAnimationFrame(frame);
+	}
+	window.addEventListener("resize", init);
+	init(); frame();
+	if (reduceMotion) frame();
+})();
+</script>
+{% elif theme == "pulse" %}
+<script>
+(function () {
+	// Uplink Pulse: sonar/ping-style rings expanding outward from random
+	// points and fading -- a "live signal" feel distinct from Ingress's
+	// starfield-with-streaks or Constellation's node mesh.
+	const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	const canvas = document.getElementById("theme-canvas");
+	const ctx = canvas.getContext("2d");
+	let w, h, dpr, rings = [];
+	function size() {
+		dpr = Math.min(window.devicePixelRatio || 1, 2);
+		w = canvas.clientWidth; h = canvas.clientHeight;
+		canvas.width = w * dpr; canvas.height = h * dpr;
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	}
+	function init() { size(); rings = []; }
+	function maybeSpawn() {
+		if (reduceMotion) return;
+		if (Math.random() < 0.018 && rings.length < 6) {
+			rings.push({ x: Math.random() * w, y: Math.random() * h, r: 0, life: 1 });
+		}
+	}
+	function frame() {
+		ctx.clearRect(0, 0, w, h);
+		maybeSpawn();
+		for (const ring of rings) {
+			if (!reduceMotion) { ring.r += 1.1; ring.life -= 0.008; }
+			ctx.beginPath();
+			ctx.arc(ring.x, ring.y, ring.r, 0, Math.PI * 2);
+			ctx.strokeStyle = `rgba(163,230,53,${0.35 * Math.max(ring.life, 0)})`;
+			ctx.lineWidth = 1.4;
+			ctx.stroke();
+		}
+		rings = rings.filter(r => r.life > 0);
+		if (reduceMotion && rings.length === 0) {
+			// Still show something static when motion is reduced -- three
+			// fixed faint rings rather than a completely blank canvas.
+			[[0.3, 0.35], [0.65, 0.25], [0.5, 0.7]].forEach(([fx, fy]) => {
+				ctx.beginPath();
+				ctx.arc(fx * w, fy * h, 70, 0, Math.PI * 2);
+				ctx.strokeStyle = "rgba(163,230,53,0.18)";
+				ctx.lineWidth = 1.4;
+				ctx.stroke();
+			});
+		}
+		if (!reduceMotion) requestAnimationFrame(frame);
+	}
+	window.addEventListener("resize", init);
+	init(); frame();
+	if (reduceMotion) frame();
+})();
+</script>
+{% elif theme == "relay" %}
+<script>
+(function () {
+	// Glass Relay: large soft-edged hexagons drifting slowly past each
+	// other, restrained frosted-glass feel (a blurred low-alpha fill, one
+	// crisp cyan-tinted edge highlight per shape) rather than the
+	// oversaturated gradient-blob look this was deliberately built to
+	// avoid.
+	const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	const canvas = document.getElementById("theme-canvas");
+	const ctx = canvas.getContext("2d");
+	let w, h, dpr, shapes;
+	function size() {
+		dpr = Math.min(window.devicePixelRatio || 1, 2);
+		w = canvas.clientWidth; h = canvas.clientHeight;
+		canvas.width = w * dpr; canvas.height = h * dpr;
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	}
+	function init() {
+		size();
+		const count = Math.max(5, Math.round((w * h) / 260000));
+		shapes = Array.from({ length: count }, () => ({
+			x: Math.random() * w, y: Math.random() * h,
+			s: 110 + Math.random() * 90,
+			vx: (Math.random() - 0.5) * 0.05, vy: (Math.random() - 0.5) * 0.05,
+			rot: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.0015,
+		}));
+	}
+	function hexPoints(cx, cy, s, rot) {
+		const pts = [];
+		for (let i = 0; i < 6; i++) {
+			const a = rot + (Math.PI / 3) * i;
+			pts.push([cx + s * Math.cos(a), cy + s * Math.sin(a)]);
+		}
+		return pts;
+	}
+	function frame() {
+		ctx.clearRect(0, 0, w, h);
+		for (const sh of shapes) {
+			if (!reduceMotion) {
+				sh.x += sh.vx; sh.y += sh.vy; sh.rot += sh.vr;
+				if (sh.x < -sh.s) sh.x = w + sh.s; if (sh.x > w + sh.s) sh.x = -sh.s;
+				if (sh.y < -sh.s) sh.y = h + sh.s; if (sh.y > h + sh.s) sh.y = -sh.s;
+			}
+			const pts = hexPoints(sh.x, sh.y, sh.s, sh.rot);
+			ctx.beginPath();
+			pts.forEach(([x, y], i) => i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y));
+			ctx.closePath();
+			ctx.fillStyle = "rgba(148,163,184,0.05)";
+			ctx.fill();
+			ctx.strokeStyle = "rgba(103,232,249,0.10)";
+			ctx.lineWidth = 1;
+			ctx.stroke();
 		}
 		if (!reduceMotion) requestAnimationFrame(frame);
 	}

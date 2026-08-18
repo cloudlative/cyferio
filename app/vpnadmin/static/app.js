@@ -1659,11 +1659,14 @@ function escapeHtml(s) {
 }
 
 // Mirrors app_settings.py's ACTIVE_THEME_IDS/resolve_active_theme exactly
-// (same 6 ids, same "hour // 2 % 6" 2-hour-slot rotation, same local-time
+// (same 10 ids, same "hour // 2 % 10" 2-hour-slot rotation, same local-time
 // basis) -- the client-side half of applying a theme change immediately
 // (see applyThemeImmediately below) without waiting for a server round-trip
 // to know which theme "auto" currently resolves to.
-const ACTIVE_THEME_IDS = ["constellation", "contour", "ingress", "cipher", "perimeter", "horizon"];
+const ACTIVE_THEME_IDS = [
+	"constellation", "contour", "ingress", "cipher", "perimeter", "horizon",
+	"lattice", "flux", "pulse", "relay",
+];
 function resolveActiveThemeClientSide(loginThemeSetting) {
 	if (loginThemeSetting && loginThemeSetting !== "auto") return loginThemeSetting;
 	const slot = Math.floor(new Date().getHours() / 2) % ACTIVE_THEME_IDS.length;
@@ -1702,6 +1705,7 @@ function applyThemeImmediately(loginThemeSetting) {
 const THEME_QUICK_LABELS = {
 	auto: "Auto-rotate", constellation: "Constellation", contour: "Signal Contour",
 	ingress: "Ingress Field", cipher: "Cipher Rain", perimeter: "Perimeter Grid", horizon: "Data Horizon",
+	lattice: "Threat Lattice", flux: "Quantum Flux", pulse: "Uplink Pulse", relay: "Glass Relay",
 };
 
 /**

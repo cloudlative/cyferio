@@ -74,18 +74,25 @@ SMTP_PASSWORD_PLACEHOLDER = "••••••••"
 # from any other non-secret field.
 SECRET_PLACEHOLDER = "••••••••"
 
-# The 6 named login/app themes, in rotation order -- must match the ids
+# The 10 named login/app themes, in rotation order -- must match the ids
 # used in static/style.css's `[data-theme="..."]` rules and
-# templates/partials/theme_bg_*.html. "auto" (rotation) is a settings value,
-# not itself a theme id, so it's intentionally excluded from this tuple.
-ACTIVE_THEME_IDS = ("constellation", "contour", "ingress", "cipher", "perimeter", "horizon")
+# templates/login.html's per-theme background blocks. "auto" (rotation) is
+# a settings value, not itself a theme id, so it's intentionally excluded
+# from this tuple. The last 4 (lattice/flux/pulse/relay) were added
+# 2026-08-19 alongside the original approved 6 -- same design language
+# (a quiet, low-opacity animated backdrop, not a showcase piece), each
+# picking a hue family none of the original 6 already used.
+ACTIVE_THEME_IDS = (
+    "constellation", "contour", "ingress", "cipher", "perimeter", "horizon",
+    "lattice", "flux", "pulse", "relay",
+)
 
 # What the Settings page dropdown offers, in display order -- id, label, and
 # a short one-line rationale (reused verbatim from the approved preview) so
-# an admin isn't picking blind between six similar-sounding names.
+# an admin isn't picking blind between ten similar-sounding names.
 THEME_CHOICES = [
-    {"id": "auto", "label": "Auto-rotate (every 2 hours, 6 themes)",
-     "description": "Cycles through all 6 themes below on a fixed schedule -- each active for two 2-hour slots per day."},
+    {"id": "auto", "label": "Auto-rotate (every 2 hours, 10 themes)",
+     "description": "Cycles through all 10 themes below on a fixed schedule -- each active for one or two 2-hour slots per day."},
     {"id": "constellation", "label": "Constellation",
      "description": "A mesh of nodes, quietly drifting, occasionally trading a packet along an edge. Indigo/violet/cyan."},
     {"id": "contour", "label": "Signal Contour",
@@ -98,6 +105,14 @@ THEME_CHOICES = [
      "description": "A faint grid with a slow radar-style sweep. Amber into gold."},
     {"id": "horizon", "label": "Data Horizon",
      "description": "Straight horizontal lines drifting past a soft horizon glow. Violet into rose."},
+    {"id": "lattice", "label": "Threat Lattice",
+     "description": "A faint hex grid where cells occasionally flare like a live heatmap. Crimson on near-black."},
+    {"id": "flux", "label": "Quantum Flux",
+     "description": "Soft glowing orbs drifting and slowly pulsing past each other, no connecting lines. Fuchsia into indigo."},
+    {"id": "pulse", "label": "Uplink Pulse",
+     "description": "Sonar-style rings expanding outward from random points and fading. Lime into chartreuse."},
+    {"id": "relay", "label": "Glass Relay",
+     "description": "Large soft-edged hexagons drifting slowly past each other, frosted-glass style. Slate into cyan."},
 ]
 
 
@@ -106,11 +121,14 @@ def resolve_active_theme(login_theme_setting: str | None, now: datetime | None =
 
     An admin's pinned choice (anything other than "auto"/None) always wins,
     no rotation logic involved. "auto" (or an unset/unrecognized value)
-    rotates through the 6 themes in ACTIVE_THEME_IDS on a fixed schedule:
-    2 hours each, so each theme is active for exactly 2 of the 12 two-hour
-    slots in a day (twice per 24h) -- `hour // 2 % 6` picks the slot. Uses
-    local server time (matches the schedule as shown/confirmed in the
-    approved preview, which likewise used the browser's local hour).
+    rotates through the 10 themes in ACTIVE_THEME_IDS on a fixed schedule:
+    2 hours each, so each theme gets 1 or 2 of the 12 two-hour slots in a
+    day (12 slots don't divide evenly across 10 themes -- the last 2 slots
+    of each day simply wrap back to the first 2 themes, giving those two
+    a slightly larger share; not worth complicating the schedule to avoid)
+    -- `hour // 2 % 10` picks the slot. Uses local server time (matches
+    the schedule as shown/confirmed in the approved preview, which
+    likewise used the browser's local hour).
 
     Deliberately NOT cached on the module-level `runtime` object -- that
     cache is only refreshed at startup and after settings saves, but this
