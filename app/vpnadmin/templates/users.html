@@ -228,7 +228,6 @@
 				<div class="field">
 					<label for="e-role">Role</label>
 					<select id="e-role"></select>
-					<p class="muted" id="e-role-note" style="margin:6px 0 0;font-size:0.8rem;display:none">The bootstrap admin account can't be demoted, deactivated, or deleted.</p>
 				</div>
 				<div class="field">
 					<label for="e-active">Status</label>
@@ -272,17 +271,22 @@
 			<fieldset id="e-vpn-fieldset" style="margin-top:16px">
 				<legend>VPN Profile</legend>
 				<div id="e-vpn-linked" style="display:none">
-					<p class="muted" style="margin:0">Linked to VPN profile <strong id="e-vpn-linked-name" class="mono"></strong>.</p>
+					<p class="muted" style="margin:0">
+						Linked to VPN profile <strong id="e-vpn-linked-name" class="mono"></strong>.
+						<button type="button" class="btn-secondary btn-sm" id="e-vpn-change-btn" style="margin-left:8px">Change</button>
+					</p>
 				</div>
 				<div id="e-vpn-unlinked" style="display:none">
-					<p class="muted" style="margin:0 0 8px">No VPN profile is linked to this account yet -- attach an existing, unassigned one below.</p>
+					<p class="muted" id="e-vpn-unlinked-intro" style="margin:0 0 8px">No VPN profile is linked to this account yet -- attach an existing, unassigned one below.</p>
 					<div class="form-row" style="align-items:flex-end">
 						<div class="field" style="margin-bottom:0">
 							<label for="e-vpn-attach-select">Unassigned VPN Profiles</label>
 							<select id="e-vpn-attach-select"><option value="">Loading…</option></select>
 						</div>
 						<button type="button" class="btn-secondary" id="e-vpn-attach-btn" disabled>Attach</button>
+						<button type="button" class="btn-secondary" id="e-vpn-cancel-change-btn" style="display:none">Cancel</button>
 					</div>
+					<button type="button" class="btn-danger btn-sm" id="e-vpn-clear-btn" style="margin-top:10px;display:none">Clear Assignment</button>
 				</div>
 			</fieldset>
 			<fieldset id="e-device-policy-fieldset">
@@ -547,6 +551,10 @@ function resetAddUserForm() {
 	// syncs the two sections' visibility/required-ness to match, same as
 	// a fresh dialog open.
 	setAddUserVpnMode("new");
+	// Must run AFTER the native .reset() above -- see
+	// applyDefaultRoleToAddUserForm's own docstring for why the reset would
+	// otherwise silently win and leave Role on whatever option sorts first.
+	applyDefaultRoleToAddUserForm();
 }
 // Toggles between "Device MAC Address" (create a fresh VPN profile) and
 // "Unassigned VPN Profiles" (link an existing standalone one) -- mirrors
@@ -649,6 +657,22 @@ document.getElementById("reset-pw-form").addEventListener("submit", async (ev) =
 	}
 });
 
+let allRoles = [];
+let creatableRoles = [];
+
+// Renders e-role's option list -- creatableRoles (excludes Super Admin,
+// see the module-level docstring below) in every normal case, or the full
+// allRoles list (the only case that needs Super Admin visible at all) when
+// editing the bootstrap admin account specifically, so its actual current
+// role still displays correctly. That control is disabled either way for
+// the bootstrap admin (see openEdit), so this never offers Super Admin as
+// something an admin can actually pick -- it's display-only in that one
+// case.
+function setEditRoleOptions(isBootstrapAdmin) {
+	const roles = isBootstrapAdmin ? allRoles : creatableRoles;
+	document.getElementById("e-role").innerHTML = roles.map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
+}
+
 async function loadRoleOptions() {
 	// Populates both the Add-User and Edit-User role <select>s from the
 	// live dynamic-RBAC role list (GET /api/roles) instead of a hardcoded
@@ -658,42 +682,60 @@ async function loadRoleOptions() {
 	// wouldn't reach users.html at all (server-side page guard), so no
 	// separate fallback is needed for that case.
 	try {
-		const roles = await apiFetch("/api/roles");
+		allRoles = await apiFetch("/api/roles");
 		// Super Admin is reserved for the bootstrap admin account only (see
 		// permissions.py's _SYSTEM_ROLES) -- never offered as a choice when
-		// creating a new user. The Edit dialog's own <select> DOES still get
-		// the full list (including super_admin): it needs to correctly
-		// display the bootstrap admin's current role when editing that
-		// account, even though that control is disabled for bootstrap admin
-		// either way (see openEdit's editingUserIsBootstrapAdmin handling).
-		const creatableRoles = roles.filter(r => r.slug !== "super_admin");
+		// creating a new user, nor as a normal Edit User choice (task
+		// feedback: "Administrators should not be able to assign or change
+		// users to the Super Admin role through normal user editing
+		// workflows"). setEditRoleOptions above is the one place that still
+		// reaches for allRoles instead of this list, and only to correctly
+		// display (not offer) the bootstrap admin's own current role.
+		creatableRoles = allRoles.filter(r => r.slug !== "super_admin");
 		document.getElementById("u-role").innerHTML = creatableRoles.map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
-		document.getElementById("e-role").innerHTML = roles.map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
-		// The API orders roles is_system-desc-then-name, which puts "Admin"
-		// alphabetically before "Viewer" -- without this, a freshly-loaded
-		// Add User form would default to creating an ADMIN account. Default
-		// to Settings -> User Management's configured default role if one is
-		// set and still exists (falls back to "viewer" otherwise) -- same
-		// safe-default intent as the previous hardcoded <option>viewer</option>
-		// being listed first, just admin-configurable now.
-		let defaultRoleSlug = "viewer";
-		try {
-			// GET /api/settings is settings-manage-gated, a narrower
-			// permission than what got this page loaded at all -- an Editor
-			// with users-manage but not settings-manage is expected to hit a
-			// 403 here, silently kept on the "viewer" fallback rather than
-			// surfaced as an error toast (this is a UX nicety, not a
-			// required capability of this form).
-			const s = await apiFetch("/api/settings");
-			if (s.default_new_user_role && creatableRoles.some(r => r.slug === s.default_new_user_role)) {
-				defaultRoleSlug = s.default_new_user_role;
-			}
-		} catch (e) { /* not settings-manage -- keep the "viewer" fallback */ }
-		if (creatableRoles.some(r => r.slug === defaultRoleSlug)) {
-			document.getElementById("u-role").value = defaultRoleSlug;
-		}
+		setEditRoleOptions(false);
 	} catch (e) {
 		toast(e.message, "error");
+	}
+}
+
+// Applies Settings -> User Management's configured default role to the Add
+// User form's Role field. Bug fix: this used to only run once, inside
+// loadRoleOptions() at page load -- but resetAddUserForm() (called every
+// time the Add User dialog opens, see openAddUserDialog) calls the native
+// <form>.reset(), which resets a <select> populated purely via JS (no
+// `selected` attribute on any of its dynamically-inserted <option>s) back
+// to its first option, silently undoing that one-time default-role
+// selection on every dialog open after the first. Calling this again,
+// AFTER resetAddUserForm()'s own form.reset(), fixes that for good.
+//
+// Re-fetches Settings -> User Management every time (rather than caching
+// the slug from loadRoleOptions()'s own settings fetch) so a default-role
+// change an admin makes on the Settings page mid-session is honored the
+// very next time Add User is opened, without needing a full page reload
+// of the Users page -- task feedback: "Any future changes to the
+// configured default role should be reflected automatically."
+async function applyDefaultRoleToAddUserForm() {
+	// The API orders roles is_system-desc-then-name, which puts "Admin"
+	// alphabetically before "Viewer" -- without an explicit default, a
+	// freshly-reset Add User form would default to creating an ADMIN
+	// account. "viewer" is the safe fallback if nothing's configured (or
+	// the configured slug no longer exists, e.g. a deleted custom role).
+	let defaultRoleSlug = "viewer";
+	try {
+		// GET /api/settings is settings-manage-gated, a narrower permission
+		// than what got this page loaded at all -- an Editor with
+		// users-manage but not settings-manage is expected to hit a 403
+		// here, silently kept on the "viewer" fallback rather than surfaced
+		// as an error toast (this is a UX nicety, not a required capability
+		// of this form).
+		const s = await apiFetch("/api/settings");
+		if (s.default_new_user_role && creatableRoles.some(r => r.slug === s.default_new_user_role)) {
+			defaultRoleSlug = s.default_new_user_role;
+		}
+	} catch (e) { /* not settings-manage -- keep the "viewer" fallback */ }
+	if (creatableRoles.some(r => r.slug === defaultRoleSlug)) {
+		document.getElementById("u-role").value = defaultRoleSlug;
 	}
 }
 
@@ -896,12 +938,15 @@ async function loadDeleted() {
 	}
 }
 
-// Shows the linked VPN profile name, or (if unlinked) an "attach an
+// Shows the linked VPN profile name (with a "Change" control -- see the
+// e-vpn-change-btn click handler below), or (if unlinked) an "attach an
 // existing, unassigned profile" dropdown -- fetched fresh every time the
 // Edit dialog opens for an unlinked user, since the unassigned set can
 // change between page loads (another admin attaching one, or a new
 // profile getting created elsewhere).
+let currentEditUser = null;
 async function refreshVpnLinkSection(u) {
+	currentEditUser = u;
 	const linkedEl = document.getElementById("e-vpn-linked");
 	const unlinkedEl = document.getElementById("e-vpn-unlinked");
 	const policyEl = document.getElementById("e-vpn-policy");
@@ -911,6 +956,11 @@ async function refreshVpnLinkSection(u) {
 	// routes/users.py's _serialize), no extra fetch needed.
 	document.querySelectorAll(".e-os-check").forEach(cb => { cb.checked = (u.allowed_os || []).includes(cb.value); });
 	document.getElementById("e-bandwidth").value = u.bandwidth_monthly_gb ?? "";
+	// Reset the "Change" sub-panel's Cancel/Clear affordances back to their
+	// first-attach-only state -- relevant when this runs after a
+	// reassign/clear/cancel, not just on first dialog open.
+	document.getElementById("e-vpn-cancel-change-btn").style.display = "none";
+	document.getElementById("e-vpn-clear-btn").style.display = "none";
 	if (u.vpn_client_name) {
 		linkedEl.style.display = "";
 		unlinkedEl.style.display = "none";
@@ -921,6 +971,16 @@ async function refreshVpnLinkSection(u) {
 	linkedEl.style.display = "none";
 	policyEl.style.display = "none";
 	unlinkedEl.style.display = "";
+	document.getElementById("e-vpn-unlinked-intro").textContent =
+		"No VPN profile is linked to this account yet -- attach an existing, unassigned one below.";
+	await populateUnassignedVpnSelect();
+}
+
+// Shared by refreshVpnLinkSection's "never linked yet" branch and
+// enterVpnChangeMode's "reassign an existing link" branch -- same
+// dropdown, same source list (GET /api/clients/unassigned), just reached
+// from two different starting states.
+async function populateUnassignedVpnSelect() {
 	const select = document.getElementById("e-vpn-attach-select");
 	const attachBtn = document.getElementById("e-vpn-attach-btn");
 	select.innerHTML = '<option value="">Loading…</option>';
@@ -936,15 +996,53 @@ async function refreshVpnLinkSection(u) {
 		toast(e.message, "error");
 	}
 }
+
+// "Change" on an already-linked profile -- task feedback: "Remove the
+// immutable behavior for the VPN Profile association... Add a small and
+// intuitive Edit action/control next to the attached VPN Profile." Reuses
+// the same attach dropdown/button the never-linked state already has
+// (routes/users.py's POST /vpn-link now accepts reassignment, not just a
+// first attach -- see that endpoint's own docstring), plus a Clear
+// Assignment option this mode adds.
+document.getElementById("e-vpn-change-btn").addEventListener("click", async () => {
+	document.getElementById("e-vpn-linked").style.display = "none";
+	document.getElementById("e-vpn-unlinked").style.display = "";
+	document.getElementById("e-vpn-unlinked-intro").textContent =
+		"Choose a different VPN profile to reassign, or clear the current assignment.";
+	document.getElementById("e-vpn-cancel-change-btn").style.display = "";
+	document.getElementById("e-vpn-clear-btn").style.display = "";
+	await populateUnassignedVpnSelect();
+});
+document.getElementById("e-vpn-cancel-change-btn").addEventListener("click", () => {
+	if (currentEditUser) refreshVpnLinkSection(currentEditUser);
+});
+document.getElementById("e-vpn-clear-btn").addEventListener("click", async () => {
+	if (!editingUserId || !currentEditUser) return;
+	const ok = await confirmDialog(
+		`Clear the VPN profile assignment for '${currentEditUser.username}'? '${currentEditUser.vpn_client_name}' becomes unassigned and can be attached to another user -- the VPN profile itself is not deleted or revoked.`,
+		{ confirmLabel: "Clear Assignment", danger: true },
+	);
+	if (!ok) return;
+	try {
+		const updated = await apiFetch(`/api/users/${editingUserId}/vpn-link`, { method: "DELETE" });
+		toast("VPN profile assignment cleared.");
+		await refreshVpnLinkSection(updated);
+		renderVpnRestrictionsSummary(updated);
+		loadUsers();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
 document.getElementById("e-vpn-attach-select").addEventListener("change", (ev) => {
 	document.getElementById("e-vpn-attach-btn").disabled = !ev.target.value;
 });
 document.getElementById("e-vpn-attach-btn").addEventListener("click", async () => {
 	const vpnClientName = document.getElementById("e-vpn-attach-select").value;
 	if (!vpnClientName || !editingUserId) return;
+	const wasLinked = !!(currentEditUser && currentEditUser.vpn_client_name);
 	try {
 		const updated = await apiFetch(`/api/users/${editingUserId}/vpn-link`, { method: "POST", body: { vpn_client_name: vpnClientName } });
-		toast(`VPN profile '${vpnClientName}' attached.`);
+		toast(wasLinked ? `VPN profile reassigned to '${vpnClientName}'.` : `VPN profile '${vpnClientName}' attached.`);
 		await refreshVpnLinkSection(updated);
 		renderVpnRestrictionsSummary(updated);
 		loadUsers();
@@ -990,15 +1088,16 @@ function openEdit(u) {
 	document.getElementById("e-email").value = u.email || "";
 	editPhone.setValue(u.phone || "");
 	editTeamMs.setSelected(u.team_ids);
+	setEditRoleOptions(editingUserIsBootstrapAdmin);
 	document.getElementById("e-role").value = u.role;
 	document.getElementById("e-active").value = String(u.is_active);
 	// The bootstrap admin account can never be demoted/deactivated/deleted
 	// (by anyone, even another admin) -- the API enforces this
-	// unconditionally; disable those controls here too so the UI doesn't
-	// offer actions that will just be rejected.
+	// unconditionally (see routes/users.py's update_user); disable those
+	// controls here too so the UI doesn't offer actions that will just be
+	// rejected.
 	document.getElementById("e-role").disabled = editingUserIsBootstrapAdmin;
 	document.getElementById("e-active").disabled = editingUserIsBootstrapAdmin;
-	document.getElementById("e-role-note").style.display = editingUserIsBootstrapAdmin ? "" : "none";
 	document.getElementById("e-password").value = "";
 	document.getElementById("e-password").type = "password";
 	document.getElementById("e-password-confirm").value = "";

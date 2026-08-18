@@ -6,7 +6,7 @@ OS/Bandwidth Quota fields synced onto the linked VPN profile at user
 create/update time, and the Super Admin system role."""
 from vpnadmin import policy_store
 from vpnadmin.config import settings
-from vpnadmin.models import RoleDef, User
+from vpnadmin.models import Role, RoleDef, User
 
 from .conftest import login
 
@@ -129,6 +129,18 @@ class TestSuperAdminRole:
             "username": "wannabesuper", "password": "Somepass123!", "first_name": "W",
             "email": "wannabesuper@example.com", "mac": "aa:bb:cc:dd:ee:04", "role": "super_admin",
         })
+        assert r.status_code == 400
+
+    def test_cannot_be_assigned_via_update_user(self, app_client, db_session):
+        # Task feedback: "Administrators should not be able to assign or
+        # change users to the Super Admin role through normal user editing
+        # workflows" -- covers Edit User's PATCH path, the counterpart to
+        # test_cannot_be_assigned_via_create_user above.
+        target = User(username="editme-notsuper", password_hash="x", role=Role.viewer, email="editme@example.com")
+        db_session.add(target)
+        db_session.commit()
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch(f"/api/users/{target.id}", json={"role": "super_admin"})
         assert r.status_code == 400
 
     def test_roles_list_orders_super_admin_first(self, app_client, db_session):
