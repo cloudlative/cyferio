@@ -41,6 +41,7 @@
 #   sudo ./setup-new-machine.sh \
 #     --domain portal.cyferio.com \
 #     --acme-email you@example.com \
+#     [--captcha-provider turnstile --turnstile-site-key XXX --turnstile-secret-key YYY] \
 #     [--deploy-user ubuntu] [--image-tag 1.0.36] [--repo-dir /opt/openvpn-toolkit] \
 #     [--use-staging-first] [--force-env] [--skip-stack] [--skip-docker]
 #
@@ -48,6 +49,24 @@
 #   --domain DOMAIN         Required. Public hostname Traefik requests a
 #                            cert for (sets APP_DOMAIN in .env).
 #   --acme-email EMAIL      Required unless .env already has ACME_EMAIL.
+#   --captcha-provider P     Opt-in. P is "turnstile" (Cloudflare) or
+#                            "recaptcha" (Google reCAPTCHA v2) -- sets
+#                            CAPTCHA_PROVIDER in .env. Requires that
+#                            provider's --*-site-key and --*-secret-key
+#                            below. Only takes effect when writing a FRESH
+#                            .env (no existing file, or --force-env) -- see
+#                            write_env()'s own comments for why an existing
+#                            .env's CAPTCHA_PROVIDER/*_KEY lines are left
+#                            untouched otherwise, the same limitation this
+#                            script already has for every other value in
+#                            the main .env heredoc (HOST_SSH_TARGET/
+#                            CLIENT_IP_HEADER are the only two exceptions,
+#                            explicitly patched into an existing .env by
+#                            name below -- CAPTCHA isn't one of them).
+#   --turnstile-site-key K   Required with --captcha-provider turnstile.
+#   --turnstile-secret-key K  Required with --captcha-provider turnstile.
+#   --recaptcha-site-key K   Required with --captcha-provider recaptcha.
+#   --recaptcha-secret-key K  Required with --captcha-provider recaptcha.
 #   --deploy-user USER      Non-root user the host-executor SSH key logs in
 #                            as, granted narrowly-scoped sudo for exactly
 #                            app/cli/openvpn_admin.py (default: ubuntu).
@@ -103,6 +122,21 @@ set -euo pipefail
 # --- Defaults -----------------------------------------------------------
 DOMAIN=""
 ACME_EMAIL=""
+# See setup.sh's own CAPTCHA_PROVIDER/TURNSTILE_*/RECAPTCHA_* defaults
+# block for why each `*_KEY=` default is deliberately unquoted-empty and
+# separated from the next `*_KEY`-shaped line by a comment (gitleaks
+# false-positive avoidance, verified with a real local gitleaks run, not
+# just reasoned about -- a `*_SET` breaker variable does NOT work here, it
+# re-triggers the same rule since its own name is `*_KEY`-shaped too).
+CAPTCHA_PROVIDER=
+# (separator -- see comment above)
+TURNSTILE_SITE_KEY=
+# (separator -- see comment above)
+TURNSTILE_SECRET_KEY=
+# (separator -- see comment above)
+RECAPTCHA_SITE_KEY=
+# (separator -- see comment above)
+RECAPTCHA_SECRET_KEY=
 DEPLOY_USER="ubuntu"
 IMAGE_TAG="latest"
 REPO_DIR="/opt/openvpn-toolkit"
@@ -121,6 +155,11 @@ while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--domain) DOMAIN="$2"; shift 2 ;;
 		--acme-email) ACME_EMAIL="$2"; shift 2 ;;
+		--captcha-provider) CAPTCHA_PROVIDER="$2"; shift 2 ;;
+		--turnstile-site-key) TURNSTILE_SITE_KEY="$2"; shift 2 ;;
+		--turnstile-secret-key) TURNSTILE_SECRET_KEY="$2"; shift 2 ;;
+		--recaptcha-site-key) RECAPTCHA_SITE_KEY="$2"; shift 2 ;;
+		--recaptcha-secret-key) RECAPTCHA_SECRET_KEY="$2"; shift 2 ;;
 		--deploy-user) DEPLOY_USER="$2"; shift 2 ;;
 		--image-tag) IMAGE_TAG="$2"; shift 2 ;;
 		--repo-dir) REPO_DIR="$2"; shift 2 ;;
@@ -130,7 +169,7 @@ while [[ $# -gt 0 ]]; do
 		--skip-stack) SKIP_STACK=1; shift ;;
 		--skip-docker) SKIP_DOCKER=1; shift ;;
 		--sqlite) USE_SQLITE=1; shift ;;
-		-h|--help) sed -n '2,99p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help) sed -n '2,118p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) die "Unknown argument: $1 (see --help)" ;;
 	esac
 done
@@ -139,6 +178,24 @@ case "$PROXY_MODE" in
 	auto|cloudflare|direct) ;;
 	*) die "--proxy-mode must be one of: auto, cloudflare, direct (got '$PROXY_MODE')." ;;
 esac
+
+# Same per-provider required-key-pair shape as setup.sh's own
+# --captcha-provider validation (kept here too since this script is meant
+# to be safely callable on its own, not only via setup.sh -- see this
+# script's header).
+if [[ -n "$CAPTCHA_PROVIDER" ]]; then
+	case "$CAPTCHA_PROVIDER" in
+		turnstile)
+			[[ -n "$TURNSTILE_SITE_KEY" ]] || die "--captcha-provider turnstile requires --turnstile-site-key."
+			[[ -n "$TURNSTILE_SECRET_KEY" ]] || die "--captcha-provider turnstile requires --turnstile-secret-key."
+			;;
+		recaptcha)
+			[[ -n "$RECAPTCHA_SITE_KEY" ]] || die "--captcha-provider recaptcha requires --recaptcha-site-key."
+			[[ -n "$RECAPTCHA_SECRET_KEY" ]] || die "--captcha-provider recaptcha requires --recaptcha-secret-key."
+			;;
+		*) die "--captcha-provider must be 'turnstile' or 'recaptcha' (got '$CAPTCHA_PROVIDER')." ;;
+	esac
+fi
 
 [[ "$EUID" -eq 0 ]] || die "Must run as root (sudo ./setup-new-machine.sh ...)."
 
@@ -389,6 +446,16 @@ write_env() {
 			_ensure_env_line "$env_file" "CLIENT_IP_TRUST_MIDDLEWARE" "$CLIENT_IP_TRUST_MIDDLEWARE"
 			log "  proxy mode: CLIENT_IP_HEADER=$CLIENT_IP_HEADER CLIENT_IP_TRUST_MIDDLEWARE=$CLIENT_IP_TRUST_MIDDLEWARE"
 		fi
+		# CAPTCHA_PROVIDER/*_KEY: unlike HOST_SSH_TARGET/CLIENT_IP_HEADER
+		# above, this script has no in-place upsert for these -- an existing
+		# .env's CAPTCHA config (on, off, or a different provider) is an
+		# admin's own choice, possibly hand-edited since this script last
+		# ran, and is left exactly as-is. If --captcha-provider was passed
+		# against an existing .env, say so loudly rather than silently
+		# discarding it, so it's obvious why nothing changed.
+		if [[ -n "$CAPTCHA_PROVIDER" ]]; then
+			log "  NOTE: --captcha-provider $CAPTCHA_PROVIDER was given, but $env_file already exists and --force-env wasn't passed -- CAPTCHA settings in the existing file are left untouched (same limitation as every other value in the main .env template; re-run with --force-env to apply it, or edit $env_file by hand)."
+		fi
 		return
 	fi
 
@@ -410,6 +477,27 @@ write_env() {
 	if [[ "$USE_SQLITE" -eq 1 ]]; then
 		database_url_line="DATABASE_URL=sqlite:///./data/app.db"
 	fi
+
+	# CAPTCHA_PROVIDER/TURNSTILE_*/RECAPTCHA_*: written blank (disabled,
+	# matching .env.example's own documented default) unless
+	# --captcha-provider was given -- the non-active provider's key pair is
+	# always left blank too, e.g. choosing turnstile writes empty
+	# RECAPTCHA_SITE_KEY/RECAPTCHA_SECRET_KEY lines, exactly mirroring how
+	# config.py/captcha.py only ever look at the pair matching
+	# CAPTCHA_PROVIDER and ignore the other provider's vars regardless of
+	# their value.
+	local turnstile_site_key_line="" turnstile_secret_key_line=""
+	local recaptcha_site_key_line="" recaptcha_secret_key_line=""
+	case "$CAPTCHA_PROVIDER" in
+		turnstile)
+			turnstile_site_key_line="$TURNSTILE_SITE_KEY"
+			turnstile_secret_key_line="$TURNSTILE_SECRET_KEY"
+			;;
+		recaptcha)
+			recaptcha_site_key_line="$RECAPTCHA_SITE_KEY"
+			recaptcha_secret_key_line="$RECAPTCHA_SECRET_KEY"
+			;;
+	esac
 
 	cat > "$env_file" <<ENVFILE
 $database_url_line
@@ -445,6 +533,12 @@ HOST_SSH_PORT=22
 HOST_SSH_REMOTE_SCRIPT_PATH=$REMOTE_SCRIPT_PATH
 HOST_SSH_USE_SUDO=true
 HOST_SSH_TIMEOUT_SECONDS=180
+
+CAPTCHA_PROVIDER=$CAPTCHA_PROVIDER
+TURNSTILE_SITE_KEY=$turnstile_site_key_line
+TURNSTILE_SECRET_KEY=$turnstile_secret_key_line
+RECAPTCHA_SITE_KEY=$recaptcha_site_key_line
+RECAPTCHA_SECRET_KEY=$recaptcha_secret_key_line
 ENVFILE
 	chmod 600 "$env_file"
 	mkdir -p "$REPO_DIR/app/data"
@@ -452,6 +546,11 @@ ENVFILE
 	log "  wrote $env_file"
 	log "  BOOTSTRAP_ADMIN_USERNAME=admin  BOOTSTRAP_ADMIN_PASSWORD=$admin_password"
 	log "  (shown once -- also readable later via: grep BOOTSTRAP_ADMIN_PASSWORD $env_file)"
+	if [[ -n "$CAPTCHA_PROVIDER" ]]; then
+		log "  CAPTCHA_PROVIDER=$CAPTCHA_PROVIDER (enabled on /login and /forgot-password)"
+	else
+		log "  CAPTCHA_PROVIDER= (disabled -- pass --captcha-provider to setup.sh/setup-new-machine.sh to enable, or edit .env by hand later)"
+	fi
 }
 
 # --- Proxy/CDN detection: decides CLIENT_IP_HEADER + CLIENT_IP_TRUST_MIDDLEWARE
