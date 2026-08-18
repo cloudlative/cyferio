@@ -1,7 +1,4 @@
 #!/bin/bash
-#
-# https://github.com/shahzadmasud/openvpn.git
-
 
 # Detect Debian users running the script with "sh" instead of bash
 if readlink /proc/$$/exe | grep -q "dash"; then
