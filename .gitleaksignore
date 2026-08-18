@@ -14,3 +14,14 @@
 # guess.
 9c554b6d91d245a6f9735e51695c94c65f364df6:setup.sh:generic-api-key:135
 1300d7dc8e1d93eaadbb6dda5e6dcd84f01e87cc:setup.sh:generic-api-key:135
+
+# Same situation, a different fixture: test_settings.py's fake
+# maxmind_license_key test value ("abcdefghij0123456789") tripped the
+# same generic-api-key heuristic in this one commit before being swapped
+# for an explicitly low-entropy fixture value (see that fix commit's own
+# message). The old commit itself never changes, so it re-flags on every
+# full-history scan otherwise.
+97f6d76433fa1b5a7cd07117b3331a7896c871af:app/tests/test_settings.py:generic-api-key:106
+97f6d76433fa1b5a7cd07117b3331a7896c871af:app/tests/test_settings.py:generic-api-key:114
+97f6d76433fa1b5a7cd07117b3331a7896c871af:app/tests/test_settings.py:generic-api-key:118
+97f6d76433fa1b5a7cd07117b3331a7896c871af:app/tests/test_settings.py:generic-api-key:130
