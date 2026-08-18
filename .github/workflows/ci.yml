@@ -144,7 +144,24 @@ jobs:
         run: |
           curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
             | tar -xz -C /usr/local/bin gitleaks
-      - name: gitleaks
+      # On a pull_request, scan only the commits this PR actually
+      # introduces (base.sha..head.sha) -- not this PR's diff against a
+      # single-commit baseline, but genuinely new commits. Scanning full
+      # history (--log-opts unset) on every PR run is wrong for a busy
+      # repo with multiple concurrent branches: `actions/checkout`
+      # fetches every remote branch's history, and gitleaks scans every
+      # ref reachable from what got fetched -- so a PR run would flag
+      # *any* branch's pre-existing findings repo-wide, forever, not just
+      # what that PR introduces (confirmed live: a concurrent, unrelated
+      # branch's commit showed up as a "new" finding on this PR's own
+      # run). Full-history scans still make sense on push to master
+      # (catches anything that slipped past PR review) and are cheap
+      # enough to run every time.
+      - name: gitleaks (PR diff only)
+        if: github.event_name == 'pull_request'
+        run: gitleaks detect --source . --redact -v --log-opts="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+      - name: gitleaks (full history)
+        if: github.event_name != 'pull_request'
         run: gitleaks detect --source . --redact -v
 
   sast:
