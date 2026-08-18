@@ -128,8 +128,8 @@
 			</fieldset>
 
 			<fieldset style="margin-top:16px">
-				<legend>Location &amp; Network Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
-				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees.</p>
+				<legend>Portal Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees. These affect signing in to this web portal only -- they have no effect on VPN connections. To restrict VPN access instead, use Manage Restrictions on the Clients page.</p>
 				<div class="field-stack">
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="u-restrict-country"> Restrict by country
@@ -269,8 +269,8 @@
 				<p class="muted" id="e-device-policy-no-mac" style="margin:0">Device MAC Address is set when the VPN profile is provisioned and isn't editable here -- manage it from the Clients page.</p>
 			</fieldset>
 			<fieldset>
-				<legend>Location &amp; Network Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
-				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees.</p>
+				<legend>Portal Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees. These affect signing in to this web portal only -- they have no effect on VPN connections.</p>
 				<div class="field-stack">
 					<div class="field">
 						<label class="checkbox-label"><input type="checkbox" id="e-restrict-country"> Restrict by country</label>
@@ -301,6 +301,14 @@
 						<textarea id="e-allowed-ips" rows="3" class="mono" placeholder="203.0.113.5&#10;10.0.0.0/24"></textarea>
 					</div>
 				</div>
+			</fieldset>
+			<fieldset id="e-vpn-restrictions-fieldset">
+				<legend>VPN Access Restrictions <span class="muted" style="text-transform:none;font-weight:500">(read-only here)</span></legend>
+				<p class="muted" style="margin-top:0" id="e-vpn-restrictions-intro">These affect VPN connections only -- they have no effect on portal sign-in. Independent from Portal Login Restrictions above.</p>
+				<div id="e-vpn-restrictions-summary" class="restriction-chips"></div>
+				<p class="muted" id="e-vpn-restrictions-none" style="display:none">No VPN access restrictions set for this client.</p>
+				<p class="muted" id="e-vpn-restrictions-no-profile" style="display:none">No VPN profile is linked yet -- link one above to set VPN access restrictions.</p>
+				<a href="/clients" class="btn-secondary btn-sm" id="e-vpn-restrictions-link" style="margin-top:10px;display:inline-block">Manage on Clients page →</a>
 			</fieldset>
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="edit-cancel">Cancel</button>
@@ -654,6 +662,31 @@ function userRestrictionChipsHtml(u) {
 	return `<div class="restriction-chips">${chips.join("")}</div>`;
 }
 
+// Same chip vocabulary as userRestrictionChipsHtml above, but for VPN
+// Access Restrictions (policy_store's allowed_countries/cities/asns/ips on
+// the linked client, surfaced read-only via routes/users.py's
+// vpn_restrict_by_*/vpn_allowed_* _serialize() fields) -- deliberately a
+// SEPARATE function/element from the Portal ones above, not merged into
+// one chip row, so the two never look like the same restriction at a
+// glance. See Edit User's "VPN Access Restrictions" fieldset.
+function vpnRestrictionChipsHtml(u) {
+	const chips = [];
+	if (u.vpn_restrict_by_country && u.vpn_allowed_countries && u.vpn_allowed_countries.length) {
+		const names = u.vpn_allowed_countries.map(c => countryName(c));
+		chips.push(`<span class="restriction-chip chip-country" title="VPN restricted to: ${escapeHtml(names.join(", "))}">${names.length === 1 ? escapeHtml(names[0]) : `${names.length} countries`}</span>`);
+	}
+	if (u.vpn_restrict_by_city && u.vpn_allowed_cities && u.vpn_allowed_cities.length) {
+		chips.push(`<span class="restriction-chip chip-city" title="VPN restricted to: ${escapeHtml(u.vpn_allowed_cities.join(", "))}">${u.vpn_allowed_cities.length === 1 ? escapeHtml(u.vpn_allowed_cities[0]) : `${u.vpn_allowed_cities.length} cities`}</span>`);
+	}
+	if (u.vpn_restrict_by_asn && u.vpn_allowed_asns && u.vpn_allowed_asns.length) {
+		chips.push(`<span class="restriction-chip chip-asn" title="VPN restricted to: ${escapeHtml(u.vpn_allowed_asns.join(", "))}">${u.vpn_allowed_asns.length === 1 ? escapeHtml(u.vpn_allowed_asns[0]) : `${u.vpn_allowed_asns.length} networks`}</span>`);
+	}
+	if (u.vpn_restrict_by_ip && u.vpn_allowed_ips && u.vpn_allowed_ips.length) {
+		chips.push(`<span class="restriction-chip chip-ip" title="VPN restricted to: ${escapeHtml(u.vpn_allowed_ips.join(", "))}">${u.vpn_allowed_ips.length === 1 ? escapeHtml(u.vpn_allowed_ips[0]) : `${u.vpn_allowed_ips.length} IPs`}</span>`);
+	}
+	return chips;
+}
+
 function renderUsers() {
 	const el = document.getElementById("users-table");
 	const filtered = lastUsers.filter(matchesSearch);
@@ -820,6 +853,34 @@ document.getElementById("e-vpn-attach-btn").addEventListener("click", async () =
 	}
 });
 
+// Populates the read-only "VPN Access Restrictions" panel in Edit User --
+// edited on the Clients page's Manage Restrictions dialog, never here (see
+// vpnRestrictionChipsHtml above and routes/users.py's _serialize).
+function renderVpnRestrictionsSummary(u) {
+	const summaryEl = document.getElementById("e-vpn-restrictions-summary");
+	const noneEl = document.getElementById("e-vpn-restrictions-none");
+	const noProfileEl = document.getElementById("e-vpn-restrictions-no-profile");
+	const linkEl = document.getElementById("e-vpn-restrictions-link");
+	if (!u.vpn_client_name) {
+		summaryEl.innerHTML = "";
+		noneEl.style.display = "none";
+		noProfileEl.style.display = "";
+		linkEl.style.display = "none";
+		return;
+	}
+	noProfileEl.style.display = "none";
+	linkEl.style.display = "";
+	linkEl.title = `Manage Restrictions for '${u.vpn_client_name}'`;
+	const chips = vpnRestrictionChipsHtml(u);
+	if (!chips.length) {
+		summaryEl.innerHTML = "";
+		noneEl.style.display = "";
+		return;
+	}
+	noneEl.style.display = "none";
+	summaryEl.innerHTML = chips.join("");
+}
+
 function openEdit(u) {
 	editingUserId = u.id;
 	editingUserIsBootstrapAdmin = !!u.is_bootstrap_admin;
@@ -852,6 +913,7 @@ function openEdit(u) {
 	editAsnsMs.setSelected(u.allowed_login_asns || []);
 	document.getElementById("e-restrict-ip").checked = !!u.restrict_login_by_ip;
 	document.getElementById("e-allowed-ips").value = (u.allowed_login_ips || []).join("\n");
+	renderVpnRestrictionsSummary(u);
 	document.getElementById("edit-dialog").showModal();
 	editDirty.arm();
 }

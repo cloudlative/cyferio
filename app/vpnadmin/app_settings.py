@@ -302,6 +302,79 @@ def migrate_legacy_smtp_provider(db: Session) -> None:
     db.commit()
 
 
+def migrate_decouple_portal_and_vpn_restrictions(db: Session) -> None:
+    """One-time backfill for separating Portal Login Restrictions
+    (User.restrict_login_by_country/city/asn/ip, enforced only by
+    routes/auth.py's login check) from VPN Access Restrictions
+    (policy_store's per-client allowed_countries/cities/asns/ips,
+    enforced only by host-scripts/openvpn-mac-addr-check.py).
+
+    Before this change, routes/users.py's create_user/update_user pushed
+    a User's Portal restriction values straight into that same user's
+    linked VPN profile's policy on every save -- the two systems were
+    reading independent storage (User columns vs. client_policy.json) but
+    always held the SAME values, because one write path kept overwriting
+    the other. That sync is now removed (see users.py), so the two are
+    free to diverge going forward -- but on an *existing* deployment,
+    stopping the sync cold would silently make VPN connections
+    UNRESTRICTED for anyone who only ever set a "restrict by X" toggle
+    through the (now VPN-blind) Portal Restrictions UI, without them ever
+    touching the Clients page's independent Manage Restrictions dialog.
+    That's a real security regression, not just a UX one.
+
+    So: for every user with any restrict_login_by_* flag on and a linked
+    VPN profile, copy that value into the profile's policy ONCE -- a
+    resulting VPN Access Restriction that exactly mirrors what the old
+    coupled behavior already enforced, preserving current behavior. Only
+    ever fills in a restriction that's actively toggled on; a restriction
+    left off is not touched (nothing to preserve). From that point on,
+    admins/users are free to edit Portal and VPN restrictions
+    independently and they'll never be silently re-synced.
+
+    Needs a REAL one-time marker (AppSettings.restrictions_decoupled_at),
+    unlike most of this app's startup migrations, which are safely
+    re-runnable because they check "does the target data already exist"
+    (see migrate_legacy_smtp_provider above). Here, "the VPN policy
+    doesn't have this restriction" is not a proxy for "hasn't been
+    migrated yet" -- it's also exactly what "an admin/user deliberately
+    cleared the VPN-side restriction after migrating, keeping the
+    Portal-side one" looks like. Re-running on every startup would
+    silently re-impose a VPN restriction someone intentionally removed.
+    A persisted timestamp is the only way to tell those apart."""
+    from . import policy_store
+    from .models import User
+
+    row = get_settings_row(db)
+    if row.restrictions_decoupled_at is not None:
+        return
+
+    users = db.query(User).filter(
+        User.restrict_login_by_country.is_(True) | User.restrict_login_by_city.is_(True)
+        | User.restrict_login_by_asn.is_(True) | User.restrict_login_by_ip.is_(True)
+    ).all()
+    for user in users:
+        if user.vpn_profile_link is None:
+            continue
+        import json as _json
+        try:
+            policy_store.set_policy(
+                user.vpn_profile_link.vpn_client_name,
+                allowed_countries=_json.loads(user.allowed_login_countries or "[]") if user.restrict_login_by_country else ...,
+                allowed_cities=_json.loads(user.allowed_login_cities or "[]") if user.restrict_login_by_city else ...,
+                allowed_asns=_json.loads(user.allowed_login_asns or "[]") if user.restrict_login_by_asn else ...,
+                allowed_ips=_json.loads(user.allowed_login_ips or "[]") if user.restrict_login_by_ip else ...,
+            )
+        except (policy_store.PolicyValidationError, OSError):
+            # Best-effort, matching every other startup migration's
+            # posture -- a malformed legacy value or filesystem hiccup for
+            # one user must never block the whole app from starting, or
+            # from finishing this pass for every other user.
+            continue
+
+    row.restrictions_decoupled_at = datetime.now(timezone.utc)
+    db.commit()
+
+
 def prune_audit_log(db: Session) -> int:
     """Deletes AuditLog entries older than `runtime.audit_retention_days`,
     if a retention period is configured (None/0 = keep forever, no-op).
