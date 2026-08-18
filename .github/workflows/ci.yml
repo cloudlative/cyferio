@@ -310,6 +310,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # app/tests/services/test_certificate_manager.py's session-scoped PKI
+      # fixture calls services.openvpn.certificate_manager.
+      # generate_tls_crypt_key(), which shells out to the real `openvpn
+      # --genkey --secret` binary (not just easyrsa/openssl) -- confirmed
+      # missing on ubuntu-24.04 runners by default (34 test errors,
+      # "Command not found: 'openvpn'", on this PR's first live CI run).
+      # ubuntu-24.04 ships openvpn 2.6.x in its default apt repos, same
+      # major version openvpn-install.sh itself installs in production.
+      - name: Install openvpn (needed by the cert-manager test fixture)
+        run: sudo apt-get update && sudo apt-get install -y openvpn
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Run tests
