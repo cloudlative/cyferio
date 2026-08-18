@@ -45,7 +45,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     # (dependencies are all installed above, at build time), so the wheel
     # is dead weight that exists only to trip a vulnerability scanner over
     # code that's never executed. Remove it.
-    && rm -rf /usr/local/lib/python3.12/ensurepip/_bundled \
+    && rm -rf /usr/local/lib/python3.*/ensurepip/_bundled \
     # pip/_vendor/bom.cdx.json is pip's own bundled CycloneDX SBOM,
     # documenting every package it vendors (Trivy explicitly supports
     # reading embedded SBOMs as an authoritative package inventory -- see
@@ -65,8 +65,15 @@ RUN pip install --no-cache-dir --upgrade pip \
     # CVE-2026-59890 by the very next scan) a per-CVE-ID .trivyignore
     # entry can't keep up -- removing the files that cause the misparse
     # fixes it at the root instead, permanently.
-    && rm -f /usr/local/lib/python3.12/site-packages/pip/_vendor/vendor.txt \
-             /usr/local/lib/python3.12/site-packages/pip/_vendor/bom.cdx.json
+    #
+    # Both this and the ensurepip rm above use a python3.* glob rather than
+    # a hardcoded version -- a prior revision hardcoded python3.12 and went
+    # silently stale (rm -f doesn't error on a no-op) the moment the base
+    # image bumped to python:3.14-alpine, reintroducing this exact phantom
+    # finding and failing the Trivy scan job on the next tag build. The
+    # glob keeps this working across future Python version bumps too.
+    && rm -f /usr/local/lib/python3.*/site-packages/pip/_vendor/vendor.txt \
+             /usr/local/lib/python3.*/site-packages/pip/_vendor/bom.cdx.json
 
 COPY main.py .
 COPY migrate_vpn_profiles.py .
