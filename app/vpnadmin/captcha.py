@@ -114,21 +114,48 @@ def verify(token: str, *, remote_ip: str | None = None) -> bool:
     return bool(result.get("success"))
 
 
-def diagnostic_check() -> dict:
+def diagnostic_check(*, provider: str, secret_key: str | None) -> dict:
     """Settings-page "Test" button support (routes/settings.py's
-    POST /api/settings/captcha/test) -- deliberately NOT built on top of
+    POST /api/settings/captcha/test). Deliberately NOT built on top of
     verify() above, because verify() collapses "the provider correctly
     rejected an invalid token" and "a network error/wrong secret key
     happened" into the same `False` on purpose (see its own docstring --
     that's the right behavior for the real login-gating path, but it's
-    exactly the distinction a diagnostic check needs to surface). Submits
-    the same kind of deliberately-invalid token, but reports transport
-    failures and malformed responses as their own `error` outcome instead
-    of silently returning as if the token were just rejected."""
-    if not is_configured():
-        return {"reachable": False, "error": "CAPTCHA is not configured."}
-    _, secret_key = _active_keys()
-    siteverify_url = _PROVIDERS[_active_provider()]["siteverify_url"]
+    exactly the distinction a diagnostic check needs to surface).
+
+    Takes `provider`/`secret_key` as explicit arguments rather than
+    reading the ambient app_settings.runtime config -- mirrors
+    mailer.send_test_email_via_config's "test the exact values passed in,
+    not necessarily the saved/active config" precedent. Found live: this
+    used to always resolve _active_provider()/_active_keys() (the
+    already-SAVED config, falling back to env vars if nothing's been
+    saved yet), so typing a dummy value into an unsaved/inactive
+    provider's field and clicking Test silently re-tested whatever was
+    already active instead -- on a box with working Turnstile env-var
+    credentials, an admin testing a fabricated reCAPTCHA secret got back
+    "turnstile is reachable and the secret key is accepted", which is
+    true but has nothing to do with what they typed. The caller
+    (routes/settings.py) is responsible for resolving what "the current
+    value" means (a SECRET_PLACEHOLDER-masked field means "whatever's
+    already saved for THIS specific provider", not the active one).
+
+    IMPORTANT reCAPTCHA caveat, confirmed live against Google's real API
+    (not assumed from docs): unlike Turnstile -- which returns a distinct
+    HTTP 400 invalid-input-secret error for a bad secret key, letting this
+    check actually confirm secret validity -- reCAPTCHA's siteverify
+    validates the RESPONSE TOKEN first and short-circuits to
+    error-codes: ["invalid-input-response"] before ever reaching secret
+    validation, for an empty, garbage, or entirely fabricated secret
+    alike, since this diagnostic has no real solved challenge to submit.
+    So for reCAPTCHA this can only ever confirm "Google's API is
+    reachable", never "this specific secret key is valid" -- surfaced via
+    the `secret_verifiable` field rather than silently claiming more than
+    was actually checked."""
+    if provider not in _PROVIDERS:
+        return {"reachable": False, "secret_verifiable": False, "error": "Unknown CAPTCHA provider."}
+    if not secret_key:
+        return {"reachable": False, "secret_verifiable": False, "error": "No secret key to test -- enter one first."}
+    siteverify_url = _PROVIDERS[provider]["siteverify_url"]
     body = urllib.parse.urlencode({"secret": secret_key, "response": "test-invalid-token-000000"}).encode("ascii")
     req = urllib.request.Request(siteverify_url, data=body, method="POST")
     try:
@@ -136,18 +163,21 @@ def diagnostic_check() -> dict:
             status = resp.status
             result = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        return {"reachable": False, "error": f"Provider returned HTTP {e.code} -- check the secret key."}
+        return {"reachable": False, "secret_verifiable": True, "error": f"Provider returned HTTP {e.code} -- check the secret key."}
     except (urllib.error.URLError, TimeoutError):
-        return {"reachable": False, "error": "Could not reach the provider -- check network connectivity."}
+        return {"reachable": False, "secret_verifiable": False, "error": "Could not reach the provider -- check network connectivity."}
     except ValueError:
-        return {"reachable": False, "error": "Provider response was not valid JSON."}
+        return {"reachable": False, "secret_verifiable": False, "error": "Provider response was not valid JSON."}
     # A well-formed response at all (regardless of success/failure on this
-    # deliberately-bogus token) means the secret key was accepted and the
-    # provider is reachable -- both providers respond 200 with a JSON body
-    # even when rejecting the token itself, only a bad SECRET key or a
-    # malformed request produces something other than a normal 200+JSON
-    # response.
-    return {"reachable": status == 200 and isinstance(result, dict) and "success" in result, "error": None}
+    # deliberately-bogus token) means the provider is reachable -- both
+    # providers respond 200 with a JSON body even when rejecting the token
+    # itself. Whether that ALSO proves the secret key is valid differs by
+    # provider -- see the docstring's reCAPTCHA caveat: only Turnstile's
+    # bad-secret case is distinguishable, via the HTTPError branch above,
+    # so simply reaching this line already implies a Turnstile secret was
+    # accepted, but proves nothing about a reCAPTCHA one.
+    reachable = status == 200 and isinstance(result, dict) and "success" in result
+    return {"reachable": reachable, "secret_verifiable": provider == "turnstile", "error": None}
 
 
 def extract_token(form: dict) -> str:

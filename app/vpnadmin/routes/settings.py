@@ -508,21 +508,51 @@ def refresh_geoip(admin: User = Depends(require_admin), db: Session = Depends(ge
 
 # --- Optional integrations: CAPTCHA ------------------------------------------
 
+class TestCaptchaRequest(BaseModel):
+    provider: str
+    secret_key: str | None = None
+
+    @field_validator("provider")
+    @classmethod
+    def _valid_provider(cls, v: str) -> str:
+        if v not in _CAPTCHA_PROVIDERS:
+            raise ValueError(f"provider must be one of: {', '.join(_CAPTCHA_PROVIDERS)}.")
+        return v
+
+
 @router.post("/captcha/test")
-def test_captcha(_: User = Depends(require_admin)):
-    """Calls the ACTIVE (already-saved) provider's siteverify with a
+def test_captcha(body: TestCaptchaRequest, _: User = Depends(require_admin)):
+    """Calls the GIVEN provider/secret_key's siteverify with a
     deliberately-invalid token and checks for a well-formed JSON response.
-    This proves the secret key is accepted and the provider is reachable
-    -- it can NOT prove the full widget flow works (that needs a real
-    solved challenge from an actual browser, which this save-time check
-    has no way to produce) -- the Settings page's "Test" button surfaces
-    this distinction in its own copy, not just here."""
-    if not captcha.is_configured():
-        raise HTTPException(status_code=400, detail="No CAPTCHA provider is configured yet.")
-    result = captcha.diagnostic_check()
-    result["provider"] = runtime.captcha_provider
-    result["note"] = ("This confirms the secret key is accepted and the provider is reachable -- "
-                       "it does not exercise the actual widget, which needs a real browser round-trip.")
+    Deliberately takes the provider/secret straight from the request body
+    -- i.e. the Settings page's CURRENT form fields -- rather than reading
+    whatever's already saved, same "test what was actually passed in, not
+    necessarily the saved config" precedent as email_providers.py's own
+    per-profile Test button. Found live: reading the saved/active config
+    here meant typing a dummy secret into an unsaved or non-active
+    provider's field and clicking Test silently re-tested a DIFFERENT,
+    already-working provider instead, reporting success for values the
+    admin never actually typed.
+
+    A `secret_key` of None/blank/the mask placeholder means "use whatever
+    is already saved for THIS specific provider" (not necessarily the
+    currently-active one -- an admin can test a provider they haven't
+    switched to yet), same placeholder-means-unchanged convention as the
+    PATCH endpoint above."""
+    secret_key = body.secret_key
+    if not secret_key or secret_key == SECRET_PLACEHOLDER:
+        secret_key = runtime.turnstile_secret_key if body.provider == "turnstile" else runtime.recaptcha_secret_key
+    if not secret_key:
+        raise HTTPException(status_code=400, detail="No secret key to test -- enter one first.")
+    result = captcha.diagnostic_check(provider=body.provider, secret_key=secret_key)
+    result["provider"] = body.provider
+    if result["reachable"] and not result["secret_verifiable"]:
+        result["note"] = ("Google's reCAPTCHA API can't confirm a secret key is valid this way -- only that "
+                           "the provider is reachable. This secret could still be wrong; the real test is "
+                           "attempting to log in with the widget.")
+    else:
+        result["note"] = ("This confirms the secret key is accepted and the provider is reachable -- "
+                           "it does not exercise the actual widget, which needs a real browser round-trip.")
     return result
 
 

@@ -578,9 +578,31 @@ document.getElementById("s-geoip-refresh-btn").addEventListener("click", async (
 });
 
 document.getElementById("s-captcha-test-btn").addEventListener("click", async () => {
+	// Tests whatever's currently in the form -- the provider dropdown and
+	// that provider's own secret-key field -- not silently whatever's
+	// already saved. A blank/masked secret field means "test whatever's
+	// already saved for this specific provider" (see the route's own
+	// docstring for why); it does NOT fall back to a different provider
+	// just because that one happens to be active.
+	const provider = document.getElementById("s-captcha-provider").value;
+	if (!provider) {
+		toast("Choose a provider above first.", "error");
+		return;
+	}
+	const secretFieldId = provider === "turnstile" ? "s-turnstile-secret-key" : "s-recaptcha-secret-key";
 	try {
-		const result = await apiFetch("/api/settings/captcha/test", { method: "POST" });
-		toast(result.reachable ? `${result.provider} is reachable and the secret key is accepted.` : (result.error || "Test failed."), result.reachable ? "success" : "error");
+		const result = await apiFetch("/api/settings/captcha/test", { method: "POST", body: {
+			provider,
+			secret_key: val(secretFieldId) || null,
+		} });
+		const label = provider === "turnstile" ? "Turnstile" : "reCAPTCHA";
+		if (result.reachable && result.secret_verifiable) {
+			toast(`${label} is reachable and the secret key is accepted.`, "success");
+		} else if (result.reachable) {
+			toast(`${label} is reachable, but this secret key's validity can't be confirmed this way -- ${result.note}`, "success");
+		} else {
+			toast(result.error || "Test failed.", "error");
+		}
 	} catch (e) {
 		toast(e.message, "error");
 	}

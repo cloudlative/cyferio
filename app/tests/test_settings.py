@@ -194,3 +194,94 @@ class TestCaptchaSettings:
         row = db_session.query(AppSettings).one()
         assert row.turnstile_site_key == "site456"
         assert row.turnstile_secret_key == "secret123"
+
+
+class TestCaptchaTestEndpoint:
+    """/api/settings/captcha/test -- regression coverage for a real bug
+    found live: this used to test whatever provider/secret was already
+    SAVED (or, if nothing was ever saved, the env-var fallback), not the
+    provider/secret actually in the request body. On a box with working
+    Turnstile env-var credentials, typing a dummy reCAPTCHA secret and
+    clicking Test reported "turnstile is reachable and the secret key is
+    accepted" -- true, but not what was tested. See captcha.py's
+    diagnostic_check() and this route's own docstrings for the fix."""
+
+    def test_tests_the_given_provider_not_the_saved_one(self, app_client, monkeypatch):
+        # Turnstile is the actually-saved/active provider (with a real,
+        # working secret) -- but the request body asks to test reCAPTCHA
+        # with a dummy secret. The result must reflect reCAPTCHA, not
+        # silently re-test the already-working Turnstile config.
+        login(app_client, "admin", "adminpass123")
+        app_client.patch("/api/settings", json={
+            "captcha_provider": "turnstile",
+            "turnstile_site_key": "site123", "turnstile_secret_key": "real-working-secret",
+        })
+
+        import json
+
+        from vpnadmin import captcha
+
+        def boom(req, timeout=10):
+            # Simulates a fabricated reCAPTCHA secret: Google always
+            # returns 200+JSON with error-codes: ["invalid-input-response"]
+            # regardless of secret validity (see diagnostic_check's own
+            # docstring) -- so this endpoint must never claim the secret
+            # itself was verified for reCAPTCHA.
+            class FakeResponse:
+                status = 200
+
+                def read(self):
+                    return json.dumps({"success": False, "error-codes": ["invalid-input-response"]}).encode()
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+            return FakeResponse()
+
+        monkeypatch.setattr(captcha.urllib.request, "urlopen", boom)
+        r = app_client.post("/api/settings/captcha/test", json={
+            "provider": "recaptcha", "secret_key": "totally-fake-dummy-value",
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["provider"] == "recaptcha"
+        assert body["secret_verifiable"] is False
+
+    def test_masked_secret_falls_back_to_that_providers_own_saved_value(self, app_client, monkeypatch):
+        # A blank/masked secret_key means "test whatever's already saved
+        # for the GIVEN provider" -- not the active provider, and not "no
+        # secret at all" (which would 400).
+        login(app_client, "admin", "adminpass123")
+        app_client.patch("/api/settings", json={
+            "captcha_provider": "turnstile",
+            "turnstile_site_key": "tsite", "turnstile_secret_key": "tsecret",
+            "recaptcha_site_key": "rsite", "recaptcha_secret_key": "rsecret",
+        })
+
+        from vpnadmin import captcha
+
+        captured = {}
+
+        def fake_diagnostic_check(*, provider, secret_key):
+            captured["provider"] = provider
+            captured["secret_key"] = secret_key
+            return {"reachable": True, "secret_verifiable": False, "error": None}
+
+        monkeypatch.setattr(captcha, "diagnostic_check", fake_diagnostic_check)
+        r = app_client.post("/api/settings/captcha/test", json={"provider": "recaptcha", "secret_key": "••••••••"})
+        assert r.status_code == 200
+        assert captured["provider"] == "recaptcha"
+        assert captured["secret_key"] == "rsecret"
+
+    def test_no_secret_at_all_is_rejected(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/settings/captcha/test", json={"provider": "recaptcha"})
+        assert r.status_code == 400
+
+    def test_unknown_provider_rejected(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/settings/captcha/test", json={"provider": "bogus", "secret_key": "x"})
+        assert r.status_code == 422

@@ -185,10 +185,23 @@ class TestVerify:
 
 
 class TestDiagnosticCheck:
-    def test_unconfigured(self, monkeypatch):
-        _clear_captcha_settings(monkeypatch)
-        result = captcha.diagnostic_check()
+    """diagnostic_check() takes provider/secret_key as explicit arguments
+    (not the ambient app_settings.runtime config) -- see its own
+    docstring for why (routes/settings.py's test_captcha() resolves what
+    "the current value" means and passes it in explicitly, same
+    mailer.send_test_email_via_config precedent). These tests therefore
+    don't need to touch app_settings.runtime at all."""
+
+    def test_unknown_provider(self):
+        result = captcha.diagnostic_check(provider="bogus", secret_key="whatever")
         assert result["reachable"] is False
+        assert result["secret_verifiable"] is False
+        assert result["error"]
+
+    def test_no_secret_key(self):
+        result = captcha.diagnostic_check(provider="turnstile", secret_key=None)
+        assert result["reachable"] is False
+        assert result["secret_verifiable"] is False
         assert result["error"]
 
     def test_reachable_even_when_token_rejected(self, monkeypatch):
@@ -197,11 +210,6 @@ class TestDiagnosticCheck:
         # test token produces) must count as "reachable", unlike verify()'s
         # own True/False, which collapses this into the same False as a
         # real network failure.
-        _clear_captcha_settings(monkeypatch)
-        monkeypatch.setattr(app_settings.runtime, "captcha_provider", "turnstile")
-        monkeypatch.setattr(app_settings.runtime, "turnstile_site_key", "site")
-        monkeypatch.setattr(app_settings.runtime, "turnstile_secret_key", "secret")
-
         class FakeResponse:
             status = 200
 
@@ -215,34 +223,50 @@ class TestDiagnosticCheck:
                 return False
 
         monkeypatch.setattr(captcha.urllib.request, "urlopen", lambda req, timeout=10: FakeResponse())
-        result = captcha.diagnostic_check()
+        result = captcha.diagnostic_check(provider="turnstile", secret_key="secret")
         assert result["reachable"] is True
+        assert result["secret_verifiable"] is True
         assert result["error"] is None
 
     def test_bad_secret_key_reported_as_unreachable(self, monkeypatch):
-        _clear_captcha_settings(monkeypatch)
-        monkeypatch.setattr(app_settings.runtime, "captcha_provider", "turnstile")
-        monkeypatch.setattr(app_settings.runtime, "turnstile_site_key", "site")
-        monkeypatch.setattr(app_settings.runtime, "turnstile_secret_key", "wrong-secret")
-
         def boom(req, timeout=10):
             raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {}, None)
 
         monkeypatch.setattr(captcha.urllib.request, "urlopen", boom)
-        result = captcha.diagnostic_check()
+        result = captcha.diagnostic_check(provider="turnstile", secret_key="wrong-secret")
         assert result["reachable"] is False
         assert result["error"]
 
     def test_network_error_reported_distinctly(self, monkeypatch):
-        _clear_captcha_settings(monkeypatch)
-        monkeypatch.setattr(app_settings.runtime, "captcha_provider", "turnstile")
-        monkeypatch.setattr(app_settings.runtime, "turnstile_site_key", "site")
-        monkeypatch.setattr(app_settings.runtime, "turnstile_secret_key", "secret")
-
         def boom(req, timeout=10):
             raise urllib.error.URLError("no network")
 
         monkeypatch.setattr(captcha.urllib.request, "urlopen", boom)
-        result = captcha.diagnostic_check()
+        result = captcha.diagnostic_check(provider="turnstile", secret_key="secret")
         assert result["reachable"] is False
         assert "reach" in result["error"].lower()
+
+    def test_recaptcha_cannot_verify_secret_this_way(self, monkeypatch):
+        # Confirmed live against Google's real siteverify API (see
+        # diagnostic_check's own docstring): a bogus response token always
+        # produces error-codes: ["invalid-input-response"] with a normal
+        # 200, regardless of whether the secret key is real, garbage, or
+        # missing -- so reCAPTCHA must report secret_verifiable: False
+        # even on an otherwise "reachable" result, unlike Turnstile.
+        class FakeResponse:
+            status = 200
+
+            def read(self):
+                return json.dumps({"success": False, "error-codes": ["invalid-input-response"]}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(captcha.urllib.request, "urlopen", lambda req, timeout=10: FakeResponse())
+        result = captcha.diagnostic_check(provider="recaptcha", secret_key="totally-fake-secret")
+        assert result["reachable"] is True
+        assert result["secret_verifiable"] is False
+        assert result["error"] is None
