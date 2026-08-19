@@ -336,23 +336,34 @@ jobs:
       # ubuntu-24.04 ships openvpn 2.6.x in its default apt repos, same
       # major version openvpn-install.sh itself installs in production.
       - name: Install openvpn (needed by the cert-manager test fixture)
-        # ubuntu-24.04 runners ship needrestart, which pops an interactive
-        # "which services should be restarted?" prompt whenever apt
-        # installs a package registering a systemd service (openvpn does)
-        # -- with no TTY in CI that prompt just hangs until this job's 25m
-        # timeout kills it. Setting DEBIAN_FRONTEND/NEEDRESTART_MODE as
-        # step-level `env:` did NOT fix this (confirmed live, v1.21.37's
-        # CI run hung again) -- sudo resets the environment by default, so
-        # those never reached the apt-get process it spawns. Writing
-        # needrestart's own config file instead sidesteps the sudo/env
-        # question entirely: 'a' = restart services automatically, no
-        # prompt, ever -- same fix used widely for this exact GH Actions
-        # gotcha.
+        # Belt and suspenders against two DIFFERENT hangs seen live on this
+        # step, neither of which is what it first looks like:
+        #
+        # 1. ubuntu-24.04 runners ship needrestart, which pops an
+        #    interactive "which services should be restarted?" prompt
+        #    whenever apt installs a package registering a systemd service
+        #    (openvpn does). Step-level `env: {DEBIAN_FRONTEND,
+        #    NEEDRESTART_MODE}` does NOT reach it -- sudo resets the
+        #    environment by default -- so the fix has to be needrestart's
+        #    own conf.d file instead ('a' = restart automatically, no
+        #    prompt).
+        # 2. Separately, `apt-get update` itself can silently stall: live
+        #    on this repo it fell back from a flaky azure.archive.ubuntu.
+        #    com mirror to archive.ubuntu.com, fetched the noble-security
+        #    InRelease, then produced zero output for 4+ minutes (a raw
+        #    network fetch stall, not a prompt -- confirmed from the
+        #    actual job log, not guessed). `timeout` + a few retries turns
+        #    that into a fast, visible failure instead of eating the job's
+        #    full 25m ceiling.
         run: |
           sudo mkdir -p /etc/needrestart/conf.d
           echo "\$nrconf{restart} = 'a';" | sudo tee /etc/needrestart/conf.d/50-autorestart.conf
-          sudo apt-get update
-          sudo apt-get install -y openvpn
+          for i in 1 2 3; do
+            echo "apt-get update: attempt $i"
+            sudo timeout 90 apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 && break
+            [ "$i" = 3 ] && { echo "apt-get update kept stalling after 3 attempts" >&2; exit 1; }
+          done
+          sudo timeout 90 apt-get install -y openvpn
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Run tests
