@@ -85,13 +85,29 @@ Skipping it (or a plain no-flags run answered "no") leaves CAPTCHA
 disabled, same as before this feature existed.
 
 **Settings page (CAPTCHA card):** pick a provider (or "Disabled"), enter
-its site/secret key pair, click **Test** -- calls the provider's
-siteverify with a deliberately-invalid token and checks for a normal
-JSON response, which confirms the secret key is accepted and the
-provider is reachable **without** needing a real solved challenge. This
-is a save-time sanity check, not a full widget test -- it can't prove
-the actual browser flow works, only that the credentials/network path
-are good.
+its site/secret key pair. A saved secret key (and, for Turnstile, the
+public site key too) loads locked -- greyed out, not a live editable
+box holding the real value -- with an **Edit** button that clears it and
+hands control back; leaving it alone re-saves it unchanged.
+
+**Test** calls the provider's siteverify with a deliberately-invalid
+token and checks for a normal JSON response, using whatever's currently
+in the provider dropdown and that provider's secret field right now --
+not necessarily the already-saved config, so it's safe to try a
+not-yet-saved value or a provider you haven't switched to yet. A blank
+or still-locked secret field falls back to that specific provider's own
+saved value (never a different, currently-active provider's). This
+confirms the provider is reachable **without** needing a real solved
+challenge, and -- for Turnstile specifically -- that the secret key
+itself is genuinely valid, since Turnstile's siteverify returns a
+distinct error for a bad secret. Google's reCAPTCHA API validates the
+token before the secret and can't be made to reveal a bad-secret error
+this way, so a reCAPTCHA Test result only ever confirms Google is
+reachable, never that the secret is correct -- the response says this
+plainly (`secret_verifiable: false`) rather than reporting a false
+positive. Either way, this is a save-time sanity check, not a full
+widget test -- it can't prove the actual browser flow works, only that
+the credentials/network path are good.
 
 **Switching providers:** just change the Provider dropdown and its
 key pair -- no reinstall, no restart. The DB-backed value always wins
