@@ -352,18 +352,24 @@ jobs:
         #    /var/lib/dpkg/lock-frontend. `apt-get update` fetches every
         #    package index just fine (~25s, confirmed in the log) and then
         #    goes completely silent waiting on that lock -- not a network
-        #    stall, a lock wait with no progress output, and it didn't
-        #    clear even across 3x90s of waiting. Stopping those units and
-        #    waiting (bounded) for the lock to actually free removes the
-        #    wait instead of racing it.
-        # 3. Even after both of the above, `apt-get install` itself still
-        #    hung for the full 90s and got killed (exit 124) on a later
-        #    run -- the needrestart conf.d file apparently doesn't cover
-        #    every prompt path. Redirecting stdin from /dev/null is the
-        #    universal fix: whatever is reading stdin (needrestart,
-        #    debconf, anything) gets immediate EOF and fails fast instead
-        #    of blocking forever on a pipe that never closes, regardless
-        #    of which specific tool is asking.
+        #    stall, a lock wait with no progress output. Stopping those
+        #    units and waiting (bounded) for the lock to actually free
+        #    removes the wait instead of racing it.
+        # 3. `apt-get install` itself hung for the full 90s and got killed
+        #    (exit 124) on one run -- the needrestart conf.d file
+        #    apparently doesn't cover every prompt path. Redirecting stdin
+        #    from /dev/null is the universal fix: whatever is reading
+        #    stdin gets immediate EOF and fails fast instead of blocking
+        #    forever, regardless of which specific tool is asking.
+        # 4. Even with all of the above, `apt-get update` itself still
+        #    stalled silently after fetching every index (same symptom as
+        #    #2, but the lock-wait loop broke instantly that run -- so a
+        #    genuinely flaky mirror connection, not the lock) and got
+        #    killed by its own 90s timeout -- on a run where the IDENTICAL
+        #    workflow content had just succeeded moments earlier on a
+        #    different runner. That's runner-to-runner network flakiness,
+        #    not a deterministic bug -- a `timeout`-bounded retry loop is
+        #    the correct tool for exactly this, not a 5th one-off patch.
         run: |
           sudo systemctl stop apt-daily.service apt-daily-upgrade.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
           for i in $(seq 1 60); do
@@ -373,8 +379,16 @@ jobs:
           done
           sudo mkdir -p /etc/needrestart/conf.d
           echo "\$nrconf{restart} = 'a';" | sudo tee /etc/needrestart/conf.d/50-autorestart.conf
-          sudo timeout 90 apt-get update < /dev/null
-          sudo DEBIAN_FRONTEND=noninteractive timeout 90 apt-get install -y openvpn < /dev/null
+          for i in 1 2 3; do
+            echo "apt-get update: attempt $i"
+            sudo timeout 90 apt-get update < /dev/null && break
+            [ "$i" = 3 ] && { echo "apt-get update kept failing/stalling after 3 attempts" >&2; exit 1; }
+          done
+          for i in 1 2 3; do
+            echo "apt-get install: attempt $i"
+            sudo DEBIAN_FRONTEND=noninteractive timeout 90 apt-get install -y openvpn < /dev/null && break
+            [ "$i" = 3 ] && { echo "apt-get install kept failing/stalling after 3 attempts" >&2; exit 1; }
+          done
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Run tests
