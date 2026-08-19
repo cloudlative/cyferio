@@ -336,7 +336,7 @@ jobs:
       # ubuntu-24.04 ships openvpn 2.6.x in its default apt repos, same
       # major version openvpn-install.sh itself installs in production.
       - name: Install openvpn (needed by the cert-manager test fixture)
-        # Three DIFFERENT hangs seen live on this one step, none of which
+        # Four DIFFERENT hangs seen live on this one step, none of which
         # was what it first looked like -- each fix below was verified
         # against the actual job log, not guessed:
         #
@@ -347,18 +347,23 @@ jobs:
         #    NEEDRESTART_MODE}` does NOT reach it -- sudo resets the
         #    environment by default -- so the fix is needrestart's own
         #    conf.d file instead ('a' = restart automatically, no prompt).
-        # 2. The REAL cause of the two hangs that followed: GitHub's
-        #    ubuntu-24.04 image runs apt-daily.service/apt-daily-
+        # 2. GitHub's ubuntu-24.04 image runs apt-daily.service/apt-daily-
         #    upgrade.service in the background right after boot, holding
         #    /var/lib/dpkg/lock-frontend. `apt-get update` fetches every
         #    package index just fine (~25s, confirmed in the log) and then
-        #    goes completely silent for the rest of its runtime waiting on
-        #    that lock -- not a network stall, a lock wait with no
-        #    progress output. It didn't clear even across 3 back-to-back
-        #    90s timeout attempts (270s total). Stopping those two units
-        #    and waiting for the lock to actually free (bounded, so a
-        #    still-stuck lock fails fast instead of hanging again) removes
-        #    the wait instead of racing it.
+        #    goes completely silent waiting on that lock -- not a network
+        #    stall, a lock wait with no progress output, and it didn't
+        #    clear even across 3x90s of waiting. Stopping those units and
+        #    waiting (bounded) for the lock to actually free removes the
+        #    wait instead of racing it.
+        # 3. Even after both of the above, `apt-get install` itself still
+        #    hung for the full 90s and got killed (exit 124) on a later
+        #    run -- the needrestart conf.d file apparently doesn't cover
+        #    every prompt path. Redirecting stdin from /dev/null is the
+        #    universal fix: whatever is reading stdin (needrestart,
+        #    debconf, anything) gets immediate EOF and fails fast instead
+        #    of blocking forever on a pipe that never closes, regardless
+        #    of which specific tool is asking.
         run: |
           sudo systemctl stop apt-daily.service apt-daily-upgrade.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
           for i in $(seq 1 60); do
@@ -368,8 +373,8 @@ jobs:
           done
           sudo mkdir -p /etc/needrestart/conf.d
           echo "\$nrconf{restart} = 'a';" | sudo tee /etc/needrestart/conf.d/50-autorestart.conf
-          sudo timeout 90 apt-get update
-          sudo timeout 90 apt-get install -y openvpn
+          sudo timeout 90 apt-get update < /dev/null
+          sudo DEBIAN_FRONTEND=noninteractive timeout 90 apt-get install -y openvpn < /dev/null
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Run tests
