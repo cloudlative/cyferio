@@ -623,6 +623,8 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 .content-footer-left, .content-footer-right { flex: 1; min-width: 0; }
 .content-footer-right { text-align: right; }
 .content-footer-center { flex: 2; text-align: center; }
+.content-footer a { color: var(--text-muted); text-decoration: underline; text-underline-offset: 2px; }
+.content-footer a:hover { color: var(--accent-2); }
 
 .role-badge {
 	font-size: 0.66rem;

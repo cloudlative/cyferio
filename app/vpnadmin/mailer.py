@@ -271,6 +271,7 @@ def send_test_email_via_config(*, provider_type: str, config: dict, to_address: 
     malformed) as-is -- the route handler surfaces that reason to the
     admin."""
     app_name = app_settings.runtime.app_name
+    portal_url = app_settings.runtime.portal_url
     provider = email_providers.get_provider(provider_type)
     from_address = config.get("from_email") or None
     sent_at = datetime.now(timezone.utc).strftime("%b %d, %Y at %H:%M UTC")
@@ -279,6 +280,7 @@ def send_test_email_via_config(*, provider_type: str, config: dict, to_address: 
         f"If you received this, delivery through this provider is working.\n\n"
         f"Sent to: {to_address}\n"
         + (f"From: {from_address}\n" if from_address else "")
+        + (f"Portal: {portal_url}\n" if portal_url else "")
         + f"Sent: {sent_at}"
     )
     html_body = _render_email_template(
@@ -286,6 +288,7 @@ def send_test_email_via_config(*, provider_type: str, config: dict, to_address: 
         provider_label=provider.display_name,
         to_address=to_address,
         from_address=from_address,
+        portal_url=portal_url,
         sent_at=sent_at,
     )
     message = OutboundMessage(

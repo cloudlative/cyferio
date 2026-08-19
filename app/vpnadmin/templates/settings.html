@@ -116,16 +116,13 @@
 		<div class="form-grid" id="s-captcha-turnstile-fields" style="display:none">
 			<div class="field">
 				<label for="s-turnstile-site-key">Turnstile Site Key</label>
-				<div style="display:flex;gap:8px">
-					<input type="text" id="s-turnstile-site-key" class="mono" autocomplete="off" style="flex:1">
-					<button type="button" class="btn-secondary btn-sm" id="s-turnstile-site-key-edit-btn" style="display:none">Edit</button>
-				</div>
+				<input type="text" id="s-turnstile-site-key" class="mono" autocomplete="off">
 			</div>
 			<div class="field">
 				<label for="s-turnstile-secret-key">Turnstile Secret Key</label>
 				<div style="display:flex;gap:8px">
 					<input type="text" id="s-turnstile-secret-key" class="mono" autocomplete="off" style="flex:1">
-					<button type="button" class="btn-secondary btn-sm" id="s-turnstile-secret-key-edit-btn" style="display:none">Edit</button>
+					<button type="button" class="btn-secondary btn-sm" id="s-turnstile-keys-edit-btn" style="display:none">Edit</button>
 				</div>
 			</div>
 		</div>
@@ -498,9 +495,8 @@ async function loadSettings() {
 		setVal("s-turnstile-secret-key", s.turnstile_secret_key);
 		setVal("s-recaptcha-site-key", s.recaptcha_site_key);
 		setVal("s-recaptcha-secret-key", s.recaptcha_secret_key);
-		applyMaskedSecretLock("s-turnstile-secret-key", "s-turnstile-secret-key-edit-btn");
+		applyTurnstileKeysLock();
 		applyMaskedSecretLock("s-recaptcha-secret-key", "s-recaptcha-secret-key-edit-btn");
-		applyFilledFieldLock("s-turnstile-site-key", "s-turnstile-site-key-edit-btn");
 		updateCaptchaFieldVisibility();
 	} catch (e) {
 		toast(e.message, "error");
@@ -537,9 +533,6 @@ function applyFieldLock(inputId, editBtnId, isLocked) {
 function applyMaskedSecretLock(inputId, editBtnId) {
 	applyFieldLock(inputId, editBtnId, (v) => v === "••••••••");
 }
-function applyFilledFieldLock(inputId, editBtnId) {
-	applyFieldLock(inputId, editBtnId, (v) => v !== "");
-}
 function wireFieldEdit(inputId, editBtnId) {
 	const input = document.getElementById(inputId);
 	const editBtn = document.getElementById(editBtnId);
@@ -550,9 +543,33 @@ function wireFieldEdit(inputId, editBtnId) {
 		editBtn.style.display = "none";
 	});
 }
-wireFieldEdit("s-turnstile-secret-key", "s-turnstile-secret-key-edit-btn");
 wireFieldEdit("s-recaptcha-secret-key", "s-recaptcha-secret-key-edit-btn");
-wireFieldEdit("s-turnstile-site-key", "s-turnstile-site-key-edit-btn");
+
+// Turnstile's site key (public) and secret key (masked) share ONE Edit
+// button rather than one each -- they're saved and re-typed together in
+// practice, so a lock/button per field was one click too many. Locked if
+// EITHER already has a saved value (covers the asymmetric case where only
+// one was ever set); Edit clears and unlocks both at once.
+function applyTurnstileKeysLock() {
+	const siteInput = document.getElementById("s-turnstile-site-key");
+	const secretInput = document.getElementById("s-turnstile-secret-key");
+	const editBtn = document.getElementById("s-turnstile-keys-edit-btn");
+	const locked = siteInput.value !== "" || secretInput.value === "••••••••";
+	siteInput.disabled = locked;
+	secretInput.disabled = locked;
+	editBtn.style.display = locked ? "" : "none";
+}
+document.getElementById("s-turnstile-keys-edit-btn").addEventListener("click", () => {
+	const siteInput = document.getElementById("s-turnstile-site-key");
+	const secretInput = document.getElementById("s-turnstile-secret-key");
+	const editBtn = document.getElementById("s-turnstile-keys-edit-btn");
+	siteInput.disabled = false;
+	secretInput.disabled = false;
+	siteInput.value = "";
+	secretInput.value = "";
+	siteInput.focus();
+	editBtn.style.display = "none";
+});
 
 document.getElementById("s-geoip-validate-btn").addEventListener("click", async () => {
 	const key = val("s-maxmind-key");

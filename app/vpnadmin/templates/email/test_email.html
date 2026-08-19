@@ -29,8 +29,14 @@ timestamp) that would otherwise read as centered if built carelessly.
 	</tr>
 	{% if from_address %}
 	<tr>
-		<td style="color:#757fa0;padding:14px 18px;">From</td>
-		<td style="color:#f1f3fa;padding:14px 18px;"><code style="background:#1e2436;padding:2px 6px;border-radius:5px;">{{ from_address }}</code></td>
+		<td style="color:#757fa0;padding:14px 18px;{% if portal_url %}border-bottom:1px solid #3a4460;{% endif %}">From</td>
+		<td style="color:#f1f3fa;padding:14px 18px;{% if portal_url %}border-bottom:1px solid #3a4460;{% endif %}"><code style="background:#1e2436;padding:2px 6px;border-radius:5px;">{{ from_address }}</code></td>
+	</tr>
+	{% endif %}
+	{% if portal_url %}
+	<tr>
+		<td style="color:#757fa0;padding:14px 18px;">Portal</td>
+		<td style="padding:14px 18px;"><a href="{{ portal_url }}" style="color:#8b9cf7;">{{ portal_url }}</a></td>
 	</tr>
 	{% endif %}
 </table>
