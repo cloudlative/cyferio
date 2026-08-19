@@ -264,6 +264,10 @@
 				</div>
 			</div>
 			<p class="muted" style="margin:6px 0 0;font-size:0.82rem">If set, the new password must be at least 8 characters and include at least 1 uppercase letter, 1 number, and 1 special character.</p>
+			<div class="field" style="margin-top:10px">
+				<label class="checkbox-label"><input type="checkbox" id="e-force-reset"> Force Password Reset on Next Login</label>
+				<p class="field-hint">The user will be required to set a new password before they can use the portal again. Uncheck and save to cancel a pending request before the user has logged in.</p>
+			</div>
 			<div class="form-row" style="margin-top:14px">
 				<div class="field">
 					<label for="e-gender">Gender</label>
@@ -1118,6 +1122,7 @@ function openEdit(u) {
 	resetPasswordVisibility(document.getElementById("e-password"));
 	document.getElementById("e-password-confirm").value = "";
 	resetPasswordVisibility(document.getElementById("e-password-confirm"));
+	document.getElementById("e-force-reset").checked = !!u.must_reset_password;
 	document.getElementById("e-restrict-country").checked = !!u.restrict_login_by_country;
 	editCountriesMs.setSelected(u.allowed_login_countries || []);
 	document.getElementById("e-restrict-city").checked = !!u.restrict_login_by_city;
@@ -1175,6 +1180,7 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		vpn_allowed_asns: editVpnAsnsMs.getSelected(),
 		vpn_restrict_by_ip: document.getElementById("e-vpn-restrict-ip").checked,
 		vpn_allowed_ips: parseLineList(document.getElementById("e-vpn-allowed-ips").value),
+		force_password_reset: document.getElementById("e-force-reset").checked,
 	};
 	if (!editingUserIsBootstrapAdmin) {
 		body.role = document.getElementById("e-role").value;

@@ -466,6 +466,18 @@ class UpdateUserRequest(BaseModel):
     phone: str | None = None
     team_ids: list[int] | None = None  # explicit [] = clear all teams; see model_fields_set usage below
 
+    # Edit User's "Force Password Reset on Next Login" checkbox -- an
+    # explicit, independent toggle for User.must_reset_password, on top of
+    # the implicit True an admin password reset (the `password` field
+    # above) already forces. None (field omitted) means "not touched by
+    # this checkbox"; model_fields_set decides, same convention as every
+    # other optional field here. Lets an admin either flag an existing
+    # account for a mandatory reset without changing its password, or
+    # cancel a pending one (uncheck + save) before the user has logged in
+    # again -- see update_user()'s handling below for how this interacts
+    # with an in-the-same-request password reset.
+    force_password_reset: bool | None = None
+
     # Same VPN-profile restrictions as CreateUserRequest, editable after the
     # fact too -- see update_user() below, which syncs these onto the
     # linked VPN profile's policy (a no-op if this user has no linked
@@ -668,6 +680,7 @@ def _serialize(u: User, policies: dict | None = None) -> dict:
         "role_name": u.role_def.name if u.role_def is not None else u.role.value.capitalize(),
         "is_active": u.is_active,
         "is_bootstrap_admin": u.is_bootstrap_admin,
+        "must_reset_password": u.must_reset_password,
         "deleted": u.deleted,
         "deleted_at": u.deleted_at.isoformat() if u.deleted_at else None,
         "created_at": u.created_at.isoformat() if u.created_at else None,
@@ -1117,6 +1130,16 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         # (not the account holder) is the one who just set this password.
         target.must_reset_password = True
         changes.append("password reset")
+    elif "force_password_reset" in body.model_fields_set and body.force_password_reset != target.must_reset_password:
+        # Independent of the password-reset branch above -- only reached
+        # when this PATCH did NOT also reset the password (a password
+        # reset already forces True unconditionally, and takes priority
+        # over a stale/contradictory checkbox state in the same request).
+        # True = admin flags an existing account for a mandatory reset
+        # without touching its password. False = admin cancels a pending
+        # one before the user has logged in again.
+        target.must_reset_password = body.force_password_reset
+        changes.append(f"force_password_reset {target.must_reset_password}")
     # Bug fix: this used to check `value is not None` -- indistinguishable
     # from "field omitted from the request" -- so an explicit `null` (e.g.
     # clearing Last Name in the Edit User form) was silently ignored
