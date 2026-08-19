@@ -165,6 +165,7 @@ class _RuntimeSettings:
         self.session_timeout_minutes = max(1, env_settings.SESSION_MAX_AGE_SECONDS // 60)
         self.account_lockout_threshold = 0  # 0 = disabled
         self.account_lockout_minutes = 15
+        self.password_history_count = 3  # 0 = disabled (no reuse check)
         self.audit_retention_days = None  # None/0 = keep forever
         self.log_failed_login_attempts = True
         self.default_new_user_role = "user"
@@ -237,6 +238,7 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.session_timeout_minutes = row.session_timeout_minutes or max(1, env_settings.SESSION_MAX_AGE_SECONDS // 60)
     runtime.account_lockout_threshold = row.account_lockout_threshold or 0
     runtime.account_lockout_minutes = row.account_lockout_minutes or 15
+    runtime.password_history_count = row.password_history_count if row.password_history_count is not None else 3
     runtime.audit_retention_days = row.audit_retention_days
     runtime.log_failed_login_attempts = row.log_failed_login_attempts if row.log_failed_login_attempts is not None else True
     runtime.default_new_user_role = row.default_new_user_role or "user"

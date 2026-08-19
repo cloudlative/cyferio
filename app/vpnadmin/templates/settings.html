@@ -78,6 +78,11 @@
 				<label for="s-lockout-minutes">Lockout Duration <span class="muted">(minutes)</span></label>
 				<input type="text" id="s-lockout-minutes" inputmode="numeric" placeholder="15">
 			</div>
+			<div class="field">
+				<label for="s-password-history">Remember Last N Passwords <span class="muted">(0 = disabled)</span></label>
+				<input type="text" id="s-password-history" inputmode="numeric" placeholder="3">
+				<p class="field-hint">Blocks reusing any of the account's last N passwords -- checked on every password change (self-service, admin reset, or forgot-password reset).</p>
+			</div>
 		</div>
 	</div>
 
@@ -386,6 +391,7 @@ const sMinPwLenValidation = attachInlineValidation(document.getElementById("s-mi
 const sSessionTimeoutValidation = attachInlineValidation(document.getElementById("s-session-timeout"), (v) => numberRangeError(v, { min: 1, label: "Session timeout", emptyOk: true }));
 const sLockoutThresholdValidation = attachInlineValidation(document.getElementById("s-lockout-threshold"), (v) => numberRangeError(v, { min: 0, label: "Account lockout threshold", emptyOk: true }));
 const sLockoutMinutesValidation = attachInlineValidation(document.getElementById("s-lockout-minutes"), (v) => numberRangeError(v, { min: 1, label: "Lockout duration", emptyOk: true }));
+const sPasswordHistoryValidation = attachInlineValidation(document.getElementById("s-password-history"), (v) => numberRangeError(v, { min: 0, max: 50, label: "Password history count", emptyOk: true }));
 const sDefaultBandwidthValidation = attachInlineValidation(document.getElementById("s-default-bandwidth"), bandwidthError);
 const sAdminNotifyEmailValidation = attachInlineValidation(document.getElementById("s-admin-notify-email"), (v) => {
 	v = (v || "").trim();
@@ -446,6 +452,7 @@ async function loadSettings() {
 		setVal("s-session-timeout", s.session_timeout_minutes);
 		setVal("s-lockout-threshold", s.account_lockout_threshold);
 		setVal("s-lockout-minutes", s.account_lockout_minutes);
+		setVal("s-password-history", s.password_history_count);
 		setVal("s-audit-retention", s.audit_retention_days);
 		document.getElementById("s-log-failed-logins").checked = s.log_failed_login_attempts !== false;
 		setVal("s-default-bandwidth", s.default_bandwidth_monthly_gb);
@@ -650,7 +657,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 	ev.preventDefault();
 	const numericChecks = [
 		sMinPwLenValidation, sSessionTimeoutValidation,
-		sLockoutThresholdValidation, sLockoutMinutesValidation, sDefaultBandwidthValidation,
+		sLockoutThresholdValidation, sLockoutMinutesValidation, sPasswordHistoryValidation, sDefaultBandwidthValidation,
 		sAdminNotifyEmailValidation, sAuditRetentionValidation, sNotificationDurationValidation,
 		sDbSnapshotRetentionValidation, // null (and filtered out) if this field isn't rendered
 		sQuotaWarningPctValidation, sQuotaCriticalPctValidation,
@@ -675,6 +682,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		session_timeout_minutes: intOrNull(val("s-session-timeout")),
 		account_lockout_threshold: intOrNull(val("s-lockout-threshold")),
 		account_lockout_minutes: intOrNull(val("s-lockout-minutes")),
+		password_history_count: intOrNull(val("s-password-history")),
 		audit_retention_days: intOrNull(val("s-audit-retention")),
 		log_failed_login_attempts: document.getElementById("s-log-failed-logins").checked,
 		default_new_user_role: document.getElementById("s-default-role").value || null,

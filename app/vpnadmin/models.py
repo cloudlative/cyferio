@@ -199,6 +199,18 @@ class User(Base):
     # holder actually knows the current password.
     must_reset_password = Column(Boolean, nullable=False, default=False)
 
+    # Password reuse prevention (Settings -> Security's "Remember last N
+    # passwords") -- a JSON list of previous password_hash values, most
+    # recent first, capped at whatever app_settings.runtime.
+    # password_history_count currently is (see routes/users.py's
+    # _check_password_reuse/_record_password_history). NULL/"[]" = no
+    # history yet, same as a brand-new account or the feature having just
+    # been enabled. Deliberately stores the SAME bcrypt hashes password_hash
+    # itself already holds (not plaintext) -- same reasoning as
+    # password_hash: a DB leak alone must never hand out working passwords,
+    # past or present.
+    password_history = Column(Text, nullable=True)
+
     # Self-service "Forgot password" (routes/auth.py's forgot_password/
     # reset_password) -- a hash of the emailed token, never the plaintext
     # (same defense-in-depth reasoning as password_hash itself: a DB leak
@@ -398,6 +410,13 @@ class AppSettings(Base):
     # counters this drives, and auth.py's login_submit for enforcement.
     account_lockout_threshold = Column(Integer, nullable=True)
     account_lockout_minutes = Column(Integer, nullable=True)
+    # Password reuse prevention: how many of a user's previous passwords
+    # (User.password_history) a new password is checked against on every
+    # password-setting path -- self-service change, admin reset, and
+    # forgot-password reset alike (see routes/users.py's
+    # _check_password_reuse). 0 disables the feature entirely (the
+    # pre-existing behavior); NULL falls back to 3.
+    password_history_count = Column(Integer, nullable=True)
 
     # Audit log retention -- NULL/0 means "keep forever" (no pruning).
     audit_retention_days = Column(Integer, nullable=True)

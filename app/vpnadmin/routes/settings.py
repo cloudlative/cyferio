@@ -31,6 +31,7 @@ class UpdateSettingsRequest(BaseModel):
     session_timeout_minutes: int | None = None
     account_lockout_threshold: int | None = None
     account_lockout_minutes: int | None = None
+    password_history_count: int | None = None
     audit_retention_days: int | None = None
     log_failed_login_attempts: bool | None = None
     notification_duration_ms: int | None = None
@@ -119,6 +120,13 @@ class UpdateSettingsRequest(BaseModel):
     def _min_pw_len(cls, v):
         if v is not None and not (6 <= v <= 128):
             raise ValueError("Minimum password length must be between 6 and 128.")
+        return v
+
+    @field_validator("password_history_count")
+    @classmethod
+    def _password_history_count(cls, v):
+        if v is not None and not (0 <= v <= 50):
+            raise ValueError("Password history count must be between 0 (disabled) and 50.")
         return v
 
     @field_validator("session_timeout_minutes")
@@ -275,6 +283,7 @@ def _serialize() -> dict:
         "session_timeout_minutes": s.session_timeout_minutes,
         "account_lockout_threshold": s.account_lockout_threshold,
         "account_lockout_minutes": s.account_lockout_minutes,
+        "password_history_count": s.password_history_count,
         "audit_retention_days": s.audit_retention_days,
         "log_failed_login_attempts": s.log_failed_login_attempts,
         "default_new_user_role": s.default_new_user_role,
@@ -342,6 +351,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
 
     for field in ("portal_url", "min_password_length",
                    "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
+                   "password_history_count",
                    "audit_retention_days", "log_failed_login_attempts", "default_new_user_role",
                    "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "admin_notification_email",
                    "notify_admin_on_user_created", "notify_admin_on_client_revoked",

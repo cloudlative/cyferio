@@ -354,13 +354,15 @@ def reset_password_submit(
             status_code=400,
         )
 
-    # Same complexity policy as every other path that ever sets
-    # User.password_hash (account creation, admin reset, self-service
-    # change) -- see routes/users.py's _valid_password docstring.
-    from .users import _valid_password
+    # Same complexity policy (and reuse check) as every other path that
+    # ever sets User.password_hash (account creation, admin reset, self-
+    # service change) -- see routes/users.py's _valid_password /
+    # _check_password_reuse docstrings.
+    from .users import _check_password_reuse, _record_password_history, _valid_password
 
     try:
         _valid_password(new_password)
+        _check_password_reuse(user, new_password)
     except ValueError as e:
         return templates.TemplateResponse(
             request, "reset_password.html",
@@ -368,6 +370,7 @@ def reset_password_submit(
             status_code=400,
         )
 
+    _record_password_history(user)
     user.password_hash = hash_password(new_password)
     # A self-service reset is exactly as strong a proof of "the account
     # holder is in control right now" as a self-service change -- clears

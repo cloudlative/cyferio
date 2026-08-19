@@ -90,6 +90,42 @@ def _valid_password(v: str) -> str:
     return v
 
 
+def _check_password_reuse(user: User, new_password: str) -> None:
+    """Settings -> Security's "Remember last N passwords": rejects a new
+    password that matches the account's current password or any of its
+    last N previous ones (N = app_settings.runtime.password_history_count,
+    0 = disabled). Called on every password-setting path -- self-service
+    change, admin reset, and forgot-password reset alike -- right before
+    the new hash is committed. Raises ValueError (the same convention
+    _valid_password uses) so every caller's existing try/except handles it
+    identically."""
+    n = app_settings.runtime.password_history_count
+    if n <= 0:
+        return
+    if verify_password(new_password, user.password_hash):
+        raise ValueError("That's your current password. Choose a different one.")
+    history = json.loads(user.password_history or "[]")
+    for old_hash in history[:n]:
+        if verify_password(new_password, old_hash):
+            raise ValueError(f"That password was used recently. Choose one you haven't used in your last {n} passwords.")
+
+
+def _record_password_history(user: User) -> None:
+    """Pairs with _check_password_reuse above -- call this BEFORE
+    overwriting user.password_hash with the new one, so the about-to-be-
+    replaced hash gets pushed onto the front of the history list. Trims to
+    the currently-configured N on every write, so a later reduction in the
+    Settings value takes effect immediately rather than only pruning what
+    was over the old, larger limit."""
+    n = app_settings.runtime.password_history_count
+    if n <= 0:
+        user.password_history = None
+        return
+    history = json.loads(user.password_history or "[]")
+    history.insert(0, user.password_hash)
+    user.password_history = json.dumps(history[:n])
+
+
 def _valid_first_name(v: str | None) -> str | None:
     """First Name is required (see task feedback): must be present and
     non-blank wherever this runs. Callers that allow the field to be
@@ -818,6 +854,11 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
     if body.new_password:
         if not body.current_password or not verify_password(body.current_password, user.password_hash):
             raise HTTPException(status_code=400, detail="Current password is incorrect.")
+        try:
+            _check_password_reuse(user, body.new_password)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        _record_password_history(user)
         user.password_hash = hash_password(body.new_password)
         # A successful SELF-service change (current password verified
         # above) is the one action that proves the account holder actually
@@ -1123,12 +1164,25 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         target.deleted_at = datetime.now(timezone.utc) if body.deleted else None
         changes.append("deleted" if body.deleted else "restored")
     if body.password:
+        try:
+            _check_password_reuse(target, body.password)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        _record_password_history(target)
         target.password_hash = hash_password(body.password)
         # Same "not yet confirmed by the account holder" reasoning as a
         # freshly-created account -- see models.py's must_reset_password
         # docstring. Forces a change on next login even though the admin
         # (not the account holder) is the one who just set this password.
         target.must_reset_password = True
+        # An admin setting a brand-new password is at least as strong a
+        # signal as the self-service forgot-password flow (which already
+        # clears these two, see auth.py's reset_password_submit) -- without
+        # this, an admin "rescuing" a locked-out user by resetting their
+        # password wouldn't actually unlock them; they'd still have to wait
+        # out the stale lockout window on top of learning the new password.
+        target.failed_login_attempts = 0
+        target.locked_until = None
         changes.append("password reset")
     elif "force_password_reset" in body.model_fields_set and body.force_password_reset != target.must_reset_password:
         # Independent of the password-reset branch above -- only reached
