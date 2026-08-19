@@ -336,6 +336,16 @@ jobs:
       # ubuntu-24.04 ships openvpn 2.6.x in its default apt repos, same
       # major version openvpn-install.sh itself installs in production.
       - name: Install openvpn (needed by the cert-manager test fixture)
+        # DEBIAN_FRONTEND/NEEDRESTART_MODE: ubuntu-24.04 runners ship
+        # needrestart, which pops an interactive "which services should be
+        # restarted?" prompt whenever apt installs a package registering a
+        # systemd service (openvpn does) -- with no TTY in CI that prompt
+        # just hangs until this job's 25m timeout kills it. `a` = restart
+        # automatically without asking, same effect noninteractive apt
+        # already has for its own prompts.
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
         run: sudo apt-get update && sudo apt-get install -y openvpn
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
