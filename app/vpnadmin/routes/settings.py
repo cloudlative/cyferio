@@ -396,16 +396,37 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
         row.recaptcha_site_key = body.recaptcha_site_key
         changes.append("recaptcha_site_key")
 
-    if row.captcha_provider == "turnstile" and not (row.turnstile_site_key and row.turnstile_secret_key):
-        raise HTTPException(status_code=400, detail="Turnstile requires both a site key and a secret key.")
-    if row.captcha_provider == "recaptcha" and not (row.recaptcha_site_key and row.recaptcha_secret_key):
-        raise HTTPException(status_code=400, detail="reCAPTCHA requires both a site key and a secret key.")
+    # Each of these three checks only fires when THIS request actually
+    # touches the field group in question -- not just because the DB
+    # already happens to be in that state. Settings has one page-wide Save
+    # button, not a Save per card, so every save round-trips the entire
+    # form; without this guard, an incomplete CAPTCHA/GeoIP/notification
+    # config left over from an earlier save (e.g. a provider picked but
+    # its keys never finished being typed in) would permanently block
+    # every future save of anything else on the page, not just that one
+    # card, until an admin happened to notice and fix the unrelated
+    # section. Confirmed live: an admin's Security-only change (lockout/
+    # password-history fields, no CAPTCHA field touched at all) was
+    # rejected with "Turnstile requires both a site key and a secret
+    # key." because captcha_provider was already "turnstile" in the DB
+    # from an earlier incomplete save.
+    captcha_touched = bool({"captcha_provider", "turnstile_site_key", "turnstile_secret_key",
+                             "recaptcha_site_key", "recaptcha_secret_key"} & fields_set)
+    if captcha_touched:
+        if row.captcha_provider == "turnstile" and not (row.turnstile_site_key and row.turnstile_secret_key):
+            raise HTTPException(status_code=400, detail="Turnstile requires both a site key and a secret key.")
+        if row.captcha_provider == "recaptcha" and not (row.recaptcha_site_key and row.recaptcha_secret_key):
+            raise HTTPException(status_code=400, detail="reCAPTCHA requires both a site key and a secret key.")
 
-    if row.geoip_enabled and not row.maxmind_license_key:
-        raise HTTPException(status_code=400, detail="A MaxMind license key is required to enable Geo/IP.")
+    if "geoip_enabled" in fields_set or "maxmind_license_key" in fields_set:
+        if row.geoip_enabled and not row.maxmind_license_key:
+            raise HTTPException(status_code=400, detail="A MaxMind license key is required to enable Geo/IP.")
 
-    if (row.notify_admin_on_user_created or row.notify_admin_on_client_revoked or row.notify_admin_on_quota_critical) and not row.admin_notification_email:
-        raise HTTPException(status_code=400, detail="An admin notification email is required to enable event notifications.")
+    notify_fields = {"notify_admin_on_user_created", "notify_admin_on_client_revoked",
+                      "notify_admin_on_quota_critical", "admin_notification_email"}
+    if notify_fields & fields_set:
+        if (row.notify_admin_on_user_created or row.notify_admin_on_client_revoked or row.notify_admin_on_quota_critical) and not row.admin_notification_email:
+            raise HTTPException(status_code=400, detail="An admin notification email is required to enable event notifications.")
 
     # Same "check the resulting merged state, not just this request's own
     # fields" reasoning as the SMTP/admin-email checks above -- a request

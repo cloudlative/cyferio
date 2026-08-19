@@ -196,6 +196,76 @@ class TestCaptchaSettings:
         assert row.turnstile_secret_key == "secret123"
 
 
+class TestUnrelatedSavesNotBlockedByOtherIncompleteSections:
+    """Regression coverage for a real bug found live: Settings has one
+    page-wide Save button, and (before this fix) the CAPTCHA completeness
+    check ran on every save regardless of what that save actually touched
+    -- so once captcha_provider was left "turnstile" with an incomplete
+    key pair (e.g. from an earlier abandoned attempt), EVERY future save
+    of anything else on the page (lockout threshold, password history,
+    ...) failed with "Turnstile requires both a site key and a secret
+    key.", even though CAPTCHA wasn't touched at all. Same class of bug
+    for GeoIP/notification-email, which get the same fields_set guard."""
+
+    def test_unrelated_save_not_blocked_by_incomplete_turnstile(self, app_client, db_session):
+        from vpnadmin.models import AppSettings
+
+        login(app_client, "admin", "adminpass123")
+        row = db_session.query(AppSettings).first() or AppSettings()
+        if row.id is None:
+            db_session.add(row)
+        row.captcha_provider = "turnstile"
+        row.turnstile_site_key = None
+        row.turnstile_secret_key = None
+        db_session.commit()
+
+        r = app_client.patch("/api/settings", json={"account_lockout_threshold": 5})
+        assert r.status_code == 200
+
+    def test_resaving_captcha_fields_still_enforces_completeness(self, app_client, db_session):
+        from vpnadmin.models import AppSettings
+
+        login(app_client, "admin", "adminpass123")
+        row = db_session.query(AppSettings).first() or AppSettings()
+        if row.id is None:
+            db_session.add(row)
+        row.captcha_provider = "turnstile"
+        row.turnstile_site_key = None
+        row.turnstile_secret_key = None
+        db_session.commit()
+
+        r = app_client.patch("/api/settings", json={"turnstile_site_key": "site123"})
+        assert r.status_code == 400
+
+    def test_unrelated_save_not_blocked_by_incomplete_geoip(self, app_client, db_session):
+        from vpnadmin.models import AppSettings
+
+        login(app_client, "admin", "adminpass123")
+        row = db_session.query(AppSettings).first() or AppSettings()
+        if row.id is None:
+            db_session.add(row)
+        row.geoip_enabled = True
+        row.maxmind_license_key = None
+        db_session.commit()
+
+        r = app_client.patch("/api/settings", json={"portal_url": "https://vpn.example.com"})
+        assert r.status_code == 200
+
+    def test_unrelated_save_not_blocked_by_incomplete_notification_email(self, app_client, db_session):
+        from vpnadmin.models import AppSettings
+
+        login(app_client, "admin", "adminpass123")
+        row = db_session.query(AppSettings).first() or AppSettings()
+        if row.id is None:
+            db_session.add(row)
+        row.notify_admin_on_user_created = True
+        row.admin_notification_email = None
+        db_session.commit()
+
+        r = app_client.patch("/api/settings", json={"session_timeout_minutes": 60})
+        assert r.status_code == 200
+
+
 class TestCaptchaTestEndpoint:
     """/api/settings/captcha/test -- regression coverage for a real bug
     found live: this used to test whatever provider/secret was already

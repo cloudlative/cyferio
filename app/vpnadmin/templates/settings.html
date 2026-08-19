@@ -71,8 +71,9 @@
 				<input type="text" id="s-session-timeout" inputmode="numeric" placeholder="480">
 			</div>
 			<div class="field">
-				<label for="s-lockout-threshold">Account Lockout Threshold <span class="muted">(failed attempts; blank or 0 = disabled)</span></label>
+				<label for="s-lockout-threshold">Account Lockout Threshold</label>
 				<input type="text" id="s-lockout-threshold" inputmode="numeric" placeholder="Disabled">
+				<p class="field-hint">Failed attempts; blank or 0 = disabled.</p>
 			</div>
 			<div class="field">
 				<label for="s-lockout-minutes">Lockout Duration <span class="muted">(minutes)</span></label>
@@ -145,6 +146,7 @@
 			</div>
 		</div>
 		<div class="form-row" style="margin-top:14px">
+			<button type="button" class="btn-primary" id="s-captcha-save-btn">Save CAPTCHA Settings</button>
 			<button type="button" class="btn-secondary" id="s-captcha-test-btn">Test</button>
 		</div>
 	</div>
@@ -617,6 +619,28 @@ document.getElementById("s-geoip-refresh-btn").addEventListener("click", async (
 	}
 });
 
+document.getElementById("s-captcha-save-btn").addEventListener("click", async () => {
+	const btn = document.getElementById("s-captcha-save-btn");
+	btn.disabled = true;
+	btn.textContent = "Saving…";
+	try {
+		await apiFetch("/api/settings", { method: "PATCH", body: {
+			captcha_provider: document.getElementById("s-captcha-provider").value,
+			turnstile_site_key: val("s-turnstile-site-key") || null,
+			turnstile_secret_key: val("s-turnstile-secret-key") || null,
+			recaptcha_site_key: val("s-recaptcha-site-key") || null,
+			recaptcha_secret_key: val("s-recaptcha-secret-key") || null,
+		} });
+		toast("CAPTCHA settings saved.");
+		loadSettings();
+	} catch (e) {
+		toast(e.message, "error");
+	} finally {
+		btn.disabled = false;
+		btn.textContent = "Save CAPTCHA Settings";
+	}
+});
+
 document.getElementById("s-captcha-test-btn").addEventListener("click", async () => {
 	// Tests whatever's currently in the form -- the provider dropdown and
 	// that provider's own secret-key field -- not silently whatever's
@@ -705,20 +729,19 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		login_theme: document.getElementById("s-login-theme").value,
 		timezone: document.getElementById("s-timezone").value,
 		time_format: document.getElementById("s-time-format").value,
-		// geoip_enabled/maxmind_license_key are deliberately NOT included
-		// here -- they're saved through their own dedicated "Save &
-		// Refresh Databases" button/PATCH below instead (same "own form,
-		// own save action" split Outbound Email already uses). Bundling
-		// them into this general save would mean an admin saving an
-		// unrelated field (timezone, session timeout, ...) fails with
-		// "A MaxMind license key is required to enable Geo/IP" any time
-		// the Enable Geo/IP checkbox is on but no key is saved yet --
-		// exactly the cross-contamination this split avoids.
-		captcha_provider: document.getElementById("s-captcha-provider").value,
-		turnstile_site_key: val("s-turnstile-site-key") || null,
-		turnstile_secret_key: val("s-turnstile-secret-key") || null,
-		recaptcha_site_key: val("s-recaptcha-site-key") || null,
-		recaptcha_secret_key: val("s-recaptcha-secret-key") || null,
+		// geoip_enabled/maxmind_license_key and every captcha_*/turnstile_*/
+		// recaptcha_* field are deliberately NOT included here -- they're
+		// saved through their own dedicated buttons/PATCHes below instead
+		// (same "own form, own save action" split Outbound Email already
+		// uses). Bundling them into this general save would mean an admin
+		// saving an unrelated field (timezone, session timeout, ...) fails
+		// with "A MaxMind license key is required to enable Geo/IP" or
+		// "Turnstile requires both a site key and a secret key" any time
+		// that section is mid-configured (enabled/provider picked, keys
+		// not finished yet) -- exactly the cross-contamination this split
+		// avoids. Confirmed live: before this split, an admin's Security-
+		// only save (lockout/password-history fields) was rejected by the
+		// Turnstile check even though CAPTCHA wasn't touched at all.
 	};
 	try {
 		await apiFetch("/api/settings", { method: "PATCH", body });
