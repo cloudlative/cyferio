@@ -585,18 +585,31 @@ fi
 # on the SAME box (this script's only supported single-box topology today
 # -- a split OpenVPN-box/app-box deployment needs APP_INGEST_URL/
 # APP_INGEST_TOKEN set by hand in /etc/openvpn/vpn-tools.conf to match the
-# app box's own HOST_INGEST_TOKEN). No-op, not an error, if either side
-# isn't present yet -- same "blank = feature not wired up" stance as
+# app box's own HOST_INGEST_TOKEN). No-op, not an error, if it isn't
+# present yet -- same "blank = feature not wired up" stance as
 # MAXMIND_LICENSE_KEY above.
+#
+# APP_INGEST_URL points at the app's VPN-tunnel-internal port
+# (10.8.0.1:8000, see docker-compose.yml's app service -- NOT the public
+# HTTPS domain: found live 2026-08-20 that a Cloudflare-proxied domain
+# silently 403s this request at the edge (Bot Fight Mode/WAF flagging
+# Python's urllib signature as bot traffic), and the app's own logs
+# showed zero record of it ever arriving. 10.8.0.1 bypasses Cloudflare/
+# Traefik/DNS entirely for this first-party, already bearer-token-
+# authenticated host-to-app call, and is immune to any future WAF
+# tightening since it never crosses Cloudflare at all -- see that
+# docker-compose.yml comment for the full "why this interface is safe"
+# rationale. No DOMAIN dependency anymore, so this no longer needs
+# --domain to have been given.
 ENV_FILE_FOR_INGEST="$REPO_DIR/.env"
 if [[ "$MODE" == "webapp" && -f "$ENV_FILE_FOR_INGEST" ]]; then
 	HOST_INGEST_TOKEN_FROM_ENV=$(grep -E '^HOST_INGEST_TOKEN=' "$ENV_FILE_FOR_INGEST" | head -1 | cut -d= -f2-)
-	if [[ -n "$HOST_INGEST_TOKEN_FROM_ENV" && -n "$DOMAIN" ]]; then
+	if [[ -n "$HOST_INGEST_TOKEN_FROM_ENV" ]]; then
 		log "Phase 3.5: connection-rejection ingestion"
 		VPN_TOOLS_CONF=/etc/openvpn/vpn-tools.conf
 		mkdir -p /etc/openvpn
 		touch "$VPN_TOOLS_CONF"
-		for kv in "APP_INGEST_URL=https://${DOMAIN}" "APP_INGEST_TOKEN=${HOST_INGEST_TOKEN_FROM_ENV}"; do
+		for kv in "APP_INGEST_URL=http://10.8.0.1:8000" "APP_INGEST_TOKEN=${HOST_INGEST_TOKEN_FROM_ENV}"; do
 			k="${kv%%=*}"
 			if grep -qE "^${k}=" "$VPN_TOOLS_CONF"; then
 				if ! grep -qE "^${kv}\$" "$VPN_TOOLS_CONF"; then
@@ -609,7 +622,7 @@ if [[ "$MODE" == "webapp" && -f "$ENV_FILE_FOR_INGEST" ]]; then
 			fi
 		done
 		chmod 640 "$VPN_TOOLS_CONF"
-		log "  OK: host-scripts/openvpn-mac-addr-check.py will now report rejections to https://${DOMAIN}/internal/connection-rejections."
+		log "  OK: host-scripts/openvpn-mac-addr-check.py will now report rejections to http://10.8.0.1:8000/internal/connection-rejections."
 	fi
 fi
 
