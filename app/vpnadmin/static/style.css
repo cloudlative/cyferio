@@ -329,6 +329,21 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 }
 .sidebar .brand-icon svg { display: block; }
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+/* Groups the sidebar into labeled sections (My Account / VPN Management /
+   Monitoring / Administration) -- see base.html's own comment on why. Not
+   a link, so it's excluded from :hover/.active styling and keyboard tab
+   order by construction. The extra top margin (beyond the nav's own 2px
+   gap) is what actually reads as "new group" at a glance -- the label
+   text is the confirmation, the whitespace is the real signal. */
+.sidebar nav .nav-section-label {
+	margin: 14px 14px 4px;
+	font-size: 0.7rem;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+	opacity: 0.6;
+}
 .sidebar nav a {
 	display: flex;
 	align-items: center;
