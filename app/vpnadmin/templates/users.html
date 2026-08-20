@@ -268,6 +268,27 @@
 				<label class="checkbox-label"><input type="checkbox" id="e-force-reset"> Force Password Reset on Next Login</label>
 				<p class="field-hint">The user will be required to set a new password before they can use the portal again. Uncheck and save to cancel a pending request before the user has logged in.</p>
 			</div>
+			<div class="field" style="margin-top:14px">
+				<label>Multi-Factor Authentication</label>
+				<p class="muted" id="e-mfa-status-line" style="margin:2px 0 8px;font-size:0.85rem"></p>
+				<div class="form-row">
+					<div class="field">
+						<label for="e-mfa-override">Policy Override</label>
+						<select id="e-mfa-override">
+							<option value="">Inherit role/global</option>
+							<option value="required">Required</option>
+							<option value="optional">Optional</option>
+							<option value="exempt">Exempt</option>
+						</select>
+					</div>
+				</div>
+				<div class="form-row" style="margin-top:8px">
+					<button type="button" class="btn-secondary btn-sm" id="e-mfa-reset-btn">Reset MFA</button>
+					<button type="button" class="btn-secondary btn-sm" id="e-mfa-disable-btn">Disable MFA</button>
+					<button type="button" class="btn-secondary btn-sm" id="e-mfa-force-enroll-btn">Force Enrollment</button>
+				</div>
+				<p class="field-hint">These three actions take effect immediately (no need to click Save Changes below) and are independent of the Policy Override dropdown, which only applies on Save.</p>
+			</div>
 			<div class="form-row" style="margin-top:14px">
 				<div class="field">
 					<label for="e-gender">Gender</label>
@@ -870,7 +891,9 @@ function renderUsers() {
 				<td class="mono">${u.vpn_client_name ? escapeHtml(u.vpn_client_name) : '<span class="muted">— unlinked —</span>'}</td>
 				<td class="muted">${u.teams && u.teams.length ? escapeHtml(u.teams.join(", ")) : "—"}</td>
 				<td><span class="role-badge role-${u.role}">${u.role}</span>${u.is_bootstrap_admin ? ' <span class="muted" style="font-size:0.78em">(bootstrap)</span>' : ""}</td>
-				<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
+				<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}
+					<div class="muted" style="font-size:0.78em;margin-top:2px">MFA: ${u.mfa_enabled ? "Enabled" : (u.mfa_setup_required ? "Pending" : "Disabled")}</div>
+				</td>
 				<td>${combinedRestrictionCellHtml(u)}</td>
 				<td class="muted">${fmtDate(u.created_at)}</td>
 				<td class="muted">${fmtDate(u.last_login_at)}</td>
@@ -1141,6 +1164,12 @@ function openEdit(u) {
 	document.getElementById("e-password-confirm").value = "";
 	resetPasswordVisibility(document.getElementById("e-password-confirm"));
 	document.getElementById("e-force-reset").checked = !!u.must_reset_password;
+	document.getElementById("e-mfa-override").value = u.mfa_policy_override || "";
+	let mfaLine = u.mfa_enabled ? "Enabled" : "Disabled";
+	if (u.mfa_setup_required) mfaLine += " -- will be required to (re-)enroll at next login";
+	if (u.mfa_enrolled_at) mfaLine += ` -- enrolled ${fmtDate(u.mfa_enrolled_at)}`;
+	if (u.mfa_last_used_at) mfaLine += `, last used ${fmtDate(u.mfa_last_used_at)}`;
+	document.getElementById("e-mfa-status-line").textContent = mfaLine;
 	document.getElementById("e-restrict-country").checked = !!u.restrict_login_by_country;
 	editCountriesMs.setSelected(u.allowed_login_countries || []);
 	document.getElementById("e-restrict-city").checked = !!u.restrict_login_by_city;
@@ -1163,6 +1192,23 @@ function openEdit(u) {
 }
 document.getElementById("edit-dialog").addEventListener("close", () => editDirty.disarm());
 document.getElementById("edit-cancel").addEventListener("click", () => document.getElementById("edit-dialog").close());
+
+async function _mfaAction(action, confirmMsg) {
+	if (confirmMsg && !(await confirmDialog(confirmMsg, { confirmLabel: "Continue" }))) return;
+	try {
+		const result = await apiFetch(`/api/users/${editingUserId}/mfa/${action}`, { method: "POST" });
+		toast(result.message);
+		loadUsers();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+document.getElementById("e-mfa-reset-btn").addEventListener("click", () =>
+	_mfaAction("reset", "Reset MFA for this user? Their current enrollment is cleared and they'll be required to set it up again at next login."));
+document.getElementById("e-mfa-disable-btn").addEventListener("click", () =>
+	_mfaAction("disable", "Disable MFA for this user? They will not be required to re-enroll."));
+document.getElementById("e-mfa-force-enroll-btn").addEventListener("click", () =>
+	_mfaAction("force-enroll", "Require this user to set up MFA at their next login?"));
 
 document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 	ev.preventDefault();
@@ -1187,6 +1233,7 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 			return raw ? Number(raw) : null;
 		})(),
 		force_password_reset: document.getElementById("e-force-reset").checked,
+		mfa_policy_override: document.getElementById("e-mfa-override").value || null,
 	};
 	if (!editingUserIsBootstrapAdmin) {
 		body.role = document.getElementById("e-role").value;

@@ -85,6 +85,24 @@
 		</div>
 	</form>
 </div>
+
+<div class="card">
+	<h2>Multi-Factor Authentication</h2>
+	<div id="mfa-status-loading" class="muted">Loading…</div>
+	<div id="mfa-status" style="display:none">
+		<p id="mfa-status-line" style="margin-top:0"></p>
+		<div id="mfa-disabled-controls" style="display:none">
+			<a href="/mfa/setup" class="btn-primary">Enable MFA</a>
+		</div>
+		<div id="mfa-enabled-controls" style="display:none">
+			<p class="muted" id="mfa-recovery-line" style="margin:0 0 12px"></p>
+			<div class="form-row">
+				<button type="button" class="btn-secondary" id="mfa-regenerate-btn">Regenerate Recovery Codes</button>
+				<button type="button" class="btn-secondary" id="mfa-disable-btn">Disable MFA</button>
+			</div>
+		</div>
+	</div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -215,5 +233,59 @@ document.getElementById("password-form").addEventListener("submit", async (ev) =
 });
 
 loadProfile();
+
+async function loadMfaStatus() {
+	try {
+		const s = await apiFetch("/api/me/mfa");
+		document.getElementById("mfa-status-loading").style.display = "none";
+		document.getElementById("mfa-status").style.display = "";
+		if (s.mfa_enabled) {
+			document.getElementById("mfa-status-line").textContent =
+				"MFA is enabled" + (s.mfa_last_used_at ? ` -- last used ${fmtTimestamp(s.mfa_last_used_at)}` : "") + ".";
+			document.getElementById("mfa-recovery-line").textContent = `${s.recovery_codes_remaining} recovery code(s) remaining.`;
+			document.getElementById("mfa-enabled-controls").style.display = "";
+			document.getElementById("mfa-disabled-controls").style.display = "none";
+		} else {
+			let line = "MFA is not enabled on your account.";
+			if (s.effective_policy === "required") line += " Your account requires it -- you'll be asked to set it up at your next login.";
+			document.getElementById("mfa-status-line").textContent = line;
+			document.getElementById("mfa-disabled-controls").style.display = "";
+			document.getElementById("mfa-enabled-controls").style.display = "none";
+		}
+	} catch (e) {
+		document.getElementById("mfa-status-loading").textContent = "Could not load MFA status.";
+	}
+}
+
+function promptCurrentPassword() {
+	return prompt("Confirm your current password to continue:");
+}
+
+document.getElementById("mfa-disable-btn").addEventListener("click", async () => {
+	const password = promptCurrentPassword();
+	if (!password) return;
+	if (!confirm("Disable multi-factor authentication on your account?")) return;
+	try {
+		await apiFetch("/api/me/mfa/disable", { method: "POST", body: { password } });
+		toast("MFA disabled.");
+		loadMfaStatus();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+document.getElementById("mfa-regenerate-btn").addEventListener("click", async () => {
+	const password = promptCurrentPassword();
+	if (!password) return;
+	try {
+		const r = await apiFetch("/api/me/mfa/recovery-codes/regenerate", { method: "POST", body: { password } });
+		alert("New recovery codes (save these now, they won't be shown again):\n\n" + r.recovery_codes.join("\n"));
+		loadMfaStatus();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+loadMfaStatus();
 </script>
 {% endblock %}

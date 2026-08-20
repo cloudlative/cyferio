@@ -293,6 +293,35 @@ def send_ticket_notification_email(*, db: Session, to_address: str, ticket_id: i
         return False
 
 
+def send_mfa_security_notice(*, db: Session, to_address: str, username: str, event_description: str) -> bool:
+    """Multi-Factor Authentication security-event emails -- enabled/
+    disabled/reset/recovery-codes-regenerated/settings-changed all funnel
+    through this ONE template+function, parameterized by
+    `event_description`, rather than five near-identical send_* functions
+    (same "one template, several call sites" approach as
+    send_ticket_notification_email above). Always sent, never gated by an
+    admin toggle -- these are transactional to the account they're about,
+    same posture as the welcome/password-reset emails. Deliberately
+    swallows delivery failures (returns False) rather than turning a
+    successful MFA enable/disable/reset into a 500 -- same "courtesy, not
+    a precondition" stance as send_admin_notification/
+    send_ticket_notification_email."""
+    app_name = app_settings.runtime.app_name
+    text_body = (
+        f"Security notice for your {app_name} account ({username}):\n\n"
+        f"{event_description}\n\n"
+        f"If this wasn't you, change your password immediately and contact an administrator.\n\n"
+        f"— {app_name}"
+    )
+    html_body = _render_email_template("mfa_security_notice.html", username=username, event_description=event_description)
+    message = OutboundMessage(to_address=to_address, subject=f"[{app_name}] Security notice for your account", text_body=text_body, html_body=html_body)
+    try:
+        _send(db, message)
+        return True
+    except Exception:
+        return False
+
+
 def send_test_email_via_config(*, provider_type: str, config: dict, to_address: str) -> None:
     """Settings-page "Test" button (per EmailProvider profile) -- sends a
     short confirmation message through the EXACT config passed in

@@ -64,7 +64,11 @@ CATEGORIES: dict[str, list[tuple[str, str, str]]] = {
     "Account Issues": [
         ("account_password_reset", "Password reset request",
          "Use the \"Forgot password\" link on the login page first -- only open a ticket if that didn't work."),
-        ("account_mfa_issue", "MFA issue", "Describe the problem you're having with multi-factor authentication."),
+        ("account_mfa_setup_issue", "MFA setup issue", "Which authenticator app are you using, and what happens when you try to scan the QR code or enter a code?"),
+        ("account_lost_authenticator", "Lost authenticator device",
+         "If you still have a recovery code, use it to sign in and regenerate your codes yourself from Profile -- otherwise an admin will need to reset MFA on your account."),
+        ("account_recovery_code_issue", "Recovery code issue", "What happens when you enter the recovery code? Have you used it before?"),
+        ("account_mfa_reset_request", "MFA reset request", "An admin will reset your MFA enrollment -- you'll be asked to set it up again at your next login."),
         ("account_profile_issue", "Profile Issues", "Describe what's wrong with your account profile."),
         ("account_profile_update", "Profile update request", "What would you like updated on your account?"),
     ],

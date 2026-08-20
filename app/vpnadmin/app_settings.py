@@ -215,6 +215,12 @@ class _RuntimeSettings:
         self.support_max_attachments_per_message = 5
         self.notify_admin_on_ticket_created = False
 
+        # Multi-Factor Authentication (TOTP) -- see mfa.py's effective_policy.
+        self.mfa_mode = "optional"
+        self.mfa_role_requirements = None  # JSON {role_slug: "required"|"optional"|"exempt"}, "{}"/None = no per-role overrides
+        self.mfa_remember_device_days = 0  # 0 = "remember this device" disabled
+        self.notify_admin_on_mfa_disabled = False
+
 
 runtime = _RuntimeSettings()
 
@@ -297,6 +303,11 @@ def refresh_runtime_cache(db: Session) -> None:
         row.support_max_attachments_per_message if row.support_max_attachments_per_message is not None else 5
     )
     runtime.notify_admin_on_ticket_created = bool(row.notify_admin_on_ticket_created)
+
+    runtime.mfa_mode = row.mfa_mode if row.mfa_mode in ("disabled", "optional", "required") else "optional"
+    runtime.mfa_role_requirements = row.mfa_role_requirements
+    runtime.mfa_remember_device_days = row.mfa_remember_device_days if row.mfa_remember_device_days is not None else 0
+    runtime.notify_admin_on_mfa_disabled = bool(row.notify_admin_on_mfa_disabled)
 
     # Mirrors the one setting host-scripts/quota_enforcer.py needs but has
     # no DB access to read directly -- see policy_store.write_global_defaults

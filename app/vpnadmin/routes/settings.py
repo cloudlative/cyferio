@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import datetime, timezone
 
@@ -49,6 +50,13 @@ class UpdateSettingsRequest(BaseModel):
     support_max_attachment_size_mb: int | None = None
     support_max_attachments_per_message: int | None = None
     notify_admin_on_ticket_created: bool | None = None
+
+    # Multi-Factor Authentication (TOTP) -- see mfa.py's effective_policy /
+    # models.py's AppSettings columns for the full precedence design.
+    mfa_mode: str | None = None
+    mfa_role_requirements: dict[str, str] | None = None
+    mfa_remember_device_days: int | None = None
+    notify_admin_on_mfa_disabled: bool | None = None
 
     admin_notification_email: str | None = None
     notify_admin_on_user_created: bool | None = None
@@ -225,6 +233,39 @@ class UpdateSettingsRequest(BaseModel):
             raise ValueError("Support ticketing limits must be at least 1.")
         return v
 
+    @field_validator("mfa_mode")
+    @classmethod
+    def _mfa_mode_choice(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("disabled", "optional", "required"):
+            raise ValueError("MFA mode must be 'disabled', 'optional', or 'required'.")
+        return v
+
+    @field_validator("mfa_role_requirements")
+    @classmethod
+    def _mfa_role_requirements_values(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        # Role SLUGS themselves are validated against the live RoleDef
+        # table in update_settings() below (needs a DB session, not
+        # available in a plain field validator) -- this only checks the
+        # per-role VALUE is one of the three real policies, same set
+        # mfa.VALID_POLICY_OVERRIDES / User.mfa_policy_override accept.
+        if v is None:
+            return v
+        from ..mfa import VALID_POLICY_OVERRIDES
+        for slug, policy in v.items():
+            if policy not in VALID_POLICY_OVERRIDES:
+                raise ValueError(f"MFA requirement for role '{slug}' must be one of: {', '.join(VALID_POLICY_OVERRIDES)}.")
+        return v
+
+    @field_validator("mfa_remember_device_days")
+    @classmethod
+    def _mfa_remember_device_days_range(cls, v):
+        # 0 = disabled (the default) -- only negative/absurdly-large values
+        # are rejected; the Settings UI offers 7/14/30/Custom but any
+        # positive day count is a legitimate "Custom" entry.
+        if v is not None and not (0 <= v <= 365):
+            raise ValueError("Remember-device duration must be between 0 (disabled) and 365 days.")
+        return v
+
     @model_validator(mode="after")
     def _warning_below_critical(self):
         # Only checked when BOTH are present in this request -- a partial
@@ -331,6 +372,10 @@ def _serialize() -> dict:
             s.support_max_attachments_per_message if s.support_max_attachments_per_message is not None else 5
         ),
         "notify_admin_on_ticket_created": bool(s.notify_admin_on_ticket_created),
+        "mfa_mode": s.mfa_mode,
+        "mfa_role_requirements": json.loads(s.mfa_role_requirements) if s.mfa_role_requirements else {},
+        "mfa_remember_device_days": s.mfa_remember_device_days,
+        "notify_admin_on_mfa_disabled": bool(s.notify_admin_on_mfa_disabled),
         "reports_default_range_days": s.reports_default_range_days,
         "db_snapshot_retention_days": s.db_snapshot_retention_days,
         "maintenance_mode": s.maintenance_mode,
@@ -387,6 +432,13 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
     # Captured before the loop below can touch it -- feeds the dedicated
     # mac_duplicate_policy_changed audit entry after the loop (see there).
     prev_allow_duplicate_macs = bool(row.allow_duplicate_macs)
+    prev_mfa_mode = row.mfa_mode or "optional"
+
+    if body.mfa_role_requirements is not None:
+        valid_slugs = {r.slug for r in db.query(RoleDef).all()}
+        unknown = set(body.mfa_role_requirements) - valid_slugs
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"No such role(s): {', '.join(sorted(unknown))}.")
 
     for field in ("portal_url", "min_password_length",
                    "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
@@ -397,6 +449,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                    "quota_notify_warning_pct", "quota_notify_critical_pct", "notify_admin_on_quota_critical",
                    "support_ticket_rate_limit_count", "support_ticket_rate_limit_window_minutes",
                    "support_max_attachment_size_mb", "support_max_attachments_per_message", "notify_admin_on_ticket_created",
+                   "mfa_mode", "mfa_remember_device_days", "notify_admin_on_mfa_disabled",
                    "reports_default_range_days", "db_snapshot_retention_days", "maintenance_mode", "maintenance_message",
                    "notification_duration_ms", "login_theme", "timezone", "time_format",
                    "geoip_enabled"):
@@ -405,6 +458,18 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
             if value != getattr(row, field):
                 setattr(row, field, value)
                 changes.append(field)
+
+    # mfa_role_requirements: a dict on the request, a JSON string on the
+    # column -- handled separately from the simple-value loop above for
+    # that reason (an empty dict {} means "clear every per-role override",
+    # stored as NULL rather than the literal string "{}", so
+    # app_settings.py's refresh_runtime_cache's falsy-check keeps treating
+    # "no overrides" as NULL either way).
+    if "mfa_role_requirements" in fields_set:
+        new_value = json.dumps(body.mfa_role_requirements) if body.mfa_role_requirements else None
+        if new_value != row.mfa_role_requirements:
+            row.mfa_role_requirements = new_value
+            changes.append("mfa_role_requirements")
 
     # Secret-bearing fields: an incoming value exactly equal to
     # SECRET_PLACEHOLDER means "unchanged" (the Settings page always
@@ -464,10 +529,12 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
             raise HTTPException(status_code=400, detail="A MaxMind license key is required to enable Geo/IP.")
 
     notify_fields = {"notify_admin_on_user_created", "notify_admin_on_client_revoked",
-                      "notify_admin_on_quota_critical", "notify_admin_on_ticket_created", "admin_notification_email"}
+                      "notify_admin_on_quota_critical", "notify_admin_on_ticket_created",
+                      "notify_admin_on_mfa_disabled", "admin_notification_email"}
     if notify_fields & fields_set:
         if (row.notify_admin_on_user_created or row.notify_admin_on_client_revoked
-                or row.notify_admin_on_quota_critical or row.notify_admin_on_ticket_created) and not row.admin_notification_email:
+                or row.notify_admin_on_quota_critical or row.notify_admin_on_ticket_created
+                or row.notify_admin_on_mfa_disabled) and not row.admin_notification_email:
             raise HTTPException(status_code=400, detail="An admin notification email is required to enable event notifications.")
 
     # Same "check the resulting merged state, not just this request's own
@@ -499,6 +566,12 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                 detail=f"{'enabled' if prev_allow_duplicate_macs else 'disabled'} -> "
                        f"{'enabled' if new_allow_duplicate_macs else 'disabled'}",
             )
+        # Same "dedicated, directly searchable audit action with old/new
+        # values" treatment for the global MFA mode -- this is the one
+        # setting change the spec explicitly lists under "MFA settings
+        # changed" user/admin-facing events.
+        if "mfa_mode" in changes:
+            log_action(db, admin, "mfa_mode_changed", detail=f"{prev_mfa_mode} -> {row.mfa_mode or 'optional'}")
     return _serialize()
 
 

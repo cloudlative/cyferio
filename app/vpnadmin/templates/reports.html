@@ -27,6 +27,11 @@
 </div>
 
 <div class="card">
+	<h2>Multi-Factor Authentication</h2>
+	<div class="form-grid" id="mfa-report"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card">
 	<h2>Team-Based Reporting</h2>
 	<div id="team-report"><p class="muted">Loading…</p></div>
 </div>
@@ -997,17 +1002,30 @@ function renderUserReport() {
 	</table></div>`;
 }
 
+function renderMfaReport(r) {
+	document.getElementById("mfa-report").innerHTML = `
+		<div><label>Adoption Rate</label><div class="mono">${r.adoption_rate_pct}%</div></div>
+		<div><label>MFA Enabled</label><div class="mono">${r.mfa_enabled_users} / ${r.total_users}</div></div>
+		<div><label>Pending Enrollment</label><div class="mono">${r.pending_enrollment}</div></div>
+		<div><label>Recovery Code Uses <span class="muted" style="font-size:0.8rem">(30d)</span></label><div class="mono">${r.last_30_days.recovery_code_uses}</div></div>
+		<div><label>Invalid OTP Attempts <span class="muted" style="font-size:0.8rem">(30d)</span></label><div class="mono">${r.last_30_days.invalid_otp_attempts}</div></div>
+		<div><label>Successful MFA Logins <span class="muted" style="font-size:0.8rem">(30d)</span></label><div class="mono">${r.last_30_days.mfa_login_successes}</div></div>
+	`;
+}
+
 async function loadReports() {
 	try {
-		const [users, teams, global_] = await Promise.all([
+		const [users, teams, global_, mfa] = await Promise.all([
 			apiFetch("/api/reports/users"),
 			apiFetch("/api/reports/teams"),
 			apiFetch("/api/reports/global"),
+			apiFetch("/api/reports/mfa"),
 		]);
 		lastUserRows = users;
 		renderUserReport();
 		renderTeamReport(teams);
 		renderGlobalSummary(global_);
+		renderMfaReport(mfa);
 	} catch (e) {
 		toast(e.message, "error");
 	}

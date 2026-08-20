@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Verify — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="login-page">
+	<div class="login-box">
+		<div class="login-brand">
+			<div class="login-logo">
+				<svg width="30" height="30" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+					<circle cx="50" cy="50" r="43" stroke="#fff" stroke-opacity="0.95" stroke-width="5.5" stroke-dasharray="230 41" stroke-linecap="round" transform="rotate(-90 50 50)"/>
+					<circle cx="50" cy="50" r="28.5" stroke="#fff" stroke-opacity="0.65" stroke-width="4.5" stroke-dasharray="152 27" stroke-linecap="round" transform="rotate(60 50 50)"/>
+					<circle cx="50" cy="50" r="8" fill="#fff"/>
+				</svg>
+			</div>
+			<h1>Two-Factor Verification</h1>
+		</div>
+		{% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+		<p class="muted" style="margin:0 0 16px;text-align:center">Enter the 6-digit code from your authenticator app.</p>
+		<form method="post" action="/mfa/verify">
+			<div class="field">
+				<label for="code">Authenticator Code</label>
+				<input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" autofocus>
+			</div>
+			{% if remember_days and remember_days > 0 %}
+			<div class="checkbox-row" style="margin:10px 0">
+				<label class="checkbox-label"><input type="checkbox" name="remember_device" value="true"> Remember this device for {{ remember_days }} day{{ "s" if remember_days != 1 else "" }}</label>
+			</div>
+			{% endif %}
+			<button type="submit" class="btn-primary">Verify</button>
+		</form>
+		<details style="margin-top:18px">
+			<summary class="muted" style="cursor:pointer">Use a recovery code instead</summary>
+			<form method="post" action="/mfa/verify" style="margin-top:12px">
+				<div class="field">
+					<label for="recovery_code">Recovery Code</label>
+					<input type="text" id="recovery_code" name="recovery_code" class="mono" placeholder="xxxxxxxx-xxxxxxxx" autocomplete="off">
+				</div>
+				<button type="submit" class="btn-secondary" style="width:100%">Use Recovery Code</button>
+			</form>
+		</details>
+	</div>
+</div>
+{% endblock %}

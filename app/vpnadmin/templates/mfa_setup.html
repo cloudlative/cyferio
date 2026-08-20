@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Set Up MFA — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="login-page">
+	<div class="login-box" style="max-width:420px">
+		<div class="login-brand">
+			<div class="login-logo">
+				<svg width="30" height="30" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+					<circle cx="50" cy="50" r="43" stroke="#fff" stroke-opacity="0.95" stroke-width="5.5" stroke-dasharray="230 41" stroke-linecap="round" transform="rotate(-90 50 50)"/>
+					<circle cx="50" cy="50" r="28.5" stroke="#fff" stroke-opacity="0.65" stroke-width="4.5" stroke-dasharray="152 27" stroke-linecap="round" transform="rotate(60 50 50)"/>
+					<circle cx="50" cy="50" r="8" fill="#fff"/>
+				</svg>
+			</div>
+			<h1>Set Up Multi-Factor Authentication</h1>
+		</div>
+
+		{% if recovery_codes %}
+		<div class="success-banner">MFA is now enabled on your account.</div>
+		<p class="muted">Save these recovery codes somewhere safe -- each one works once, and this is the <strong>only time</strong> they're shown. If you lose your authenticator app, use one of these to sign in.</p>
+		<div class="card" style="background:var(--surface);margin:14px 0">
+			<div class="mono" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.92rem">
+				{% for c in recovery_codes %}<div>{{ c }}</div>{% endfor %}
+			</div>
+		</div>
+		<a href="/" class="btn-primary" style="display:block;text-align:center;text-decoration:none">Continue</a>
+		{% else %}
+		{% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+		{% if mandatory %}
+		<p class="muted" style="text-align:center;margin:0 0 16px">Your administrator requires multi-factor authentication on this account before you can continue.</p>
+		{% endif %}
+		<ol style="color:var(--text-muted);font-size:0.9rem;line-height:1.7;padding-left:20px;margin:0 0 16px">
+			<li>Install an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password, Bitwarden, or any RFC 6238-compatible app).</li>
+			<li>Scan the QR code below, or enter the key manually.</li>
+			<li>Enter the 6-digit code it shows to confirm.</li>
+		</ol>
+		{% if qr_data_uri %}
+		<div style="text-align:center;margin:0 0 16px">
+			<img src="{{ qr_data_uri }}" alt="MFA QR code" width="200" height="200" style="border-radius:12px;background:#fff;padding:10px">
+		</div>
+		<p class="mono muted" style="text-align:center;word-break:break-all;font-size:0.82rem;margin:0 0 20px">{{ secret }}</p>
+		{% endif %}
+		<form method="post" action="/mfa/setup">
+			<div class="field">
+				<label for="code">Authenticator Code</label>
+				<input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" autofocus required>
+			</div>
+			<button type="submit" class="btn-primary">Confirm &amp; Enable</button>
+		</form>
+		{% endif %}
+	</div>
+</div>
+{% endblock %}

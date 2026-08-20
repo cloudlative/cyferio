@@ -514,6 +514,21 @@ class UpdateUserRequest(BaseModel):
     # with an in-the-same-request password reset.
     force_password_reset: bool | None = None
 
+    # Multi-Factor Authentication -- per-user override of the global/role
+    # policy (see mfa.effective_policy). "required"/"optional"/"exempt", or
+    # explicit null to clear back to "inherit role/global" -- same
+    # model_fields_set-driven optional-field convention as every other
+    # field here.
+    mfa_policy_override: str | None = None
+
+    @field_validator("mfa_policy_override")
+    @classmethod
+    def _mfa_policy_override_choice(cls, v: str | None) -> str | None:
+        from ..mfa import VALID_POLICY_OVERRIDES
+        if v is not None and v not in VALID_POLICY_OVERRIDES:
+            raise ValueError(f"MFA policy override must be one of: {', '.join(VALID_POLICY_OVERRIDES)}.")
+        return v
+
     # Same VPN-profile restrictions as CreateUserRequest, editable after the
     # fact too -- see update_user() below, which syncs these onto the
     # linked VPN profile's policy (a no-op if this user has no linked
@@ -763,6 +778,13 @@ def _serialize(u: User, policies: dict | None = None) -> dict:
         "vpn_allowed_asns": policy.get("allowed_asns") or [],
         "vpn_restrict_by_ip": bool(policy.get("allowed_ips")),
         "vpn_allowed_ips": policy.get("allowed_ips") or [],
+        # Multi-Factor Authentication -- User Management's status column +
+        # Edit User dialog (see mfa.py for effective_policy's precedence).
+        "mfa_enabled": u.mfa_enabled,
+        "mfa_setup_required": u.mfa_setup_required,
+        "mfa_enrolled_at": u.mfa_enrolled_at.isoformat() if u.mfa_enrolled_at else None,
+        "mfa_last_used_at": u.mfa_last_used_at.isoformat() if u.mfa_last_used_at else None,
+        "mfa_policy_override": u.mfa_policy_override,
     }
 
 
@@ -1249,6 +1271,16 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
         if new_value != target.allowed_login_asns:
             target.allowed_login_asns = new_value
             changes.append("allowed_login_asns")
+    if "mfa_policy_override" in body.model_fields_set and body.mfa_policy_override != target.mfa_policy_override:
+        old_override = target.mfa_policy_override or "inherit"
+        target.mfa_policy_override = body.mfa_policy_override
+        changes.append(f"mfa_policy_override {old_override}->{body.mfa_policy_override or 'inherit'}")
+        # "MFA bypass granted" is specifically an override set to "exempt"
+        # -- see the spec's own audit event list -- a dedicated, directly
+        # searchable entry beyond the generic "update_user" line below.
+        if body.mfa_policy_override == "exempt":
+            log_action(db, admin, "mfa_bypass_granted", target=target.username, success=True)
+
     # created_at is intentionally immutable here -- it's a factual record of
     # account creation, not admin-editable through this endpoint (unlike the
     # other profile fields above).
@@ -1311,6 +1343,73 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
             log_action(db, admin, "update_user", target=target.username,
                        detail=f"VPN profile restrictions could not be applied: {e}", success=False)
     return _serialize(target, {client_name: policy} if client_name else {})
+
+
+def _get_mfa_target(user_id: int, db: Session) -> User:
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return target
+
+
+def _mfa_admin_notice_and_email(admin: User, target: User, db: Session, event_description: str) -> None:
+    from .. import mfa as mfa_module
+    if mfa_module.is_privileged(target, db) and app_settings.runtime.notify_admin_on_mfa_disabled:
+        mailer.send_admin_notification(
+            db=db, subject="MFA disabled for a privileged account",
+            body=f"{admin.username} disabled multi-factor authentication for {target.username} ({target.display_name}).",
+        )
+    if target.email:
+        mailer.send_mfa_security_notice(db=db, to_address=target.email, username=target.username, event_description=event_description)
+
+
+@router.post("/{user_id}/mfa/reset")
+def reset_user_mfa(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """"Reset MFA" -- used when a user loses their authenticator device.
+    Clears the current enrollment entirely (secret + recovery codes) AND
+    forces re-enrollment at next login (mfa_setup_required=True) -- unlike
+    /mfa/disable below, this doesn't leave the account MFA-less if the
+    effective policy still requires it."""
+    from ..models import MfaRecoveryCode
+
+    target = _get_mfa_target(user_id, db)
+    target.mfa_enabled = False
+    target.mfa_secret_encrypted = None
+    target.mfa_setup_required = True
+    db.query(MfaRecoveryCode).filter(MfaRecoveryCode.user_id == target.id).delete()
+    db.commit()
+    log_action(db, admin, "mfa_reset_by_admin", target=target.username, success=True)
+    _mfa_admin_notice_and_email(admin, target, db, "An administrator reset multi-factor authentication on your account -- you'll be asked to set it up again at your next login.")
+    return {"message": f"MFA reset for '{target.username}' -- they'll be asked to re-enroll at next login."}
+
+
+@router.post("/{user_id}/mfa/disable")
+def disable_user_mfa(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """"Disable MFA" -- troubleshooting/temporary access. Unlike /mfa/reset
+    above, does NOT force re-enrollment -- the account is simply left
+    without MFA until the user (or another admin action) re-enables it."""
+    from ..models import MfaRecoveryCode
+
+    target = _get_mfa_target(user_id, db)
+    target.mfa_enabled = False
+    target.mfa_secret_encrypted = None
+    db.query(MfaRecoveryCode).filter(MfaRecoveryCode.user_id == target.id).delete()
+    db.commit()
+    log_action(db, admin, "mfa_disabled_by_admin", target=target.username, success=True)
+    _mfa_admin_notice_and_email(admin, target, db, "An administrator disabled multi-factor authentication on your account.")
+    return {"message": f"MFA disabled for '{target.username}'."}
+
+
+@router.post("/{user_id}/mfa/force-enroll")
+def force_enroll_user_mfa(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """"Force MFA Enrollment" -- requires the user to complete enrollment at
+    their NEXT login, without touching their current enrollment state
+    (unlike /mfa/reset, this doesn't clear an already-working enrollment)."""
+    target = _get_mfa_target(user_id, db)
+    target.mfa_setup_required = True
+    db.commit()
+    log_action(db, admin, "mfa_force_enroll", target=target.username, success=True)
+    return {"message": f"'{target.username}' will be required to set up MFA at their next login."}
 
 
 class VpnLinkRequest(BaseModel):

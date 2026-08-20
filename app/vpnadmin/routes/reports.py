@@ -217,6 +217,44 @@ def get_global_report(db: Session = Depends(get_db), _: User = Depends(require_r
     }
 
 
+@router.get("/mfa")
+def get_mfa_report(db: Session = Depends(get_db), _: User = Depends(require_reports_view)):
+    """Multi-Factor Authentication adoption/activity -- see the feature's
+    plan for why this is one card on the existing Reports page rather than
+    a new page: same read-only-aggregation posture as get_global_report
+    above, just over User.mfa_* columns and AuditLog instead of
+    policy_store. "Pending enrollment" iterates active users in Python
+    (mfa.effective_policy per user) rather than a SQL WHERE clause --
+    small scale (this app's whole user list, not per-session data), and
+    the policy precedence logic already lives in one place (mfa.py), not
+    worth duplicating as a query."""
+    from .. import mfa as mfa_module
+
+    active_users = db.query(User).filter(User.deleted.is_(False)).all()
+    total = len(active_users)
+    enabled = sum(1 for u in active_users if u.mfa_enabled)
+    pending_enrollment = sum(
+        1 for u in active_users if not u.mfa_enabled and mfa_module.effective_policy(u, db) == "required"
+    )
+    window_start = datetime.now(timezone.utc) - timedelta(days=30)
+    recent = db.query(AuditLog).filter(AuditLog.timestamp >= window_start)
+    invalid_otp_attempts = recent.filter(AuditLog.action == "invalid_otp_attempt").count()
+    mfa_login_successes = recent.filter(AuditLog.action == "mfa_login_success").count()
+    recovery_code_uses = recent.filter(AuditLog.action == "recovery_code_used").count()
+    return {
+        "total_users": total,
+        "mfa_enabled_users": enabled,
+        "mfa_disabled_users": total - enabled,
+        "adoption_rate_pct": round((enabled / total) * 100, 1) if total else 0,
+        "pending_enrollment": pending_enrollment,
+        "last_30_days": {
+            "invalid_otp_attempts": invalid_otp_attempts,
+            "mfa_login_successes": mfa_login_successes,
+            "recovery_code_uses": recovery_code_uses,
+        },
+    }
+
+
 # --- Per-User Analytics (Phase 2) ----------------------------------------
 
 @router.get("/user-options")

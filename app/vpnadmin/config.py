@@ -10,6 +10,8 @@ not a private deployment.
 import os
 import secrets
 
+from cryptography.fernet import Fernet
+
 
 def _env_bool(name: str, default: bool) -> bool:
     val = os.environ.get(name)
@@ -58,6 +60,16 @@ class Settings:
     # generated per-process as a safe fallback for local dev only (sessions
     # won't survive a restart, which is a deliberate nudge to set a real one).
     SECRET_KEY: str = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+
+    # --- Multi-Factor Authentication (TOTP) ------------------------------
+    # Symmetric key (Fernet, urlsafe-base64) encrypting User.mfa_secret_encrypted
+    # at rest -- see mfa.py. Same "MUST be overridden in production, random
+    # per-process fallback for local dev only" posture as SECRET_KEY above,
+    # and the same caveat: leaving this unset means a restart re-generates
+    # the key, silently making every already-enrolled account's stored
+    # secret undecryptable (the account would need to re-enroll -- an
+    # inconvenience, not a lockout, since re-enrollment is self-service).
+    MFA_ENCRYPTION_KEY: str = os.environ.get("MFA_ENCRYPTION_KEY") or Fernet.generate_key().decode("ascii")
     SESSION_COOKIE_NAME: str = os.environ.get("SESSION_COOKIE_NAME", "vpnadmin_session")
     SESSION_MAX_AGE_SECONDS: int = int(os.environ.get("SESSION_MAX_AGE_SECONDS", 60 * 60 * 8))  # 8h
     # Marks the session cookie Secure (browser withholds it over plain HTTP)

@@ -215,6 +215,42 @@
 	</div>
 
 	<div class="card">
+		<h2>Multi-Factor Authentication</h2>
+		<p class="muted" style="margin-top:0">TOTP (authenticator app) second factor for every portal account. A role or individual account can always override the global setting below -- see the per-role table and each user's own MFA policy in User Management.</p>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-mfa-mode">Global Mode
+					<button type="button" class="info-tip" data-tip="Disabled is a kill switch -- nobody is challenged regardless of individual enrollment or role/user overrides (useful for emergency recovery). Optional lets users enable it themselves. Required challenges everyone who has no role/user override." aria-label="More info on MFA Global Mode">i</button>
+				</label>
+				<select id="s-mfa-mode">
+					<option value="disabled">Disabled</option>
+					<option value="optional" selected>Optional</option>
+					<option value="required">Required</option>
+				</select>
+			</div>
+			<div class="field">
+				<label for="s-mfa-remember-device">Remember Device</label>
+				<select id="s-mfa-remember-device">
+					<option value="0">Disabled</option>
+					<option value="7">7 Days</option>
+					<option value="14">14 Days</option>
+					<option value="30">30 Days</option>
+					<option value="custom">Custom…</option>
+				</select>
+				<input type="text" id="s-mfa-remember-device-custom" inputmode="numeric" placeholder="Days" style="display:none;margin-top:8px">
+				<p class="field-hint">Skips the MFA challenge for a device the user marked "Remember this device" at login, for this many days.</p>
+			</div>
+		</div>
+		<div class="field" style="margin-top:6px">
+			<label>Enforce MFA by Role <span class="muted">(overrides Global Mode above for that role only)</span></label>
+			<div class="form-grid" id="s-mfa-role-requirements"></div>
+		</div>
+		<div class="checkbox-row" style="margin-top:12px">
+			<label class="checkbox-label"><input type="checkbox" id="s-notify-mfa-disabled"> Email me when MFA is disabled for a privileged (Admin/Settings-manage) account</label>
+		</div>
+	</div>
+
+	<div class="card">
 		<h2>Notifications</h2>
 		<p class="muted" style="margin-top:0">Controls how long toast/notification popups stay on screen across the whole app, plus optional admin-facing event emails (sent through the default Outbound Email provider above).</p>
 		<div class="form-grid">
@@ -503,6 +539,35 @@ async function loadSettings() {
 		setVal("s-support-max-attachment-size", s.support_max_attachment_size_mb != null ? s.support_max_attachment_size_mb : 10);
 		setVal("s-support-max-attachments", s.support_max_attachments_per_message != null ? s.support_max_attachments_per_message : 5);
 		document.getElementById("s-notify-ticket-created").checked = !!s.notify_admin_on_ticket_created;
+		document.getElementById("s-mfa-mode").value = s.mfa_mode || "optional";
+		const rememberDays = s.mfa_remember_device_days || 0;
+		const rememberSelect = document.getElementById("s-mfa-remember-device");
+		const rememberCustom = document.getElementById("s-mfa-remember-device-custom");
+		if ([0, 7, 14, 30].includes(rememberDays)) {
+			rememberSelect.value = String(rememberDays);
+			rememberCustom.style.display = "none";
+		} else {
+			rememberSelect.value = "custom";
+			rememberCustom.style.display = "";
+			rememberCustom.value = String(rememberDays);
+		}
+		document.getElementById("s-notify-mfa-disabled").checked = !!s.notify_admin_on_mfa_disabled;
+		const mfaRoleReqs = s.mfa_role_requirements || {};
+		document.getElementById("s-mfa-role-requirements").innerHTML = (s.role_choices || []).map(r => `
+			<div class="field">
+				<label for="s-mfa-role-${escapeHtml(r.slug)}">${escapeHtml(r.name)}</label>
+				<select id="s-mfa-role-${escapeHtml(r.slug)}" data-role-slug="${escapeHtml(r.slug)}" class="s-mfa-role-select">
+					<option value="">Inherit global</option>
+					<option value="required">Required</option>
+					<option value="optional">Optional</option>
+					<option value="exempt">Exempt</option>
+				</select>
+			</div>
+		`).join("");
+		(s.role_choices || []).forEach(r => {
+			const el = document.getElementById(`s-mfa-role-${r.slug}`);
+			if (el) el.value = mfaRoleReqs[r.slug] || "";
+		});
 		setVal("s-admin-notify-email", s.admin_notification_email);
 		document.getElementById("s-notify-user-created").checked = !!s.notify_admin_on_user_created;
 		document.getElementById("s-notify-client-revoked").checked = !!s.notify_admin_on_client_revoked;
@@ -561,6 +626,10 @@ function updateCaptchaFieldVisibility() {
 	document.getElementById("s-captcha-recaptcha-fields").style.display = provider === "recaptcha" ? "" : "none";
 }
 document.getElementById("s-captcha-provider").addEventListener("change", updateCaptchaFieldVisibility);
+
+document.getElementById("s-mfa-remember-device").addEventListener("change", (e) => {
+	document.getElementById("s-mfa-remember-device-custom").style.display = e.target.value === "custom" ? "" : "none";
+});
 
 // Lock/edit UX for the CAPTCHA fields: once a value is already saved, the
 // field loads greyed out (disabled, matching style.css's input:disabled
@@ -762,6 +831,17 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		support_max_attachment_size_mb: intOrNull(val("s-support-max-attachment-size")),
 		support_max_attachments_per_message: intOrNull(val("s-support-max-attachments")),
 		notify_admin_on_ticket_created: document.getElementById("s-notify-ticket-created").checked,
+		mfa_mode: document.getElementById("s-mfa-mode").value,
+		mfa_remember_device_days: (() => {
+			const sel = document.getElementById("s-mfa-remember-device").value;
+			return sel === "custom" ? intOrNull(val("s-mfa-remember-device-custom")) || 0 : Number(sel);
+		})(),
+		notify_admin_on_mfa_disabled: document.getElementById("s-notify-mfa-disabled").checked,
+		mfa_role_requirements: Object.fromEntries(
+			[...document.querySelectorAll(".s-mfa-role-select")]
+				.filter(el => el.value)
+				.map(el => [el.dataset.roleSlug, el.value])
+		),
 		admin_notification_email: val("s-admin-notify-email") || null,
 		notify_admin_on_user_created: document.getElementById("s-notify-user-created").checked,
 		notify_admin_on_client_revoked: document.getElementById("s-notify-client-revoked").checked,

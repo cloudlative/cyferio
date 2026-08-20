@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .. import app_settings, captcha, geoip, mailer
+from .. import mfa as mfa_module
 from ..app_settings import apply_settings_globals
 from ..audit import log_action
 from ..auth import (
@@ -219,6 +220,32 @@ async def login_submit(
         user.failed_login_attempts = 0
         user.locked_until = None
         db.commit()
+
+    # --- Multi-Factor Authentication branching -----------------------------
+    # See mfa.py's module docstring / the feature's plan for the full
+    # design: a password-correct-but-MFA-pending state is held in SEPARATE
+    # session keys (mfa_setup_required_user_id / mfa_pending_user_id) that
+    # get_current_user() never reads -- login_user() (which sets
+    # session["user_id"], the one key every permission dependency actually
+    # checks) is simply not called until MFA is fully satisfied or the
+    # effective policy says it doesn't apply. This is deliberately
+    # evaluated BEFORE login_user() below, not after -- there's no
+    # intermediate "logged in but MFA-pending" session state to accidentally
+    # leave reachable.
+    policy = mfa_module.effective_policy(user, db)
+    if policy == "required" and not user.mfa_enabled:
+        # Mandatory enrollment -- never bypassed by a trusted-device cookie
+        # (see mfa.is_device_trusted's own docstring): a required-and-
+        # unenrolled account has no completed second factor to trust a
+        # device FOR yet.
+        request.session["mfa_setup_required_user_id"] = user.id
+        return RedirectResponse("/mfa/setup", status_code=303)
+    if policy != "exempt":
+        trusted_token = request.cookies.get(mfa_module.TRUSTED_DEVICE_COOKIE_NAME)
+        device_trusted = bool(trusted_token) and mfa_module.is_device_trusted(user, trusted_token, db)
+        if not device_trusted and (policy == "required" or (policy == "optional" and user.mfa_enabled)):
+            request.session["mfa_pending_user_id"] = user.id
+            return RedirectResponse("/mfa/verify", status_code=303)
 
     login_user(request, user, db)
     # Same log_action helper/naming convention as "login_failed"/

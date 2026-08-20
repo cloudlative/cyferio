@@ -1,0 +1,13 @@
+{% extends "base_email.html" %}
+{% block content %}
+<h2 style="margin:0 0 12px;font-size:1.2rem;">Security notice</h2>
+<p style="color:#aab2cc;line-height:1.6;margin:0 0 18px;">
+	For your account <strong style="color:#f1f3fa;">{{ username }}</strong>:
+</p>
+<div style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);border-radius:12px;padding:16px 20px;margin:0 0 22px;">
+	<p style="margin:0;color:#dfe3f5;font-size:0.9rem;line-height:1.6;">{{ event_description }}</p>
+</div>
+<p style="color:#aab2cc;line-height:1.6;margin:0;font-size:0.85rem;">
+	If this wasn't you, change your password immediately and contact an administrator.
+</p>
+{% endblock %}

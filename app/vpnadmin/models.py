@@ -301,6 +301,40 @@ class User(Base):
     failed_login_attempts = Column(Integer, nullable=False, default=0)
     locked_until = Column(DateTime(timezone=True), nullable=True)
 
+    # --- Multi-Factor Authentication (TOTP) -- see mfa.py -------------------
+    # mfa_enabled=True means this account has completed enrollment and MUST
+    # be challenged for a second factor at login whenever the effective
+    # policy calls for it (mfa.effective_policy) -- it does NOT by itself
+    # mean "always challenged" (see the kill-switch/exempt cases there).
+    mfa_enabled = Column(Boolean, nullable=False, default=False)
+    # Fernet-encrypted TOTP secret (see config.MFA_ENCRYPTION_KEY, mfa.py's
+    # encrypt_secret/decrypt_secret) -- the raw secret is never stored, never
+    # logged, and never returned by any API response after the enrollment
+    # step that first generates it.
+    mfa_secret_encrypted = Column(Text, nullable=True)
+    mfa_enrolled_at = Column(DateTime(timezone=True), nullable=True)
+    mfa_last_used_at = Column(DateTime(timezone=True), nullable=True)
+    # Per-user override of the global/role MFA policy -- "required",
+    # "optional", "exempt", or NULL (inherit role/global, the default). See
+    # mfa.effective_policy for the full precedence order.
+    mfa_policy_override = Column(String(16), nullable=True)
+    # Admin-forced re-enrollment: set True by routes/users.py's
+    # /mfa/reset and /mfa/force-enroll actions, or automatically whenever
+    # an admin resets a user's MFA. Checked at login (routes/auth.py) --
+    # a True value redirects to mandatory /mfa/setup before a session is
+    # ever established, regardless of mfa_enabled's current value.
+    mfa_setup_required = Column(Boolean, nullable=False, default=False)
+    # OTP brute-force lockout -- deliberately a SEPARATE counter from
+    # failed_login_attempts/locked_until above: a password brute-force and
+    # an OTP brute-force against an already-known-correct password are
+    # different attack surfaces, and conflating them would let a wrong-OTP
+    # streak lock someone out of the password step too (or vice versa).
+    # Reuses the SAME account_lockout_threshold/account_lockout_minutes
+    # settings for the actual math (see routes/mfa.py) -- one lockout
+    # policy concept, not two near-duplicate Settings fields.
+    mfa_failed_attempts = Column(Integer, nullable=False, default=0)
+    mfa_locked_until = Column(DateTime(timezone=True), nullable=True)
+
     @validates("username")
     def _normalize_username(self, key, value):
         return value.strip().lower()
@@ -582,6 +616,26 @@ class AppSettings(Base):
     # notify_admin_on_client_revoked -- gated by admin_notification_email
     # being set (see routes/settings.py's notify_fields check).
     notify_admin_on_ticket_created = Column(Boolean, nullable=True)
+
+    # Multi-Factor Authentication (TOTP) -- see mfa.py's effective_policy
+    # for how these three combine with User.mfa_policy_override.
+    # "disabled" | "optional" | "required" -- NULL falls back to "optional"
+    # (app_settings.py's refresh_runtime_cache). "disabled" is a kill
+    # switch: nobody is challenged regardless of individual enrollment or
+    # role/user overrides, for emergency recovery.
+    mfa_mode = Column(String(16), nullable=True)
+    # JSON {role_slug: "required"|"optional"|"exempt"} -- a role not
+    # mentioned here inherits mfa_mode. See routes/settings.py's validator
+    # for the allowed value set.
+    mfa_role_requirements = Column(Text, nullable=True)
+    # "Remember this device" -- 0/NULL = disabled (never skip the
+    # challenge for a trusted device). See models.MfaTrustedDevice.
+    mfa_remember_device_days = Column(Integer, nullable=True)
+    # Same notify_admin_on_* pattern as notify_admin_on_ticket_created above
+    # -- gated by admin_notification_email being set (routes/settings.py's
+    # notify_fields check). Fires when MFA is disabled (any path -- self-
+    # service or admin action) for a privileged account (mfa.is_privileged).
+    notify_admin_on_mfa_disabled = Column(Boolean, nullable=True)
 
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
@@ -975,5 +1029,50 @@ class TicketNotification(Base):
     message = Column(String(512), nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
     read_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User")
+
+
+class MfaRecoveryCode(Base):
+    """One single-use MFA recovery code -- see mfa.py's
+    generate_recovery_codes/consume_recovery_code. code_hash is sha256, the
+    same reasoning as auth.py's _hash_reset_token: a high-entropy value
+    looked up by exact match, not a low-entropy human password, so bcrypt's
+    deliberate slowness buys nothing here. Regenerating (self-service or
+    admin reset) deletes every existing row for the user and inserts a
+    fresh batch -- that's what "invalidate previous codes when regenerated"
+    means in practice, no separate `active` flag needed."""
+    __tablename__ = "mfa_recovery_codes"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    user = relationship("User")
+
+
+class MfaTrustedDevice(Base):
+    """"Remember this device" (Settings -> Multi-Factor Authentication ->
+    mfa_remember_device_days) -- one row per device a user chose to trust
+    at the /mfa/verify step. token_hash is sha256 of the opaque value
+    stored in the `mfa_trusted_device` cookie (routes/mfa.py); the cookie
+    itself carries no user identity, so a lookup is always scoped to the
+    user_id already resolved from the in-progress login attempt, not just
+    "any row matching this hash" -- a stolen cookie is useless without also
+    guessing which account it belongs to. Never bypasses a MANDATORY
+    enrollment requirement (mfa.effective_policy == "required" and not yet
+    enrolled) -- see routes/auth.py's login_submit."""
+    __tablename__ = "mfa_trusted_devices"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, index=True)
+    user_agent = Column(String(255), nullable=True)
+    created_ip = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User")
