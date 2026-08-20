@@ -87,18 +87,18 @@ def parse_source_ip(real_address: str) -> str:
     "udp4:182.185.203.112:53266" -> "182.185.203.112", or
     "tcp6:[2001:db8::1]:1194" -> "2001:db8::1".
 
-    This exists because vpn-status.py's own Source IP column has the
-    equivalent bug uncaught until now: it does `real_addr.split(":")[0]`,
-    which on this "proto:ip:port" shape returns the *protocol* ("udp4"),
-    not the IP -- silently wrong for every session, always. vpn-status.py
-    is off-limits to modify (see its own header comment), and its JSON
-    output doesn't expose the raw Real Address for a caller to reprocess
-    (only the already-mis-sliced result), so that bug can't be fixed
-    downstream of it either. This client already gets the correct raw
-    value from `status 3` for an unrelated reason (session listing/kill),
-    so it's the one place in this app that can compute Source IP
-    correctly -- callers needing an accurate Source IP should prefer this
-    over vpn-status.py's connected/all-clients "source_ip" field."""
+    vpn-status.py's own Source IP column had the identical bug until
+    2026-08-20 (`real_addr.split(":")[0]`, which on this "proto:ip:port"
+    shape returns the *protocol* ("udp4"), not the IP -- wrong for every
+    session, always) -- fixed there too, as
+    `parse_real_address_ip()` (same regex/logic, duplicated rather than
+    imported since that script has to stay a standalone, dependency-free
+    CLI usable outside the app, same reasoning as policy_lib.py/
+    client_ip.py's other host-vs-app duplicated pairs in this codebase).
+    This function exists independently of that fix: this client already
+    has the raw Real Address in hand from `status 3` for an unrelated
+    reason (session listing/kill), so parsing it here avoids a redundant
+    vpn-status.py subprocess call just to get Source IP again."""
     addr = _REAL_ADDRESS_PROTO_RE.sub("", real_address, count=1)
     if addr.startswith("["):  # bracketed IPv6, e.g. "[2001:db8::1]:1194"
         end = addr.find("]")

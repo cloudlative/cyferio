@@ -183,3 +183,64 @@ class TestCmdRejectedMacRegistered:
         rows = json.loads(capsys.readouterr().out)
         assert rows[0]["mac_registered"] == "11:22:33:44:55:66"
         assert rows[0]["mac_registered_is_live"] is False
+
+
+def _write_status(vpn_status, real_address, name="alice"):
+    content = (
+        "TITLE,OpenVPN 2.7.0\n"
+        "TIME,2026-08-20 16:00:00,1787241600\n"
+        "HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,Virtual IPv6 Address,"
+        "Bytes Received,Bytes Sent,Connected Since,Connected Since (time_t),Username,Client ID,Peer ID,Data Channel Cipher\n"
+        f"CLIENT_LIST,{name},{real_address},10.8.0.4,,88200,65200,"
+        "2026-08-20 16:06:00,1787242560,UNDEF,1,1,AES-256-GCM\n"
+        "END\n"
+    )
+    with open(vpn_status.STATUS_LOG, "w") as f:
+        f.write(content)
+
+
+class TestParseRealAddressIp:
+    """Regression guard for the Source IP showing the literal string
+    "udp4" bug -- CLIENT_LIST's Real Address field is "proto:ip:port" on
+    this OpenVPN version, not plain "ip:port". See
+    app/services/openvpn/management_client.py's parse_source_ip(), the
+    app-side counterpart to this same fix."""
+
+    def test_ipv4_with_proto_prefix(self, vpn_status):
+        assert vpn_status.parse_real_address_ip("udp4:182.185.203.112:53266") == "182.185.203.112"
+
+    def test_tcp_prefix(self, vpn_status):
+        assert vpn_status.parse_real_address_ip("tcp4:203.0.113.5:1194") == "203.0.113.5"
+
+    def test_bracketed_ipv6_with_proto_prefix(self, vpn_status):
+        assert vpn_status.parse_real_address_ip("tcp6:[2001:db8::1]:1194") == "2001:db8::1"
+
+    def test_plain_ip_port_no_proto_prefix(self, vpn_status):
+        # Defensive: older OpenVPN versions/status-log formats that never
+        # had the proto prefix at all must keep working unchanged.
+        assert vpn_status.parse_real_address_ip("203.0.113.5:1194") == "203.0.113.5"
+
+    def test_get_connected_reports_real_ip_not_protocol(self, vpn_status):
+        _write_status(vpn_status, "udp4:182.185.203.112:53266")
+        rows = vpn_status.get_connected()
+        assert len(rows) == 1
+        assert rows[0]["source_ip"] == "182.185.203.112"
+        assert rows[0]["source_ip"] != "udp4"
+
+    def test_cmd_connected_json_reports_real_ip(self, vpn_status, capsys):
+        _write_status(vpn_status, "udp4:182.185.203.112:53266")
+        vpn_status.cmd_connected(as_json=True)
+        import json
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["source_ip"] == "182.185.203.112"
+
+    def test_cmd_all_json_reports_real_ip_for_online_client(self, vpn_status, capsys):
+        with open(vpn_status.DB_FILE, "w") as f:
+            f.write("alice=aa:bb:cc:dd:ee:ff\n")
+        _write_status(vpn_status, "udp4:182.185.203.112:53266")
+        vpn_status.cmd_all(as_json=True)
+        import json
+        rows = json.loads(capsys.readouterr().out)
+        online = next(r for r in rows if r["name"] == "alice")
+        assert online["status"] == "online"
+        assert online["source_ip"] == "182.185.203.112"

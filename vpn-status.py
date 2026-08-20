@@ -245,6 +245,29 @@ def latest_matched_blocks():
     return latest
 
 
+# CLIENT_LIST's "Real Address" field is "proto:ip:port" (e.g.
+# "udp4:182.185.203.112:53266", or "tcp6:[2001:db8::1]:1194" for IPv6) on
+# this OpenVPN version -- NOT plain "ip:port". Found live 2026-08-20: the
+# web app's "My VPN Profile" Current Session card was showing the literal
+# string "udp4" as Source IP for every connected session, because this
+# function used to do a naive `real_addr.split(":")[0]`, which returns
+# the *protocol* on this shape, not the IP -- silently wrong for every
+# session, always (not an edge case). Mirrors
+# app/services/openvpn/management_client.py's parse_source_ip() exactly
+# (that function already got this right, for an unrelated reason -- see
+# its own docstring -- but couldn't be reused here: this script has to
+# stay a standalone, dependency-free CLI usable outside the app).
+_REAL_ADDRESS_PROTO_RE = re.compile(r"^(?:udp|tcp)[46]:")
+
+
+def parse_real_address_ip(real_address):
+    addr = _REAL_ADDRESS_PROTO_RE.sub("", real_address, count=1)
+    if addr.startswith("["):  # bracketed IPv6, e.g. "[2001:db8::1]:1194"
+        end = addr.find("]")
+        return addr[1:end] if end != -1 else addr
+    return addr.rsplit(":", 1)[0] if ":" in addr else addr  # IPv4 "ip:port" -> "ip"
+
+
 def get_connected():
     status = read_status()
     now = time.time()
@@ -259,7 +282,7 @@ def get_connected():
         bytes_sent = parts[6]
         since_str = parts[7]
         since_epoch = int(parts[8])
-        ip = real_addr.split(":")[0]
+        ip = parse_real_address_ip(real_addr)
         rows.append({
             "name": name,
             "source_ip": ip,
