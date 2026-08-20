@@ -589,27 +589,64 @@ fi
 # present yet -- same "blank = feature not wired up" stance as
 # MAXMIND_LICENSE_KEY above.
 #
-# APP_INGEST_URL points at the app's VPN-tunnel-internal port
-# (10.8.0.1:8000, see docker-compose.yml's app service -- NOT the public
-# HTTPS domain: found live 2026-08-20 that a Cloudflare-proxied domain
-# silently 403s this request at the edge (Bot Fight Mode/WAF flagging
-# Python's urllib signature as bot traffic), and the app's own logs
-# showed zero record of it ever arriving. 10.8.0.1 bypasses Cloudflare/
+# APP_INGEST_URL points at the app's VPN-tunnel-internal port (see
+# docker-compose.yml's app service -- NOT the public HTTPS domain: found
+# live 2026-08-20 that a Cloudflare-proxied domain silently 403s this
+# request at the edge (Bot Fight Mode/WAF flagging Python's urllib
+# signature as bot traffic), and the app's own logs showed zero record
+# of it ever arriving. The VPN-internal interface bypasses Cloudflare/
 # Traefik/DNS entirely for this first-party, already bearer-token-
 # authenticated host-to-app call, and is immune to any future WAF
 # tightening since it never crosses Cloudflare at all -- see that
 # docker-compose.yml comment for the full "why this interface is safe"
 # rationale. No DOMAIN dependency anymore, so this no longer needs
 # --domain to have been given.
+#
+# The gateway IP is COMPUTED from this box's actual server.conf, never
+# assumed -- openvpn-install.sh unconditionally writes `server 10.8.0.0
+# 255.255.255.0` today (topology-subnet gateway = network address with
+# its last octet set to 1, e.g. 10.8.0.0 -> 10.8.0.1), but a fork that
+# customizes the VPN subnet must still get the right address here
+# automatically, not a stale literal -- see docker-compose.yml's
+# VPN_TUNNEL_IP comment for the other half of this (its port binding
+# reads the same value back out of .env).
+_compute_vpn_tunnel_ip() {
+	local server_conf="/etc/openvpn/server/server.conf" network gw
+	network=$(grep -m1 -E '^server ' "$server_conf" 2>/dev/null | awk '{print $2}')
+	if [[ "$network" =~ ^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\.[0-9]{1,3}$ ]]; then
+		gw="${BASH_REMATCH[1]}.1"
+	else
+		gw="10.8.0.1"
+	fi
+	echo "$gw"
+}
+
 ENV_FILE_FOR_INGEST="$REPO_DIR/.env"
 if [[ "$MODE" == "webapp" && -f "$ENV_FILE_FOR_INGEST" ]]; then
 	HOST_INGEST_TOKEN_FROM_ENV=$(grep -E '^HOST_INGEST_TOKEN=' "$ENV_FILE_FOR_INGEST" | head -1 | cut -d= -f2-)
 	if [[ -n "$HOST_INGEST_TOKEN_FROM_ENV" ]]; then
 		log "Phase 3.5: connection-rejection ingestion"
+		VPN_TUNNEL_IP=$(_compute_vpn_tunnel_ip)
+
+		# Record VPN_TUNNEL_IP in .env too -- docker-compose.yml's app
+		# port binding reads it from there (Compose's own ${VAR}
+		# interpolation, same mechanism APP_DOMAIN/IMAGE_TAG already use
+		# in that file), so a customized subnet is picked up automatically
+		# on the next `docker compose up` without editing YAML by hand.
+		if grep -qE '^VPN_TUNNEL_IP=' "$ENV_FILE_FOR_INGEST"; then
+			if ! grep -qE "^VPN_TUNNEL_IP=${VPN_TUNNEL_IP}\$" "$ENV_FILE_FOR_INGEST"; then
+				sed -i "s|^VPN_TUNNEL_IP=.*|VPN_TUNNEL_IP=${VPN_TUNNEL_IP}|" "$ENV_FILE_FOR_INGEST"
+				note_change "updated VPN_TUNNEL_IP in $ENV_FILE_FOR_INGEST"
+			fi
+		else
+			echo "VPN_TUNNEL_IP=${VPN_TUNNEL_IP}" >> "$ENV_FILE_FOR_INGEST"
+			note_change "set VPN_TUNNEL_IP in $ENV_FILE_FOR_INGEST"
+		fi
+
 		VPN_TOOLS_CONF=/etc/openvpn/vpn-tools.conf
 		mkdir -p /etc/openvpn
 		touch "$VPN_TOOLS_CONF"
-		for kv in "APP_INGEST_URL=http://10.8.0.1:8000" "APP_INGEST_TOKEN=${HOST_INGEST_TOKEN_FROM_ENV}"; do
+		for kv in "APP_INGEST_URL=http://${VPN_TUNNEL_IP}:8000" "APP_INGEST_TOKEN=${HOST_INGEST_TOKEN_FROM_ENV}"; do
 			k="${kv%%=*}"
 			if grep -qE "^${k}=" "$VPN_TOOLS_CONF"; then
 				if ! grep -qE "^${kv}\$" "$VPN_TOOLS_CONF"; then
@@ -622,7 +659,15 @@ if [[ "$MODE" == "webapp" && -f "$ENV_FILE_FOR_INGEST" ]]; then
 			fi
 		done
 		chmod 640 "$VPN_TOOLS_CONF"
-		log "  OK: host-scripts/openvpn-mac-addr-check.py will now report rejections to http://10.8.0.1:8000/internal/connection-rejections."
+		log "  OK: host-scripts/openvpn-mac-addr-check.py will now report rejections to http://${VPN_TUNNEL_IP}:8000/internal/connection-rejections."
+
+		# Phase 2 already brought the stack up earlier in this same run,
+		# before VPN_TUNNEL_IP existed in .env -- re-apply now so the
+		# port binding actually reflects it immediately, not just on the
+		# next unrelated restart. Cheap and idempotent either way.
+		if [[ "$SKIP_STACK" -ne 1 && "$SKIP_DOCKER" -ne 1 ]] && command -v docker &>/dev/null; then
+			(cd "$REPO_DIR" && docker compose up -d app) || log "  WARNING: 'docker compose up -d app' failed after setting VPN_TUNNEL_IP -- the app container may still be listening on the old binding until you re-run it by hand."
+		fi
 	fi
 fi
 

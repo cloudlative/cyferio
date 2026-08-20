@@ -130,21 +130,29 @@ services:
     init: true
     env_file: .env
     # No PUBLIC host port: Traefik (above) is the only public entrypoint.
-    # This one binding to the VPN-internal tun0 interface (10.8.0.1) is
-    # intentional and load-bearing, not just a debugging convenience --
+    # This one binding to the VPN-internal tun0 interface is intentional
+    # and load-bearing, not just a debugging convenience --
     # host-scripts/openvpn-mac-addr-check.py's report_rejection() (running
     # on the bare host, "My Connection Issues" ingestion) calls the app
     # over THIS address rather than the public HTTPS domain, because a
     # Cloudflare-proxied domain silently 403s that request at the edge
     # (Bot Fight Mode/WAF flagging Python's urllib signature -- found live
     # 2026-08-20, confirmed by the app's own logs showing zero record of
-    # the request ever arriving). 10.8.0.1 is reachable from the host
-    # itself and from connected VPN clients over the tunnel, never from
-    # the public internet, so this carries none of the "unauthenticated
-    # bypass" risk a public/0.0.0.0 binding alongside Traefik would --
-    # never widen this beyond that one interface.
+    # the request ever arriving). This interface is reachable from the
+    # host itself and from connected VPN clients over the tunnel, never
+    # from the public internet, so this carries none of the
+    # "unauthenticated bypass" risk a public/0.0.0.0 binding alongside
+    # Traefik would -- never widen this beyond that one interface.
+    #
+    # VPN_TUNNEL_IP (default 10.8.0.1, matching openvpn-install.sh's own
+    # unconditional `server 10.8.0.0 255.255.255.0` today) is NOT a fixed
+    # constant -- it's this install's actual tun0 gateway, computed by
+    # setup.sh's Phase 3.5 from the running server.conf and written to
+    # .env, so a community fork using a different VPN subnet still gets
+    # the right address here automatically instead of silently pointing
+    # at the wrong interface.
     ports:
-      - "10.8.0.1:8000:8000"
+      - "${VPN_TUNNEL_IP:-10.8.0.1}:8000:8000"
     # Routing (Host rule, TLS, backend port) is defined in
     # app/traefik/dynamic.yml rather than labels here -- see that file's
     # comment for why.
