@@ -61,6 +61,14 @@ def _reset_runtime_settings():
         r.turnstile_secret_key = env_settings.TURNSTILE_SECRET_KEY
         r.recaptcha_site_key = env_settings.RECAPTCHA_SITE_KEY
         r.recaptcha_secret_key = env_settings.RECAPTCHA_SECRET_KEY
+        # Support Ticketing System -- same leak risk as everything above
+        # (test_settings.py's TestMacDuplicationPolicy-style tests PATCH
+        # these via the real endpoint).
+        r.support_ticket_rate_limit_count = 5
+        r.support_ticket_rate_limit_window_minutes = 60
+        r.support_max_attachment_size_mb = 10
+        r.support_max_attachments_per_message = 5
+        r.notify_admin_on_ticket_created = False
 
     _reset()
     yield

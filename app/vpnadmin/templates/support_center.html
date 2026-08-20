@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Support Center — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar">
+	<div class="toolbar-title"><h1 style="margin:0">Support Center</h1></div>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Every ticket, from every user -- filter, search, and act on them below.</p>
+
+<div class="card">
+	<div class="form-row" style="margin-bottom:14px">
+		<div class="field">
+			<label for="sc-search">Search</label>
+			<input type="text" id="sc-search" placeholder="Subject...">
+		</div>
+		<div class="field">
+			<label for="sc-filter-status">Status</label>
+			<select id="sc-filter-status"><option value="">All</option></select>
+		</div>
+		<div class="field">
+			<label for="sc-filter-category">Category</label>
+			<select id="sc-filter-category"><option value="">All</option></select>
+		</div>
+		<div class="field">
+			<label for="sc-filter-priority">Priority</label>
+			<select id="sc-filter-priority"><option value="">All</option></select>
+		</div>
+	</div>
+	<div style="overflow-x:auto">
+		<table>
+			<thead><tr><th>Subject</th><th>Category</th><th>Priority</th><th>Status</th><th>Assigned To</th><th>Updated</th></tr></thead>
+			<tbody id="sc-list-body"><tr><td colspan="6" class="muted">Loading...</td></tr></tbody>
+		</table>
+	</div>
+	<div class="pagination" id="sc-pagination" style="margin-top:14px"></div>
+</div>
+
+<script>
+let allTickets = [];
+let categoryData = [];
+let ticketPage = 1;
+const TICKET_PAGE_SIZE = 20;
+
+function statusPillClass(status) {
+	if (status === "resolved" || status === "closed") return "status-offline";
+	if (status === "new" || status === "reopened" || status === "waiting_for_admin") return "status-revoked";
+	return "status-online";
+}
+
+function currentFilteredTickets() {
+	const q = (document.getElementById("sc-search").value || "").toLowerCase();
+	const status = document.getElementById("sc-filter-status").value;
+	const category = document.getElementById("sc-filter-category").value;
+	const priority = document.getElementById("sc-filter-priority").value;
+	return allTickets.filter((t) =>
+		(!q || t.subject.toLowerCase().includes(q)) &&
+		(!status || t.status === status) &&
+		(!category || t.category === category) &&
+		(!priority || t.priority === priority)
+	);
+}
+
+function renderTicketTable() {
+	const filtered = currentFilteredTickets();
+	const totalPages = Math.max(1, Math.ceil(filtered.length / TICKET_PAGE_SIZE));
+	ticketPage = Math.min(ticketPage, totalPages);
+	const start = (ticketPage - 1) * TICKET_PAGE_SIZE;
+	const pageRows = filtered.slice(start, start + TICKET_PAGE_SIZE);
+
+	const tbody = document.getElementById("sc-list-body");
+	tbody.innerHTML = pageRows.length === 0
+		? '<tr><td colspan="6" class="muted">No tickets found.</td></tr>'
+		: pageRows.map((t) => `
+			<tr class="clickable-row" onclick="window.location.href='/support-center/${t.id}'">
+				<td>${t.subject}</td>
+				<td>${t.category_label}</td>
+				<td>${t.priority_label}</td>
+				<td><span class="status-pill ${statusPillClass(t.status)}">${t.status_label}</span></td>
+				<td class="muted">${t.assigned_admin || "Unassigned"}</td>
+				<td class="muted">${new Date(t.updated_at).toLocaleString()}</td>
+			</tr>
+		`).join("");
+
+	const pager = document.getElementById("sc-pagination");
+	pager.innerHTML = totalPages <= 1 ? "" : `
+		<button type="button" class="btn-secondary" ${ticketPage <= 1 ? "disabled" : ""} id="sc-prev">Prev</button>
+		<span class="muted" style="margin:0 10px">Page ${ticketPage} of ${totalPages}</span>
+		<button type="button" class="btn-secondary" ${ticketPage >= totalPages ? "disabled" : ""} id="sc-next">Next</button>
+	`;
+	if (totalPages > 1) {
+		document.getElementById("sc-prev")?.addEventListener("click", () => { ticketPage--; renderTicketTable(); });
+		document.getElementById("sc-next")?.addEventListener("click", () => { ticketPage++; renderTicketTable(); });
+	}
+}
+
+for (const id of ["sc-search"]) document.getElementById(id).addEventListener("input", () => { ticketPage = 1; renderTicketTable(); });
+for (const id of ["sc-filter-status", "sc-filter-category", "sc-filter-priority"]) document.getElementById(id).addEventListener("change", () => { ticketPage = 1; renderTicketTable(); });
+
+(async function init() {
+	const catData = await apiFetch("/api/tickets/categories");
+	categoryData = catData.categories;
+	const catSel = document.getElementById("sc-filter-category");
+	for (const group of categoryData) {
+		const og = document.createElement("optgroup");
+		og.label = group.group;
+		for (const opt of group.options) {
+			const o = document.createElement("option");
+			o.value = opt.slug; o.textContent = opt.label;
+			og.appendChild(o);
+		}
+		catSel.appendChild(og);
+	}
+	const statusSel = document.getElementById("sc-filter-status");
+	for (const s of catData.statuses) {
+		const o = document.createElement("option");
+		o.value = s.value; o.textContent = s.label;
+		statusSel.appendChild(o);
+	}
+	const prioritySel = document.getElementById("sc-filter-priority");
+	for (const p of catData.priorities) {
+		const o = document.createElement("option");
+		o.value = p.value; o.textContent = p.label;
+		prioritySel.appendChild(o);
+	}
+
+	const data = await apiFetch("/api/tickets");
+	allTickets = data.tickets;
+	renderTicketTable();
+})();
+</script>
+{% endblock %}

@@ -567,6 +567,22 @@ class AppSettings(Base):
     # actually connect, only whether registering a shared MAC is accepted.
     allow_duplicate_macs = Column(Boolean, nullable=True)
 
+    # Support Ticketing System -- admin-tweakable preferences (Settings ->
+    # Support), NOT hardcoded constants (unlike the old routes/support.py's
+    # fixed MAX_SUBJECT_LENGTH/SUPPORT_REQUEST_RATE_LIMIT it replaces): see
+    # routes/tickets.py's/routes/me_tickets.py's rate-limit check and
+    # attachment upload validation. NULL falls back to the defaults noted
+    # below (app_settings.py's refresh_runtime_cache), same convention as
+    # every other tunable in this table.
+    support_ticket_rate_limit_count = Column(Integer, nullable=True)  # default 5
+    support_ticket_rate_limit_window_minutes = Column(Integer, nullable=True)  # default 60
+    support_max_attachment_size_mb = Column(Integer, nullable=True)  # default 10
+    support_max_attachments_per_message = Column(Integer, nullable=True)  # default 5
+    # Same notify_admin_on_* pattern as notify_admin_on_user_created/
+    # notify_admin_on_client_revoked -- gated by admin_notification_email
+    # being set (see routes/settings.py's notify_fields check).
+    notify_admin_on_ticket_created = Column(Boolean, nullable=True)
+
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
 
@@ -854,3 +870,110 @@ class MigrationReport(Base):
     run_by = Column(String(64), nullable=False)  # username snapshot, same pattern as AuditLog
     is_preview = Column(Boolean, nullable=False, default=False)  # True = preview run, never wrote anything
     report_json = Column(Text, nullable=False)
+
+
+# --- Support Ticketing System -----------------------------------------------
+# See routes/me_tickets.py (self-service) and routes/tickets.py (admin
+# console) for the RBAC-gated read/write surface, permissions.py's
+# "support_tickets" object for the RBAC registration, and support_tickets.py
+# for the STATUSES/PRIORITIES/CATEGORIES constants these columns reference
+# by plain string, not a DB-native Enum (see that module's docstring for
+# why). No dedicated "ticket event" table for the activity timeline -- every
+# status/priority/assignment change is logged via audit.log_action(target=
+# f"TCK-{id}") like any other state-changing action, and the ticket detail
+# view reads it back filtered by that same target, interleaved with
+# SupportTicketMessage rows by timestamp.
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+
+    id = Column(Integer, primary_key=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    subject = Column(String(200), nullable=False)
+    category = Column(String(64), nullable=False)  # leaf slug, see support_tickets.CATEGORIES
+    priority = Column(String(16), nullable=False, default="medium")
+    # Own scope (routes/me_tickets.py) always filters on created_by_user_id
+    # -- same "structural ownership, no separate scope check" pattern as
+    # VpnProfileLink/me_vpn.py. Any scope (routes/tickets.py) sees every row.
+    status = Column(String(32), nullable=False, default="new", index=True)
+    assigned_admin_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Optional -- set from the auto-attached diagnostic context (see
+    # context_snapshot below) when the category is VPN-related and the
+    # submitter has a linked profile, or left NULL otherwise.
+    vpn_client_name = Column(String(64), nullable=True)
+    # JSON blob captured ONCE at ticket-creation time (IP/session/last-
+    # rejection info from me_vpn.py/me_connection_issues.py/client_ip.py) --
+    # display-only, a frozen snapshot of "what did the submitter's own
+    # environment look like when they filed this", never re-queried live.
+    context_snapshot = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
+    assigned_admin = relationship("User", foreign_keys=[assigned_admin_id])
+    messages = relationship("SupportTicketMessage", backref="ticket", order_by="SupportTicketMessage.created_at",
+                             cascade="all, delete-orphan")
+
+
+class SupportTicketMessage(Base):
+    __tablename__ = "support_ticket_messages"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("support_tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    author_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # Admin-only visibility -- filtered out server-side in routes/
+    # me_tickets.py's serialization, never merely hidden client-side, so a
+    # self-service response can't leak an internal note by inspecting the
+    # raw JSON.
+    is_internal_note = Column(Boolean, nullable=False, default=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+
+    author = relationship("User")
+    attachments = relationship("SupportTicketAttachment", backref="message", cascade="all, delete-orphan")
+
+
+class SupportTicketAttachment(Base):
+    """Metadata row for one uploaded file -- the file itself lives on disk
+    under config.TICKET_ATTACHMENTS_DIR (see routes/me_tickets.py's/routes/
+    tickets.py's upload handling, added in the Attachments phase), never in
+    the DB. `stored_path` is relative to that root, e.g.
+    "42/3f9e.../screenshot.png" -- ticket id as the leading path segment
+    purely for on-disk organization, not itself a security boundary (every
+    download still re-checks the caller owns or can manage the parent
+    ticket, via ticket_id/message_id, not by trusting the path)."""
+    __tablename__ = "support_ticket_attachments"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("support_tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    message_id = Column(Integer, ForeignKey("support_ticket_messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    original_filename = Column(String(255), nullable=False)
+    stored_path = Column(String(512), nullable=False)
+    content_type = Column(String(128), nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    uploaded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class TicketNotification(Base):
+    """In-app notification bell entry for a ticket event -- sibling to
+    QuotaNotification (models.py, above), not folded into that table: the
+    two have genuinely different shapes (QuotaNotification's pct_used/
+    period_start/unique-constraint don't apply here, and vice versa a
+    ticket_id FK doesn't belong on a quota row). routes/notifications.py's
+    list_my_notifications merges both tables for display -- see that
+    module's own comment for the id-prefixing scheme that keeps a single
+    read/read-all contract working across two source tables."""
+    __tablename__ = "ticket_notifications"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    ticket_id = Column(Integer, ForeignKey("support_tickets.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(32), nullable=False)  # "ticket_created" | "ticket_reply" | "ticket_status_changed" | "ticket_assigned"
+    message = Column(String(512), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User")

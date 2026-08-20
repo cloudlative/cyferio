@@ -207,6 +207,14 @@ class _RuntimeSettings:
         self.connection_issue_retention_days = 60  # None/0 (if explicitly set) = keep forever
         self.allow_duplicate_macs = False  # default = strict, matches openvpn-install.sh's original always-on behavior
 
+        # Support Ticketing System -- see AppSettings' own columns for why
+        # these are admin-tweakable rather than hardcoded.
+        self.support_ticket_rate_limit_count = 5
+        self.support_ticket_rate_limit_window_minutes = 60
+        self.support_max_attachment_size_mb = 10
+        self.support_max_attachments_per_message = 5
+        self.notify_admin_on_ticket_created = False
+
 
 runtime = _RuntimeSettings()
 
@@ -279,6 +287,16 @@ def refresh_runtime_cache(db: Session) -> None:
     # still explicitly set 0 for forever" stance as db_snapshot_retention_days.
     runtime.connection_issue_retention_days = row.connection_issue_retention_days if row.connection_issue_retention_days is not None else 60
     runtime.allow_duplicate_macs = bool(row.allow_duplicate_macs)
+
+    runtime.support_ticket_rate_limit_count = row.support_ticket_rate_limit_count if row.support_ticket_rate_limit_count is not None else 5
+    runtime.support_ticket_rate_limit_window_minutes = (
+        row.support_ticket_rate_limit_window_minutes if row.support_ticket_rate_limit_window_minutes is not None else 60
+    )
+    runtime.support_max_attachment_size_mb = row.support_max_attachment_size_mb if row.support_max_attachment_size_mb is not None else 10
+    runtime.support_max_attachments_per_message = (
+        row.support_max_attachments_per_message if row.support_max_attachments_per_message is not None else 5
+    )
+    runtime.notify_admin_on_ticket_created = bool(row.notify_admin_on_ticket_created)
 
     # Mirrors the one setting host-scripts/quota_enforcer.py needs but has
     # no DB access to read directly -- see policy_store.write_global_defaults

@@ -188,6 +188,33 @@
 	</div>
 
 	<div class="card">
+		<h2>Support</h2>
+		<p class="muted" style="margin-top:0">Rate limiting and attachment sizing for the Support Ticketing System (users' own Support page, and the admin Support Center).</p>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-support-rate-limit-count">Ticket Rate Limit <span class="muted">(tickets + replies per window)</span></label>
+				<input type="text" id="s-support-rate-limit-count" inputmode="numeric" placeholder="5">
+			</div>
+			<div class="field">
+				<label for="s-support-rate-limit-window">Rate Limit Window <span class="muted">(minutes)</span></label>
+				<input type="text" id="s-support-rate-limit-window" inputmode="numeric" placeholder="60">
+			</div>
+			<div class="field">
+				<label for="s-support-max-attachment-size">Max Attachment Size <span class="muted">(MB per file)</span></label>
+				<input type="text" id="s-support-max-attachment-size" inputmode="numeric" placeholder="10">
+			</div>
+			<div class="field">
+				<label for="s-support-max-attachments">Max Attachments <span class="muted">(per message)</span></label>
+				<input type="text" id="s-support-max-attachments" inputmode="numeric" placeholder="5">
+			</div>
+		</div>
+		<p class="field-hint">Allowed attachment types (images, PDF, txt/log/csv, zip) are fixed and not configurable here.</p>
+		<div class="checkbox-row" style="margin-top:12px">
+			<label class="checkbox-label"><input type="checkbox" id="s-notify-ticket-created"> Email me when a new support ticket is created</label>
+		</div>
+	</div>
+
+	<div class="card">
 		<h2>Notifications</h2>
 		<p class="muted" style="margin-top:0">Controls how long toast/notification popups stay on screen across the whole app, plus optional admin-facing event emails (sent through the default Outbound Email provider above).</p>
 		<div class="form-grid">
@@ -471,6 +498,11 @@ async function loadSettings() {
 		const quotaPolicyEl = document.querySelector(`input[name="s-quota-policy"][value="${s.default_quota_enforcement_policy || "soft"}"]`);
 		if (quotaPolicyEl) quotaPolicyEl.checked = true;
 		document.getElementById("s-allow-duplicate-macs").checked = !!s.allow_duplicate_macs;
+		setVal("s-support-rate-limit-count", s.support_ticket_rate_limit_count != null ? s.support_ticket_rate_limit_count : 5);
+		setVal("s-support-rate-limit-window", s.support_ticket_rate_limit_window_minutes != null ? s.support_ticket_rate_limit_window_minutes : 60);
+		setVal("s-support-max-attachment-size", s.support_max_attachment_size_mb != null ? s.support_max_attachment_size_mb : 10);
+		setVal("s-support-max-attachments", s.support_max_attachments_per_message != null ? s.support_max_attachments_per_message : 5);
+		document.getElementById("s-notify-ticket-created").checked = !!s.notify_admin_on_ticket_created;
 		setVal("s-admin-notify-email", s.admin_notification_email);
 		document.getElementById("s-notify-user-created").checked = !!s.notify_admin_on_user_created;
 		document.getElementById("s-notify-client-revoked").checked = !!s.notify_admin_on_client_revoked;
@@ -725,6 +757,11 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		default_bandwidth_monthly_gb: val("s-default-bandwidth") ? Number(val("s-default-bandwidth")) : null,
 		default_quota_enforcement_policy: document.querySelector('input[name="s-quota-policy"]:checked')?.value || "soft",
 		allow_duplicate_macs: document.getElementById("s-allow-duplicate-macs").checked,
+		support_ticket_rate_limit_count: intOrNull(val("s-support-rate-limit-count")),
+		support_ticket_rate_limit_window_minutes: intOrNull(val("s-support-rate-limit-window")),
+		support_max_attachment_size_mb: intOrNull(val("s-support-max-attachment-size")),
+		support_max_attachments_per_message: intOrNull(val("s-support-max-attachments")),
+		notify_admin_on_ticket_created: document.getElementById("s-notify-ticket-created").checked,
 		admin_notification_email: val("s-admin-notify-email") || null,
 		notify_admin_on_user_created: document.getElementById("s-notify-user-created").checked,
 		notify_admin_on_client_revoked: document.getElementById("s-notify-client-revoked").checked,

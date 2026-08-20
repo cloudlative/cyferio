@@ -42,6 +42,7 @@ OBJECTS: dict[str, str] = {
     # role's blanket grant below (unlike "reports"/"health", which viewer
     # already has) -- admin/super_admin only, by default.
     "db_reporting": "Database Reporting",
+    "support_tickets": "Support Tickets",
 }
 
 ACTIONS = ("view", "create", "update", "delete", "execute", "manage")
@@ -86,6 +87,12 @@ _SYSTEM_ROLES: dict[str, dict] = {
             "dashboard": {"view": True},
             "health": {"view": True},
             "vpn_profiles": {"view": True, "update": True, "execute": True},
+            # Any-scope (no scopes entry below) -- lets editor-role staff
+            # act as support agents (view every ticket, reply, change
+            # status/assignment via "update") without the full "manage"
+            # an admin/super_admin gets, consistent with editor's existing
+            # "operational staff, no settings/user-management" character.
+            "support_tickets": {"view": True, "update": True},
         },
         "scopes": {},
     },
@@ -106,10 +113,16 @@ _SYSTEM_ROLES: dict[str, dict] = {
         "permissions": {
             "vpn_profiles": {"view": True, "update": True},
             "users": {"view": True, "update": True},  # scoped "own" below -- their own account/password only
+            # "view"+"create"+"update" is enough for the entire self-service
+            # ticket lifecycle: create a ticket, view own tickets, reply to
+            # (and reopen) an own ticket -- see routes/me_tickets.py. Scoped
+            # "own" below, same as vpn_profiles/users.
+            "support_tickets": {"view": True, "create": True, "update": True},
         },
         "scopes": {
             "vpn_profiles": ApiScope.own,
             "users": ApiScope.own,
+            "support_tickets": ApiScope.own,
         },
     },
 }

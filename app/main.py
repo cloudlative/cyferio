@@ -33,7 +33,7 @@ from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_
 from vpnadmin import geo_lists, mailer
 from vpnadmin import app_settings
 from vpnadmin.models import QuotaNotification
-from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, host_ingest, me_connection_issues, me_vpn, notifications, pages, reports, roles, settings as settings_routes, status, support, teams, users
+from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, host_ingest, me_connection_issues, me_tickets, me_vpn, notifications, pages, reports, roles, settings as settings_routes, status, teams, tickets, users
 from vpnadmin.routes.reports import _load_rows
 
 logger = logging.getLogger(__name__)
@@ -294,7 +294,8 @@ app.include_router(me_connection_issues.router)
 app.include_router(host_ingest.router)
 app.include_router(reports.router)
 app.include_router(notifications.router)
-app.include_router(support.router)
+app.include_router(me_tickets.router)
+app.include_router(tickets.router)
 app.include_router(email_providers.router)
 
 

@@ -95,6 +95,38 @@ async function apiFetch(url, options = {}) {
 }
 
 /**
+ * Same contract as apiFetch above, for a multipart/form-data POST (the
+ * Support Ticketing System's create/reply endpoints, which take Form()
+ * fields -- and, once attachments ship, File uploads -- rather than a
+ * JSON body). Deliberately NOT folded into apiFetch itself: that
+ * function's "JSON-encode any non-string body" branch would otherwise
+ * mis-encode a FormData object and clobber its multipart Content-Type
+ * boundary header.
+ */
+async function apiFetchForm(url, formData, options = {}) {
+	_progressStart();
+	try {
+		const res = await fetch(url, { method: "POST", ...options, body: formData });
+		if (res.status === 401) {
+			window.location.href = "/login";
+			throw new Error("Session expired");
+		}
+		if (!res.ok) {
+			let detail = `Request failed (${res.status})`;
+			try {
+				const data = await res.json();
+				if (data && data.detail) detail = data.detail;
+			} catch (_) { /* body wasn't JSON */ }
+			throw new Error(detail);
+		}
+		if (res.status === 204) return null;
+		return await res.json();
+	} finally {
+		_progressDone();
+	}
+}
+
+/**
  * Shows a native <dialog> confirm prompt and resolves true/false. Used for
  * anything destructive (revoke client, delete user) so a non-technical user
  * never triggers it by a stray click alone.

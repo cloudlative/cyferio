@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Ticket #{{ ticket_id }} — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+{# Shared by BOTH /support/{id} (self-service) and /support-center/{id}
+   (admin) -- is_admin_view (passed by routes/pages.py) toggles the
+   assign/status/internal-note controls and which API prefix this page
+   talks to, rather than maintaining two near-identical conversation UIs.
+   See the Support Ticketing System plan. #}
+<div class="toolbar">
+	<div class="toolbar-title">
+		<a href="{{ '/support-center' if is_admin_view else '/support' }}" class="link-button">&larr; Back</a>
+		<h1 style="margin:0" id="td-subject">Loading...</h1>
+	</div>
+	<div id="td-badges"></div>
+</div>
+
+<div class="content-grid" style="display:grid;grid-template-columns:2fr 1fr;gap:20px;align-items:start">
+	<div>
+		<div class="card">
+			<div id="td-context-panel" style="display:none;margin-bottom:16px">
+				<h3 style="margin:0 0 8px">Diagnostic Context <span class="muted" style="font-weight:400">(captured when the ticket was filed)</span></h3>
+				<div id="td-context-body" class="muted" style="font-size:0.88rem"></div>
+			</div>
+			<div id="td-thread"></div>
+
+			<form id="td-reply-form" style="margin-top:18px;display:none">
+				<div class="field">
+					<label for="td-reply-body">Reply</label>
+					<textarea id="td-reply-body" rows="5" required maxlength="5000" placeholder="Write your reply..."></textarea>
+				</div>
+				{% if is_admin_view %}
+				<div class="checkbox-row">
+					<label class="checkbox-label"><input type="checkbox" id="td-internal-note"> Internal note <span class="muted">(not visible to the user)</span></label>
+				</div>
+				{% endif %}
+				<div class="dialog-actions" style="justify-content:flex-start">
+					<button type="submit" class="btn-primary">Send</button>
+				</div>
+			</form>
+			<div id="td-reopen-panel" style="display:none;margin-top:18px">
+				<p class="muted">This ticket is {{ '' }}<span id="td-reopen-status"></span> -- reopen it to add a reply.</p>
+				<button type="button" class="btn-secondary" id="td-reopen-btn">Reopen Ticket</button>
+			</div>
+		</div>
+	</div>
+
+	<div>
+		{% if is_admin_view %}
+		<div class="card">
+			<h3 style="margin-top:0">Manage</h3>
+			<div class="field">
+				<label for="td-status-select">Status</label>
+				<select id="td-status-select"></select>
+			</div>
+			<div class="field">
+				<label for="td-priority-select">Priority</label>
+				<select id="td-priority-select"></select>
+			</div>
+			<div class="field">
+				<label for="td-assignee-select">Assigned To</label>
+				<select id="td-assignee-select"><option value="">Unassigned</option></select>
+			</div>
+			<button type="button" class="btn-primary" id="td-save-manage" style="width:100%">Save</button>
+		</div>
+		<div class="card">
+			<h3 style="margin-top:0">Activity History</h3>
+			<div id="td-history" class="muted" style="font-size:0.85rem"></div>
+		</div>
+		{% else %}
+		<div class="card">
+			<h3 style="margin-top:0">Ticket Details</h3>
+			<div id="td-details" class="muted" style="font-size:0.88rem"></div>
+		</div>
+		{% endif %}
+	</div>
+</div>
+
+<script>
+const TICKET_ID = {{ ticket_id }};
+const IS_ADMIN_VIEW = {{ "true" if is_admin_view else "false" }};
+const API_BASE = IS_ADMIN_VIEW ? "/api/tickets" : "/api/me/tickets";
+let currentTicket = null;
+
+function statusPillClass(status) {
+	if (status === "resolved" || status === "closed") return "status-offline";
+	if (status === "new" || status === "reopened" || status === "waiting_for_admin") return "status-revoked";
+	return "status-online";
+}
+
+function renderBadges(t) {
+	document.getElementById("td-badges").innerHTML = `
+		<span class="status-pill ${statusPillClass(t.status)}">${t.status_label}</span>
+		<span class="activity-action">${t.priority_label} priority</span>
+		<span class="activity-action">${t.category_label}</span>
+	`;
+}
+
+function renderThread(t) {
+	document.getElementById("td-thread").innerHTML = t.messages.map((m) => `
+		<div class="card" style="margin-bottom:10px;${m.is_internal_note ? "border-color:var(--warning-strong,#f59e0b)" : ""}">
+			<div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:6px">
+				<strong>${m.author}${m.author_is_admin ? ' <span class="role-badge role-admin">Staff</span>' : ' <span class="role-badge role-viewer">You</span>'}${m.is_internal_note ? ' <span class="activity-action">Internal Note</span>' : ""}</strong>
+				<span class="muted" style="font-size:0.8rem">${new Date(m.created_at).toLocaleString()}</span>
+			</div>
+			<div style="white-space:pre-wrap">${m.body.replace(/</g, "&lt;")}</div>
+			${m.attachments.length ? `<div class="muted" style="margin-top:8px;font-size:0.82rem">${m.attachments.map((a) => `📎 ${a.filename}`).join(", ")}</div>` : ""}
+		</div>
+	`).join("");
+}
+
+function renderContext(t) {
+	const panel = document.getElementById("td-context-panel");
+	if (!t.context_snapshot) { panel.style.display = "none"; return; }
+	panel.style.display = "block";
+	const c = t.context_snapshot;
+	document.getElementById("td-context-body").innerHTML = `
+		${t.vpn_client_name ? `VPN Profile: <strong>${t.vpn_client_name}</strong><br>` : ""}
+		${c.current_ip ? `IP at time of filing: <strong>${c.current_ip}</strong><br>` : ""}
+		${c.usage ? `Bandwidth usage: <strong>${JSON.stringify(c.usage)}</strong><br>` : ""}
+	`;
+}
+
+function renderReplyArea(t) {
+	const canReply = t.can_reply;
+	document.getElementById("td-reply-form").style.display = canReply ? "block" : "none";
+	document.getElementById("td-reopen-panel").style.display = (!canReply && !IS_ADMIN_VIEW) ? "block" : "none";
+	if (!canReply && !IS_ADMIN_VIEW) document.getElementById("td-reopen-status").textContent = t.status_label.toLowerCase();
+	// Admins can always reply/leave a note regardless of status.
+	if (IS_ADMIN_VIEW) document.getElementById("td-reply-form").style.display = "block";
+}
+
+async function loadTicket() {
+	currentTicket = await apiFetch(`${API_BASE}/${TICKET_ID}`);
+	const t = currentTicket;
+	document.getElementById("td-subject").textContent = t.subject;
+	renderBadges(t);
+	renderThread(t);
+	renderContext(t);
+	renderReplyArea(t);
+	if (IS_ADMIN_VIEW) {
+		document.getElementById("td-status-select").value = t.status;
+		document.getElementById("td-priority-select").value = t.priority;
+		loadHistory();
+	} else {
+		document.getElementById("td-details").innerHTML = `
+			Category: <strong>${t.category_label}</strong><br>
+			Priority: <strong>${t.priority_label}</strong><br>
+			Assigned to: <strong>${t.assigned_admin || "Unassigned"}</strong><br>
+			Created: <strong>${new Date(t.created_at).toLocaleString()}</strong>
+		`;
+	}
+}
+
+async function loadHistory() {
+	const data = await apiFetch(`/api/tickets/${TICKET_ID}/history`);
+	document.getElementById("td-history").innerHTML = data.events.length
+		? data.events.map((e) => `<div style="margin-bottom:8px"><strong>${e.username}</strong> -- ${e.action}<br><span class="muted">${e.detail || ""}</span><br><span class="muted" style="font-size:0.78rem">${new Date(e.timestamp).toLocaleString()}</span></div>`).join("")
+		: '<p class="muted">No activity yet.</p>';
+}
+
+document.getElementById("td-reply-form").addEventListener("submit", async (e) => {
+	e.preventDefault();
+	const fd = new FormData();
+	fd.set("body", document.getElementById("td-reply-body").value);
+	if (IS_ADMIN_VIEW) fd.set("is_internal_note", document.getElementById("td-internal-note").checked ? "true" : "false");
+	try {
+		await apiFetchForm(`${API_BASE}/${TICKET_ID}/replies`, fd);
+		document.getElementById("td-reply-body").value = "";
+		if (IS_ADMIN_VIEW) document.getElementById("td-internal-note").checked = false;
+		await loadTicket();
+		toast("Reply sent.");
+	} catch (err) {
+		toast(err.message, "error");
+	}
+});
+
+document.getElementById("td-reopen-btn")?.addEventListener("click", async () => {
+	try {
+		await apiFetch(`${API_BASE}/${TICKET_ID}/reopen`, { method: "POST" });
+		await loadTicket();
+		toast("Ticket reopened.");
+	} catch (err) {
+		toast(err.message, "error");
+	}
+});
+
+if (IS_ADMIN_VIEW) {
+	document.getElementById("td-save-manage").addEventListener("click", async () => {
+		const assigneeVal = document.getElementById("td-assignee-select").value;
+		const body = {
+			status: document.getElementById("td-status-select").value,
+			priority: document.getElementById("td-priority-select").value,
+		};
+		if (assigneeVal) body.assigned_admin_id = Number(assigneeVal);
+		else body.clear_assignment = true;
+		try {
+			await apiFetch(`/api/tickets/${TICKET_ID}`, { method: "PATCH", body });
+			await loadTicket();
+			toast("Ticket updated.");
+		} catch (err) {
+			toast(err.message, "error");
+		}
+	});
+}
+
+(async function init() {
+	if (IS_ADMIN_VIEW) {
+		const catData = await apiFetch("/api/tickets/categories");
+		document.getElementById("td-status-select").innerHTML = catData.statuses.map((s) => `<option value="${s.value}">${s.label}</option>`).join("");
+		document.getElementById("td-priority-select").innerHTML = catData.priorities.map((p) => `<option value="${p.value}">${p.label}</option>`).join("");
+		const admins = await apiFetch("/api/tickets/assignable-admins");
+		for (const a of admins.admins) {
+			const o = document.createElement("option");
+			o.value = a.id; o.textContent = a.display_name;
+			document.getElementById("td-assignee-select").appendChild(o);
+		}
+	}
+	await loadTicket();
+	if (IS_ADMIN_VIEW && currentTicket.assigned_admin) {
+		const sel = document.getElementById("td-assignee-select");
+		const match = [...sel.options].find((o) => o.textContent === currentTicket.assigned_admin);
+		if (match) sel.value = match.value;
+	}
+})();
+</script>
+{% endblock %}

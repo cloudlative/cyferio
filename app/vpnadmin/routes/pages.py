@@ -66,6 +66,12 @@ def _ctx(user: User, db: Session, **extra) -> dict:
         "can_view_clients": has_permission_any_scope(db, user, "vpn_profiles", "view"),
         "can_view_health": has_permission_any_scope(db, user, "health", "view"),
         "can_view_reports": has_permission_any_scope(db, user, "reports", "view"),
+        # Support Center nav visibility -- an "own"-scoped account (the
+        # "User" self-service role) has view/create/update on
+        # "support_tickets" too, but only for its OWN tickets (see routes/
+        # me_tickets.py); any_scope is what distinguishes "can see the
+        # admin console" from "can use My Support".
+        "can_manage_support": has_permission_any_scope(db, user, "support_tickets", "update"),
         # Database Reporting -- a stricter, separate gate than "reports"
         # itself (see permissions.py's OBJECTS entry for "db_reporting"),
         # so Reports' own nav link/page stays visible under "can_view_reports"
@@ -331,15 +337,55 @@ def faq_page(request: Request, user: User | None = Depends(get_current_user), db
 
 @router.get("/support")
 def support_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Same "every account, any role" posture as /faq -- reachable by
-    # whoever's already logged in, no permission gate. Linked from the
-    # FAQ page's "Still need help?" card.
+    """"My Support" -- ticket list + create form (routes/me_tickets.py).
+    Same "every account, any role" posture as /faq -- reachable by
+    whoever's already logged in, no permission gate. Linked from the FAQ
+    page's "Still need help?" card. Replaces the old stateless "Contact
+    Support" email form (routes/support.py, removed) -- see the Support
+    Ticketing System plan for why that's superseded, not kept alongside."""
     if user is None:
         return RedirectResponse("/login", status_code=303)
     redirect = _password_reset_redirect(user, request)
     if redirect is not None:
         return redirect
     return templates.TemplateResponse(request, "support.html", _ctx(user, db))
+
+
+@router.get("/support/{ticket_id}")
+def ticket_detail_page(ticket_id: int, request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
+    return templates.TemplateResponse(request, "ticket_detail.html", _ctx(user, db, ticket_id=ticket_id, is_admin_view=False))
+
+
+@router.get("/support-center")
+def support_center_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
+    if not has_permission_any_scope(db, user, "support_tickets", "view"):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "support_center.html", _ctx(user, db))
+
+
+@router.get("/support-center/{ticket_id}")
+def ticket_detail_admin_page(ticket_id: int, request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
+    if not has_permission_any_scope(db, user, "support_tickets", "view"):
+        return RedirectResponse("/", status_code=303)
+    # Reuses the SAME template as /support/{id} -- see ticket_detail.html's
+    # own comment on how is_admin_view toggles the assign/status/internal-
+    # note controls, rather than maintaining two near-identical templates.
+    return templates.TemplateResponse(request, "ticket_detail.html", _ctx(user, db, ticket_id=ticket_id, is_admin_view=True))
 
 
 @router.get("/change-password")

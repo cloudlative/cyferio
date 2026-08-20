@@ -76,7 +76,7 @@
 			{% endif %}
 			{% endif %}
 
-			{% if is_admin or can_manage_roles %}
+			{% if is_admin or can_manage_roles or can_manage_support %}
 			<div class="nav-section-label">Administration</div>
 			{% if is_admin %}
 			<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
@@ -84,6 +84,9 @@
 			{% endif %}
 			{% if can_manage_roles %}
 			<a href="/roles" class="{{ 'active' if request.url.path == '/roles' }}"><span class="nav-icon">⚿</span>Roles</a>
+			{% endif %}
+			{% if can_manage_support %}
+			<a href="/support-center" class="{{ 'active' if request.url.path.startswith('/support-center') }}"><span class="nav-icon">☎</span>Support Center</a>
 			{% endif %}
 			{% if is_admin %}
 			<a href="/settings" class="{{ 'active' if request.url.path == '/settings' }}"><span class="nav-icon">⛭</span>Settings</a>
@@ -95,6 +98,7 @@
 			   is written for the least technical account in the building,
 			   so it stays reachable by everyone rather than being tucked
 			   behind a permission check. #}
+			<a href="/support" class="{{ 'active' if request.url.path.startswith('/support') and not request.url.path.startswith('/support-center') }}"><span class="nav-icon">✉</span>Support</a>
 			<a href="/faq" class="{{ 'active' if request.url.path == '/faq' }}"><span class="nav-icon">?</span>FAQ / Help</a>
 		</nav>
 	</aside>

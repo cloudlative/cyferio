@@ -42,6 +42,14 @@ class UpdateSettingsRequest(BaseModel):
     default_quota_enforcement_policy: str | None = None
     allow_duplicate_macs: bool | None = None
 
+    # Support Ticketing System -- admin-tweakable preferences, see
+    # AppSettings' own columns for why these aren't hardcoded constants.
+    support_ticket_rate_limit_count: int | None = None
+    support_ticket_rate_limit_window_minutes: int | None = None
+    support_max_attachment_size_mb: int | None = None
+    support_max_attachments_per_message: int | None = None
+    notify_admin_on_ticket_created: bool | None = None
+
     admin_notification_email: str | None = None
     notify_admin_on_user_created: bool | None = None
     notify_admin_on_client_revoked: bool | None = None
@@ -209,6 +217,14 @@ class UpdateSettingsRequest(BaseModel):
             raise ValueError("Quota notification thresholds must be between 1 and 99 percent.")
         return v
 
+    @field_validator("support_ticket_rate_limit_count", "support_ticket_rate_limit_window_minutes",
+                      "support_max_attachment_size_mb", "support_max_attachments_per_message")
+    @classmethod
+    def _support_tunable_positive(cls, v):
+        if v is not None and v < 1:
+            raise ValueError("Support ticketing limits must be at least 1.")
+        return v
+
     @model_validator(mode="after")
     def _warning_below_critical(self):
         # Only checked when BOTH are present in this request -- a partial
@@ -306,6 +322,15 @@ def _serialize() -> dict:
         "quota_notify_critical_pct": s.quota_notify_critical_pct,
         "notify_admin_on_quota_critical": s.notify_admin_on_quota_critical,
         "allow_duplicate_macs": bool(s.allow_duplicate_macs),
+        "support_ticket_rate_limit_count": s.support_ticket_rate_limit_count if s.support_ticket_rate_limit_count is not None else 5,
+        "support_ticket_rate_limit_window_minutes": (
+            s.support_ticket_rate_limit_window_minutes if s.support_ticket_rate_limit_window_minutes is not None else 60
+        ),
+        "support_max_attachment_size_mb": s.support_max_attachment_size_mb if s.support_max_attachment_size_mb is not None else 10,
+        "support_max_attachments_per_message": (
+            s.support_max_attachments_per_message if s.support_max_attachments_per_message is not None else 5
+        ),
+        "notify_admin_on_ticket_created": bool(s.notify_admin_on_ticket_created),
         "reports_default_range_days": s.reports_default_range_days,
         "db_snapshot_retention_days": s.db_snapshot_retention_days,
         "maintenance_mode": s.maintenance_mode,
@@ -370,6 +395,8 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                    "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "allow_duplicate_macs", "admin_notification_email",
                    "notify_admin_on_user_created", "notify_admin_on_client_revoked",
                    "quota_notify_warning_pct", "quota_notify_critical_pct", "notify_admin_on_quota_critical",
+                   "support_ticket_rate_limit_count", "support_ticket_rate_limit_window_minutes",
+                   "support_max_attachment_size_mb", "support_max_attachments_per_message", "notify_admin_on_ticket_created",
                    "reports_default_range_days", "db_snapshot_retention_days", "maintenance_mode", "maintenance_message",
                    "notification_duration_ms", "login_theme", "timezone", "time_format",
                    "geoip_enabled"):
@@ -437,9 +464,10 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
             raise HTTPException(status_code=400, detail="A MaxMind license key is required to enable Geo/IP.")
 
     notify_fields = {"notify_admin_on_user_created", "notify_admin_on_client_revoked",
-                      "notify_admin_on_quota_critical", "admin_notification_email"}
+                      "notify_admin_on_quota_critical", "notify_admin_on_ticket_created", "admin_notification_email"}
     if notify_fields & fields_set:
-        if (row.notify_admin_on_user_created or row.notify_admin_on_client_revoked or row.notify_admin_on_quota_critical) and not row.admin_notification_email:
+        if (row.notify_admin_on_user_created or row.notify_admin_on_client_revoked
+                or row.notify_admin_on_quota_critical or row.notify_admin_on_ticket_created) and not row.admin_notification_email:
             raise HTTPException(status_code=400, detail="An admin notification email is required to enable event notifications.")
 
     # Same "check the resulting merged state, not just this request's own

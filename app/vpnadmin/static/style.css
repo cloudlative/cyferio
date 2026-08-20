@@ -763,6 +763,13 @@ tr.row-online td:first-child { box-shadow: inset 3px 0 0 var(--success-strong); 
 tr.row-selected td { background: var(--surface-alt); }
 tr.row-selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
+/* Support Ticketing System's ticket list tables (support.html/
+   support_center.html) -- a whole row navigates to the ticket detail
+   page, same client-side-pagination pattern as users_activity.html. */
+tr.clickable-row { cursor: pointer; }
+tr.clickable-row:hover td { background: var(--surface-alt); }
+.pagination { display: flex; align-items: center; justify-content: center; }
+
 .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
 .status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .status-online { background: var(--success-bg); color: var(--success-text); }

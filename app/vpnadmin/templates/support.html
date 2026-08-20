@@ -1,73 +1,208 @@
 {% extends "base.html" %}
-{% block title %}Contact Support — {{ app_settings.app_name }}{% endblock %}
+{% block title %}My Support — {{ app_settings.app_name }}{% endblock %}
 {% block content %}
-<div class="toolbar" style="margin-bottom:6px">
-	<div class="toolbar-title"><h1 style="margin:0">Contact Support</h1></div>
+<div class="toolbar">
+	<div class="toolbar-title"><h1 style="margin:0">My Support</h1></div>
+	<button type="button" class="btn-primary" id="new-ticket-btn">New Ticket</button>
 </div>
-<p class="page-subtitle" style="margin-top:-10px">Didn't find your answer in the <a href="/faq">FAQ</a>? Send a message directly to an administrator -- they'll reply to the email address on your account.</p>
+<p class="page-subtitle" style="margin-top:-10px">Didn't find your answer in the <a href="/faq">FAQ</a>? Open a ticket below -- you'll be able to track its status and reply to an administrator right here.</p>
 
-<div class="card" id="support-form-card">
-	<form id="support-form">
+<div class="card">
+	<div class="form-row" style="margin-bottom:14px">
 		<div class="field">
-			<label for="support-email">Your Email</label>
-			<input type="email" id="support-email" value="{{ user.email or '' }}" readonly disabled>
-			{% if not user.email %}
-			<p class="field-hint" style="color:var(--warning-text)">Your account has no email address on file -- <a href="/profile">add one under My Profile</a> before submitting a request, so an administrator can reply to you.</p>
-			{% else %}
-			<p class="field-hint">An administrator will reply to this address -- it comes from your account, not editable here.</p>
-			{% endif %}
+			<label for="t-search">Search</label>
+			<input type="text" id="t-search" placeholder="Subject...">
 		</div>
 		<div class="field">
-			<label for="support-subject">Subject</label>
-			<input type="text" id="support-subject" required maxlength="200" placeholder="e.g. VPN Connection Issue, Account Access Problem, Billing Question">
+			<label for="t-filter-status">Status</label>
+			<select id="t-filter-status"><option value="">All</option></select>
 		</div>
 		<div class="field">
-			<label for="support-message">Message</label>
-			<textarea id="support-message" rows="8" required maxlength="5000" placeholder="Describe your issue or question in as much detail as you can -- what you were trying to do, what happened instead, and any error messages you saw."></textarea>
-			<p class="field-hint"><span id="support-message-count">0</span> / 5000</p>
+			<label for="t-filter-category">Category</label>
+			<select id="t-filter-category"><option value="">All</option></select>
 		</div>
-		<div class="dialog-actions" style="justify-content:flex-start">
-			<button type="submit" class="btn-primary" id="support-submit" {{ "disabled" if not user.email }}>Send Request</button>
-		</div>
-	</form>
-</div>
-
-<div class="card" id="support-success-card" style="display:none">
-	<h2 style="margin-top:0">Request Sent</h2>
-	<p id="support-success-message" class="muted" style="margin:0"></p>
-	<div class="dialog-actions" style="justify-content:flex-start;margin-top:14px">
-		<a class="btn btn-secondary" href="/faq">Back to FAQ</a>
 	</div>
+	<div style="overflow-x:auto">
+		<table>
+			<thead><tr><th>Subject</th><th>Category</th><th>Priority</th><th>Status</th><th>Updated</th></tr></thead>
+			<tbody id="t-list-body"><tr><td colspan="5" class="muted">Loading...</td></tr></tbody>
+		</table>
+	</div>
+	<div class="pagination" id="t-pagination" style="margin-top:14px"></div>
 </div>
-{% endblock %}
 
-{% block scripts %}
+<dialog id="new-ticket-dialog">
+	<div class="dialog-body">
+		<h2>New Support Ticket</h2>
+		<form id="new-ticket-form">
+			<div class="field">
+				<label for="nt-subject">Subject</label>
+				<input type="text" id="nt-subject" required maxlength="200" placeholder="A short summary of your issue">
+			</div>
+			<div class="form-row">
+				<div class="field">
+					<label for="nt-category">Category</label>
+					<select id="nt-category" required></select>
+				</div>
+				<div class="field">
+					<label for="nt-priority">Priority</label>
+					<select id="nt-priority"></select>
+				</div>
+			</div>
+			<p class="field-hint" id="nt-guidance"></p>
+			<div class="field">
+				<label for="nt-description">Description</label>
+				<textarea id="nt-description" rows="8" required maxlength="5000" placeholder="Describe your issue in as much detail as you can -- what you were trying to do, what happened instead, and any error messages you saw."></textarea>
+				<p class="field-hint"><span id="nt-description-count">0</span> / 5000</p>
+			</div>
+			<div class="checkbox-row">
+				<label class="checkbox-label"><input type="checkbox" id="nt-attach-context"> Attach my current VPN diagnostic info (IP, session, recent connection issues)</label>
+			</div>
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" id="new-ticket-cancel">Cancel</button>
+				<button type="submit" class="btn-primary" id="new-ticket-submit">Submit Ticket</button>
+			</div>
+		</form>
+	</div>
+</dialog>
+
 <script>
-const supportMessageEl = document.getElementById("support-message");
-const supportMessageCount = document.getElementById("support-message-count");
-supportMessageEl.addEventListener("input", () => {
-	supportMessageCount.textContent = supportMessageEl.value.length;
+let allTickets = [];
+let categoryData = [];
+let ticketPage = 1;
+const TICKET_PAGE_SIZE = 15;
+
+function statusPillClass(status) {
+	if (status === "resolved" || status === "closed") return "status-offline";
+	if (status === "new" || status === "reopened" || status === "waiting_for_admin") return "status-revoked";
+	return "status-online";
+}
+
+function renderCategoryOptions(selectEl, { includeAll = false } = {}) {
+	selectEl.innerHTML = includeAll ? '<option value="">All</option>' : "";
+	for (const group of categoryData) {
+		const og = document.createElement("optgroup");
+		og.label = group.group;
+		for (const opt of group.options) {
+			const o = document.createElement("option");
+			o.value = opt.slug; o.textContent = opt.label;
+			o.dataset.guidance = opt.guidance;
+			o.dataset.contextSuggested = opt.context_suggested ? "1" : "";
+			og.appendChild(o);
+		}
+		selectEl.appendChild(og);
+	}
+}
+
+function currentFilteredTickets() {
+	const q = (document.getElementById("t-search").value || "").toLowerCase();
+	const status = document.getElementById("t-filter-status").value;
+	const category = document.getElementById("t-filter-category").value;
+	return allTickets.filter((t) =>
+		(!q || t.subject.toLowerCase().includes(q)) &&
+		(!status || t.status === status) &&
+		(!category || t.category === category)
+	);
+}
+
+function renderTicketTable() {
+	const filtered = currentFilteredTickets();
+	const totalPages = Math.max(1, Math.ceil(filtered.length / TICKET_PAGE_SIZE));
+	ticketPage = Math.min(ticketPage, totalPages);
+	const start = (ticketPage - 1) * TICKET_PAGE_SIZE;
+	const pageRows = filtered.slice(start, start + TICKET_PAGE_SIZE);
+
+	const tbody = document.getElementById("t-list-body");
+	if (pageRows.length === 0) {
+		tbody.innerHTML = '<tr><td colspan="5" class="muted">No tickets found.</td></tr>';
+	} else {
+		tbody.innerHTML = pageRows.map((t) => `
+			<tr class="clickable-row" onclick="window.location.href='/support/${t.id}'">
+				<td>${t.subject}</td>
+				<td>${t.category_label}</td>
+				<td>${t.priority_label}</td>
+				<td><span class="status-pill ${statusPillClass(t.status)}">${t.status_label}</span></td>
+				<td class="muted">${new Date(t.updated_at).toLocaleString()}</td>
+			</tr>
+		`).join("");
+	}
+
+	const pager = document.getElementById("t-pagination");
+	pager.innerHTML = totalPages <= 1 ? "" : `
+		<button type="button" class="btn-secondary" ${ticketPage <= 1 ? "disabled" : ""} id="t-prev">Prev</button>
+		<span class="muted" style="margin:0 10px">Page ${ticketPage} of ${totalPages}</span>
+		<button type="button" class="btn-secondary" ${ticketPage >= totalPages ? "disabled" : ""} id="t-next">Next</button>
+	`;
+	if (totalPages > 1) {
+		document.getElementById("t-prev")?.addEventListener("click", () => { ticketPage--; renderTicketTable(); });
+		document.getElementById("t-next")?.addEventListener("click", () => { ticketPage++; renderTicketTable(); });
+	}
+}
+
+async function loadTickets() {
+	const data = await apiFetch("/api/me/tickets");
+	allTickets = data.tickets;
+	ticketPage = 1;
+	renderTicketTable();
+}
+
+for (const id of ["t-search"]) document.getElementById(id).addEventListener("input", () => { ticketPage = 1; renderTicketTable(); });
+for (const id of ["t-filter-status", "t-filter-category"]) document.getElementById(id).addEventListener("change", () => { ticketPage = 1; renderTicketTable(); });
+
+document.getElementById("nt-description").addEventListener("input", (e) => {
+	document.getElementById("nt-description-count").textContent = e.target.value.length;
+});
+document.getElementById("nt-category").addEventListener("change", (e) => {
+	const opt = e.target.selectedOptions[0];
+	document.getElementById("nt-guidance").textContent = opt?.dataset.guidance || "";
+	document.getElementById("nt-attach-context").checked = opt?.dataset.contextSuggested === "1";
 });
 
-document.getElementById("support-form").addEventListener("submit", async (e) => {
+document.getElementById("new-ticket-btn").addEventListener("click", () => {
+	document.getElementById("new-ticket-form").reset();
+	document.getElementById("nt-description-count").textContent = "0";
+	document.getElementById("nt-category").dispatchEvent(new Event("change"));
+	document.getElementById("new-ticket-dialog").showModal();
+});
+document.getElementById("new-ticket-cancel").addEventListener("click", () => document.getElementById("new-ticket-dialog").close());
+
+document.getElementById("new-ticket-form").addEventListener("submit", async (e) => {
 	e.preventDefault();
-	const subject = document.getElementById("support-subject").value.trim();
-	const message = supportMessageEl.value.trim();
-	if (!subject || !message) {
-		toast("Please fill in both Subject and Message.", "error");
-		return;
-	}
-	const submitBtn = document.getElementById("support-submit");
-	submitBtn.disabled = true;
+	const fd = new FormData();
+	fd.set("subject", document.getElementById("nt-subject").value);
+	fd.set("category", document.getElementById("nt-category").value);
+	fd.set("priority", document.getElementById("nt-priority").value);
+	fd.set("description", document.getElementById("nt-description").value);
+	fd.set("attach_context", document.getElementById("nt-attach-context").checked ? "true" : "false");
 	try {
-		const result = await apiFetch("/api/support", { method: "POST", body: { subject, message } });
-		document.getElementById("support-form-card").style.display = "none";
-		document.getElementById("support-success-message").textContent = result.message;
-		document.getElementById("support-success-card").style.display = "";
+		const ticket = await apiFetchForm("/api/me/tickets", fd);
+		document.getElementById("new-ticket-dialog").close();
+		toast("Ticket submitted.");
+		window.location.href = `/support/${ticket.id}`;
 	} catch (err) {
 		toast(err.message, "error");
-		submitBtn.disabled = false;
 	}
 });
+
+(async function init() {
+	const catData = await apiFetch("/api/me/tickets/categories");
+	categoryData = catData.categories;
+	renderCategoryOptions(document.getElementById("nt-category"));
+	renderCategoryOptions(document.getElementById("t-filter-category"), { includeAll: true });
+	const prioritySel = document.getElementById("nt-priority");
+	prioritySel.innerHTML = catData.priorities.map((p) => `<option value="${p.value}" ${p.value === "medium" ? "selected" : ""}>${p.label}</option>`).join("");
+
+	const statusSel = document.getElementById("t-filter-status");
+	// Built from whatever's actually in the ticket list rather than a
+	// separate statuses endpoint -- self-service only ever needs to filter
+	// by statuses that could exist on ITS OWN tickets, not the full admin set.
+	await loadTickets();
+	const seenStatuses = [...new Map(allTickets.map((t) => [t.status, t.status_label])).entries()];
+	for (const [value, label] of seenStatuses) {
+		const o = document.createElement("option");
+		o.value = value; o.textContent = label;
+		statusSel.appendChild(o);
+	}
+})();
 </script>
 {% endblock %}
