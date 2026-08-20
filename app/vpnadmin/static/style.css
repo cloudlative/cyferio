@@ -835,6 +835,37 @@ input[type=text], input[type=password], input[type=date], input[type=email], inp
 }
 select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 
+/* File inputs (ticket attachments) -- otherwise render as the browser's
+   bare OS-native picker, which reads as unstyled/broken against this
+   app's dark theme. Wraps the whole control in the same pill shape as
+   every other field, and re-skins the browser's own "Choose File" part
+   as a .btn-secondary so it matches every other button on the page
+   instead of clashing with it. */
+input[type=file] {
+	padding: 8px 14px;
+	border-radius: 9px;
+	border: 1.5px solid var(--border);
+	background: var(--bg-elevated);
+	color: var(--text-muted);
+	font: inherit;
+	font-size: 0.85rem;
+	width: 100%;
+}
+input[type=file]::file-selector-button {
+	margin-right: 12px;
+	padding: 7px 14px;
+	border-radius: 999px;
+	border: 1px solid var(--border-light);
+	background: var(--surface-alt);
+	color: var(--text);
+	font: inherit;
+	font-weight: 600;
+	font-size: 0.8rem;
+	cursor: pointer;
+	transition: background 0.15s ease, border-color 0.15s ease;
+}
+input[type=file]::file-selector-button:hover { background: var(--surface-hover); border-color: var(--accent-2); }
+
 /* --- Geo-scoped restriction pickers (users.html's City/ASN Login
    Restrictions) -- a country <select> narrows what the multiselect next
    to it offers, so the two sit side by side as one control. */

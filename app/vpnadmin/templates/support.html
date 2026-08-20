@@ -3,7 +3,10 @@
 {% block content %}
 <div class="toolbar">
 	<div class="toolbar-title"><h1 style="margin:0">My Support</h1></div>
-	<button type="button" class="btn-primary" id="new-ticket-btn">New Ticket</button>
+	<div style="display:flex;gap:8px">
+		<button type="button" class="btn-secondary" id="refresh-btn">Refresh</button>
+		<button type="button" class="btn-primary" id="new-ticket-btn">New Ticket</button>
+	</div>
 </div>
 <p class="page-subtitle" style="margin-top:-10px">Didn't find your answer in the <a href="/faq">FAQ</a>? Open a ticket below -- you'll be able to track its status and reply to an administrator right here.</p>
 
@@ -69,7 +72,8 @@
 		</form>
 	</div>
 </dialog>
-
+{% endblock %}
+{% block scripts %}
 <script>
 let allTickets = [];
 let categoryData = [];
@@ -161,6 +165,8 @@ document.getElementById("nt-category").addEventListener("change", (e) => {
 	document.getElementById("nt-guidance").textContent = opt?.dataset.guidance || "";
 	document.getElementById("nt-attach-context").checked = opt?.dataset.contextSuggested === "1";
 });
+
+document.getElementById("refresh-btn").addEventListener("click", loadTickets);
 
 document.getElementById("new-ticket-btn").addEventListener("click", () => {
 	document.getElementById("new-ticket-form").reset();

@@ -3,6 +3,7 @@
 {% block content %}
 <div class="toolbar">
 	<div class="toolbar-title"><h1 style="margin:0">Support Center</h1></div>
+	<button type="button" class="btn-secondary" id="refresh-btn">Refresh</button>
 </div>
 <p class="page-subtitle" style="margin-top:-10px">Every ticket, from every user -- filter, search, and act on them below.</p>
 
@@ -33,7 +34,8 @@
 	</div>
 	<div class="pagination" id="sc-pagination" style="margin-top:14px"></div>
 </div>
-
+{% endblock %}
+{% block scripts %}
 <script>
 let allTickets = [];
 let categoryData = [];
@@ -122,9 +124,16 @@ for (const id of ["sc-filter-status", "sc-filter-category", "sc-filter-priority"
 		prioritySel.appendChild(o);
 	}
 
+	await loadTickets();
+})();
+
+async function loadTickets() {
 	const data = await apiFetch("/api/tickets");
 	allTickets = data.tickets;
+	ticketPage = 1;
 	renderTicketTable();
-})();
+}
+
+document.getElementById("refresh-btn").addEventListener("click", loadTickets);
 </script>
 {% endblock %}
