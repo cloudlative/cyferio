@@ -552,6 +552,21 @@ class AppSettings(Base):
     # prune_connection_rejections() and main.py's lifespan().
     connection_issue_retention_days = Column(Integer, nullable=True)
 
+    # MAC Address Duplication Policy -- NULL/false (default) preserves the
+    # original, always-on behavior: openvpn-install.sh's find_mac_owner()
+    # rejects registering a MAC already assigned to a different client.
+    # True relaxes that ONE check (do_add_client/do_add_mac's cross-client
+    # conflict check) to allow the same MAC on multiple clients -- e.g.
+    # shared/virtualized devices. Threaded through to the script per-call
+    # as the ALLOW_DUPLICATE_MACS env var (see cli_wrapper.py's
+    # _run_install_script()), never a persistent change to the script
+    # itself. Deliberately does NOT affect connect-time enforcement --
+    # host-scripts/openvpn-mac-addr-check.py's db_lookup() only ever
+    # checks a MAC against the connecting client's OWN registrations, not
+    # other clients', so this setting can't weaken who's allowed to
+    # actually connect, only whether registering a shared MAC is accepted.
+    allow_duplicate_macs = Column(Boolean, nullable=True)
+
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
 

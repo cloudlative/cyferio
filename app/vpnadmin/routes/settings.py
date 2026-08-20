@@ -40,6 +40,7 @@ class UpdateSettingsRequest(BaseModel):
     default_new_user_role: str | None = None
     default_bandwidth_monthly_gb: float | None = None
     default_quota_enforcement_policy: str | None = None
+    allow_duplicate_macs: bool | None = None
 
     admin_notification_email: str | None = None
     notify_admin_on_user_created: bool | None = None
@@ -304,6 +305,7 @@ def _serialize() -> dict:
         "quota_notify_warning_pct": s.quota_notify_warning_pct,
         "quota_notify_critical_pct": s.quota_notify_critical_pct,
         "notify_admin_on_quota_critical": s.notify_admin_on_quota_critical,
+        "allow_duplicate_macs": bool(s.allow_duplicate_macs),
         "reports_default_range_days": s.reports_default_range_days,
         "db_snapshot_retention_days": s.db_snapshot_retention_days,
         "maintenance_mode": s.maintenance_mode,
@@ -357,12 +359,15 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
     row = get_settings_row(db)
     fields_set = body.model_fields_set
     changes = []
+    # Captured before the loop below can touch it -- feeds the dedicated
+    # mac_duplicate_policy_changed audit entry after the loop (see there).
+    prev_allow_duplicate_macs = bool(row.allow_duplicate_macs)
 
     for field in ("portal_url", "min_password_length",
                    "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
                    "password_history_count",
                    "audit_retention_days", "connection_issue_retention_days", "log_failed_login_attempts", "default_new_user_role",
-                   "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "admin_notification_email",
+                   "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "allow_duplicate_macs", "admin_notification_email",
                    "notify_admin_on_user_created", "notify_admin_on_client_revoked",
                    "quota_notify_warning_pct", "quota_notify_critical_pct", "notify_admin_on_quota_critical",
                    "reports_default_range_days", "db_snapshot_retention_days", "maintenance_mode", "maintenance_message",
@@ -454,6 +459,18 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
         db.commit()
         refresh_runtime_cache(db)
         log_action(db, admin, "update_settings", detail="; ".join(changes))
+        # A dedicated, directly searchable audit action for this one
+        # security-relevant toggle -- see the spec's explicit ask for
+        # "previous value, new value" on enabling/disabling duplicate MAC
+        # support, beyond what the generic update_settings line above
+        # (field names only, no values) already records.
+        if "allow_duplicate_macs" in changes:
+            new_allow_duplicate_macs = bool(row.allow_duplicate_macs)
+            log_action(
+                db, admin, "mac_duplicate_policy_changed",
+                detail=f"{'enabled' if prev_allow_duplicate_macs else 'disabled'} -> "
+                       f"{'enabled' if new_allow_duplicate_macs else 'disabled'}",
+            )
     return _serialize()
 
 

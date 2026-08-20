@@ -90,6 +90,62 @@ class TestUpdateSettings:
         assert entry.username == "admin"
 
 
+class TestMacDuplicationPolicy:
+    """Configurable MAC Address Duplication Policy (Settings -> VPN
+    Management -> "Allow Duplicate MAC Addresses") -- defaults off (strict,
+    the original always-on behavior), admin-toggleable. cli_wrapper's own
+    threading of this into openvpn-install.sh's --allow-duplicate flag is
+    covered by test_cli_wrapper.py; this file only covers the setting's
+    own storage/API/audit-trail round trip."""
+
+    def test_defaults_to_disabled(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.get("/api/settings")
+        assert r.json()["allow_duplicate_macs"] is False
+
+    def test_admin_can_enable_and_disable(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch("/api/settings", json={"allow_duplicate_macs": True})
+        assert r.status_code == 200
+        assert r.json()["allow_duplicate_macs"] is True
+        assert runtime_settings.allow_duplicate_macs is True  # in-process cache refreshed immediately
+
+        r = app_client.patch("/api/settings", json={"allow_duplicate_macs": False})
+        assert r.status_code == 200
+        assert r.json()["allow_duplicate_macs"] is False
+        assert runtime_settings.allow_duplicate_macs is False
+
+    def test_viewer_cannot_change_it(self, app_client):
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.patch("/api/settings", json={"allow_duplicate_macs": True})
+        assert r.status_code == 403
+
+    def test_change_logged_with_old_and_new_value(self, app_client, db_session):
+        from vpnadmin.models import AuditLog
+
+        login(app_client, "admin", "adminpass123")
+        app_client.patch("/api/settings", json={"allow_duplicate_macs": True})
+        entry = db_session.query(AuditLog).filter(AuditLog.action == "mac_duplicate_policy_changed").one()
+        assert entry.username == "admin"
+        assert entry.detail == "disabled -> enabled"
+
+    def test_resaving_the_same_value_does_not_duplicate_the_audit_entry(self, app_client, db_session):
+        from vpnadmin.models import AuditLog
+
+        login(app_client, "admin", "adminpass123")
+        app_client.patch("/api/settings", json={"allow_duplicate_macs": True})
+        app_client.patch("/api/settings", json={"allow_duplicate_macs": True})  # unchanged -- not in `changes`
+        entries = db_session.query(AuditLog).filter(AuditLog.action == "mac_duplicate_policy_changed").all()
+        assert len(entries) == 1
+
+    def test_unrelated_save_does_not_touch_it(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        app_client.patch("/api/settings", json={"allow_duplicate_macs": True})
+        r = app_client.patch("/api/settings", json={"portal_url": "https://vpn.example.com"})
+        assert r.status_code == 200
+        assert r.json()["allow_duplicate_macs"] is True
+
+
 class TestGeoipSettings:
     """MaxMind GeoIP -- see features.py / routes/settings.py's geoip
     endpoints. Doesn't exercise /api/settings/geoip/refresh's actual host

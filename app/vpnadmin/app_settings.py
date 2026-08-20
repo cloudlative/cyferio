@@ -205,6 +205,7 @@ class _RuntimeSettings:
         self.recaptcha_site_key = env_settings.RECAPTCHA_SITE_KEY
         self.recaptcha_secret_key = env_settings.RECAPTCHA_SECRET_KEY
         self.connection_issue_retention_days = 60  # None/0 (if explicitly set) = keep forever
+        self.allow_duplicate_macs = False  # default = strict, matches openvpn-install.sh's original always-on behavior
 
 
 runtime = _RuntimeSettings()
@@ -277,6 +278,7 @@ def refresh_runtime_cache(db: Session) -> None:
     # My Connection Issues: same "default to a bounded window, admin can
     # still explicitly set 0 for forever" stance as db_snapshot_retention_days.
     runtime.connection_issue_retention_days = row.connection_issue_retention_days if row.connection_issue_retention_days is not None else 60
+    runtime.allow_duplicate_macs = bool(row.allow_duplicate_macs)
 
     # Mirrors the one setting host-scripts/quota_enforcer.py needs but has
     # no DB access to read directly -- see policy_store.write_global_defaults

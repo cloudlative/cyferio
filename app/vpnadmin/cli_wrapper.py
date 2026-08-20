@@ -15,7 +15,23 @@ import subprocess
 import threading
 import time
 
+from . import app_settings
 from .config import settings
+
+# Appended to --add-mac/--add-user's own argv (see add_mac()/add_client()
+# below) whenever the admin-configured "Allow Duplicate MAC Addresses"
+# setting (app_settings.runtime.allow_duplicate_macs, Settings ->
+# VPN Management) is on -- lets openvpn-install.sh's do_add_mac/
+# do_add_client skip their cross-client MAC conflict check for just this
+# one invocation. A plain trailing CLI flag rather than an env var/config-
+# file write: it works identically whether or not USE_SUDO re-invokes the
+# script through `sudo`, with no dependency on sudoers env_keep/SETENV
+# policy or on the app process having direct filesystem access to
+# /etc/openvpn (neither of which this wrapper can assume -- see
+# config.py's USE_SUDO docstring). Omitted entirely when the setting is
+# off, so the script's default (and only historical) behavior is
+# byte-for-byte unchanged for every other caller.
+_ALLOW_DUPLICATE_FLAG = "--allow-duplicate"
 
 # The two wrapped scripts spawn a fresh python3/bash interpreter per
 # invocation, and the dashboard fires several of these concurrently
@@ -149,7 +165,10 @@ def dump_macs() -> dict:
 
 
 def add_mac(name: str, mac: str) -> str:
-    proc = _run_install_script("--add-mac", name, mac)
+    args = ["--add-mac", name, mac]
+    if app_settings.runtime.allow_duplicate_macs:
+        args.append(_ALLOW_DUPLICATE_FLAG)
+    proc = _run_install_script(*args)
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to add MAC address",
@@ -216,7 +235,10 @@ def add_client(name: str, mac: str) -> str:
     swallowed. Raises ScriptError with the script's own stderr message on
     failure (bad name, bad MAC, duplicate client, etc.) -- already
     human-readable, written for exactly this purpose."""
-    proc = _run_install_script("--add-user", name, mac)
+    args = ["--add-user", name, mac]
+    if app_settings.runtime.allow_duplicate_macs:
+        args.append(_ALLOW_DUPLICATE_FLAG)
+    proc = _run_install_script(*args)
     if proc.returncode != 0:
         raise ScriptError(
             proc.stderr.strip() or "Failed to add client",

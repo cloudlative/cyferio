@@ -247,10 +247,15 @@ find_mac_owner () {
 }
 
 do_add_client () {
-	# Usage: do_add_client <name> <mac>
+	# Usage: do_add_client <name> <mac> [--allow-duplicate]
 	# Issues a client cert, generates the .ovpn, registers the client in
 	# the MAC-binding db, and delivers the .ovpn to OVPN_OUTPUT_DIR.
-	local unsanitized_client="$1" raw_mac="$2" client mac
+	# --allow-duplicate skips the cross-client MAC conflict check below --
+	# set by cli_wrapper.py's add_client() only when the admin has turned
+	# on Settings -> VPN Management -> "Allow Duplicate MAC Addresses";
+	# absent (the default) for every other caller, including interactive
+	# menu use, which always enforces one-MAC-one-client as before.
+	local unsanitized_client="$1" raw_mac="$2" allow_dup="${3:-}" client mac
 
 	client=$(sed 's/[^0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-]/_/g' <<< "$unsanitized_client")
 	if [[ -z "$client" ]]; then
@@ -270,10 +275,12 @@ do_add_client () {
 		echo "Invalid MAC address: expected 12 hex characters (e.g. aa:bb:cc:dd:ee:ff), got '$raw_mac'." >&2
 		return 1
 	fi
-	local existing_owner
-	if existing_owner=$(find_mac_owner "$mac"); then
-		echo "MAC address $mac is already assigned to client '$existing_owner'." >&2
-		return 1
+	if [[ "$allow_dup" != "--allow-duplicate" ]]; then
+		local existing_owner
+		if existing_owner=$(find_mac_owner "$mac"); then
+			echo "MAC address $mac is already assigned to client '$existing_owner'." >&2
+			return 1
+		fi
 	fi
 
 	(cd "$EASYRSA_DIR" && ./easyrsa --batch --days=3650 build-client-full "$client" nopass) || return 1
@@ -606,13 +613,17 @@ do_set_endpoint () {
 }
 
 do_add_mac () {
-	# Usage: do_add_mac <name> <mac>
+	# Usage: do_add_mac <name> <mac> [--allow-duplicate]
 	# Registers an additional device MAC for an existing client, without
 	# issuing a new certificate -- for the common multi-device case (same
 	# person, a second laptop/phone). Requires a valid (non-revoked) cert to
 	# already exist for the name, so this can't be used to sneak in a
 	# registration for a client that was never actually issued.
-	local name="$1" raw_mac="$2" mac
+	# --allow-duplicate skips the cross-client MAC conflict check below --
+	# see do_add_client's own comment on this flag's origin/scope; the
+	# exact-duplicate check just above it (same client, same MAC already
+	# on file) is unrelated and always enforced regardless of this flag.
+	local name="$1" raw_mac="$2" allow_dup="${3:-}" mac
 	if [[ -z "$name" ]]; then
 		echo "Client name required." >&2
 		return 1
@@ -633,10 +644,12 @@ do_add_mac () {
 		echo "$name is already registered with MAC $mac." >&2
 		return 1
 	fi
-	local existing_owner
-	if existing_owner=$(find_mac_owner "$mac" "$name"); then
-		echo "MAC address $mac is already assigned to client '$existing_owner'." >&2
-		return 1
+	if [[ "$allow_dup" != "--allow-duplicate" ]]; then
+		local existing_owner
+		if existing_owner=$(find_mac_owner "$mac" "$name"); then
+			echo "MAC address $mac is already assigned to client '$existing_owner'." >&2
+			return 1
+		fi
 	fi
 	touch "$DB_FILE"
 	ensure_trailing_newline "$DB_FILE"
@@ -1001,15 +1014,22 @@ print_usage () {
 	With no command, runs the interactive installer/menu.
 
 	Commands:
-	  --add-user NAME MAC    Add a new client non-interactively (MAC in any common
-	                         separator style/case -- normalized automatically)
+	  --add-user NAME MAC [--allow-duplicate]
+	                         Add a new client non-interactively (MAC in any common
+	                         separator style/case -- normalized automatically).
+	                         --allow-duplicate skips the check that the MAC isn't
+	                         already assigned to a different client (app-managed via
+	                         Settings -> VPN Management -> "Allow Duplicate MAC
+	                         Addresses"; omit for the default one-MAC-one-client rule)
 	  --revoke-user NAME     Revoke an existing client
 	  --list-users           List valid clients and their MAC-db registration status
 	  --list-revoked-users   List revoked clients, when revoked, and any stale db entries
 	  --macs NAME            List every MAC address registered for one client
 	  --dump-macs            Dump every name's MAC list at once (requires --json; used by
 	                         the web app's DB mirror resync, not for interactive use)
-	  --add-mac NAME MAC     Register an additional device MAC for an existing client
+	  --add-mac NAME MAC [--allow-duplicate]
+	                         Register an additional device MAC for an existing client
+	                         (--allow-duplicate: same meaning as --add-user's, above)
 	  --remove-mac NAME MAC  Remove one specific MAC registration (client keeps its cert)
 	  --show-ovpn NAME       Print an existing client's .ovpn config to stdout
 	  --purge-revoked NAME   Permanently delete a revoked client's leftover PKI/.ovpn files
@@ -1084,7 +1104,7 @@ fi
 
 case "${1:-}" in
 	--add-user)
-		do_add_client "$2" "$3"
+		do_add_client "$2" "$3" "$4"
 		exit $?
 		;;
 	--revoke-user)
@@ -1108,7 +1128,7 @@ case "${1:-}" in
 		exit $?
 		;;
 	--add-mac)
-		do_add_mac "$2" "$3"
+		do_add_mac "$2" "$3" "$4"
 		exit $?
 		;;
 	--remove-mac)

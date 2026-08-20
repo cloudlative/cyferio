@@ -134,6 +134,43 @@ class TestArgumentConstruction:
             "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--add-mac", "alice", "aa:bb:cc:dd:ee:ff",
         ]
 
+    def test_add_mac_appends_allow_duplicate_flag_when_setting_enabled(self, monkeypatch):
+        # Configurable MAC Address Duplication Policy: cli_wrapper checks
+        # app_settings.runtime.allow_duplicate_macs at call time, appending
+        # --allow-duplicate only when the admin has turned the setting on
+        # (see cli_wrapper._ALLOW_DUPLICATE_FLAG's own docstring for why a
+        # trailing CLI flag was chosen over an env var/config-file write).
+        from vpnadmin import app_settings
+
+        monkeypatch.setattr(app_settings.runtime, "allow_duplicate_macs", True)
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, "Added MAC for alice.")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.add_mac("alice", "aa:bb:cc:dd:ee:ff")
+        assert seen["args"] == [
+            "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--add-mac", "alice", "aa:bb:cc:dd:ee:ff", "--allow-duplicate",
+        ]
+
+    def test_add_client_appends_allow_duplicate_flag_when_setting_enabled(self, monkeypatch):
+        from vpnadmin import app_settings
+
+        monkeypatch.setattr(app_settings.runtime, "allow_duplicate_macs", True)
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, "alice added.")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.add_client("alice", "aa:bb:cc:dd:ee:ff")
+        assert seen["args"] == [
+            "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--add-user", "alice", "aa:bb:cc:dd:ee:ff", "--allow-duplicate",
+        ]
+
     def test_remove_mac_args(self, monkeypatch):
         seen = {}
 

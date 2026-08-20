@@ -181,6 +181,10 @@
 			</div>
 			<p class="field-hint">Applies to every client with a quota set, unless overridden per-profile from the Clients page's Manage Restrictions dialog.</p>
 		</div>
+		<div class="checkbox-row" style="margin-top:12px">
+			<label class="checkbox-label"><input type="checkbox" id="s-allow-duplicate-macs"> Allow Duplicate MAC Addresses</label>
+		</div>
+		<p class="field-hint">When off (default), a MAC address can only be assigned to one client across the whole system -- registering an already-used MAC to another client is rejected. When on, the same MAC may be registered to multiple clients (e.g. shared/virtualized devices). Does not affect connection-time enforcement, which always checks a MAC against the connecting client's own registrations only.</p>
 	</div>
 
 	<div class="card">
@@ -466,6 +470,7 @@ async function loadSettings() {
 		setVal("s-default-bandwidth", s.default_bandwidth_monthly_gb);
 		const quotaPolicyEl = document.querySelector(`input[name="s-quota-policy"][value="${s.default_quota_enforcement_policy || "soft"}"]`);
 		if (quotaPolicyEl) quotaPolicyEl.checked = true;
+		document.getElementById("s-allow-duplicate-macs").checked = !!s.allow_duplicate_macs;
 		setVal("s-admin-notify-email", s.admin_notification_email);
 		document.getElementById("s-notify-user-created").checked = !!s.notify_admin_on_user_created;
 		document.getElementById("s-notify-client-revoked").checked = !!s.notify_admin_on_client_revoked;
@@ -719,6 +724,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		default_new_user_role: document.getElementById("s-default-role").value || null,
 		default_bandwidth_monthly_gb: val("s-default-bandwidth") ? Number(val("s-default-bandwidth")) : null,
 		default_quota_enforcement_policy: document.querySelector('input[name="s-quota-policy"]:checked')?.value || "soft",
+		allow_duplicate_macs: document.getElementById("s-allow-duplicate-macs").checked,
 		admin_notification_email: val("s-admin-notify-email") || null,
 		notify_admin_on_user_created: document.getElementById("s-notify-user-created").checked,
 		notify_admin_on_client_revoked: document.getElementById("s-notify-client-revoked").checked,
