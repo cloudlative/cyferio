@@ -36,3 +36,29 @@ def test_env_dump_write_matches_vpn_status_parser_format():
         "colon makes every env var in this log file unparseable, which is "
         "exactly the bug that made the OS column always show 'n/a'."
     )
+
+
+def test_registered_mac_at_time_line_matches_vpn_status_parser_format():
+    """Regression guard for the "now matches -- likely fixed" fix: reject()'s
+    new registered_mac_at_time line (see models.ConnectionRejectionLog's
+    docstring and vpn-status.py's cmd_rejected()) must use the exact same
+    "KEY: value" shape (no space before the colon) as every other env/
+    reason line, in BOTH its print() and LogFile.write() forms -- otherwise
+    it silently never lands as a parseable field and cmd_rejected() falls
+    back to the live (misleading) lookup for every row, defeating the
+    whole point of freezing this value at rejection time."""
+    with open(_SCRIPT_PATH) as f:
+        source = f.read()
+    assert 'print("registered_mac_at_time: {0}".format(' in source, (
+        "couldn't find the print() form of the registered_mac_at_time line"
+    )
+    assert 'log.write("registered_mac_at_time: {0}\\n".format(' in source, (
+        "couldn't find the LogFile.write() form of the registered_mac_at_time line"
+    )
+    # Guard against a stray space creeping in before the colon on either
+    # form (the exact class of bug the sibling test above already guards
+    # against for the env dump loop).
+    assert 'registered_mac_at_time : ' not in source, (
+        "registered_mac_at_time has a space before its colon -- unparseable "
+        "by vpn-status.py's ENV_LINE_RE, same bug class as the OS-detection regression."
+    )

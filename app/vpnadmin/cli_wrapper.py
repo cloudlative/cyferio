@@ -137,6 +137,17 @@ def list_macs(name: str) -> dict:
     return _cached(("list_macs", name), _do)
 
 
+def dump_macs() -> dict:
+    """The entire contents of openvpn_db.txt in one shot, as {name: [mac,
+    ...]} -- used only by client_mac_mirror.resync_client_macs() at
+    startup to backfill/repair models.ClientMac, never on the connect-time
+    enforcement path. Not cached (unlike list_macs above): a startup-only
+    caller doesn't benefit from the 3s TTL, and a stale result here would
+    make the resync itself wrong."""
+    proc = _run_install_script("--dump-macs", "--json")
+    return _parse_json_or_raise(proc, allow_nonzero_json=True)
+
+
 def add_mac(name: str, mac: str) -> str:
     proc = _run_install_script("--add-mac", name, mac)
     if proc.returncode != 0:

@@ -283,6 +283,25 @@ def my_reports_page(request: Request, user: User | None = Depends(get_current_us
     return templates.TemplateResponse(request, "my_reports.html", _ctx(user, db))
 
 
+@router.get("/my-connection-issues")
+def my_connection_issues_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
+    # Same gate/shape as /my-vpn-profile and /my-reports above -- own data
+    # by construction (the backing endpoint, GET /api/me/connection-issues,
+    # never takes an id param -- see routes/me_connection_issues.py's module
+    # docstring). No linked profile means nothing to show yet, so fall back
+    # to /my-vpn-profile, same as /my-reports does.
+    if not has_permission(db, user, "vpn_profiles", "view"):
+        return RedirectResponse("/", status_code=303)
+    if user.vpn_profile_link is None:
+        return RedirectResponse("/my-vpn-profile", status_code=303)
+    return templates.TemplateResponse(request, "my_connection_issues.html", _ctx(user, db))
+
+
 @router.get("/roles")
 def roles_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:

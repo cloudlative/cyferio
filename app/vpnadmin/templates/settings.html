@@ -224,8 +224,12 @@
 				<label for="s-audit-retention">Keep Audit Log Entries For <span class="muted">(days; blank or 0 = keep forever)</span></label>
 				<input type="text" id="s-audit-retention" inputmode="numeric" placeholder="Keep forever">
 			</div>
+			<div class="field">
+				<label for="s-connection-issue-retention">Keep Connection Issue History For <span class="muted">(days; blank or 0 = keep forever)</span></label>
+				<input type="text" id="s-connection-issue-retention" inputmode="numeric" placeholder="60">
+			</div>
 		</div>
-		<p class="muted" style="margin:10px 0 0">Pruning of older entries happens on app startup/deploy, not instantly on save.</p>
+		<p class="muted" style="margin:10px 0 0">Pruning of older entries happens on app startup/deploy, not instantly on save. Connection issue history backs users' own "My Connection Issues" page.</p>
 		<div class="checkbox-row" style="margin-top:12px">
 			<label class="checkbox-label"><input type="checkbox" id="s-log-failed-logins"> Log wrong-password login attempts to the audit log</label>
 		</div>
@@ -402,6 +406,7 @@ const sAdminNotifyEmailValidation = attachInlineValidation(document.getElementBy
 	return null;
 });
 const sAuditRetentionValidation = attachInlineValidation(document.getElementById("s-audit-retention"), (v) => numberRangeError(v, { min: 0, label: "Audit log retention", emptyOk: true }));
+const sConnectionIssueRetentionValidation = attachInlineValidation(document.getElementById("s-connection-issue-retention"), (v) => numberRangeError(v, { min: 0, label: "Connection issue log retention", emptyOk: true }));
 // Guarded on element presence -- this field only renders for
 // can_view_db_reporting accounts (see the conditional block around this
 // field further up this template), narrower than what gets someone onto
@@ -456,6 +461,7 @@ async function loadSettings() {
 		setVal("s-lockout-minutes", s.account_lockout_minutes);
 		setVal("s-password-history", s.password_history_count);
 		setVal("s-audit-retention", s.audit_retention_days);
+		setVal("s-connection-issue-retention", s.connection_issue_retention_days);
 		document.getElementById("s-log-failed-logins").checked = s.log_failed_login_attempts !== false;
 		setVal("s-default-bandwidth", s.default_bandwidth_monthly_gb);
 		const quotaPolicyEl = document.querySelector(`input[name="s-quota-policy"][value="${s.default_quota_enforcement_policy || "soft"}"]`);
@@ -682,7 +688,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 	const numericChecks = [
 		sMinPwLenValidation, sSessionTimeoutValidation,
 		sLockoutThresholdValidation, sLockoutMinutesValidation, sPasswordHistoryValidation, sDefaultBandwidthValidation,
-		sAdminNotifyEmailValidation, sAuditRetentionValidation, sNotificationDurationValidation,
+		sAdminNotifyEmailValidation, sAuditRetentionValidation, sConnectionIssueRetentionValidation, sNotificationDurationValidation,
 		sDbSnapshotRetentionValidation, // null (and filtered out) if this field isn't rendered
 		sQuotaWarningPctValidation, sQuotaCriticalPctValidation,
 	].filter(Boolean);
@@ -708,6 +714,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		account_lockout_minutes: intOrNull(val("s-lockout-minutes")),
 		password_history_count: intOrNull(val("s-password-history")),
 		audit_retention_days: intOrNull(val("s-audit-retention")),
+		connection_issue_retention_days: intOrNull(val("s-connection-issue-retention")),
 		log_failed_login_attempts: document.getElementById("s-log-failed-logins").checked,
 		default_new_user_role: document.getElementById("s-default-role").value || null,
 		default_bandwidth_monthly_gb: val("s-default-bandwidth") ? Number(val("s-default-bandwidth")) : null,

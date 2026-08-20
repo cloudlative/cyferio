@@ -126,3 +126,60 @@ class TestCmdRejectedReasonDefault:
         rows = json.loads(capsys.readouterr().out)
         assert len(rows) == 1
         assert rows[0]["reason"] == "os_not_allowed"
+
+
+FROZEN_MAC_MISMATCH_BLOCK = """---------------------------------------
+2026-01-04T00:00:00
+---------------------------------------
+common_name: dave
+IV_HWADDR: aa:bb:cc:dd:ee:ff
+IV_PLAT: linux
+trusted_ip: 203.0.113.8
+time_unix: 1767484800
+reason: mac_mismatch
+registered_mac_at_time: none
+
+The MAC address of the client machine could not be found in the database
+
+"""
+
+
+class TestCmdRejectedMacRegistered:
+    """Regression guard for the "now matches -- likely fixed" fix -- see
+    models.ConnectionRejectionLog.registered_mac_at_time's docstring and
+    diagnostics.html's rendering logic."""
+
+    def test_old_format_row_falls_back_to_live_lookup(self, vpn_status, capsys):
+        # No registered_mac_at_time line at all (predates the feature) --
+        # must fall back to a live lookup against DB_FILE, flagged as such.
+        _write_log(vpn_status, OLD_FORMAT_MAC_MISMATCH_BLOCK)
+        with open(vpn_status.DB_FILE, "w") as f:
+            f.write("alice=aa:bb:cc:dd:ee:ff\n")  # registered AFTER the fact
+        vpn_status.cmd_rejected(20, as_json=True)
+        import json
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["mac_registered"] == "aa:bb:cc:dd:ee:ff"
+        assert rows[0]["mac_registered_is_live"] is True
+
+    def test_new_format_row_uses_frozen_value_not_live_file(self, vpn_status, capsys):
+        # The file NOW has this MAC registered, but the row was frozen at
+        # rejection time as "none" -- the historical fact must win, not a
+        # live re-check that would make it look retroactively "fixed".
+        _write_log(vpn_status, FROZEN_MAC_MISMATCH_BLOCK)
+        with open(vpn_status.DB_FILE, "w") as f:
+            f.write("dave=aa:bb:cc:dd:ee:ff\n")
+        vpn_status.cmd_rejected(20, as_json=True)
+        import json
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["mac_registered"] == "not registered"
+        assert rows[0]["mac_registered_is_live"] is False
+
+    def test_frozen_value_reflects_what_was_actually_registered(self, vpn_status, capsys):
+        block = FROZEN_MAC_MISMATCH_BLOCK.replace(
+            "registered_mac_at_time: none", "registered_mac_at_time: 11:22:33:44:55:66")
+        _write_log(vpn_status, block)
+        vpn_status.cmd_rejected(20, as_json=True)
+        import json
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["mac_registered"] == "11:22:33:44:55:66"
+        assert rows[0]["mac_registered_is_live"] is False

@@ -147,6 +147,18 @@ class TestArgumentConstruction:
             "sudo", "-n", "bash", "/fake/openvpn-install.sh", "--remove-mac", "alice", "aa:bb:cc:dd:ee:ff",
         ]
 
+    def test_dump_macs_args_and_parsing(self, monkeypatch):
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, '{"alice":["aa:bb:cc:dd:ee:ff"],"bob":[]}')
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        result = cw.dump_macs()
+        assert seen["args"] == ["sudo", "-n", "bash", "/fake/openvpn-install.sh", "--dump-macs", "--json"]
+        assert result == {"alice": ["aa:bb:cc:dd:ee:ff"], "bob": []}
+
     def test_show_ovpn_args(self, monkeypatch):
         seen = {}
 

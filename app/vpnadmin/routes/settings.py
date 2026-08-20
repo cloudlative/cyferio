@@ -33,6 +33,7 @@ class UpdateSettingsRequest(BaseModel):
     account_lockout_minutes: int | None = None
     password_history_count: int | None = None
     audit_retention_days: int | None = None
+    connection_issue_retention_days: int | None = None
     log_failed_login_attempts: bool | None = None
     notification_duration_ms: int | None = None
 
@@ -141,6 +142,13 @@ class UpdateSettingsRequest(BaseModel):
     def _retention(cls, v):
         if v is not None and v < 0:
             raise ValueError("Audit log retention can't be negative.")
+        return v
+
+    @field_validator("connection_issue_retention_days")
+    @classmethod
+    def _connection_issue_retention(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("Connection issue log retention can't be negative.")
         return v
 
     @field_validator("notification_duration_ms")
@@ -285,6 +293,7 @@ def _serialize() -> dict:
         "account_lockout_minutes": s.account_lockout_minutes,
         "password_history_count": s.password_history_count,
         "audit_retention_days": s.audit_retention_days,
+        "connection_issue_retention_days": s.connection_issue_retention_days,
         "log_failed_login_attempts": s.log_failed_login_attempts,
         "default_new_user_role": s.default_new_user_role,
         "default_bandwidth_monthly_gb": s.default_bandwidth_monthly_gb,
@@ -352,7 +361,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
     for field in ("portal_url", "min_password_length",
                    "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
                    "password_history_count",
-                   "audit_retention_days", "log_failed_login_attempts", "default_new_user_role",
+                   "audit_retention_days", "connection_issue_retention_days", "log_failed_login_attempts", "default_new_user_role",
                    "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "admin_notification_email",
                    "notify_admin_on_user_created", "notify_admin_on_client_revoked",
                    "quota_notify_warning_pct", "quota_notify_critical_pct", "notify_admin_on_quota_critical",

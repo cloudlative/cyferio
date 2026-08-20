@@ -506,6 +506,36 @@ do_list_macs () {
 	[[ "$count" -gt 0 ]]
 }
 
+do_dump_macs () {
+	# Usage: do_dump_macs [json]
+	# The ENTIRE contents of $DB_FILE in one shot, grouped by name --
+	# {"name":["mac", ...], ...}. Unlike do_list_macs above (one name at a
+	# time), this exists purely for app/vpnadmin/client_mac_mirror.py's
+	# startup-time resync of models.ClientMac (a queryable DB mirror of
+	# this same file) -- never called on the connect-time enforcement
+	# path, which stays host-scripts/openvpn-mac-addr-check.py's own
+	# direct per-line read.
+	local as_json="${1:-}"
+	if [[ "$as_json" != json ]]; then
+		echo "do_dump_macs only supports --json output." >&2
+		return 1
+	fi
+	if [[ ! -f "$DB_FILE" ]]; then
+		printf '{}\n'
+		return 0
+	fi
+	local names name macs first=1
+	names=$(grep -v '^\s*$' "$DB_FILE" 2>/dev/null | cut -d '=' -f 1 | sort -u)
+	printf '{'
+	while IFS= read -r name; do
+		[[ -z "$name" ]] && continue
+		[[ $first -eq 1 ]] && first=0 || printf ','
+		macs=$(grep "^${name}=" "$DB_FILE" | cut -d '=' -f 2-)
+		printf '"%s":%s' "$(json_escape "$name")" "$(json_string_array "$macs")"
+	done <<< "$names"
+	printf '}\n'
+}
+
 do_add_mac () {
 	# Usage: do_add_mac <name> <mac>
 	# Registers an additional device MAC for an existing client, without
@@ -908,6 +938,8 @@ print_usage () {
 	  --list-users           List valid clients and their MAC-db registration status
 	  --list-revoked-users   List revoked clients, when revoked, and any stale db entries
 	  --macs NAME            List every MAC address registered for one client
+	  --dump-macs            Dump every name's MAC list at once (requires --json; used by
+	                         the web app's DB mirror resync, not for interactive use)
 	  --add-mac NAME MAC     Register an additional device MAC for an existing client
 	  --remove-mac NAME MAC  Remove one specific MAC registration (client keeps its cert)
 	  --show-ovpn NAME       Print an existing client's .ovpn config to stdout
@@ -924,7 +956,7 @@ print_usage () {
 	  --help                 Show this help
 
 	--json can be combined with --list-users, --list-revoked-users, --macs,
-	--check-certs, --lint-mac-db, or --get-policy to print structured JSON
+	--dump-macs, --check-certs, --lint-mac-db, or --get-policy to print structured JSON
 	instead of a table (order doesn't matter, e.g. both "--list-users --json"
 	and "--json --list-users" work). Not valid with any other command.
 
@@ -955,7 +987,7 @@ set -- "${_cli_args[@]}"
 unset _a _cli_args
 
 case "${1:-}" in
-	--add-user|--revoke-user|--list-users|--list-revoked-users|--macs|--add-mac|--remove-mac|--show-ovpn|--purge-revoked|--clean-stale-db|--restore|--check-certs|--lint-mac-db|--set-country|--set-os|--set-bandwidth|--get-policy)
+	--add-user|--revoke-user|--list-users|--list-revoked-users|--macs|--dump-macs|--add-mac|--remove-mac|--show-ovpn|--purge-revoked|--clean-stale-db|--restore|--check-certs|--lint-mac-db|--set-country|--set-os|--set-bandwidth|--get-policy)
 		if [[ ! -e "$OPENVPN_DIR/server.conf" ]]; then
 			echo "OpenVPN is not installed yet (no $OPENVPN_DIR/server.conf) -- run without arguments first to install." >&2
 			exit 1
@@ -965,7 +997,7 @@ esac
 
 if [[ -n "$json_flag" ]]; then
 	case "${1:-}" in
-		--list-users|--list-revoked-users|--macs|--check-certs|--lint-mac-db|--get-policy) ;;
+		--list-users|--list-revoked-users|--macs|--dump-macs|--check-certs|--lint-mac-db|--get-policy) ;;
 		*)
 			echo "--json option is not allowed with this command." >&2
 			exit 1
@@ -992,6 +1024,10 @@ case "${1:-}" in
 		;;
 	--macs)
 		do_list_macs "$2" "$json_flag"
+		exit $?
+		;;
+	--dump-macs)
+		do_dump_macs "$json_flag"
 		exit $?
 		;;
 	--add-mac)

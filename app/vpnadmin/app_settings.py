@@ -204,6 +204,7 @@ class _RuntimeSettings:
         self.turnstile_secret_key = env_settings.TURNSTILE_SECRET_KEY
         self.recaptcha_site_key = env_settings.RECAPTCHA_SITE_KEY
         self.recaptcha_secret_key = env_settings.RECAPTCHA_SECRET_KEY
+        self.connection_issue_retention_days = 60  # None/0 (if explicitly set) = keep forever
 
 
 runtime = _RuntimeSettings()
@@ -273,6 +274,9 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.turnstile_secret_key = row.turnstile_secret_key if row.turnstile_secret_key is not None else env_settings.TURNSTILE_SECRET_KEY
     runtime.recaptcha_site_key = row.recaptcha_site_key if row.recaptcha_site_key is not None else env_settings.RECAPTCHA_SITE_KEY
     runtime.recaptcha_secret_key = row.recaptcha_secret_key if row.recaptcha_secret_key is not None else env_settings.RECAPTCHA_SECRET_KEY
+    # My Connection Issues: same "default to a bounded window, admin can
+    # still explicitly set 0 for forever" stance as db_snapshot_retention_days.
+    runtime.connection_issue_retention_days = row.connection_issue_retention_days if row.connection_issue_retention_days is not None else 60
 
     # Mirrors the one setting host-scripts/quota_enforcer.py needs but has
     # no DB access to read directly -- see policy_store.write_global_defaults
@@ -465,5 +469,22 @@ def prune_db_stat_snapshots(db: Session) -> int:
         return 0
     cutoff = datetime.now(timezone.utc) - timedelta(days=runtime.db_snapshot_retention_days)
     deleted = db.query(DbStatSnapshot).filter(DbStatSnapshot.timestamp < cutoff).delete(synchronize_session=False)
+    db.commit()
+    return deleted
+
+
+def prune_connection_rejections(db: Session) -> int:
+    """Same shape as prune_audit_log()/prune_db_stat_snapshots() above,
+    against ConnectionRejectionLog instead -- see
+    runtime.connection_issue_retention_days' own comment in
+    refresh_runtime_cache()."""
+    from datetime import timedelta
+
+    from .models import ConnectionRejectionLog
+
+    if not runtime.connection_issue_retention_days:
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=runtime.connection_issue_retention_days)
+    deleted = db.query(ConnectionRejectionLog).filter(ConnectionRejectionLog.timestamp < cutoff).delete(synchronize_session=False)
     db.commit()
     return deleted

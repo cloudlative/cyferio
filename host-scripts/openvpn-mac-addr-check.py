@@ -99,6 +99,14 @@
 # "KEY: value" env line; vpn-status.py defaults missing/old-format entries
 # (logged before this change) to reason "mac_mismatch" for backward
 # compatibility.
+#
+# Every rejection is ALSO best-effort POSTed to the app's "My Connection
+# Issues" ingestion endpoint (see report_rejection() below), which is what
+# backs a portal user's own per-user rejection history/retention -- this is
+# additional to, never a replacement for, the flat-file logging above.
+# Requires APP_INGEST_URL/APP_INGEST_TOKEN in vpn-tools.conf (set by
+# setup.sh); if either is unset, or the app is unreachable, this is
+# silently skipped -- it can never affect the connect decision.
 
 import sys
 import os
@@ -132,15 +140,91 @@ def db_lookup(user, mac):
     return False
 
 
-def reject(log, reason, message):
+def db_lookup_registered(user):
+    """Every MAC currently on file for `user` (openvpn_db.txt allows
+    multiple "name=mac" lines per person, for multi-device users), as a
+    comma-joined string, or None if there are none. Called ONLY at the
+    moment of a mac_mismatch rejection, to freeze "what was actually
+    registered right now" onto that row (report_rejection()'s
+    registered_mac kwarg) -- so vpn-status.py's rejected-connections view
+    never has to recompute this later against a file that may have since
+    changed. See that function's own docstring for the full rationale."""
+    macs = []
+    try:
+        with open(db_file, 'r') as db:
+            for line in db.readlines():
+                if '=' not in line:
+                    continue
+                name, val = line.split('=', 1)
+                name = name.rstrip('\n')
+                val = val.rstrip('\n')
+                if user == name and val:
+                    macs.append(val)
+    except FileNotFoundError:
+        pass
+    return ",".join(macs) if macs else None
+
+
+def report_rejection(reason, message, **detected):
+    """Best-effort POST of this rejection to the app's "My Connection
+    Issues" ingestion endpoint (routes/host_ingest.py) -- ADDITIONAL to,
+    never a replacement for, the flat-file write reject() below already
+    does (vpn-status.py --rejected-connections keeps parsing that file
+    unchanged). Every failure mode here (no token configured, app
+    unreachable, timeout, bad response) is swallowed -- this must never
+    change the connect decision or slow it down noticeably. `detected` may
+    include source_ip/detected_mac/detected_country/detected_city/
+    detected_asn/detected_asn_name; any omitted key is sent as null."""
+    url = policy_lib.CFG.get("APP_INGEST_URL")
+    token = policy_lib.CFG.get("APP_INGEST_TOKEN")
+    if not url or not token:
+        return
+    try:
+        import json
+        import urllib.request
+
+        payload = {"vpn_client_name": env_user, "reason": reason, "message": message}
+        payload.update(detected)
+        req = urllib.request.Request(
+            url.rstrip("/") + "/internal/connection-rejections",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": "Bearer " + token},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=2)
+    except Exception:
+        pass  # see docstring -- never allowed to affect the reject() call site
+
+
+def reject(log, reason, message, **detected):
     """Prints/logs the reason + message, then exits 1. `message` must
     contain either "could not be found" (the original MAC-mismatch
     detector string vpn-status.py's iter_env_blocks already matches on) or
     "connection rejected" (the new, equally-unambiguous marker added for
     every other reason) -- see that function's own comment for why both
-    phrases are recognized rather than replacing the original one."""
+    phrases are recognized rather than replacing the original one.
+    `detected` (source_ip/detected_mac/detected_country/detected_city/
+    detected_asn/detected_asn_name/registered_mac, whichever are known at
+    this call site) is passed straight through to report_rejection()
+    above (the new DB-backed history). When "registered_mac" is one of
+    the given keys (mac_mismatch only -- see its call site), it's
+    ADDITIONALLY written to the flat log as its own
+    "registered_mac_at_time:" line (sentinel "none" if the identity had
+    NO MAC registered at all, so this is distinguishable from an older
+    log line that simply predates this field, which has no
+    "registered_mac_at_time:" line at all) -- same "KEY: value" shape
+    every other env/reason line already uses, so vpn-status.py's
+    iter_env_blocks parses it for free. This is what lets cmd_rejected()
+    show a frozen historical value instead of re-deriving it live against
+    whatever's on file when the report is viewed (see that function's own
+    docstring for why that mattered)."""
+    report_rejection(reason, message, **detected)
     print("reason: {0}".format(reason))
     log.write("reason : {0}\n".format(reason))
+    if "registered_mac" in detected:
+        registered_mac_line = detected["registered_mac"] or "none"
+        print("registered_mac_at_time: {0}".format(registered_mac_line))
+        log.write("registered_mac_at_time: {0}\n".format(registered_mac_line))
     print(message)
     log.write("\n" + message + "\n\n")
     sys.exit(1)
@@ -174,7 +258,9 @@ with open(log_file, 'a') as LogFile:
     # parsing/monitoring). ------------------------------------------------
     if not db_lookup(env_user, env_mac_addr):
         reject(LogFile, "mac_mismatch",
-               "The MAC address of the client machine could not be found in the database")
+               "The MAC address of the client machine could not be found in the database",
+               source_ip=env_trusted_ip, detected_mac=env_mac_addr,
+               registered_mac=db_lookup_registered(env_user))
 
     # Identity established (cert CN + device MAC both matched) -- look up
     # this client's restrictions, if any. An empty/absent policy means
@@ -205,7 +291,8 @@ with open(log_file, 'a') as LogFile:
         if client_os not in allowed_os:
             reject(LogFile, "os_not_allowed",
                    "OpenVPN connection rejected: client OS '{0}' is not in {1}'s allowed OS list ({2})".format(
-                       env_iv_plat or "unknown", env_user, ", ".join(allowed_os)))
+                       env_iv_plat or "unknown", env_user, ", ".join(allowed_os)),
+                   source_ip=env_trusted_ip)
 
     # 3) Country restriction (GeoIP) -----------------------------------------
     # Fail-safe: only even attempts a GeoIP lookup at all if this specific
@@ -225,11 +312,13 @@ with open(log_file, 'a') as LogFile:
             # not silently let through -- see policy_lib.geoip_lookup_country.
             reject(LogFile, "country_lookup_failed",
                    "OpenVPN connection rejected: GeoIP country lookup failed ({0}) for {1} while a country restriction is configured for {2}".format(
-                       err, env_trusted_ip or "unknown", env_user))
+                       err, env_trusted_ip or "unknown", env_user),
+                   source_ip=env_trusted_ip)
         if country not in allowed_countries:
             reject(LogFile, "country_not_allowed",
                    "OpenVPN connection rejected: client country '{0}' is not in {1}'s allowed countries ({2})".format(
-                       country or "unknown", env_user, ", ".join(allowed_countries)))
+                       country or "unknown", env_user, ", ".join(allowed_countries)),
+                   source_ip=env_trusted_ip, detected_country=country)
 
     # 4) City restriction (GeoIP) --------------------------------------------
     allowed_cities = policy.get("allowed_cities") or []
@@ -239,12 +328,14 @@ with open(log_file, 'a') as LogFile:
         if err:
             reject(LogFile, "city_lookup_failed",
                    "OpenVPN connection rejected: GeoIP city lookup failed ({0}) for {1} while a city restriction is configured for {2}".format(
-                       err, env_trusted_ip or "unknown", env_user))
+                       err, env_trusted_ip or "unknown", env_user),
+                   source_ip=env_trusted_ip)
         allowed_cities_lower = {c.lower() for c in allowed_cities}
         if (city or "").lower() not in allowed_cities_lower:
             reject(LogFile, "city_not_allowed",
                    "OpenVPN connection rejected: client city '{0}' is not in {1}'s allowed cities ({2})".format(
-                       city or "unknown", env_user, ", ".join(allowed_cities)))
+                       city or "unknown", env_user, ", ".join(allowed_cities)),
+                   source_ip=env_trusted_ip, detected_city=city)
 
     # 5) Network/ASN restriction (GeoIP) --------------------------------------
     allowed_asns = policy.get("allowed_asns") or []
@@ -254,11 +345,13 @@ with open(log_file, 'a') as LogFile:
         if err:
             reject(LogFile, "asn_lookup_failed",
                    "OpenVPN connection rejected: GeoIP ASN lookup failed ({0}) for {1} while a network restriction is configured for {2}".format(
-                       err, env_trusted_ip or "unknown", env_user))
+                       err, env_trusted_ip or "unknown", env_user),
+                   source_ip=env_trusted_ip)
         if asn not in allowed_asns:
             reject(LogFile, "asn_not_allowed",
                    "OpenVPN connection rejected: client network '{0}' is not in {1}'s allowed networks ({2})".format(
-                       asn or "unknown", env_user, ", ".join(allowed_asns)))
+                       asn or "unknown", env_user, ", ".join(allowed_asns)),
+                   source_ip=env_trusted_ip, detected_asn=asn)
 
     # 6) IP address restriction ------------------------------------------------
     # No GeoIP database involved -- a direct trusted_ip-vs-allowlist
@@ -269,7 +362,8 @@ with open(log_file, 'a') as LogFile:
         if not policy_lib.ip_matches_allowlist(env_trusted_ip, allowed_ips):
             reject(LogFile, "ip_not_allowed",
                    "OpenVPN connection rejected: client IP '{0}' is not in {1}'s allowed IP list ({2})".format(
-                       env_trusted_ip or "unknown", env_user, ", ".join(allowed_ips)))
+                       env_trusted_ip or "unknown", env_user, ", ".join(allowed_ips)),
+                   source_ip=env_trusted_ip)
 
     # 7) Monthly bandwidth quota (soft cutoff, connect-time only) -----------
     quota_gb = policy.get("bandwidth_monthly_gb")
@@ -288,7 +382,8 @@ with open(log_file, 'a') as LogFile:
         if used_bytes >= quota_bytes:
             reject(LogFile, "bandwidth_exceeded",
                    "OpenVPN connection rejected: {0}'s monthly bandwidth quota exceeded ({1:.2f} / {2} GB used this month)".format(
-                       env_user, used_bytes / (1024 ** 3), quota_gb))
+                       env_user, used_bytes / (1024 ** 3), quota_gb),
+                   source_ip=env_trusted_ip)
 
     print("The MAC address of the client machine has been successfully matched to the database")
     LogFile.write("\nThe MAC address of the client machine has been successfully matched to the database\n\n")

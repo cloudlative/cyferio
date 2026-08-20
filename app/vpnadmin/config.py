@@ -177,6 +177,16 @@ class Settings:
     # portion of a timestamp. Paired with APP_TIMEZONE above.
     APP_TIME_FORMAT: str = os.environ.get("APP_TIME_FORMAT", "24h")
 
+    # Shared secret authenticating host-scripts/openvpn-mac-addr-check.py's
+    # best-effort POST of each rejected VPN connect attempt to routes/
+    # host_ingest.py's /internal/connection-rejections (see "My Connection
+    # Issues", models.ConnectionRejectionLog). Generated and written into
+    # both this env var and the host's /etc/openvpn/vpn-tools.conf
+    # (APP_INGEST_TOKEN) by setup.sh -- unset means the ingestion endpoint
+    # rejects every request (fails closed on the app side; the host script
+    # itself fails open, i.e. it never blocks a connect decision over this).
+    HOST_INGEST_TOKEN: str | None = os.environ.get("HOST_INGEST_TOKEN")
+
     # --- Outbound email (SMTP) -----------------------------------------------
     # Used solely for the "email a client's .ovpn profile" action. Left blank
     # by default -- the feature stays present in the UI but the API returns a

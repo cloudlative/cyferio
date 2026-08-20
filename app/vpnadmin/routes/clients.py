@@ -16,6 +16,7 @@ from .. import policy_store
 from .. import vpn_identity_sync
 from ..audit import log_action
 from ..cli_wrapper import ScriptError
+from ..client_mac_mirror import record_mac_added, record_mac_removed
 from ..config import settings
 from ..db import get_db
 from ..geo_validators import valid_asn_list as _valid_asn_list
@@ -199,6 +200,7 @@ def add_client_mac(name: str, body: MacRequest, user: User = Depends(_require_cl
         log_action(db, user, "add_mac", target=name, detail=e.message, success=False)
         raise HTTPException(status_code=400, detail=e.message)
     log_action(db, user, "add_mac", target=name, detail=result, success=True)
+    record_mac_added(db, name, body.mac)
     return {"message": result}
 
 
@@ -212,6 +214,7 @@ def remove_client_mac(name: str, mac: str, user: User = Depends(_require_client_
         log_action(db, user, "remove_mac", target=name, detail=e.message, success=False)
         raise HTTPException(status_code=400, detail=e.message)
     log_action(db, user, "remove_mac", target=name, detail=result, success=True)
+    record_mac_removed(db, name, mac)
     return {"message": result}
 
 

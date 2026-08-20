@@ -26,6 +26,7 @@ from .. import cli_wrapper as cli
 from .. import policy_store
 from ..audit import log_action
 from ..cli_wrapper import ScriptError
+from ..client_mac_mirror import record_mac_added, record_mac_removed
 from ..db import get_db
 from ..models import User
 from ..permissions import require_permission
@@ -177,6 +178,7 @@ def add_my_mac(
         log_action(db, user, "self_add_mac", target=link.vpn_client_name, detail=e.message, success=False)
         raise HTTPException(status_code=400, detail=e.message)
     log_action(db, user, "self_add_mac", target=link.vpn_client_name, detail=result, success=True)
+    record_mac_added(db, link.vpn_client_name, body.mac)
     return {"message": result}
 
 
@@ -193,6 +195,7 @@ def remove_my_mac(
         log_action(db, user, "self_remove_mac", target=link.vpn_client_name, detail=e.message, success=False)
         raise HTTPException(status_code=400, detail=e.message)
     log_action(db, user, "self_remove_mac", target=link.vpn_client_name, detail=result, success=True)
+    record_mac_removed(db, link.vpn_client_name, mac)
     return {"message": result}
 
 

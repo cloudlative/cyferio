@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from vpnadmin import cli_wrapper
+from vpnadmin import client_mac_mirror
 # Aliased to health_data -- routes/health.py (the API router module,
 # imported below via `from vpnadmin.routes import ... health ...`) and
 # vpnadmin/health.py (this data-gathering module) share the bare name
@@ -25,14 +26,14 @@ from vpnadmin import cli_wrapper
 # (which has no such attribute) instead of this one, crashing the
 # snapshot loop's very first tick on every startup.
 from vpnadmin import health as health_data
-from vpnadmin.app_settings import migrate_decouple_portal_and_vpn_restrictions, migrate_legacy_smtp_provider, prune_audit_log, prune_db_stat_snapshots, refresh_runtime_cache
+from vpnadmin.app_settings import migrate_decouple_portal_and_vpn_restrictions, migrate_legacy_smtp_provider, prune_audit_log, prune_connection_rejections, prune_db_stat_snapshots, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_admin
 from vpnadmin import geo_lists, mailer
 from vpnadmin import app_settings
 from vpnadmin.models import QuotaNotification
-from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, me_vpn, notifications, pages, reports, roles, settings as settings_routes, status, support, teams, users
+from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, host_ingest, me_connection_issues, me_vpn, notifications, pages, reports, roles, settings as settings_routes, status, support, teams, users
 from vpnadmin.routes.reports import _load_rows
 
 logger = logging.getLogger(__name__)
@@ -200,6 +201,7 @@ async def lifespan(_app: FastAPI):
         refresh_runtime_cache(db)
         prune_audit_log(db)
         prune_db_stat_snapshots(db)
+        prune_connection_rejections(db)
         # One-time backfill: turns already-configured legacy SMTP settings
         # into the first EmailProvider row (marked default) so an upgrade
         # keeps sending mail exactly as before with no manual step -- see
@@ -212,6 +214,17 @@ async def lifespan(_app: FastAPI):
         # see that function's own docstring for why this needs a real
         # one-time marker rather than being safely re-runnable.
         migrate_decouple_portal_and_vpn_restrictions(db)
+        # Reconciles models.ClientMac (a queryable DB mirror of
+        # openvpn_db.txt) against the file itself on every startup -- both
+        # the first-upgrade backfill and ongoing drift repair (hand edits,
+        # SSH, setup.sh provisioning) in one mechanism. Fails soft: a
+        # missing/misconfigured install script (e.g. a local dev/test
+        # environment) must never block startup over a reporting-only
+        # mirror -- see client_mac_mirror.py's own docstring.
+        try:
+            client_mac_mirror.resync_client_macs(db, cli_wrapper.dump_macs())
+        except Exception:
+            logging.getLogger(__name__).warning("ClientMac resync failed at startup -- continuing without it", exc_info=True)
     finally:
         db.close()
     # Kick the City/ASN pick-list build (or a disk-cache load) off in a
@@ -277,6 +290,8 @@ app.include_router(teams.router)
 app.include_router(settings_routes.router)
 app.include_router(roles.router)
 app.include_router(me_vpn.router)
+app.include_router(me_connection_issues.router)
+app.include_router(host_ingest.router)
 app.include_router(reports.router)
 app.include_router(notifications.router)
 app.include_router(support.router)

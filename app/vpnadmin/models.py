@@ -546,6 +546,12 @@ class AppSettings(Base):
     recaptcha_site_key = Column(String(255), nullable=True)
     recaptcha_secret_key = Column(String(255), nullable=True)  # plaintext, same precedent as smtp_password
 
+    # My Connection Issues: how long to keep ConnectionRejectionLog rows --
+    # NULL/0 means "keep forever" (no pruning), same convention as
+    # audit_retention_days above. See app_settings.py's
+    # prune_connection_rejections() and main.py's lifespan().
+    connection_issue_retention_days = Column(Integer, nullable=True)
+
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
 
@@ -607,6 +613,92 @@ class AuditLog(Base):
     target = Column(String(128), nullable=True)  # e.g. the client name affected
     detail = Column(Text, nullable=True)  # short human-readable outcome/error
     success = Column(Boolean, nullable=False, default=True)
+
+
+class ConnectionRejectionLog(Base):
+    """One row per rejected OpenVPN tunnel connect attempt -- fed by
+    host-scripts/openvpn-mac-addr-check.py's reject(), which best-effort
+    POSTs here (via routes/host_ingest.py's /internal/connection-rejections,
+    bearer-token authenticated) in addition to its pre-existing flat-file
+    write to /etc/openvpn/server/openvpn.log (vpn-status.py --rejected-
+    connections keeps parsing that file unchanged -- this table is a new,
+    separate, DB-backed history, not a replacement).
+
+    Deliberately NOT a per-User FK: `vpn_client_name` (the OpenVPN
+    common_name) is the join key back to VpnProfileLink, matched at read
+    time by routes/me_connection_issues.py -- a rejection can happen for a
+    common_name with no (or a since-unlinked) portal user, and the host
+    script only ever knows the cert's common_name, never a portal user id.
+
+    `reason` is one of the exact strings openvpn-mac-addr-check.py already
+    emits: mac_mismatch, os_not_allowed, country_not_allowed,
+    country_lookup_failed, city_not_allowed, city_lookup_failed,
+    asn_not_allowed, asn_lookup_failed, ip_not_allowed, bandwidth_exceeded.
+    The detected_* columns are all nullable since not every reason
+    populates every field (e.g. os_not_allowed never sets detected_country).
+
+    Pruned by app_settings.py's prune_connection_rejections(), governed by
+    AppSettings.connection_issue_retention_days, same "0/NULL = keep
+    forever" shape as audit_retention_days/db_snapshot_retention_days."""
+    __tablename__ = "connection_rejection_log"
+
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    vpn_client_name = Column(String(64), nullable=False, index=True)
+    reason = Column(String(32), nullable=False)
+    message = Column(Text, nullable=True)
+    source_ip = Column(String(64), nullable=True)
+    detected_mac = Column(String(32), nullable=True)
+    detected_country = Column(String(8), nullable=True)
+    detected_city = Column(String(128), nullable=True)
+    detected_asn = Column(String(16), nullable=True)
+    detected_asn_name = Column(String(255), nullable=True)
+    # What openvpn_db.txt actually had on file for this common_name at the
+    # MOMENT of rejection (mac_mismatch rows only, NULL for every other
+    # reason) -- frozen at ingestion time by host-scripts/
+    # openvpn-mac-addr-check.py's db_lookup_registered(), specifically so
+    # this never needs (and never gets) a live re-lookup against the
+    # CURRENT file the way vpn-status.py's flat-file-backed
+    # cmd_rejected() historically did (see that function's own comment on
+    # why a live recompute against historical rows is misleading -- an
+    # admin registering the MAC later must never make an old rejection
+    # look retroactively "resolved"). NULL also covers rows ingested
+    # before this column existed. Comma-joined if the name had multiple
+    # MACs on file (openvpn_db.txt allows one-to-many for multi-device
+    # users) -- String(255), not String(32) like detected_mac, to leave
+    # room for that.
+    registered_mac_at_time = Column(String(255), nullable=True)
+
+
+class ClientMac(Base):
+    """A queryable DB mirror of openvpn_db.txt's `name=mac` bindings --
+    NOT the connect-time enforcement source, which stays the flat file
+    (read by host-scripts/openvpn-mac-addr-check.py's db_lookup(), an
+    unprivileged host-side script with zero DB credentials on the
+    security-critical connect path; moving that lookup to a live DB call
+    would make VPN connectivity itself depend on the app/DB being
+    reachable -- a real regression for no benefit). This table exists
+    purely so the app can query/report/join on MAC bindings without
+    shelling out, mirroring what routes/clients.py's add_client_mac/
+    remove_client_mac and routes/me_vpn.py's add_my_mac/remove_my_mac
+    already do to the file via cli_wrapper -- see
+    client_mac_mirror.py's record_mac_added/record_mac_removed, called
+    right after each of those succeeds.
+
+    Kept in sync with the file (which can still drift out from under the
+    app -- hand edits, SSH, setup.sh provisioning) by a full resync
+    against openvpn-install.sh's --dump-macs at every startup (see
+    main.py's lifespan() and cli_wrapper.dump_macs()) -- the same
+    "startup-time reconciliation, no separate scheduler" precedent as
+    db._sync_missing_columns()/the prune_* functions."""
+    __tablename__ = "client_macs"
+
+    id = Column(Integer, primary_key=True)
+    vpn_client_name = Column(String(64), nullable=False, index=True)
+    mac = Column(String(32), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    __table_args__ = (UniqueConstraint("vpn_client_name", "mac", name="uq_client_mac"),)
 
 
 class DbStatSnapshot(Base):

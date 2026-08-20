@@ -448,24 +448,51 @@ def cmd_rejected(limit, as_json):
 
     all_blocks.sort(key=lambda b: b["timestamp"] or datetime.min, reverse=True)
     blocks = all_blocks[:limit]
-    rows = [{
-        "timestamp": b["timestamp"].isoformat() if b.get("timestamp") else "unknown",
-        "claimed_name": b.get("common_name", "n/a"),
-        "mac_presented": b.get("IV_HWADDR", "n/a"),
-        "mac_registered": db.get(b.get("common_name", ""), "not registered"),
-        "os": format_os(b),
-        "platform": b.get("IV_PLAT", "n/a"),
-        "source_ip": b.get("trusted_ip") or b.get("untrusted_ip", "n/a"),
-        "source_port": b.get("trusted_port") or b.get("untrusted_port", "n/a"),
-        # Defaults to "mac_mismatch" for log lines written before the
-        # per-client restriction feature existed -- they never had a
-        # "reason:" line at all, but every rejection logged back then WAS
-        # a MAC mismatch (the only check that existed), so this default is
-        # accurate, not just a placeholder.
-        "reason": b.get("reason", "mac_mismatch"),
-        "total_attempts_this_name": total_by_name.get(b.get("common_name", "n/a"), 1),
-        "total_attempts_this_mac": total_by_name_mac.get((b.get("common_name", "n/a"), b.get("IV_HWADDR", "n/a")), 1),
-    } for b in blocks]
+
+    def _mac_registered(b):
+        # A row logged after this field shipped has a "registered_mac_at_time:"
+        # line -- a FROZEN historical fact (what was actually on file at the
+        # moment this specific attempt was rejected), never recomputed
+        # later. "none" means the identity genuinely had no MAC on file
+        # then, distinct from a row that simply predates this field (no
+        # such key at all), which falls back to today's live lookup --
+        # see host-scripts/openvpn-mac-addr-check.py's reject() docstring
+        # and this function's own module-level note above on why a live
+        # recompute against historical rows is misleading (an admin
+        # registering the MAC later must never make an old rejection look
+        # retroactively "resolved").
+        frozen = b.get("registered_mac_at_time")
+        if frozen is not None:
+            return (frozen if frozen != "none" else "not registered"), False
+        return db.get(b.get("common_name", ""), "not registered"), True
+
+    rows = []
+    for b in blocks:
+        mac_registered, mac_registered_is_live = _mac_registered(b)
+        rows.append({
+            "timestamp": b["timestamp"].isoformat() if b.get("timestamp") else "unknown",
+            "claimed_name": b.get("common_name", "n/a"),
+            "mac_presented": b.get("IV_HWADDR", "n/a"),
+            "mac_registered": mac_registered,
+            # True only for rows that predate the registered_mac_at_time
+            # field -- the frontend uses this to show an honest "this is a
+            # live lookup, not historical record" caveat instead of the
+            # old, misleading "now matches -- likely fixed" wording, which
+            # implied a resolved historical fact this app never actually had.
+            "mac_registered_is_live": mac_registered_is_live,
+            "os": format_os(b),
+            "platform": b.get("IV_PLAT", "n/a"),
+            "source_ip": b.get("trusted_ip") or b.get("untrusted_ip", "n/a"),
+            "source_port": b.get("trusted_port") or b.get("untrusted_port", "n/a"),
+            # Defaults to "mac_mismatch" for log lines written before the
+            # per-client restriction feature existed -- they never had a
+            # "reason:" line at all, but every rejection logged back then WAS
+            # a MAC mismatch (the only check that existed), so this default is
+            # accurate, not just a placeholder.
+            "reason": b.get("reason", "mac_mismatch"),
+            "total_attempts_this_name": total_by_name.get(b.get("common_name", "n/a"), 1),
+            "total_attempts_this_mac": total_by_name_mac.get((b.get("common_name", "n/a"), b.get("IV_HWADDR", "n/a")), 1),
+        })
 
     if as_json:
         print(json.dumps(rows, indent=2, default=str))

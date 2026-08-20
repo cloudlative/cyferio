@@ -78,6 +78,12 @@ DEFAULTS = {
     # parses; keeping this in its own file avoids any risk of interfering
     # with that parsing.
     "QUOTA_ENFORCER_LOG": "/etc/openvpn/server/quota-enforcer.log",
+    # "My Connection Issues" ingestion -- see openvpn-mac-addr-check.py's
+    # report_rejection(). Both empty by default (feature is a no-op until
+    # setup.sh writes real values in) -- same "blank = not configured, no
+    # error" stance as MAXMIND_LICENSE_KEY above.
+    "APP_INGEST_URL": "",
+    "APP_INGEST_TOKEN": "",
 }
 
 

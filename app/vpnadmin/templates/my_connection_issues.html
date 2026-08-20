@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}My Connection Issues — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">My Connection Issues</h1></div>
+	<button class="btn-secondary" id="ci-refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Why recent VPN connection attempts from your profile were rejected, and what you can do about it. MAC address and country restrictions can be resolved here when your profile allows it; city and ASN restrictions are always set by your administrator.</p>
+
+<div class="stat-grid" id="ci-cards"></div>
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">Recent Rejections</h2></div>
+	<div id="ci-history"><p class="muted">Loading…</p></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Mirrors me_connection_issues.py's REASON_INFO -- category + recommended
+// action per reason code. Labels here are the user-facing strings; the
+// backend only ever sends the raw reason/category/recommended_action
+// codes, never pre-rendered text (same "server sends data, template
+// renders it" split as every other page in this app).
+const REASON_LABELS = {
+	mac_mismatch: "MAC Address Not Allowed",
+	os_not_allowed: "Device OS Not Allowed",
+	country_not_allowed: "Country Not Allowed",
+	country_lookup_failed: "Country Could Not Be Determined",
+	city_not_allowed: "City Not Allowed",
+	city_lookup_failed: "City Could Not Be Determined",
+	asn_not_allowed: "Network Provider (ASN) Not Allowed",
+	asn_lookup_failed: "Network Provider (ASN) Could Not Be Determined",
+	ip_not_allowed: "IP Address Not Allowed",
+	bandwidth_exceeded: "Monthly Bandwidth Quota Exceeded",
+};
+const CARD_ORDER = ["mac", "country", "city", "asn", "other"];
+const CARD_ICON = { mac: "▤", country: "◈", city: "◇", asn: "⌁", other: "⚠" };
+
+let latestData = null;
+
+function actionLabel(action) {
+	if (action === "whitelist_mac") return "Add to My Allowed MAC Addresses";
+	if (action === "update_country") return "Update Allowed Country";
+	if (action === "upgrade_quota") return "Contact Administrator (Quota)";
+	return "Contact Administrator";
+}
+
+async function auditAction(action, target) {
+	try {
+		await apiFetch("/api/me/connection-issues/audit", { method: "POST", body: { action, target: target || null } });
+	} catch (e) {
+		// Non-fatal -- the audit trail is a bonus, never blocks the user's
+		// own action (copying a MAC, expanding a row) from completing.
+	}
+}
+
+function renderCards(cards) {
+	const grid = document.getElementById("ci-cards");
+	grid.innerHTML = CARD_ORDER.map((key) => {
+		const c = cards.find((x) => x.category === key) || { count: 0, last_occurrence: null, label: key };
+		const accent = c.count > 0 ? "accent-rejected" : "accent-total";
+		return `
+			<div class="stat-card ${accent}">
+				<span class="stat-hint">${CARD_ICON[key] || "•"}</span>
+				<div class="stat-value">${c.count}</div>
+				<div class="stat-label">${escapeHtml(c.label)}</div>
+				<div class="muted" style="font-size:0.78rem;margin-top:4px">${c.last_occurrence ? `Last: ${fmtTimestamp(c.last_occurrence)}` : "No occurrences"}</div>
+			</div>`;
+	}).join("");
+}
+
+function renderRowDetail(row, data) {
+	const parts = [];
+	if (row.detected_mac) parts.push(`<div><label>Detected MAC</label><div class="mono">${escapeHtml(row.detected_mac)}</div></div>`);
+	if (row.detected_country) parts.push(`<div><label>Detected Country</label><div>${escapeHtml(row.detected_country)}</div></div>`);
+	if (row.detected_city) parts.push(`<div><label>Detected City</label><div>${escapeHtml(row.detected_city)}</div></div>`);
+	if (row.detected_asn) parts.push(`<div><label>Detected ASN</label><div class="mono">${escapeHtml(row.detected_asn)}${row.detected_asn_name ? " — " + escapeHtml(row.detected_asn_name) : ""}</div></div>`);
+	if (row.source_ip) parts.push(`<div><label>Source IP</label><div class="mono">${escapeHtml(row.source_ip)}</div></div>`);
+
+	let actionHtml = "";
+	if (row.recommended_action === "whitelist_mac") {
+		if (data.mac_self_service_enabled) {
+			actionHtml = `
+				<button class="btn-secondary btn-sm" data-copy-mac="${escapeHtml(row.detected_mac || "")}">Copy MAC Address</button>
+				<button class="btn-primary btn-sm" data-whitelist-mac="${escapeHtml(row.detected_mac || "")}">Add to My Allowed MAC Addresses</button>`;
+		} else {
+			actionHtml = `<p class="muted" style="margin:0">Your device MAC address is not currently allowed. Please contact your administrator to update your profile.</p>`;
+		}
+	} else if (row.recommended_action === "update_country") {
+		actionHtml = `
+			<p class="muted" style="margin:0 0 8px">Your profile currently allows VPN connections only from ${data.login_country ? `<strong>${escapeHtml(data.login_country)}</strong>` : "a restricted set of countries"}.</p>
+			<a class="btn-primary btn-sm" href="/my-vpn-profile#login-country-form">Update Allowed Country</a>`;
+	} else if (row.category === "city") {
+		actionHtml = `<p class="muted" style="margin:0">Your connection was rejected because your current city is not permitted by administrator-defined access policies. Please contact your administrator if this location should be allowed.</p>
+			<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`;
+	} else if (row.category === "asn") {
+		actionHtml = `<p class="muted" style="margin:0">Your connection was rejected because your network provider (ASN) is not permitted by administrator-defined access policies. Please contact your administrator to request access.</p>
+			<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`;
+	} else {
+		actionHtml = `<p class="muted" style="margin:0">Contact your administrator about this restriction.</p>
+			<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`;
+	}
+
+	return `<div class="form-grid" style="margin-bottom:10px">${parts.join("")}</div>${actionHtml}`;
+}
+
+function wireRowActions(container, row) {
+	container.querySelectorAll("[data-copy-mac]").forEach((btn) => {
+		btn.addEventListener("click", async () => {
+			try {
+				await navigator.clipboard.writeText(btn.dataset.copyMac);
+				toast("MAC address copied.", "success");
+			} catch (e) {
+				toast("Couldn't copy to clipboard.", "error");
+			}
+			auditAction("copy_mac", btn.dataset.copyMac);
+		});
+	});
+	container.querySelectorAll("[data-whitelist-mac]").forEach((btn) => {
+		btn.addEventListener("click", async () => {
+			try {
+				await apiFetch("/api/me/vpn-profile/macs", { method: "POST", body: { mac: btn.dataset.whitelistMac } });
+				toast("MAC address added to your allowed devices.", "success");
+				await loadConnectionIssues();
+			} catch (e) {
+				toast(e.message, "error");
+			}
+		});
+	});
+	container.querySelectorAll("[data-request-review]").forEach((btn) => {
+		btn.addEventListener("click", async () => {
+			await auditAction("request_access_review", row.reason);
+			toast("Your administrator has been notified via the audit log. Reach out directly for anything urgent.", "success");
+		});
+	});
+}
+
+function renderHistory(data) {
+	const el = document.getElementById("ci-history");
+	const rows = data.history || [];
+	if (rows.length === 0) {
+		el.innerHTML = `<p class="muted">No rejected connection attempts on record${data.retention_days ? ` in the last ${data.retention_days} days` : ""}.</p>`;
+		return;
+	}
+	el.innerHTML = `<div class="table-scroll"><table>
+		<thead><tr><th>Date &amp; Time</th><th>Source IP</th><th>Reason</th><th>Recommended Action</th><th></th></tr></thead>
+		<tbody>${rows.map((r, i) => `
+			<tr data-row-idx="${i}" style="cursor:pointer">
+				<td class="mono">${fmtTimestamp(r.timestamp)}</td>
+				<td class="mono">${r.source_ip ? escapeHtml(r.source_ip) : "—"}</td>
+				<td>${escapeHtml(REASON_LABELS[r.reason] || r.reason)}</td>
+				<td>${escapeHtml(actionLabel(r.recommended_action))}</td>
+				<td style="text-align:right"><span class="muted">Details ▾</span></td>
+			</tr>
+			<tr class="ci-detail-row" data-detail-idx="${i}" style="display:none"><td colspan="5"></td></tr>
+		`).join("")}</tbody>
+	</table></div>`;
+
+	el.querySelectorAll("tr[data-row-idx]").forEach((tr) => {
+		tr.addEventListener("click", async () => {
+			const idx = tr.dataset.rowIdx;
+			const detailRow = el.querySelector(`tr[data-detail-idx="${idx}"]`);
+			const cell = detailRow.querySelector("td");
+			const alreadyOpen = detailRow.style.display !== "none";
+			// Only one detail panel open at a time, same collapse behavior as
+			// other expandable tables in this app.
+			el.querySelectorAll(".ci-detail-row").forEach((r2) => (r2.style.display = "none"));
+			if (alreadyOpen) return;
+			const row = rows[idx];
+			cell.innerHTML = `<div style="padding:12px 4px">${renderRowDetail(row, latestData)}</div>`;
+			wireRowActions(cell, row);
+			detailRow.style.display = "";
+			auditAction("view_details", row.detected_mac || row.reason);
+		});
+	});
+}
+
+async function loadConnectionIssues() {
+	try {
+		const data = await apiFetch("/api/me/connection-issues");
+		latestData = data;
+		renderCards(data.cards || []);
+		renderHistory(data);
+	} catch (e) {
+		document.getElementById("ci-history").innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+document.getElementById("ci-refresh-btn").addEventListener("click", loadConnectionIssues);
+loadConnectionIssues();
+</script>
+{% endblock %}

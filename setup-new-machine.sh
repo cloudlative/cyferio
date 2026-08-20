@@ -516,10 +516,18 @@ write_env() {
 	detect_proxy_mode
 	log "  proxy mode: CLIENT_IP_HEADER=$CLIENT_IP_HEADER CLIENT_IP_TRUST_MIDDLEWARE=$CLIENT_IP_TRUST_MIDDLEWARE"
 
-	local secret_key admin_password pg_password
+	local secret_key admin_password pg_password host_ingest_token
 	secret_key=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 	admin_password=$(python3 -c "import secrets; print(secrets.token_urlsafe(18))")
 	pg_password=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+	# Shared secret authenticating host-scripts/openvpn-mac-addr-check.py's
+	# best-effort POST of rejected connect attempts to this app's
+	# /internal/connection-rejections ("My Connection Issues") -- setup.sh's
+	# own Phase 3.5 reads this back out of the freshly-written .env and
+	# writes the same value into the host's vpn-tools.conf (APP_INGEST_TOKEN),
+	# same "generate once here, read back there" pattern already used for
+	# DOMAIN (see this script's own DOMAIN-from-.env fallback above).
+	host_ingest_token=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 
 	# Postgres is the default (config.py's _default_database_url() builds it
 	# automatically from POSTGRES_PASSWORD below, which is always written) --
@@ -590,6 +598,8 @@ TURNSTILE_SITE_KEY=$turnstile_site_key_line
 TURNSTILE_SECRET_KEY=$turnstile_secret_key_line
 RECAPTCHA_SITE_KEY=$recaptcha_site_key_line
 RECAPTCHA_SECRET_KEY=$recaptcha_secret_key_line
+
+HOST_INGEST_TOKEN=$host_ingest_token
 ENVFILE
 	chmod 600 "$env_file"
 	mkdir -p "$REPO_DIR/app/data"

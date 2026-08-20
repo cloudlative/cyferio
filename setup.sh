@@ -541,6 +541,42 @@ else
 	log "Phase 3: MaxMind GeoIP -- skipped (no --maxmind-key given / declined at the prompt). Country/city/ASN restrictions will fail closed for any client that has one configured until this is set up."
 fi
 
+# --- Phase 3.5: host -> app connection-rejection ingestion (webapp mode, same box only) ----
+# Wires host-scripts/openvpn-mac-addr-check.py's best-effort POST of
+# rejected connect attempts into this box's own app instance -- see
+# routes/host_ingest.py and models.ConnectionRejectionLog ("My Connection
+# Issues"). Only meaningful when the OpenVPN host scripts AND the app run
+# on the SAME box (this script's only supported single-box topology today
+# -- a split OpenVPN-box/app-box deployment needs APP_INGEST_URL/
+# APP_INGEST_TOKEN set by hand in /etc/openvpn/vpn-tools.conf to match the
+# app box's own HOST_INGEST_TOKEN). No-op, not an error, if either side
+# isn't present yet -- same "blank = feature not wired up" stance as
+# MAXMIND_LICENSE_KEY above.
+ENV_FILE_FOR_INGEST="$REPO_DIR/.env"
+if [[ "$MODE" == "webapp" && -f "$ENV_FILE_FOR_INGEST" ]]; then
+	HOST_INGEST_TOKEN_FROM_ENV=$(grep -E '^HOST_INGEST_TOKEN=' "$ENV_FILE_FOR_INGEST" | head -1 | cut -d= -f2-)
+	if [[ -n "$HOST_INGEST_TOKEN_FROM_ENV" && -n "$DOMAIN" ]]; then
+		log "Phase 3.5: connection-rejection ingestion"
+		VPN_TOOLS_CONF=/etc/openvpn/vpn-tools.conf
+		mkdir -p /etc/openvpn
+		touch "$VPN_TOOLS_CONF"
+		for kv in "APP_INGEST_URL=https://${DOMAIN}" "APP_INGEST_TOKEN=${HOST_INGEST_TOKEN_FROM_ENV}"; do
+			k="${kv%%=*}"
+			if grep -qE "^${k}=" "$VPN_TOOLS_CONF"; then
+				if ! grep -qE "^${kv}\$" "$VPN_TOOLS_CONF"; then
+					sed -i "s|^${k}=.*|${kv}|" "$VPN_TOOLS_CONF"
+					note_change "updated ${k} in $VPN_TOOLS_CONF"
+				fi
+			else
+				echo "$kv" >> "$VPN_TOOLS_CONF"
+				note_change "set ${k} in $VPN_TOOLS_CONF"
+			fi
+		done
+		chmod 640 "$VPN_TOOLS_CONF"
+		log "  OK: host-scripts/openvpn-mac-addr-check.py will now report rejections to https://${DOMAIN}/internal/connection-rejections."
+	fi
+fi
+
 # --- Provisioning marker ------------------------------------------------------
 if [[ ! -f "$MARKER_FILE" ]]; then
 	mkdir -p "$MARKER_DIR"
