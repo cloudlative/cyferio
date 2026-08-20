@@ -192,6 +192,13 @@ class MacRequest(BaseModel):
 
 @router.post("/{name}/macs", status_code=201)
 def add_client_mac(name: str, body: MacRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
+    # Admin-only endpoint (gated by _require_client_manager) -- e.message
+    # is passed through UNREDACTED, including a cross-client MAC conflict's
+    # "...is already assigned to client '<other_client_name>'." detail,
+    # deliberately: an admin needs that for troubleshooting/support. The
+    # self-service equivalent (routes/me_vpn.py's add_my_mac) redacts the
+    # other client's name from this same underlying message before it
+    # reaches a regular user -- see that function's own comment.
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid client name.")
     try:

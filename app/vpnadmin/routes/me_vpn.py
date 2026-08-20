@@ -18,6 +18,8 @@ Profile lifecycle unification) or by attaching an existing, unassigned
 profile via routes/users.py's link_vpn_profile. This router only ever
 views/updates a profile that's already linked, regardless of which of
 those two ways it got linked."""
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
@@ -37,6 +39,24 @@ from ..permissions import require_permission
 from .reports import _source_ip_summary
 
 router = APIRouter(prefix="/api/me/vpn-profile", tags=["me"])
+
+
+# openvpn-install.sh's do_add_mac (via cli.add_mac's ScriptError) reports a
+# cross-client MAC conflict as "MAC address <mac> is already assigned to
+# client '<other_client_name>'." -- correct and useful for an admin (see
+# routes/clients.py's add_client_mac, which passes this through
+# unredacted), but a self-service "User" role has no business learning
+# another account's VPN client/profile name just by guessing at MAC
+# addresses. Only THIS substring is redacted -- every other ScriptError
+# this same call can raise (invalid MAC format, re-adding a MAC already
+# registered to the caller's OWN client) names nothing but the caller's
+# own input/profile and is left untouched.
+_MAC_CONFLICT_RE = re.compile(r"^(MAC address \S+) is already assigned to client '.*'\.$")
+
+
+def _redact_mac_conflict_for_self_service(message: str) -> str:
+    m = _MAC_CONFLICT_RE.match(message)
+    return f"{m.group(1)} is already assigned to another account." if m else message
 
 
 def _require_link(user: User) -> "VpnProfileLink":  # noqa: F821 -- forward ref, avoids importing the model just for typing
@@ -175,8 +195,14 @@ def add_my_mac(
     try:
         result = cli.add_mac(link.vpn_client_name, body.mac)
     except ScriptError as e:
+        # Audit log keeps the FULL, unredacted detail (e.message) --
+        # that's an admin-facing surface (Users Activity), not the
+        # response returned to the caller below, so an admin investigating
+        # a failed self-service attempt still sees exactly which other
+        # client's MAC collided. Only the HTTP response to the requesting
+        # user itself is redacted -- see _redact_mac_conflict_for_self_service.
         log_action(db, user, "self_add_mac", target=link.vpn_client_name, detail=e.message, success=False)
-        raise HTTPException(status_code=400, detail=e.message)
+        raise HTTPException(status_code=400, detail=_redact_mac_conflict_for_self_service(e.message))
     log_action(db, user, "self_add_mac", target=link.vpn_client_name, detail=result, success=True)
     record_mac_added(db, link.vpn_client_name, body.mac)
     return {"message": result}
