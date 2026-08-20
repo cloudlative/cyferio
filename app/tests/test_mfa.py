@@ -3,15 +3,14 @@ full design. Covers: policy precedence resolution, enrollment, login-flow
 branching, OTP lockout, recovery codes, trusted devices, and admin
 actions."""
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pyotp
-import pytest
 
 from vpnadmin import app_settings
 from vpnadmin import mfa as mfa_module
 from vpnadmin.auth import hash_password
-from vpnadmin.models import AuditLog, MfaRecoveryCode, MfaTrustedDevice, RoleDef, User
+from vpnadmin.models import AuditLog, MfaRecoveryCode, RoleDef, User
 
 from .conftest import login
 
