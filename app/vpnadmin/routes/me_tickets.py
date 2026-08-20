@@ -19,14 +19,15 @@ kept alongside this."""
 import json
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from .. import app_settings
+from .. import app_settings, ticket_attachments
 from ..audit import log_action
 from ..client_ip import get_client_ip
 from ..db import get_db
-from ..models import AuditLog, SupportTicket, SupportTicketMessage, User
+from ..models import AuditLog, SupportTicket, SupportTicketAttachment, SupportTicketMessage, User
 from ..permissions import require_permission
 from ..support_tickets import (
     DEFAULT_PRIORITY,
@@ -67,6 +68,22 @@ def _rate_limited(db: Session, user: User) -> bool:
         .count()
     )
     return recent_count >= s.support_ticket_rate_limit_count
+
+
+def _attach_validated_files(db: Session, message: SupportTicketMessage, ticket_id: int, uploader_id: int,
+                             validated: list[tuple[bytes, str, str]]) -> None:
+    """Stores every already-validated upload (see ticket_attachments.
+    validate_all, which MUST be called by the route handler BEFORE it
+    creates the ticket/message row -- that ordering, not this function,
+    is what guarantees a rejected attachment never leaves a half-flushed
+    ticket/message in the session; see validate_all's own docstring),
+    creating one SupportTicketAttachment row per file. Shared by create/
+    reply on both this router and routes/tickets.py's admin counterpart."""
+    for original_filename, stored_path, content_type, size_bytes in ticket_attachments.store_all(ticket_id, validated):
+        db.add(SupportTicketAttachment(
+            ticket_id=ticket_id, message_id=message.id, original_filename=original_filename,
+            stored_path=stored_path, content_type=content_type, size_bytes=size_bytes, uploaded_by_user_id=uploader_id,
+        ))
 
 
 def _require_own_ticket(db: Session, user: User, ticket_id: int) -> SupportTicket:
@@ -184,9 +201,11 @@ def create_my_ticket(
     priority: str = Form(DEFAULT_PRIORITY),
     description: str = Form(...),
     attach_context: bool = Form(False),
+    attachments: list[UploadFile] = File(default=[]),
     user: User = Depends(require_permission("support_tickets", "create")),
     db: Session = Depends(get_db),
 ):
+    attachments = [a for a in attachments if a.filename]  # an empty file input still submits one zero-name UploadFile
     subject = subject.strip()
     description = description.strip()
     if not subject:
@@ -208,6 +227,11 @@ def create_my_ticket(
             detail=f"You've submitted {s.support_ticket_rate_limit_count} ticket actions in the last "
                    f"{s.support_ticket_rate_limit_window_minutes} minutes -- please wait before sending another.",
         )
+    # Validated (and, for magic-byte types, sniffed) BEFORE anything below
+    # touches the session -- see ticket_attachments.validate_all's own
+    # docstring for why a rejected attachment must never leave a half-
+    # flushed ticket/message row behind.
+    validated_attachments = ticket_attachments.validate_all(attachments)
 
     context_snapshot, vpn_client_name = (None, None)
     if attach_context:
@@ -222,6 +246,8 @@ def create_my_ticket(
     db.flush()  # need ticket.id for the first message row below
     message = SupportTicketMessage(ticket_id=ticket.id, author_user_id=user.id, body=description)
     db.add(message)
+    db.flush()  # need message.id for attachment rows below
+    _attach_validated_files(db, message, ticket.id, user.id, validated_attachments)
     db.commit()
 
     log_action(db, user, "self_ticket_created", target=f"TCK-{ticket.id}", detail=subject)
@@ -238,9 +264,11 @@ def get_my_ticket(ticket_id: int, user: User = Depends(require_permission("suppo
 def reply_to_my_ticket(
     ticket_id: int,
     body: str = Form(...),
+    attachments: list[UploadFile] = File(default=[]),
     user: User = Depends(require_permission("support_tickets", "update")),
     db: Session = Depends(get_db),
 ):
+    attachments = [a for a in attachments if a.filename]
     ticket = _require_own_ticket(db, user, ticket_id)
     body = body.strip()
     if not body:
@@ -256,9 +284,12 @@ def reply_to_my_ticket(
             detail=f"You've submitted {s.support_ticket_rate_limit_count} ticket actions in the last "
                    f"{s.support_ticket_rate_limit_window_minutes} minutes -- please wait before sending another.",
         )
+    validated_attachments = ticket_attachments.validate_all(attachments)
 
     message = SupportTicketMessage(ticket_id=ticket.id, author_user_id=user.id, body=body)
     db.add(message)
+    db.flush()  # need message.id for attachment rows below
+    _attach_validated_files(db, message, ticket.id, user.id, validated_attachments)
     ticket.status = "waiting_for_admin"
     ticket.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -281,3 +312,28 @@ def reopen_my_ticket(ticket_id: int, user: User = Depends(require_permission("su
 
     log_action(db, user, "self_ticket_reopen", target=f"TCK-{ticket.id}", detail=f"status {old_status}->reopened")
     return _serialize_ticket_detail(ticket, is_admin_view=False)
+
+
+@router.get("/{ticket_id}/attachments/{attachment_id}")
+def download_my_attachment(
+    ticket_id: int, attachment_id: int,
+    user: User = Depends(require_permission("support_tickets", "view")),
+    db: Session = Depends(get_db),
+):
+    _require_own_ticket(db, user, ticket_id)  # 404s if not this user's own ticket
+    attachment = (
+        db.query(SupportTicketAttachment)
+        .join(SupportTicketMessage, SupportTicketAttachment.message_id == SupportTicketMessage.id)
+        .filter(
+            SupportTicketAttachment.id == attachment_id,
+            SupportTicketAttachment.ticket_id == ticket_id,
+            SupportTicketMessage.is_internal_note.is_(False),  # never leak an internal-note attachment to self-service
+        )
+        .one_or_none()
+    )
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+    path = ticket_attachments.full_path(attachment.stored_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Attachment file is missing on disk.")
+    return FileResponse(path, media_type=attachment.content_type, filename=attachment.original_filename)

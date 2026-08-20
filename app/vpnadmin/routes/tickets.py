@@ -10,16 +10,18 @@ See routes/me_tickets.py's module docstring for the self-service
 counterpart and the shared serialization helpers reused here."""
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Form, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from .. import ticket_attachments
 from ..audit import log_action
 from ..db import get_db
-from ..models import AuditLog, SupportTicket, SupportTicketMessage, User
+from ..models import AuditLog, SupportTicket, SupportTicketAttachment, SupportTicketMessage, User
 from ..permissions import require_permission_any_scope
 from ..support_tickets import PRIORITIES, STATUSES, categories_for_form, priority_label, status_label
-from .me_tickets import MAX_DESCRIPTION_LENGTH, _serialize_ticket_detail, _serialize_ticket_summary
+from .me_tickets import MAX_DESCRIPTION_LENGTH, _attach_validated_files, _serialize_ticket_detail, _serialize_ticket_summary
 
 _require_ticket_viewer = require_permission_any_scope("support_tickets", "view")
 _require_ticket_manager = require_permission_any_scope("support_tickets", "update")
@@ -81,18 +83,23 @@ def reply_to_ticket(
     ticket_id: int,
     body: str = Form(...),
     is_internal_note: bool = Form(False),
+    attachments: list[UploadFile] = File(default=[]),
     admin: User = Depends(_require_ticket_manager),
     db: Session = Depends(get_db),
 ):
+    attachments = [a for a in attachments if a.filename]
     ticket = _get_ticket_or_404(db, ticket_id)
     body = body.strip()
     if not body:
         raise HTTPException(status_code=422, detail="Reply cannot be empty.")
     if len(body) > MAX_DESCRIPTION_LENGTH:
         raise HTTPException(status_code=422, detail=f"Reply must be {MAX_DESCRIPTION_LENGTH} characters or fewer.")
+    validated_attachments = ticket_attachments.validate_all(attachments)
 
     message = SupportTicketMessage(ticket_id=ticket.id, author_user_id=admin.id, body=body, is_internal_note=is_internal_note)
     db.add(message)
+    db.flush()  # need message.id for attachment rows below
+    _attach_validated_files(db, message, ticket.id, admin.id, validated_attachments)
     # An admin's real (non-internal) reply is what a user is actually
     # waiting on -- flips status to reflect that, same as a user's own
     # reply flips it to waiting_for_admin (routes/me_tickets.py). An
@@ -188,3 +195,25 @@ def list_assignable_admins(_: User = Depends(_require_ticket_viewer), db: Sessio
         if has_permission_any_scope(db, u, "support_tickets", "update")
     ]
     return {"admins": [{"id": u.id, "username": u.username, "display_name": u.display_name} for u in candidates]}
+
+
+@router.get("/{ticket_id}/attachments/{attachment_id}")
+def download_ticket_attachment(
+    ticket_id: int, attachment_id: int,
+    _: User = Depends(_require_ticket_viewer), db: Session = Depends(get_db),
+):
+    _get_ticket_or_404(db, ticket_id)
+    # Admin view -- unlike routes/me_tickets.py's download_my_attachment,
+    # an internal-note attachment IS visible here; internal notes are
+    # only ever hidden from self-service.
+    attachment = (
+        db.query(SupportTicketAttachment)
+        .filter(SupportTicketAttachment.id == attachment_id, SupportTicketAttachment.ticket_id == ticket_id)
+        .one_or_none()
+    )
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+    path = ticket_attachments.full_path(attachment.stored_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Attachment file is missing on disk.")
+    return FileResponse(path, media_type=attachment.content_type, filename=attachment.original_filename)

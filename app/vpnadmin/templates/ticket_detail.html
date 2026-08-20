@@ -28,6 +28,10 @@
 					<label for="td-reply-body">Reply</label>
 					<textarea id="td-reply-body" rows="5" required maxlength="5000" placeholder="Write your reply..."></textarea>
 				</div>
+				<div class="field">
+					<label for="td-reply-attachments">Attachments <span class="muted">(optional)</span></label>
+					<input type="file" id="td-reply-attachments" multiple accept=".png,.jpg,.jpeg,.gif,.pdf,.txt,.log,.csv,.zip">
+				</div>
 				{% if is_admin_view %}
 				<div class="checkbox-row">
 					<label class="checkbox-label"><input type="checkbox" id="td-internal-note"> Internal note <span class="muted">(not visible to the user)</span></label>
@@ -103,7 +107,7 @@ function renderThread(t) {
 				<span class="muted" style="font-size:0.8rem">${new Date(m.created_at).toLocaleString()}</span>
 			</div>
 			<div style="white-space:pre-wrap">${m.body.replace(/</g, "&lt;")}</div>
-			${m.attachments.length ? `<div class="muted" style="margin-top:8px;font-size:0.82rem">${m.attachments.map((a) => `📎 ${a.filename}`).join(", ")}</div>` : ""}
+			${m.attachments.length ? `<div class="muted" style="margin-top:8px;font-size:0.82rem">${m.attachments.map((a) => `📎 <a href="${API_BASE}/${TICKET_ID}/attachments/${a.id}" target="_blank" rel="noopener">${a.filename}</a>`).join(", ")}</div>` : ""}
 		</div>
 	`).join("");
 }
@@ -163,9 +167,11 @@ document.getElementById("td-reply-form").addEventListener("submit", async (e) =>
 	const fd = new FormData();
 	fd.set("body", document.getElementById("td-reply-body").value);
 	if (IS_ADMIN_VIEW) fd.set("is_internal_note", document.getElementById("td-internal-note").checked ? "true" : "false");
+	for (const file of document.getElementById("td-reply-attachments").files) fd.append("attachments", file);
 	try {
 		await apiFetchForm(`${API_BASE}/${TICKET_ID}/replies`, fd);
 		document.getElementById("td-reply-body").value = "";
+		document.getElementById("td-reply-attachments").value = "";
 		if (IS_ADMIN_VIEW) document.getElementById("td-internal-note").checked = false;
 		await loadTicket();
 		toast("Reply sent.");

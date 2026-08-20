@@ -8,6 +8,7 @@ OpenVPN install or root access.
 """
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -16,6 +17,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("USE_SUDO", "false")
 os.environ.setdefault("OPENVPN_INSTALL_SCRIPT", "/nonexistent/openvpn-install.sh")
 os.environ.setdefault("VPN_STATUS_SCRIPT", "/nonexistent/vpn-status.py")
+os.environ.setdefault("TICKET_ATTACHMENTS_DIR", tempfile.mkdtemp(prefix="cyferio-test-ticket-attachments-"))
 
 import pytest
 from sqlalchemy import create_engine

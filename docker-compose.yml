@@ -188,6 +188,14 @@ services:
       #     below instead.
       - ./app/data:/app/data
 
+      # --- Support Ticketing System attachments (config.py's
+      #     TICKET_ATTACHMENTS_DIR) -- a dedicated named volume, not a
+      #     subdirectory of /etc/openvpn: these are user-uploaded files
+      #     unrelated to OpenVPN server state, so they don't belong under
+      #     the host bind-mount above. Persists across container
+      #     recreation the same way pgdata/app/data do.
+      - ticket-attachments:/data/ticket-attachments
+
       # --- Health page (see app/vpnadmin/health.py's get_host_health):
       #     the HOST's /proc, /sys, and root filesystem, all read-only, so
       #     the app can report the droplet's real CPU/RAM/disk/uptime
@@ -254,3 +262,4 @@ volumes:
   traefik-acme:
   traefik-dynamic-config:
   pgdata:
+  ticket-attachments:

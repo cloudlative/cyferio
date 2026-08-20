@@ -58,6 +58,10 @@
 			<div class="checkbox-row">
 				<label class="checkbox-label"><input type="checkbox" id="nt-attach-context"> Attach my current VPN diagnostic info (IP, session, recent connection issues)</label>
 			</div>
+			<div class="field">
+				<label for="nt-attachments">Attachments <span class="muted">(optional -- images, PDF, txt/log/csv, zip)</span></label>
+				<input type="file" id="nt-attachments" multiple accept=".png,.jpg,.jpeg,.gif,.pdf,.txt,.log,.csv,.zip">
+			</div>
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="new-ticket-cancel">Cancel</button>
 				<button type="submit" class="btn-primary" id="new-ticket-submit">Submit Ticket</button>
@@ -174,6 +178,7 @@ document.getElementById("new-ticket-form").addEventListener("submit", async (e) 
 	fd.set("priority", document.getElementById("nt-priority").value);
 	fd.set("description", document.getElementById("nt-description").value);
 	fd.set("attach_context", document.getElementById("nt-attach-context").checked ? "true" : "false");
+	for (const file of document.getElementById("nt-attachments").files) fd.append("attachments", file);
 	try {
 		const ticket = await apiFetchForm("/api/me/tickets", fd);
 		document.getElementById("new-ticket-dialog").close();

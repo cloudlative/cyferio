@@ -258,6 +258,16 @@ class Settings:
     GEOIP_CITY_DB_PATH: str = os.environ.get("GEOIP_CITY_DB_PATH", "/etc/openvpn/server/GeoLite2-City.mmdb")
     GEOIP_ASN_DB_PATH: str = os.environ.get("GEOIP_ASN_DB_PATH", "/etc/openvpn/server/GeoLite2-ASN.mmdb")
 
+    # Support Ticketing System attachment storage -- deliberately its OWN
+    # dedicated volume (docker-compose.yml's `ticket-attachments` named
+    # volume), not a subdirectory of /etc/openvpn: these are user-uploaded
+    # files (screenshots, log excerpts), not OpenVPN server state, and
+    # /etc/openvpn is bind-mounted from the HOST for a specific reason
+    # (openvpn-install.sh/vpn-status.py need direct access) that has
+    # nothing to do with this feature. See app/vpnadmin/ticket_attachments.py
+    # for the upload/download validation that reads/writes here.
+    TICKET_ATTACHMENTS_DIR: str = os.environ.get("TICKET_ATTACHMENTS_DIR", "/data/ticket-attachments")
+
     # --- Real client IP source (proxy/CDN detection) -------------------------
     # Which header client_ip.py::get_client_ip() trusts for the visitor's real
     # IP (used by the GeoIP/country/city/ASN/IP login restrictions above, and
