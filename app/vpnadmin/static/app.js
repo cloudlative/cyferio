@@ -1918,18 +1918,20 @@ document.addEventListener("click", (e) => {
 });
 
 /**
- * Notification bell (sidebar header) -- backs QuotaNotification rows
- * (routes/notifications.py), currently the only notification type this
- * app raises. Polls GET /api/notifications every 60s (much lower-frequency
- * data than the 10s dashboard-snapshot cadence elsewhere in this app --
- * a bandwidth-quota threshold crossing doesn't need near-real-time
- * visibility) plus once on page load; updates the unread badge always,
- * re-renders the list only while the panel is open (no point rebuilding
- * DOM the user can't see). Same anchored-panel toggle shape as
- * initThemeQuickSwitch above (plain style.display, close on outside
- * click) -- present on every authenticated page since it's in base.html,
- * not gated by role (every account, including "User"-role self-service
- * accounts, can have notifications about their own quota).
+ * Notification bell (sidebar header) -- backs the merged QuotaNotification
+ * + TicketNotification feed (routes/notifications.py). Polls
+ * GET /api/notifications every 60s (much lower-frequency data than the
+ * 10s dashboard-snapshot cadence elsewhere in this app -- neither a quota
+ * crossing nor a ticket reply needs near-real-time visibility) plus once
+ * on page load; updates the unread badge always, re-renders the list only
+ * while the panel is open (no point rebuilding DOM the user can't see).
+ * Same anchored-panel toggle shape as initThemeQuickSwitch above (plain
+ * style.display, close on outside click) -- present on every
+ * authenticated page since it's in base.html, not gated by role (every
+ * account, including "User"-role self-service accounts, can have
+ * notifications about its own quota/tickets). A notification with a
+ * link_url (ticket events; quota ones have none) navigates there once
+ * marked read -- see each item's click handler below.
  */
 (function initNotificationBell() {
 	const root = document.getElementById("notif-bell");
@@ -1943,16 +1945,18 @@ document.addEventListener("click", (e) => {
 	function renderList() {
 		listEl.innerHTML = lastNotifications.length
 			? lastNotifications.map((n) => `
-				<div class="notif-item ${n.read_at ? "" : "unread"}" data-id="${n.id}">
+				<div class="notif-item ${n.read_at ? "" : "unread"}" data-id="${n.id}" data-link="${n.link_url || ""}" style="${n.link_url ? "cursor:pointer" : ""}">
 					<span class="notif-item-level ${n.level}">${n.level}</span>
 					<div>${escapeHtml(n.message)}</div>
 					<div class="notif-item-time">${fmtTimestamp(n.created_at)}</div>
 				</div>`).join("")
 			: '<p class="muted" style="padding:14px">No notifications.</p>';
-		listEl.querySelectorAll(".notif-item.unread").forEach((el) => {
+		listEl.querySelectorAll(".notif-item").forEach((el) => {
+			if (!el.classList.contains("unread") && !el.dataset.link) return;
 			el.addEventListener("click", async () => {
 				try {
-					await apiFetch(`/api/notifications/${el.dataset.id}/read`, { method: "POST" });
+					if (el.classList.contains("unread")) await apiFetch(`/api/notifications/${el.dataset.id}/read`, { method: "POST" });
+					if (el.dataset.link) { window.location.href = el.dataset.link; return; }
 					await refresh();
 				} catch (e) { /* non-fatal -- the item just stays marked unread */ }
 			});

@@ -492,6 +492,9 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 .notif-item-level { display: inline-block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 7px; border-radius: 5px; margin-bottom: 5px; }
 .notif-item-level.warning { background: var(--warning-bg); color: var(--warning-text); }
 .notif-item-level.critical { background: var(--danger-bg); color: var(--danger-text); }
+/* Support Ticketing System notifications (routes/notifications.py's
+   TicketNotification merge) -- neutral, not a warning/critical severity. */
+.notif-item-level.info { background: var(--surface-alt); color: var(--text-muted); }
 .notif-item-time { color: var(--text-muted); font-size: 0.75rem; margin-top: 4px; }
 
 .theme-quick-switch { position: relative; }

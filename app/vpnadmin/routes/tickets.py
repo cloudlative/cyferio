@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from .. import ticket_attachments
+from .. import ticket_attachments, ticket_notifications
 from ..audit import log_action
 from ..db import get_db
 from ..models import AuditLog, SupportTicket, SupportTicketAttachment, SupportTicketMessage, User
@@ -112,6 +112,8 @@ def reply_to_ticket(
 
     action = "ticket_internal_note" if is_internal_note else "ticket_reply"
     log_action(db, admin, action, target=f"TCK-{ticket.id}", detail=body[:200])
+    if not is_internal_note:
+        ticket_notifications.admin_replied(db, ticket)
     return _serialize_ticket_detail(ticket, is_admin_view=True)
 
 
@@ -134,12 +136,18 @@ def update_ticket(
     ticket = _get_ticket_or_404(db, ticket_id)
     fields_set = body.model_fields_set
     changes: list[str] = []
+    # Captured before either field is mutated below -- feeds the
+    # post-commit notification fan-out at the end of this function.
+    old_status = ticket.status
+    status_changed_to: str | None = None
+    became_critical = False
 
     if "status" in fields_set:
         if body.status not in STATUSES:
             raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(STATUSES)}.")
         if body.status != ticket.status:
             changes.append(f"status {status_label(ticket.status)}->{status_label(body.status)}")
+            status_changed_to = body.status
             now = datetime.now(timezone.utc)
             if body.status == "resolved":
                 ticket.resolved_at = now
@@ -158,6 +166,7 @@ def update_ticket(
             raise HTTPException(status_code=400, detail=f"Priority must be one of: {', '.join(PRIORITIES)}.")
         if body.priority != ticket.priority:
             changes.append(f"priority {ticket.priority}->{body.priority}")
+            became_critical = body.priority == "critical"
             ticket.priority = body.priority
 
     if body.clear_assignment:
@@ -178,6 +187,10 @@ def update_ticket(
         ticket.updated_at = datetime.now(timezone.utc)
         db.commit()
         log_action(db, admin, "ticket_updated", target=f"TCK-{ticket.id}", detail="; ".join(changes))
+        if status_changed_to is not None:
+            ticket_notifications.status_changed(db, ticket, old_status, status_changed_to)
+        if became_critical:
+            ticket_notifications.ticket_marked_critical(db, ticket)
     return _serialize_ticket_detail(ticket, is_admin_view=True)
 
 

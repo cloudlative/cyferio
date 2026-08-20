@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from .. import app_settings, ticket_attachments
+from .. import app_settings, ticket_attachments, ticket_notifications
 from ..audit import log_action
 from ..client_ip import get_client_ip
 from ..db import get_db
@@ -251,6 +251,7 @@ def create_my_ticket(
     db.commit()
 
     log_action(db, user, "self_ticket_created", target=f"TCK-{ticket.id}", detail=subject)
+    ticket_notifications.ticket_created(db, ticket)
     return _serialize_ticket_detail(ticket, is_admin_view=False)
 
 
@@ -295,6 +296,7 @@ def reply_to_my_ticket(
     db.commit()
 
     log_action(db, user, "self_ticket_reply", target=f"TCK-{ticket.id}", detail=body[:200])
+    ticket_notifications.user_replied(db, ticket)
     return _serialize_ticket_detail(ticket, is_admin_view=False)
 
 
@@ -311,6 +313,7 @@ def reopen_my_ticket(ticket_id: int, user: User = Depends(require_permission("su
     db.commit()
 
     log_action(db, user, "self_ticket_reopen", target=f"TCK-{ticket.id}", detail=f"status {old_status}->reopened")
+    ticket_notifications.ticket_reopened(db, ticket)
     return _serialize_ticket_detail(ticket, is_admin_view=False)
 
 

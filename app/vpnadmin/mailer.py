@@ -260,6 +260,39 @@ def send_support_request(*, db: Session, requester_name: str, requester_username
     _send(db, outbound)
 
 
+def send_ticket_notification_email(*, db: Session, to_address: str, ticket_id: int, subject: str, headline: str, body_text: str | None = None) -> bool:
+    """Support Ticketing System -- user-facing ticket emails (created,
+    admin replied, status changed, resolved, closed). Unlike
+    send_admin_notification, this is NEVER gated by an admin toggle (see
+    the plan's "User-side ticket emails are not behind an admin toggle"
+    decision) -- these are transactional to the ticket's own creator, same
+    posture as the welcome/password-reset emails. Deliberately swallows
+    delivery failures (returns False) rather than turning a successful
+    reply/status-change into a 500 -- the notification is a courtesy, not
+    a precondition, same stance as send_admin_notification takes for the
+    admin-facing side."""
+    s = app_settings.runtime
+    app_name = s.app_name
+    ticket_path = f"/support/{ticket_id}"
+    text_body = (
+        f"{headline}\n\n"
+        f"Ticket #{ticket_id} -- {subject}\n\n"
+        + (f"{body_text}\n\n" if body_text else "")
+        + (f"View it here: {s.portal_url}{ticket_path}\n\n" if s.portal_url else "")
+        + f"— {app_name}"
+    )
+    html_body = _render_email_template(
+        "ticket_notification.html", ticket_id=ticket_id, subject=subject, headline=headline,
+        body_text=body_text, portal_url=s.portal_url, ticket_path=ticket_path,
+    )
+    message = OutboundMessage(to_address=to_address, subject=f"[{app_name}] {headline} -- Ticket #{ticket_id}", text_body=text_body, html_body=html_body)
+    try:
+        _send(db, message)
+        return True
+    except Exception:
+        return False
+
+
 def send_test_email_via_config(*, provider_type: str, config: dict, to_address: str) -> None:
     """Settings-page "Test" button (per EmailProvider profile) -- sends a
     short confirmation message through the EXACT config passed in

@@ -1,16 +1,25 @@
-"""In-app notifications -- currently just QuotaNotification (bandwidth
-quota threshold crossings, written by main.py's _quota_notification_loop),
-but deliberately shaped as its own small router/table rather than folded
-into me_vpn.py, since a notification concept naturally grows to cover
-event types beyond VPN self-service (e.g. a future account/security
-notice) that shouldn't have to live under the vpn-profile prefix.
+"""In-app notifications -- QuotaNotification (bandwidth quota threshold
+crossings, written by main.py's _quota_notification_loop) and
+TicketNotification (Support Ticketing System events, written by routes/
+me_tickets.py/routes/tickets.py at the moment each event happens, not by
+a background loop) are merged into one read/read-all contract here.
+Deliberately two separate tables, not one shared/polymorphic table: the
+two have genuinely different shapes (QuotaNotification's pct_used/
+vpn_client_name/period_start-based unique constraint don't apply to a
+ticket event, and vice versa a ticket_id FK doesn't belong on a quota
+row) -- this router is what presents them as one list to the frontend.
 
 Deliberately always operates on request.user's own rows, never an id/
 username taken from the request -- same "own by construction, no separate
 scope check needed" reasoning as me_vpn.py's own module docstring. Any
 authenticated account (any role) can see its own notifications; there's
 no permission object for this because "my own notifications" isn't a
-module an admin would ever need to grant/revoke access to."""
+module an admin would ever need to grant/revoke access to.
+
+Each source table's own numeric id isn't unique ACROSS the two tables, so
+every notification's `id` in this router's responses is prefixed
+("quota:<id>" / "ticket:<id>") -- mark_read/mark_all_read parse that
+prefix to know which table to update."""
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,17 +27,30 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_user
 from ..db import get_db
-from ..models import QuotaNotification, User
+from ..models import QuotaNotification, TicketNotification, User
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
 
-def _serialize(n: QuotaNotification) -> dict:
+def _serialize_quota(n: QuotaNotification) -> dict:
     return {
-        "id": n.id,
-        "level": n.level,
+        "id": f"quota:{n.id}",
+        "kind": f"quota_{n.level}",
+        "level": n.level,  # "warning" | "critical" -- drives .notif-item-level's existing color classes
         "message": n.message,
-        "pct_used": n.pct_used,
+        "link_url": None,
+        "created_at": n.created_at.isoformat() if n.created_at else None,
+        "read_at": n.read_at.isoformat() if n.read_at else None,
+    }
+
+
+def _serialize_ticket(n: TicketNotification) -> dict:
+    return {
+        "id": f"ticket:{n.id}",
+        "kind": n.kind,
+        "level": "info",  # neutral styling -- ticket events aren't a warning/critical severity scale
+        "message": n.message,
+        "link_url": f"/support/{n.ticket_id}",
         "created_at": n.created_at.isoformat() if n.created_at else None,
         "read_at": n.read_at.isoformat() if n.read_at else None,
     }
@@ -36,24 +58,42 @@ def _serialize(n: QuotaNotification) -> dict:
 
 @router.get("")
 def list_my_notifications(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    rows = (
-        db.query(QuotaNotification)
-        .filter(QuotaNotification.user_id == user.id)
-        .order_by(QuotaNotification.created_at.desc())
-        .limit(30)
-        .all()
+    quota_rows = (
+        db.query(QuotaNotification).filter(QuotaNotification.user_id == user.id)
+        .order_by(QuotaNotification.created_at.desc()).limit(30).all()
     )
+    ticket_rows = (
+        db.query(TicketNotification).filter(TicketNotification.user_id == user.id)
+        .order_by(TicketNotification.created_at.desc()).limit(30).all()
+    )
+    merged = sorted(
+        [_serialize_quota(n) for n in quota_rows] + [_serialize_ticket(n) for n in ticket_rows],
+        key=lambda n: n["created_at"] or "", reverse=True,
+    )[:30]
     unread_count = (
-        db.query(QuotaNotification)
-        .filter(QuotaNotification.user_id == user.id, QuotaNotification.read_at.is_(None))
-        .count()
+        db.query(QuotaNotification).filter(QuotaNotification.user_id == user.id, QuotaNotification.read_at.is_(None)).count()
+        + db.query(TicketNotification).filter(TicketNotification.user_id == user.id, TicketNotification.read_at.is_(None)).count()
     )
-    return {"notifications": [_serialize(n) for n in rows], "unread_count": unread_count}
+    return {"notifications": merged, "unread_count": unread_count}
+
+
+def _split_prefixed_id(notification_id: str) -> tuple[str, int]:
+    if ":" not in notification_id:
+        raise HTTPException(status_code=404, detail="Notification not found.")
+    source, _, raw_id = notification_id.partition(":")
+    try:
+        return source, int(raw_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Notification not found.")
 
 
 @router.post("/{notification_id}/read")
-def mark_read(notification_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    n = db.query(QuotaNotification).filter_by(id=notification_id, user_id=user.id).one_or_none()
+def mark_read(notification_id: str, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    source, raw_id = _split_prefixed_id(notification_id)
+    model = {"quota": QuotaNotification, "ticket": TicketNotification}.get(source)
+    if model is None:
+        raise HTTPException(status_code=404, detail="Notification not found.")
+    n = db.query(model).filter_by(id=raw_id, user_id=user.id).one_or_none()
     if n is None:
         # Never trust a path id blindly -- 404 whether it doesn't exist at
         # all or belongs to someone else, same shape either way so this
@@ -62,15 +102,18 @@ def mark_read(notification_id: int, user: User = Depends(require_user), db: Sess
     if n.read_at is None:
         n.read_at = datetime.now(timezone.utc)
         db.commit()
-    return _serialize(n)
+    return _serialize_quota(n) if source == "quota" else _serialize_ticket(n)
 
 
 @router.post("/read-all")
 def mark_all_read(user: User = Depends(require_user), db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
     updated = (
-        db.query(QuotaNotification)
-        .filter(QuotaNotification.user_id == user.id, QuotaNotification.read_at.is_(None))
+        db.query(QuotaNotification).filter(QuotaNotification.user_id == user.id, QuotaNotification.read_at.is_(None))
+        .update({"read_at": now}, synchronize_session=False)
+    )
+    updated += (
+        db.query(TicketNotification).filter(TicketNotification.user_id == user.id, TicketNotification.read_at.is_(None))
         .update({"read_at": now}, synchronize_session=False)
     )
     db.commit()
