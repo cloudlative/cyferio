@@ -536,6 +536,75 @@ do_dump_macs () {
 	printf '}\n'
 }
 
+do_set_endpoint () {
+	# Usage: do_set_endpoint <host_or_ip> [port]
+	# Repoints every client's "remote" line -- both client-common.txt (the
+	# template new_client() builds every FUTURE .ovpn from) and every
+	# already-issued *.ovpn file under $OVPN_OUTPUT_DIR (regenerated
+	# in-place, cert/key material untouched) -- at a new host/IP, without
+	# reissuing a single certificate.
+	#
+	# Exists because openvpn-install.sh's first-time install auto-detects
+	# the box's IP ONCE and bakes it as a literal string into
+	# client-common.txt; there was previously no way to fix this short of
+	# hand-editing files if that IP later changed (cloud VM stop/start
+	# reassigning an ephemeral address, migration, re-provisioning...) --
+	# every existing .ovpn silently pointed at a dead address, connections
+	# never even reached the TLS handshake, and nothing showed up in any
+	# log because openvpn-mac-addr-check.py's client-connect hook only
+	# ever runs once a client actually reaches the server.
+	#
+	# IMPORTANT: an already-DOWNLOADED/imported .ovpn on a client device is
+	# a static file -- fixing the server-side copy here only corrects what
+	# a FUTURE download/re-import gets. Anyone with an already-imported
+	# profile needs to re-download and re-import it to actually pick up
+	# the new endpoint.
+	#
+	# host_or_ip may be a bare IP or a hostname -- but NOT a
+	# Cloudflare-(or similar)-proxied domain: proxied DNS only forwards
+	# HTTP(S), never raw OpenVPN UDP/TCP traffic. Use an unproxied
+	# ("DNS-only"/grey-cloud) record, a bare IP, or (best against future
+	# drift) a static/reserved IP.
+	local host="$1" port="${2:-}"
+	if [[ -z "$host" ]]; then
+		echo "A hostname or IP address is required." >&2
+		return 1
+	fi
+	if [[ -z "$port" ]]; then
+		if [[ ! -f "$CLIENT_COMMON_FILE" ]]; then
+			echo "No port given and $CLIENT_COMMON_FILE doesn't exist yet to read the current one from -- pass a port explicitly." >&2
+			return 1
+		fi
+		port=$(grep -m1 '^remote ' "$CLIENT_COMMON_FILE" | awk '{print $3}')
+		if [[ -z "$port" ]]; then
+			echo "Couldn't determine the current port from $CLIENT_COMMON_FILE's remote line -- pass a port explicitly." >&2
+			return 1
+		fi
+	fi
+	if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+		echo "Port must be numeric, got: '$port'" >&2
+		return 1
+	fi
+
+	if [[ ! -f "$CLIENT_COMMON_FILE" ]]; then
+		echo "$CLIENT_COMMON_FILE doesn't exist -- is OpenVPN installed yet?" >&2
+		return 1
+	fi
+	sed -i "s|^remote .*|remote $host $port|" "$CLIENT_COMMON_FILE"
+
+	local updated=0 f
+	shopt -s nullglob
+	for f in "$OVPN_OUTPUT_DIR"/*.ovpn; do
+		sed -i "s|^remote .*|remote $host $port|" "$f"
+		updated=$((updated + 1))
+	done
+	shopt -u nullglob
+
+	echo "Endpoint set to $host:$port in $CLIENT_COMMON_FILE and $updated existing .ovpn file(s)."
+	echo "NOTE: anyone with an already-imported .ovpn must re-download and re-import it to pick up this change -- this only affects the server-side files."
+	return 0
+}
+
 do_add_mac () {
 	# Usage: do_add_mac <name> <mac>
 	# Registers an additional device MAC for an existing client, without
@@ -953,6 +1022,14 @@ print_usage () {
 	  --set-os NAME LIST|ANY         Restrict NAME to a comma list of windows,linux,mac, or ANY to clear
 	  --set-bandwidth NAME GB|ANY    Set NAME's weekly bandwidth quota in GB, or ANY to clear
 	  --get-policy [NAME]             Show restriction policy for NAME, or every client if omitted
+	  --set-endpoint HOST_OR_IP [PORT]  Repoint client-common.txt and every existing
+	                         .ovpn's "remote" line at a new host/IP (port defaults
+	                         to whatever's already set) -- use after the server's
+	                         public IP changes. Clients must re-download/re-import
+	                         their .ovpn afterward to pick up the change. Do NOT
+	                         use a Cloudflare-(or similar)-proxied domain here --
+	                         proxied DNS only forwards HTTP(S), never raw OpenVPN
+	                         UDP/TCP.
 	  --help                 Show this help
 
 	--json can be combined with --list-users, --list-revoked-users, --macs,
@@ -987,7 +1064,7 @@ set -- "${_cli_args[@]}"
 unset _a _cli_args
 
 case "${1:-}" in
-	--add-user|--revoke-user|--list-users|--list-revoked-users|--macs|--dump-macs|--add-mac|--remove-mac|--show-ovpn|--purge-revoked|--clean-stale-db|--restore|--check-certs|--lint-mac-db|--set-country|--set-os|--set-bandwidth|--get-policy)
+	--add-user|--revoke-user|--list-users|--list-revoked-users|--macs|--dump-macs|--add-mac|--remove-mac|--show-ovpn|--purge-revoked|--clean-stale-db|--restore|--check-certs|--lint-mac-db|--set-country|--set-os|--set-bandwidth|--get-policy|--set-endpoint)
 		if [[ ! -e "$OPENVPN_DIR/server.conf" ]]; then
 			echo "OpenVPN is not installed yet (no $OPENVPN_DIR/server.conf) -- run without arguments first to install." >&2
 			exit 1
@@ -1076,6 +1153,10 @@ case "${1:-}" in
 		;;
 	--get-policy)
 		do_get_policy "$2" "$json_flag"
+		exit $?
+		;;
+	--set-endpoint)
+		do_set_endpoint "$2" "$3"
 		exit $?
 		;;
 	--help|-h)

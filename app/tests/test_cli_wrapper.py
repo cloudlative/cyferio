@@ -159,6 +159,37 @@ class TestArgumentConstruction:
         assert seen["args"] == ["sudo", "-n", "bash", "/fake/openvpn-install.sh", "--dump-macs", "--json"]
         assert result == {"alice": ["aa:bb:cc:dd:ee:ff"], "bob": []}
 
+    def test_set_endpoint_args_host_only(self, monkeypatch):
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, "Endpoint set to 34.168.71.143:1194 in ... and 3 existing .ovpn file(s).")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        result = cw.set_endpoint("34.168.71.143")
+        assert seen["args"] == ["sudo", "-n", "bash", "/fake/openvpn-install.sh", "--set-endpoint", "34.168.71.143"]
+        assert "Endpoint set" in result
+
+    def test_set_endpoint_args_with_port(self, monkeypatch):
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["args"] = args
+            return _completed(args, 0, "ok")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        cw.set_endpoint("vpn.example.com", "1195")
+        assert seen["args"] == ["sudo", "-n", "bash", "/fake/openvpn-install.sh", "--set-endpoint", "vpn.example.com", "1195"]
+
+    def test_set_endpoint_failure_raises(self, monkeypatch):
+        def fake_run(args, **kwargs):
+            return _completed(args, 1, "", "A hostname or IP address is required.")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        with pytest.raises(cw.ScriptError):
+            cw.set_endpoint("")
+
     def test_show_ovpn_args(self, monkeypatch):
         seen = {}
 

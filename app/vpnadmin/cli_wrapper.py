@@ -170,6 +170,25 @@ def remove_mac(name: str, mac: str) -> str:
     return proc.stdout.strip()
 
 
+def set_endpoint(host: str, port: str | None = None) -> str:
+    """Repoints client-common.txt and every existing .ovpn's "remote" line
+    at a new host/IP -- see openvpn-install.sh's do_set_endpoint() for the
+    full rationale (this is the fix for a server's public IP changing
+    out from under already-issued client configs). No per-client cache to
+    invalidate here -- this doesn't touch list_clients/list_macs/etc,
+    only the .ovpn files' own contents, which aren't cached."""
+    args = ["--set-endpoint", host]
+    if port:
+        args.append(str(port))
+    proc = _run_install_script(*args)
+    if proc.returncode != 0:
+        raise ScriptError(
+            proc.stderr.strip() or "Failed to set VPN endpoint",
+            stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode,
+        )
+    return proc.stdout.strip()
+
+
 def _invalidate_client_caches(name: str) -> None:
     """After a mutating client/MAC action, drop any cached read-only results
     that would now be stale -- otherwise a change could appear not to have

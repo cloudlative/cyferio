@@ -104,6 +104,23 @@
 #   --acme-email EMAIL       Required for --mode webapp (unless .env
 #                            already has ACME_EMAIL -- see
 #                            setup-new-machine.sh).
+#   --vpn-endpoint HOST_OR_IP  Opt-in. Repoints client-common.txt and every
+#                            existing .ovpn's "remote" line at this host/IP
+#                            right after Phase 1 -- run this whenever the
+#                            box's public IP changes (an ephemeral cloud IP
+#                            reassignment, migration, ...), since
+#                            openvpn-install.sh's own first-time install
+#                            only ever auto-detects the IP ONCE and never
+#                            revisits it. Safe to re-run any time, on an
+#                            already-installed box too. Do NOT pass a
+#                            Cloudflare-(or similar)-proxied domain here --
+#                            proxied DNS only forwards HTTP(S), never raw
+#                            OpenVPN UDP/TCP; use a bare IP, an unproxied
+#                            ("DNS-only") record, or (best against future
+#                            drift) a static/reserved IP. Clients must
+#                            re-download/re-import their .ovpn afterward to
+#                            actually pick up the change -- this only fixes
+#                            the server-side files.
 #   --maxmind-key KEY        Opt-in. Enables GeoIP country/city/ASN
 #                            restrictions -- validated end-to-end (format,
 #                            live download, geoip2 can open the result)
@@ -156,6 +173,7 @@ note_change() { CHANGES+=("$1"); log "  -> $1"; }
 MODE=""
 DOMAIN=""
 ACME_EMAIL=""
+VPN_ENDPOINT=""
 # MAXMIND_KEY_SET declared *before* MAXMIND_KEY itself, deliberately: a
 # `*_KEY=<empty>` line immediately followed by another `*_KEY`-shaped
 # variable name trips gitleaks' generic-api-key rule, which spans the
@@ -207,6 +225,7 @@ while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--mode) MODE="$2"; shift 2 ;;
 		--domain) DOMAIN="$2"; shift 2 ;;
+		--vpn-endpoint) VPN_ENDPOINT="$2"; shift 2 ;;
 		--acme-email) ACME_EMAIL="$2"; shift 2 ;;
 		--maxmind-key) MAXMIND_KEY="$2"; MAXMIND_KEY_SET=1; shift 2 ;;
 		--captcha-provider) CAPTCHA_PROVIDER="$2"; shift 2 ;;
@@ -403,6 +422,23 @@ else
 	fi
 	[[ -e /etc/openvpn/server/server.conf ]] || die "openvpn-install.sh reported success but /etc/openvpn/server/server.conf still doesn't exist -- something went wrong."
 	note_change "installed OpenVPN (openvpn-install.sh)"
+fi
+
+# --- Phase 1a: VPN endpoint (optional, only if requested) -------------------
+# openvpn-install.sh's own first-time install (above) auto-detects the
+# box's IP ONCE and bakes it into client-common.txt/every issued .ovpn --
+# it never revisits that later. --vpn-endpoint runs any time (fresh
+# install above, OR an already-installed box being reconciled -- this
+# block isn't gated behind the "already installed?" check above) so this
+# is also the tool to reach for after the box's IP has already changed
+# and existing clients are broken, not just at first install.
+if [[ -n "$VPN_ENDPOINT" ]]; then
+	log "Phase 1a: VPN endpoint"
+	if ! bash "$OPENVPN_INSTALL_SH" --set-endpoint "$VPN_ENDPOINT"; then
+		die "--set-endpoint failed -- see its output above."
+	fi
+	note_change "set VPN endpoint to $VPN_ENDPOINT (client-common.txt + every existing .ovpn)"
+	log "  NOTE: clients must re-download/re-import their .ovpn to pick up this change."
 fi
 
 # --- Phase 1b: CAPTCHA (optional, light format check only) ------------------
