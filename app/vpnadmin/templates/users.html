@@ -1071,6 +1071,20 @@ document.getElementById("e-vpn-attach-btn").addEventListener("click", async () =
 	}
 });
 
+// Snapshot of each of the 8 restriction kinds (portal login + VPN access,
+// x country/city/asn/ip) as of the moment the Edit User dialog was last
+// populated for the CURRENT user -- see restrictionKindChanged() (app.js)
+// and the edit-form submit handler below for why: only a kind that's
+// actually different from this snapshot gets included in the PATCH body,
+// so an unrelated edit (role, bandwidth, ...) never re-triggers
+// validation on an already-stored value that might have since fallen out
+// of the GeoIP database (a city/ASN MaxMind has since renamed or
+// dropped). Portal-kind entries are set in openEdit() below; VPN-kind
+// entries are set in renderVpnRestrictionsSummary() (also called
+// separately after attaching a VPN profile, which correctly re-snapshots
+// against that profile's own -- possibly empty -- starting policy).
+let editingUserInitialRestrictions = {};
+
 // Populates Edit User's editable "VPN Access Restrictions" fieldset --
 // same fields/pickers as Manage Restrictions on the Clients page (they
 // edit the exact same policy_store entry), just reachable from this
@@ -1095,6 +1109,10 @@ function renderVpnRestrictionsSummary(u) {
 	editVpnAsnsMs.setSelected(u.vpn_allowed_asns || []);
 	document.getElementById("e-vpn-restrict-ip").checked = !!u.vpn_restrict_by_ip;
 	document.getElementById("e-vpn-allowed-ips").value = (u.vpn_allowed_ips || []).join("\n");
+	editingUserInitialRestrictions.vpnCountry = { restrict: !!u.vpn_restrict_by_country, list: u.vpn_allowed_countries || [] };
+	editingUserInitialRestrictions.vpnCity = { restrict: !!u.vpn_restrict_by_city, list: u.vpn_allowed_cities || [] };
+	editingUserInitialRestrictions.vpnAsn = { restrict: !!u.vpn_restrict_by_asn, list: u.vpn_allowed_asns || [] };
+	editingUserInitialRestrictions.vpnIp = { restrict: !!u.vpn_restrict_by_ip, list: u.vpn_allowed_ips || [] };
 }
 
 function openEdit(u) {
@@ -1131,6 +1149,14 @@ function openEdit(u) {
 	editAsnsMs.setSelected(u.allowed_login_asns || []);
 	document.getElementById("e-restrict-ip").checked = !!u.restrict_login_by_ip;
 	document.getElementById("e-allowed-ips").value = (u.allowed_login_ips || []).join("\n");
+	// See editingUserInitialRestrictions's own docstring above -- the VPN-
+	// kind half of this snapshot is captured inside renderVpnRestrictionsSummary().
+	editingUserInitialRestrictions = {
+		portalCountry: { restrict: !!u.restrict_login_by_country, list: u.allowed_login_countries || [] },
+		portalCity: { restrict: !!u.restrict_login_by_city, list: u.allowed_login_cities || [] },
+		portalAsn: { restrict: !!u.restrict_login_by_asn, list: u.allowed_login_asns || [] },
+		portalIp: { restrict: !!u.restrict_login_by_ip, list: u.allowed_login_ips || [] },
+	};
 	renderVpnRestrictionsSummary(u);
 	document.getElementById("edit-dialog").showModal();
 	editDirty.arm();
@@ -1155,31 +1181,11 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		email: document.getElementById("e-email").value.trim(),
 		phone: editPhone.getValue(),
 		team_ids: editTeamMs.getSelected(),
-		restrict_login_by_country: document.getElementById("e-restrict-country").checked,
-		allowed_login_countries: editCountriesMs.getSelected(),
-		restrict_login_by_city: document.getElementById("e-restrict-city").checked,
-		allowed_login_cities: editCitiesMs.getSelected(),
-		restrict_login_by_asn: document.getElementById("e-restrict-asn").checked,
-		allowed_login_asns: editAsnsMs.getSelected(),
-		restrict_login_by_ip: document.getElementById("e-restrict-ip").checked,
-		allowed_login_ips: parseLineList(document.getElementById("e-allowed-ips").value),
 		allowed_os: [...document.querySelectorAll(".e-os-check:checked")].map(cb => cb.value),
 		bandwidth_monthly_gb: (() => {
 			const raw = document.getElementById("e-bandwidth").value.trim();
 			return raw ? Number(raw) : null;
 		})(),
-		// VPN Access Restrictions -- separate fields, separate storage
-		// (policy_store), see UpdateUserRequest's own docstring. Harmless to
-		// send even when this user has no linked VPN profile yet: update_user
-		// only applies these once a client_name exists.
-		vpn_restrict_by_country: document.getElementById("e-vpn-restrict-country").checked,
-		vpn_allowed_countries: editVpnCountriesMs.getSelected(),
-		vpn_restrict_by_city: document.getElementById("e-vpn-restrict-city").checked,
-		vpn_allowed_cities: editVpnCitiesMs.getSelected(),
-		vpn_restrict_by_asn: document.getElementById("e-vpn-restrict-asn").checked,
-		vpn_allowed_asns: editVpnAsnsMs.getSelected(),
-		vpn_restrict_by_ip: document.getElementById("e-vpn-restrict-ip").checked,
-		vpn_allowed_ips: parseLineList(document.getElementById("e-vpn-allowed-ips").value),
 		force_password_reset: document.getElementById("e-force-reset").checked,
 	};
 	if (!editingUserIsBootstrapAdmin) {
@@ -1188,6 +1194,38 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 	}
 	const pw = document.getElementById("e-password").value;
 	if (pw) body.password = pw;
+	// Only include a restriction kind's fields when it actually changed
+	// from what was loaded into this dialog -- see
+	// editingUserInitialRestrictions/restrictionKindChanged()'s docstrings.
+	// An unrelated edit (role, bandwidth, ...) must never re-trigger
+	// validation on a kind nobody touched, even if that kind's
+	// already-stored value (e.g. a city/ASN the GeoIP database has since
+	// dropped) would no longer pass that validation today.
+	const restrictionKinds = [
+		["portalCountry", "restrict_login_by_country", "allowed_login_countries",
+			{ restrict: document.getElementById("e-restrict-country").checked, list: editCountriesMs.getSelected() }],
+		["portalCity", "restrict_login_by_city", "allowed_login_cities",
+			{ restrict: document.getElementById("e-restrict-city").checked, list: editCitiesMs.getSelected() }],
+		["portalAsn", "restrict_login_by_asn", "allowed_login_asns",
+			{ restrict: document.getElementById("e-restrict-asn").checked, list: editAsnsMs.getSelected() }],
+		["portalIp", "restrict_login_by_ip", "allowed_login_ips",
+			{ restrict: document.getElementById("e-restrict-ip").checked, list: parseLineList(document.getElementById("e-allowed-ips").value) }],
+		["vpnCountry", "vpn_restrict_by_country", "vpn_allowed_countries",
+			{ restrict: document.getElementById("e-vpn-restrict-country").checked, list: editVpnCountriesMs.getSelected() }],
+		["vpnCity", "vpn_restrict_by_city", "vpn_allowed_cities",
+			{ restrict: document.getElementById("e-vpn-restrict-city").checked, list: editVpnCitiesMs.getSelected() }],
+		["vpnAsn", "vpn_restrict_by_asn", "vpn_allowed_asns",
+			{ restrict: document.getElementById("e-vpn-restrict-asn").checked, list: editVpnAsnsMs.getSelected() }],
+		["vpnIp", "vpn_restrict_by_ip", "vpn_allowed_ips",
+			{ restrict: document.getElementById("e-vpn-restrict-ip").checked, list: parseLineList(document.getElementById("e-vpn-allowed-ips").value) }],
+	];
+	for (const [key, restrictField, listField, current] of restrictionKinds) {
+		const initial = editingUserInitialRestrictions[key] || { restrict: false, list: [] };
+		if (restrictionKindChanged(initial, current)) {
+			body[restrictField] = current.restrict;
+			body[listField] = current.list;
+		}
+	}
 	try {
 		await apiFetch(`/api/users/${editingUserId}`, { method: "PATCH", body });
 		// Close before toasting -- see clients.html's email-dialog handler

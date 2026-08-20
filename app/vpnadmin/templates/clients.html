@@ -764,6 +764,17 @@ if (isAdmin) {
 	});
 
 	let policyClientName = null;
+	// Snapshot of the four restriction lists (country/city/asn/ip) as
+	// loaded for the CURRENT client -- see users.html's
+	// editingUserInitialRestrictions/restrictionKindChanged() (app.js) for
+	// the full rationale: only a list that actually changed gets included
+	// in the PUT body, so saving an unrelated field (bandwidth, quota
+	// policy, ...) never re-triggers validation on an already-stored
+	// city/ASN the GeoIP database may have since stopped recognizing.
+	// These four have no separate "restrict" toggle (an empty list already
+	// means unrestricted) -- `restrict` is fixed true in both snapshots so
+	// restrictionKindChanged() reduces to a pure list comparison here.
+	let policyInitialLists = { countries: [], cities: [], asns: [], ips: [] };
 	async function openPolicyDialog(name) {
 		policyClientName = name;
 		document.getElementById("policy-dialog-title").textContent = `Manage Restrictions — ${name}`;
@@ -777,6 +788,12 @@ if (isAdmin) {
 			policyCitiesMs.setSelected(data.policy.allowed_cities || []);
 			policyAsnsMs.setSelected(data.policy.allowed_asns || []);
 			document.getElementById("policy-allowed-ips").value = (data.policy.allowed_ips || []).join("\n");
+			policyInitialLists = {
+				countries: data.policy.allowed_countries || [],
+				cities: data.policy.allowed_cities || [],
+				asns: data.policy.allowed_asns || [],
+				ips: data.policy.allowed_ips || [],
+			};
 			const allowedOs = data.policy.allowed_os || [];
 			document.querySelectorAll(".policy-os-check").forEach(cb => { cb.checked = allowedOs.includes(cb.value); });
 			document.getElementById("policy-bandwidth").value = data.policy.bandwidth_monthly_gb ?? "";
@@ -826,18 +843,28 @@ if (isAdmin) {
 		const bwRaw = document.getElementById("policy-bandwidth").value.trim();
 		const submitBtn = document.getElementById("policy-submit");
 		submitBtn.disabled = true;
+		const body = {
+			allowed_os: allowedOs,
+			bandwidth_monthly_gb: bwRaw ? Number(bwRaw) : null,
+			quota_enforcement_policy: document.getElementById("policy-quota-enforcement").value || null,
+		};
+		// Only include a restriction list that actually changed -- see
+		// policyInitialLists's own comment above.
+		const restrictionLists = [
+			["countries", "allowed_countries", policyCountryMs.getSelected()],
+			["cities", "allowed_cities", policyCitiesMs.getSelected()],
+			["asns", "allowed_asns", policyAsnsMs.getSelected()],
+			["ips", "allowed_ips", parseLineList(document.getElementById("policy-allowed-ips").value)],
+		];
+		for (const [key, field, current] of restrictionLists) {
+			if (restrictionKindChanged({ restrict: true, list: policyInitialLists[key] }, { restrict: true, list: current })) {
+				body[field] = current;
+			}
+		}
 		try {
 			await apiFetch(`/api/clients/${encodeURIComponent(policyClientName)}/policy`, {
 				method: "PUT",
-				body: {
-					allowed_os: allowedOs,
-					bandwidth_monthly_gb: bwRaw ? Number(bwRaw) : null,
-					allowed_countries: policyCountryMs.getSelected(),
-					allowed_cities: policyCitiesMs.getSelected(),
-					allowed_asns: policyAsnsMs.getSelected(),
-					allowed_ips: parseLineList(document.getElementById("policy-allowed-ips").value),
-					quota_enforcement_policy: document.getElementById("policy-quota-enforcement").value || null,
-				},
+				body,
 			});
 			document.getElementById("policy-dialog").close();
 			toast("Restrictions updated.", "success");

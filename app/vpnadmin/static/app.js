@@ -1352,6 +1352,31 @@ function bindDirtyTracking(container, saveBtn) {
 	return { arm, disarm, isDirty: () => dirty };
 }
 
+/**
+ * True if a "restriction kind" (a restrict-toggle + allow-list pair --
+ * country/city/ASN/IP, on either Portal Login or VPN Access restrictions)
+ * actually changed since `initial` was snapshotted. Used to decide whether
+ * to include that kind's fields in a PATCH/PUT body at all -- omitting an
+ * UNCHANGED kind, rather than resending its current value, is what lets an
+ * admin save an unrelated edit (role, bandwidth, ...) even when that kind's
+ * already-stored value happens to contain a city/ASN the GeoIP database no
+ * longer recognizes (MaxMind's own data drifts between updates -- a value
+ * that validated when it was first saved isn't guaranteed to validate
+ * forever). The backend already skips re-validating/re-applying a field
+ * that's simply absent from the request (model_fields_set-gated) -- this
+ * is what makes that gate actually take effect instead of being defeated
+ * by the form always sending every field regardless of whether it was
+ * touched. See users.html's openEdit()/edit-form submit handler and
+ * clients.html's Manage Restrictions dialog for the two call sites.
+ */
+function restrictionKindChanged(initial, current) {
+	if (initial.restrict !== current.restrict) return true;
+	const a = [...initial.list].sort();
+	const b = [...current.list].sort();
+	if (a.length !== b.length) return true;
+	return a.some((v, i) => v !== b[i]);
+}
+
 // Character classes kept disjoint and each guaranteed at least one
 // occurrence below -- avoids the visually-ambiguous glyphs (l/1/I/O/0)
 // that make a freshly-generated password error-prone to retype/read back,
