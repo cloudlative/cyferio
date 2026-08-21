@@ -1,18 +1,28 @@
 name: CI
 
-# Runs on every push to master and every PR targeting master -- quality,
-# security, compliance, supply-chain, and test gates for this repo's
-# actual stack (Python/FastAPI in app/, bash installer scripts at the repo
-# root, one vanilla app.js, Docker + docker-compose). No Terraform/K8s/
-# Helm anywhere in this repo, so none of that is faked here.
+# Runs on every PR targeting master, and as the check gate build.yml calls
+# via `workflow_call` on every tag push -- quality, security, compliance,
+# supply-chain, and test gates for this repo's actual stack (Python/
+# FastAPI in app/, bash installer scripts at the repo root, one vanilla
+# app.js, Docker + docker-compose). No Terraform/K8s/Helm anywhere in this
+# repo, so none of that is faked here.
+#
+# Deliberately NOT triggered on a plain push to master (no `push:
+# branches: [master]` trigger below) -- this team's actual workflow is
+# push a commit to master, then immediately tag it, which used to fire
+# BOTH this workflow (via that push trigger) and build.yml's own
+# workflow_call invocation of it for the exact same commit: identical
+# lint/test/scan jobs, running twice, doubling Actions minutes and wait
+# time for zero extra safety (see conversation history 2026-08-21 -- an
+# untagged push straight to master with no PR gets no CI at all under
+# this setup, which matches how this repo is actually used: every real
+# change is tagged and deployed, nothing is left sitting on master
+# untagged for long).
 #
 # Every job below is independent (no artificial `needs:` chains) so they
 # all run in parallel and a failure in one doesn't block the others from
-# reporting. build.yml's build-push job calls this workflow via
-# `workflow_call` and gates the release build on all of these passing.
+# reporting.
 on:
-  push:
-    branches: [master]
   pull_request:
     branches: [master]
   workflow_call: {}
