@@ -77,8 +77,18 @@
 		</div>
 	</div>
 	<div id="clients-table"><p class="muted">Loading…</p></div>
-	<div id="client-detail-panel" style="display:none;margin-top:18px;padding-top:18px;border-top:1px solid var(--border-light)"></div>
 </div>
+
+{# Detail drawer -- slides in from the right instead of rendering inline
+   below the table (see renderClientDetailPanel() below for why: with a
+   large/filtered client list, "below the table" could be hundreds of rows
+   down from whichever one you actually selected). Same off-canvas idiom
+   base.html's mobile sidebar already uses (fixed + translateX + backdrop,
+   toggled via an .open class) -- kept as siblings of the card, not nested
+   inside it, so position:fixed is relative to the viewport with no
+   ancestor transform/overflow to fight. #}
+<div class="client-detail-backdrop" id="client-detail-backdrop"></div>
+<div class="client-detail-drawer" id="client-detail-panel"></div>
 
 <dialog id="macs-dialog">
 	<div class="dialog-body">
@@ -475,10 +485,44 @@ function renderClients() {
 // Everything moved OUT of the trimmed-down table above (OS, Source IP,
 // Connected Since, Duration, In MAC DB, Last Seen, MAC list) -- shown for
 // whichever one client is currently selected, right below the table.
+function closeClientDetailDrawer() {
+	document.getElementById("client-detail-panel").classList.remove("open");
+	document.getElementById("client-detail-backdrop").classList.remove("open");
+	document.body.classList.remove("drawer-open");
+}
+
+// Radio inputs can't be un-clicked natively (once selected, clicking it
+// again is a no-op) -- this is the only way to deselect/close the drawer
+// short of picking a different row. Shared by the drawer's own Close
+// button, the backdrop click-outside, and Escape.
+function deselectClient() {
+	selectedClientName = null;
+	renderClients(); // clears the row-selected highlight + radio state
+	updateClientToolbarState();
+	renderClientDetailPanel();
+}
+
+// One-time wiring for the drawer's two other close affordances (its own
+// Close button is wired fresh on every render() call above, since the
+// button itself is destroyed/recreated each time) -- backdrop click, and
+// Escape from anywhere on the page. Escape also closes the "More" menu
+// first if that's open, matching the usual "closest overlay first" feel
+// rather than closing both at once.
+document.getElementById("client-detail-backdrop").addEventListener("click", deselectClient);
+document.addEventListener("keydown", (ev) => {
+	if (ev.key !== "Escape") return;
+	const panel = document.getElementById("client-actions-panel");
+	if (panel && panel.style.display === "block") {
+		closeClientActionsMenu();
+	} else if (selectedClientName) {
+		deselectClient();
+	}
+});
+
 function renderClientDetailPanel() {
 	const panel = document.getElementById("client-detail-panel");
 	if (!selectedClientName) {
-		panel.style.display = "none";
+		closeClientDetailDrawer();
 		return;
 	}
 	const c = lastClients.find(x => x.name === selectedClientName);
@@ -489,27 +533,29 @@ function renderClientDetailPanel() {
 		// filtered out, etc.) -- clear the stale selection rather than
 		// showing a detail panel for a row that's gone.
 		selectedClientName = null;
-		panel.style.display = "none";
+		closeClientDetailDrawer();
 		updateClientToolbarState();
 		return;
 	}
 	const duration = session && session.connected_since_epoch != null
 		? fmtDuration((Date.now() / 1000) - session.connected_since_epoch)
 		: null;
-	panel.style.display = "";
+	panel.classList.add("open");
+	document.getElementById("client-detail-backdrop").classList.add("open");
+	document.body.classList.add("drawer-open");
 	panel.innerHTML = `
 		<div class="toolbar" style="margin-bottom:12px">
 			<h3 style="margin:0">${escapeHtml(selectedClientName)} — Details</h3>
 			<button type="button" class="btn-secondary btn-sm" id="client-detail-close">Close</button>
 		</div>
-		<div class="form-grid">
-			<div><label>OS</label><div>${escapeHtml(s && s.os && s.os !== "n/a" ? s.os : "—")}</div></div>
-			<div><label>Source IP</label><div class="mono">${session ? escapeHtml(session.source_ip) : "—"}</div></div>
-			<div><label>Connected Since</label><div class="muted">${session ? escapeHtml(session.connected_since) : "—"}</div></div>
-			<div><label>Duration</label><div class="mono">${duration ? escapeHtml(duration) : "—"}</div></div>
-			<div><label>In MAC DB</label><div>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</div></div>
-			<div><label>Last Seen</label><div class="muted">${escapeHtml(s ? s.last_seen : "—")}</div></div>
-		</div>
+		<dl class="detail-kv">
+			<div class="detail-kv-row"><dt>OS</dt><dd>${escapeHtml(s && s.os && s.os !== "n/a" ? s.os : "—")}</dd></div>
+			<div class="detail-kv-row"><dt>Source IP</dt><dd class="mono">${session ? escapeHtml(session.source_ip) : "—"}</dd></div>
+			<div class="detail-kv-row"><dt>Connected Since</dt><dd>${session ? escapeHtml(session.connected_since) : "—"}</dd></div>
+			<div class="detail-kv-row"><dt>Duration</dt><dd class="mono">${duration ? escapeHtml(duration) : "—"}</dd></div>
+			<div class="detail-kv-row"><dt>In MAC DB</dt><dd>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</dd></div>
+			<div class="detail-kv-row"><dt>Last Seen</dt><dd>${escapeHtml(s ? s.last_seen : "—")}</dd></div>
+		</dl>
 		<div style="margin-top:14px">
 			<label class="muted" style="font-size:0.78rem">MAC Addresses (<span class="count-badge">${c.mac_count ?? 0}</span>)</label>
 			<div id="client-detail-macs" style="margin-top:6px"><p class="muted">Loading…</p></div>
@@ -517,12 +563,7 @@ function renderClientDetailPanel() {
 	// Radio inputs can't be un-clicked natively (once selected, clicking it
 	// again is a no-op) -- this is the only way to deselect/close the panel
 	// short of picking a different row.
-	document.getElementById("client-detail-close").addEventListener("click", () => {
-		selectedClientName = null;
-		renderClients(); // clears the row-selected highlight + radio state
-		updateClientToolbarState();
-		renderClientDetailPanel();
-	});
+	document.getElementById("client-detail-close").addEventListener("click", deselectClient);
 	apiFetch(`/api/clients/${encodeURIComponent(selectedClientName)}/macs`).then(data => {
 		const macsEl = document.getElementById("client-detail-macs");
 		if (!macsEl) return; // panel may have re-rendered for a different selection by the time this resolves

@@ -1128,7 +1128,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 	border-top: 4.5px solid currentColor;
 	vertical-align: middle;
 	opacity: 0.7;
+	transition: transform 0.18s ease;
 }
+/* Points up while the panel is open -- same rotate-on-expand idea as the
+   sidebar's .nav-section-caret, driven off the button's own aria-expanded
+   rather than a separate class, so it can never drift out of sync with
+   the actual open/closed state. */
+.client-actions-toggle[aria-expanded="true"] .dropdown-caret { transform: rotate(180deg); }
 .client-actions-panel {
 	position: absolute;
 	top: calc(100% + 6px);
@@ -1168,6 +1174,96 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .client-actions-item.danger { color: var(--danger-strong, #e11d48); }
 .client-actions-item.danger:hover { background: var(--danger-bg, rgba(225,29,72,0.08)); }
 .client-actions-divider { height: 1px; margin: 5px 4px; background: var(--border-light); }
+
+/* Client detail drawer (VPN Clients page, clients.html) -- slides in from
+   the right instead of rendering inline below the table. With a large or
+   filtered client list, "below the table" could be hundreds of rows past
+   whichever one was actually selected, forcing a long scroll every time.
+   Same off-canvas idiom the mobile sidebar above already uses
+   (position:fixed + translateX + a backdrop, toggled via .open) -- reused
+   rather than inventing a second overlay pattern. z-index sits above the
+   mobile sidebar's own 190/200 so the drawer still wins if both are ever
+   open at once (sidebar is off-canvas only below 860px, same breakpoint
+   this drawer goes full-width at). */
+.client-detail-backdrop {
+	display: none;
+	position: fixed;
+	inset: 0;
+	z-index: 300;
+	background: rgba(0, 0, 0, 0.45);
+}
+.client-detail-backdrop.open { display: block; }
+
+.client-detail-drawer {
+	position: fixed;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 310;
+	width: min(480px, 100vw);
+	background: var(--surface);
+	border-left: 1.5px solid var(--border-light);
+	box-shadow: var(--shadow-lg);
+	transform: translateX(100%);
+	transition: transform 0.22s ease;
+	overflow-y: auto;
+	padding: 22px 24px;
+}
+.client-detail-drawer.open { transform: translateX(0); }
+
+@media (max-width: 640px) {
+	.client-detail-drawer { width: 100vw; }
+}
+
+/* .content has no max-width tight enough to guarantee a right-aligned
+   toolbar (clients.html's Manage MACs/Manage Restrictions/.../More row)
+   sits clear of a 480px-wide fixed drawer -- without this, opening the
+   drawer visually clipped whatever toolbar button happened to fall under
+   its left edge instead of cleanly covering or avoiding it. Pushing
+   .content's padding (not margin -- margin:0 auto is what centers it;
+   padding shrinks the box border-box already accounts for) reflows the
+   real page content out from under the drawer while it's open, same
+   general idea as the sidebar's own off-canvas push. Skipped below 640px
+   -- the drawer is already full-viewport-width there (see above), so
+   there's nothing beside it left to make room for. */
+@media (min-width: 641px) {
+	body.drawer-open .content {
+		padding-right: calc(32px + min(480px, 100vw));
+		transition: padding-right 0.22s ease;
+	}
+}
+
+/* Key/value list for the drawer's field set (OS, Source IP, Connected
+   Since, ...) -- label left, value right, one pair per row. Tried
+   .form-grid first (label stacked above value, multi-column) but at the
+   drawer's ~480px width its minmax(200px,1fr) columns collapse to one
+   anyway, so every field ends up as label-then-value-on-the-next-line --
+   twice the vertical space for no benefit once there's no second column
+   to fill. A plain two-column row reads faster for this kind of flat
+   "field: value" listing. */
+.detail-kv { margin: 0; }
+.detail-kv-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 14px;
+	padding: 9px 0;
+	border-bottom: 1px solid var(--border-light);
+}
+.detail-kv-row:last-child { border-bottom: none; }
+.detail-kv-row dt {
+	flex: none;
+	color: var(--text-muted);
+	font-size: 0.78rem;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+.detail-kv-row dd {
+	margin: 0;
+	text-align: right;
+	font-weight: 600;
+	overflow-wrap: anywhere;
+}
 
 input[type=text], input[type=password], input[type=date], input[type=email], input[type=tel], input[type=search], select, textarea {
 	padding: 10px 14px;
