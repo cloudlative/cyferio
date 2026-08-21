@@ -145,6 +145,13 @@ def list_my_connection_issues(user: User = Depends(require_permission("vpn_profi
             "reason": r.reason,
             "category": category,
             "recommended_action": action,
+            # Set once request_access_review() below has filed a ticket for
+            # this exact row -- the frontend uses this to keep showing
+            # "View Ticket #N" across a refresh instead of reverting to
+            # "Request Access Review" (which would otherwise look like
+            # nothing happened, and invite filing a second ticket for the
+            # same rejection).
+            "existing_ticket_id": r.review_ticket_id,
         })
 
     log_action(db, user, "self_view_connection_issues", target=link.vpn_client_name)
@@ -245,6 +252,14 @@ def request_access_review(
     if row is None:
         raise HTTPException(status_code=404, detail="That rejection record could not be found.")
 
+    if row.review_ticket_id is not None:
+        # Already filed -- same row, re-submitted (double click, or a
+        # request that raced a page refresh). Return the existing ticket
+        # rather than creating a second one for the identical rejection;
+        # this is what makes GET ""'s existing_ticket_id trustworthy across
+        # a refresh instead of just a client-side illusion.
+        return {"ticket_id": row.review_ticket_id}
+
     if _rate_limited(db, user):
         s = runtime
         raise HTTPException(
@@ -288,9 +303,10 @@ def request_access_review(
         vpn_client_name=link.vpn_client_name, context_snapshot=json.dumps(context_snapshot),
     )
     db.add(ticket)
-    db.flush()  # need ticket.id for the message row below
+    db.flush()  # need ticket.id for the message row below and review_ticket_id below
     message = SupportTicketMessage(ticket_id=ticket.id, author_user_id=user.id, body="\n".join(detail_lines))
     db.add(message)
+    row.review_ticket_id = ticket.id
     db.commit()
 
     log_action(db, user, "self_ticket_created", target=f"TCK-{ticket.id}", detail=ticket.subject)

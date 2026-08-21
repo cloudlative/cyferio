@@ -808,6 +808,17 @@ class ConnectionRejectionLog(Base):
     # never reported IV_PLAT at all) simply have no value here.
     detected_os = Column(String(64), nullable=True)
 
+    # Set by routes/me_connection_issues.py's request_access_review() the
+    # moment it files a SupportTicket from this row -- lets GET "" (list_my_
+    # connection_issues) tell the frontend "a ticket already exists for
+    # this rejection" so a page refresh renders "View Ticket #N" instead of
+    # reverting to "Request Access Review" and inviting a second, duplicate
+    # ticket for the exact same rejection. Nullable: most rows never get a
+    # review requested against them at all. No relationship() needed here
+    # (nothing walks from a ticket back to the rejection it came from) --
+    # just the id, same as every other "id" surfaced to the frontend.
+    review_ticket_id = Column(Integer, ForeignKey("support_tickets.id"), nullable=True)
+
 
 class ClientMac(Base):
     """A queryable DB mirror of openvpn_db.txt's `name=mac` bindings --

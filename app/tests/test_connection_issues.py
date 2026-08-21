@@ -277,6 +277,41 @@ class TestRequestAccessReview:
         r = app_client.post("/api/me/connection-issues/request-review", json={"timestamp": row.timestamp.isoformat()})
         assert r.status_code == 404
 
+    def test_resubmitting_the_same_rejection_returns_the_existing_ticket(self, app_client, db_session):
+        """A second request-review call against the SAME rejection row
+        (double click, or a request racing a refresh) must not file a
+        second ticket -- it returns the ticket already on file, matching
+        GET ""'s existing_ticket_id (see next test)."""
+        from vpnadmin.models import SupportTicket
+
+        _make_self_service_user(db_session, "alice", vpn_client_name="alice")
+        row = _add_rejection(db_session, "alice", "mac_mismatch", detected_mac="AA:BB:CC:DD:EE:FF")
+        login(app_client, "alice", "somepass123")
+        r1 = app_client.post("/api/me/connection-issues/request-review", json={"timestamp": row.timestamp.isoformat()})
+        assert r1.status_code == 201
+        r2 = app_client.post("/api/me/connection-issues/request-review", json={"timestamp": row.timestamp.isoformat()})
+        assert r2.status_code == 201
+        assert r2.json()["ticket_id"] == r1.json()["ticket_id"]
+        assert db_session.query(SupportTicket).count() == 1
+
+    def test_existing_ticket_id_survives_in_the_list_response(self, app_client, db_session):
+        """The whole point of review_ticket_id -- GET "" (what the frontend
+        refreshes on) must keep reporting the ticket id for this rejection
+        after it's been filed, so a page reload shows "View Ticket #N"
+        instead of reverting to "Request Access Review"."""
+        _make_self_service_user(db_session, "alice", vpn_client_name="alice")
+        row = _add_rejection(db_session, "alice", "os_not_allowed", detected_os="ios")
+        login(app_client, "alice", "somepass123")
+
+        before = app_client.get("/api/me/connection-issues").json()["history"][0]
+        assert before["existing_ticket_id"] is None
+
+        review = app_client.post("/api/me/connection-issues/request-review", json={"timestamp": row.timestamp.isoformat()})
+        ticket_id = review.json()["ticket_id"]
+
+        after = app_client.get("/api/me/connection-issues").json()["history"][0]
+        assert after["existing_ticket_id"] == ticket_id
+
 
 class TestMyConnectionIssuesPage:
     def test_requires_authentication(self, app_client):

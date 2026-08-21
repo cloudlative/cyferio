@@ -130,9 +130,18 @@ function renderRowDetail(row, data) {
 		showReviewButton = true;
 	}
 
-	const reviewButtonHtml = showReviewButton
-		? `<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`
-		: "";
+	// A ticket already exists for this exact rejection (routes/
+	// me_connection_issues.py's ConnectionRejectionLog.review_ticket_id,
+	// set the moment request-review succeeds) -- render the same "View
+	// Ticket #N" link the click handler below swaps in live, so a page
+	// refresh (or reopening this row later) shows where the request
+	// actually went instead of a bare "Request Access Review" button that
+	// looks like nothing happened and invites filing a duplicate.
+	const reviewButtonHtml = row.existing_ticket_id
+		? `<a href="/support/${row.existing_ticket_id}" class="btn btn-secondary btn-sm" style="margin-top:8px">View Ticket #${row.existing_ticket_id} →</a>`
+		: showReviewButton
+			? `<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`
+			: "";
 	return `<div class="form-grid" style="margin-bottom:10px">${parts.join("")}</div>${actionHtml}${reviewButtonHtml}`;
 }
 
@@ -179,6 +188,15 @@ function wireRowActions(container, row) {
 			try {
 				const r = await apiFetch("/api/me/connection-issues/request-review", { method: "POST", body: { timestamp: row.timestamp } });
 				toast(`Access review request submitted successfully. Ticket #${r.ticket_id} created.`, "success");
+				// Also updates the in-memory row (not just this button's outer
+				// HTML) so collapsing/reopening this same row later in the same
+				// session -- which re-runs renderRowDetail() from `rows`/
+				// `latestData`, see renderHistory() below -- shows the View
+				// Ticket link too, not just right after the click. A hard page
+				// refresh gets this for free from the server's own
+				// existing_ticket_id (see GET "" above); this covers the gap
+				// between here and the next refresh.
+				row.existing_ticket_id = r.ticket_id;
 				btn.outerHTML = `<a href="/support/${r.ticket_id}" class="btn btn-secondary btn-sm" style="margin-top:8px">View Ticket #${r.ticket_id} →</a>`;
 			} catch (e) {
 				toast(e.message, "error");
