@@ -34,6 +34,7 @@ from ..support_tickets import (
     DEFAULT_STATUS,
     PRIORITIES,
     TERMINAL_STATUSES,
+    allowed_next_statuses,
     categories_for_form,
     category_label,
     is_valid_category,
@@ -175,6 +176,17 @@ def _serialize_ticket_detail(t: SupportTicket, *, is_admin_view: bool) -> dict:
         "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None,
         "closed_at": t.closed_at.isoformat() if t.closed_at else None,
         "can_reply": can_reply,
+        # Status Workflow Rules (see support_tickets.py's TRANSITIONS) --
+        # admin-console-only, same reasoning as "duplicates" below: only
+        # routes/tickets.py's status <select> needs this to build a
+        # Jira/ClickUp-style transition menu that only ever offers a
+        # ticket's actually-valid next statuses. Self-service has no
+        # generic status picker (only the dedicated POST .../reopen
+        # action), so it gets an empty list rather than exposing this.
+        "allowed_next_statuses": (
+            [{"value": s, "label": status_label(s)} for s in sorted(allowed_next_statuses(t.status))]
+            if is_admin_view else []
+        ),
         "locked_at": t.locked_at.isoformat() if t.locked_at else None,
         "locked_by": t.locked_by.display_name if t.locked_by else None,
         "marked_duplicate_at": t.marked_duplicate_at.isoformat() if t.marked_duplicate_at else None,

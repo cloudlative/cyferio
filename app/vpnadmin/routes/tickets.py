@@ -23,7 +23,7 @@ from ..audit import log_action
 from ..db import get_db
 from ..models import AuditLog, SupportTicket, SupportTicketAttachment, SupportTicketMessage, User
 from ..permissions import has_permission_any_scope, require_permission_any_scope
-from ..support_tickets import PRIORITIES, STATUSES, categories_for_form, priority_label, status_label
+from ..support_tickets import PRIORITIES, STATUSES, allowed_next_statuses, categories_for_form, priority_label, status_label
 from .me_tickets import (
     MAX_DESCRIPTION_LENGTH,
     _attach_validated_files,
@@ -237,7 +237,13 @@ def bulk_close_tickets(body: BulkTicketIdsRequest, admin: User = Depends(_requir
     now = datetime.now(timezone.utc)
     changed = []
     for t in tickets:
-        if is_duplicate_locked(t) or t.locked or t.status == "closed":
+        # Status Workflow Rules apply to bulk actions too -- e.g. a
+        # Resolved/Failed/Cancelled ticket can't jump straight to Closed,
+        # same restriction the single-ticket PATCH endpoint enforces (see
+        # support_tickets.py's TRANSITIONS). Skipped rather than erroring
+        # the whole batch, same posture as the pre-existing "already
+        # closed" skip below.
+        if is_duplicate_locked(t) or t.locked or t.status == "closed" or "closed" not in allowed_next_statuses(t.status):
             continue
         old_status = t.status
         t.status = "closed"
@@ -475,6 +481,18 @@ def update_ticket(
         if body.status not in STATUSES:
             raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(STATUSES)}.")
         if body.status != ticket.status:
+            # Status Workflow Rules -- see support_tickets.py's TRANSITIONS
+            # docstring for the full design. Same-status "changes" (a no-op
+            # save) skip this check entirely, same as every other write
+            # below only acting on an actual delta.
+            allowed = allowed_next_statuses(ticket.status)
+            if body.status not in allowed:
+                allowed_desc = ", ".join(status_label(s) for s in sorted(allowed)) if allowed else "nothing (terminal)"
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Can't move a {status_label(ticket.status)} ticket directly to {status_label(body.status)}. "
+                           f"Allowed next status(es): {allowed_desc}.",
+                )
             changes.append(f"status {status_label(ticket.status)}->{status_label(body.status)}")
             status_changed_to = body.status
             now = datetime.now(timezone.utc)

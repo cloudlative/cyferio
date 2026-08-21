@@ -225,6 +225,111 @@ class TestAdminConsole:
         assert any(a["username"] == "admin" for a in admins)
 
 
+class TestStatusWorkflowRules:
+    """Status Workflow Rules -- see support_tickets.py's TRANSITIONS for the
+    full design. Reported live 2026-08-21: "I can see that ticket can be
+    moved to status New from closed ticket" -- these lock down every
+    terminal status (TERMINAL_STATUSES) to a reopen-only exit, while
+    leaving every active status free to move to any other status
+    (including jumping straight to a terminal one), matching how a real
+    collaboration tool's workflow engine is actually configured."""
+
+    def test_closed_cannot_jump_straight_to_new(self, app_client, db_session):
+        _make_self_service_user(db_session, "frank")
+        login(app_client, "frank", "somepass123")
+        ticket_id = _create_ticket(app_client).json()["id"]
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "closed"})
+        assert r.status_code == 200
+
+        # The exact bug report: Closed -> New directly.
+        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "new"})
+        assert r.status_code == 409
+        assert "reopened" in r.json()["detail"].lower()
+        # The ticket's actual status is untouched by the rejected attempt.
+        assert app_client.get(f"/api/tickets/{ticket_id}").json()["status"] == "closed"
+
+    def test_closed_can_only_reopen(self, app_client, db_session):
+        _make_self_service_user(db_session, "gina")
+        login(app_client, "gina", "somepass123")
+        ticket_id = _create_ticket(app_client).json()["id"]
+
+        login(app_client, "admin", "adminpass123")
+        app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "closed"})
+        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "reopened"})
+        assert r.status_code == 200
+        assert r.json()["status"] == "reopened"
+
+    def test_resolved_cannot_jump_to_a_different_terminal_status(self, app_client, db_session):
+        """Resolved -> Cancelled directly is blocked too -- not just the
+        reported Closed -> New case. Terminal statuses are one-way doors;
+        sideways moves between them require reopening first, same as
+        moving back into the active workflow does."""
+        _make_self_service_user(db_session, "hank")
+        login(app_client, "hank", "somepass123")
+        ticket_id = _create_ticket(app_client).json()["id"]
+
+        login(app_client, "admin", "adminpass123")
+        app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "resolved"})
+        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "cancelled"})
+        assert r.status_code == 409
+
+    def test_active_status_can_jump_straight_to_a_terminal_one(self, app_client, db_session):
+        """A brand-new ticket can be closed directly -- real collaboration
+        tools don't force a rigid step-by-step sequence for the active
+        part of the workflow, only terminal exits are restricted."""
+        _make_self_service_user(db_session, "ivan")
+        login(app_client, "ivan", "somepass123")
+        ticket_id = _create_ticket(app_client).json()["id"]
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "closed"})
+        assert r.status_code == 200
+
+    def test_active_statuses_move_freely_between_each_other(self, app_client, db_session):
+        _make_self_service_user(db_session, "jill")
+        login(app_client, "jill", "somepass123")
+        ticket_id = _create_ticket(app_client).json()["id"]
+
+        login(app_client, "admin", "adminpass123")
+        # new -> in_progress directly, skipping "open" -- common in
+        # practice (an admin picks up a fresh ticket and starts working).
+        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "in_progress"})
+        assert r.status_code == 200
+        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "waiting_for_user"})
+        assert r.status_code == 200
+
+    def test_same_status_save_is_always_a_no_op(self, app_client, db_session):
+        """Re-saving the ticket's own current status (e.g. from the Save
+        button on the manage panel without touching the dropdown) must
+        never 409, regardless of TRANSITIONS -- this isn't a transition at
+        all."""
+        _make_self_service_user(db_session, "kate")
+        login(app_client, "kate", "somepass123")
+        ticket_id = _create_ticket(app_client).json()["id"]
+
+        login(app_client, "admin", "adminpass123")
+        app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "closed"})
+        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "closed"})
+        assert r.status_code == 200
+
+    def test_allowed_next_statuses_exposed_on_ticket_detail(self, app_client, db_session):
+        _make_self_service_user(db_session, "liam")
+        login(app_client, "liam", "somepass123")
+        ticket_id = _create_ticket(app_client).json()["id"]
+
+        login(app_client, "admin", "adminpass123")
+        app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "closed"})
+        detail = app_client.get(f"/api/tickets/{ticket_id}").json()
+        assert detail["allowed_next_statuses"] == [{"value": "reopened", "label": "Reopened"}]
+
+        # Self-service detail never exposes this (no generic status picker there).
+        login(app_client, "liam", "somepass123")
+        self_detail = app_client.get(f"/api/me/tickets/{ticket_id}").json()
+        assert self_detail["allowed_next_statuses"] == []
+
+
 class TestCreateValidation:
     def test_unknown_category_rejected(self, app_client, db_session):
         _make_self_service_user(db_session, "alice")

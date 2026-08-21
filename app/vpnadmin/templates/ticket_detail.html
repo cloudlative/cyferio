@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Ticket #{{ ticket_id }} — {{ app_settings.app_name }}{% endblock %}
+{% block title %}Ticket CF-{{ "%02d"|format(ticket_id) }} — {{ app_settings.app_name }}{% endblock %}
 {% block content %}
 {# Shared by BOTH /support/{id} (self-service) and /support-center/{id}
    (admin) -- is_admin_view (passed by routes/pages.py) toggles the
@@ -181,7 +181,7 @@ function renderDuplicateUi(t) {
 	if (t.duplicate_of_ticket_id) {
 		banner.style.display = "block";
 		banner.innerHTML = `<div class="card" style="border-color:var(--warning-strong,#f59e0b)">
-			Duplicate of <a href="/support-center/${t.duplicate_of_ticket_id}">Ticket #${t.duplicate_of_ticket_id}</a>${t.duplicate_of_subject ? `: ${escapeHtml(t.duplicate_of_subject)}` : ""}.
+			Duplicate of <a href="/support-center/${t.duplicate_of_ticket_id}">Ticket ${formatTicketId(t.duplicate_of_ticket_id)}</a>${t.duplicate_of_subject ? `: ${escapeHtml(t.duplicate_of_subject)}` : ""}.
 			Replies and status changes are blocked here -- act on the linked ticket instead.
 			<button type="button" class="btn-secondary btn-sm" id="td-unmark-duplicate-btn" style="margin-top:8px;display:block">Unmark as Duplicate</button>
 		</div>`;
@@ -202,7 +202,7 @@ function renderDuplicateUi(t) {
 		dupCard.style.display = "block";
 		document.getElementById("td-duplicates-count").textContent = `(${t.duplicates.length})`;
 		document.getElementById("td-duplicates-list").innerHTML = t.duplicates.map((d) => `
-			<div style="margin-bottom:6px"><a href="/support-center/${d.id}">Ticket #${d.id}</a> -- ${escapeHtml(d.subject)} <span class="status-pill ${statusPillClass(d.status)}">${d.status_label}</span></div>
+			<div style="margin-bottom:6px"><a href="/support-center/${d.id}">Ticket ${formatTicketId(d.id)}</a> -- ${escapeHtml(d.subject)} <span class="status-pill ${statusPillClass(d.status)}">${d.status_label}</span></div>
 		`).join("");
 	} else {
 		dupCard.style.display = "none";
@@ -212,16 +212,32 @@ function renderDuplicateUi(t) {
 	document.getElementById("td-unlock-btn").style.display = t.locked ? "inline-block" : "none";
 }
 
+// Status Workflow Rules, frontend half (see support_tickets.py's
+// TRANSITIONS for the backend enforcement this mirrors -- this is purely
+// a UX convenience, PATCH /api/tickets/{id} rejects an out-of-workflow
+// status with a 409 regardless of what's offered here). Jira/ClickUp-
+// style transition menu: the dropdown only ever lists the ticket's
+// CURRENT status (so "no change" is always a valid save) plus whichever
+// next statuses support_tickets.allowed_next_statuses() says this ticket
+// can move to from here -- never the full static catalog, which is what
+// let a Closed ticket jump straight back to New before this existed.
+function renderStatusSelect(t) {
+	const sel = document.getElementById("td-status-select");
+	const options = [{ value: t.status, label: `${t.status_label} (current)` }, ...t.allowed_next_statuses];
+	sel.innerHTML = options.map((o) => `<option value="${o.value}">${o.label}</option>`).join("");
+	sel.value = t.status;
+}
+
 async function loadTicket() {
 	currentTicket = await apiFetch(`${API_BASE}/${TICKET_ID}`);
 	const t = currentTicket;
-	document.getElementById("td-subject").textContent = t.subject;
+	document.getElementById("td-subject").textContent = `${formatTicketId(t.id)} -- ${t.subject}`;
 	renderBadges(t);
 	renderThread(t);
 	renderContext(t);
 	renderReplyArea(t);
 	if (IS_ADMIN_VIEW) {
-		document.getElementById("td-status-select").value = t.status;
+		renderStatusSelect(t);
 		document.getElementById("td-priority-select").value = t.priority;
 		renderDuplicateUi(t);
 		loadHistory();
@@ -335,7 +351,7 @@ if (IS_ADMIN_VIEW) {
 
 	document.getElementById("td-delete-btn")?.addEventListener("click", async () => {
 		const confirmed = await confirmDialog(
-			`Are you sure you want to delete Ticket #${TICKET_ID}: ${currentTicket ? currentTicket.subject : ""}?`,
+			`Are you sure you want to delete Ticket ${formatTicketId(TICKET_ID)}: ${currentTicket ? currentTicket.subject : ""}?`,
 			{ confirmLabel: "Delete Ticket", danger: true },
 		);
 		if (!confirmed) return;
@@ -358,7 +374,7 @@ if (IS_ADMIN_VIEW) {
 			? '<p class="muted">No matching tickets.</p>'
 			: duplicateSearchResults.map((t) => `
 				<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border,#333)">
-					<span>#${t.id} -- ${escapeHtml(t.subject)} <span class="muted">(${t.status_label})</span></span>
+					<span>${formatTicketId(t.id)} -- ${escapeHtml(t.subject)} <span class="muted">(${t.status_label})</span></span>
 					<button type="button" class="btn-secondary btn-sm" data-pick-parent="${t.id}">Pick</button>
 				</div>
 			`).join("");
@@ -369,7 +385,7 @@ if (IS_ADMIN_VIEW) {
 					await apiFetch(`/api/tickets/${TICKET_ID}/mark-duplicate`, { method: "POST", body: { parent_ticket_id: parentId } });
 					document.getElementById("td-duplicate-dialog").close();
 					await loadTicket();
-					toast(`Marked as a duplicate of Ticket #${parentId}.`);
+					toast(`Marked as a duplicate of Ticket ${formatTicketId(parentId)}.`);
 				} catch (err) { toast(err.message, "error"); }
 			});
 		});
@@ -395,8 +411,13 @@ if (IS_ADMIN_VIEW) {
 	// it must load regardless of whether this secondary setup succeeds.
 	if (IS_ADMIN_VIEW) {
 		try {
+			// Status intentionally NOT populated from here -- unlike priority
+			// (a flat, always-fully-available list), which status a ticket can
+			// move to next depends on its CURRENT status (Status Workflow
+			// Rules -- see support_tickets.py's TRANSITIONS), so the <select>
+			// is rebuilt on every loadTicket() instead, from that ticket's own
+			// allowed_next_statuses (see renderStatusSelect() below).
 			const catData = await apiFetch("/api/tickets/categories");
-			document.getElementById("td-status-select").innerHTML = catData.statuses.map((s) => `<option value="${s.value}">${s.label}</option>`).join("");
 			document.getElementById("td-priority-select").innerHTML = catData.priorities.map((p) => `<option value="${p.value}">${p.label}</option>`).join("");
 			const admins = await apiFetch("/api/tickets/assignable-admins");
 			for (const a of admins.admins) {

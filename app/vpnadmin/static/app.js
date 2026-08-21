@@ -1790,6 +1790,17 @@ function fmtDuration(totalSeconds) {
 // never storage. Falls back to the browser's own locale/timezone if the
 // configured zone is somehow invalid (e.g. a typo saved outside the UI's
 // own validation) rather than showing nothing.
+// Support Ticketing System's user-facing ticket ID display -- "CF-01"
+// style (Cyferio, zero-padded to 2 digits minimum; e.g. ticket 100 ->
+// "CF-100", not truncated). Purely a display convention: the underlying
+// numeric SupportTicket.id is still what every URL (/support/{id},
+// /support-center/{id}) and API call actually uses -- this never touches
+// routing or the audit log's own "TCK-{id}" internal target key (see
+// AuditLog's docstring), only what's shown to a human.
+function formatTicketId(id) {
+	return `CF-${String(id).padStart(2, "0")}`;
+}
+
 function fmtTimestamp(iso) {
 	if (!iso) return "—";
 	const d = new Date(iso);

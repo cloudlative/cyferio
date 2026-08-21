@@ -60,6 +60,64 @@ STATUS_LABELS: dict[str, str] = {
 # terminal timestamps" handling treating them consistently.
 TERMINAL_STATUSES: frozenset[str] = frozenset({"resolved", "closed", "completed", "failed", "cancelled"})
 
+# Status Workflow Rules (Enhanced Ticket Management Controls) -- current
+# status -> the set of statuses a PATCH is allowed to move it to next.
+# Before this existed, routes/tickets.py's update_ticket() accepted any
+# STATUSES value from any other one -- e.g. Closed straight back to New,
+# skipping every intermediate step a real support/collaboration tool
+# (Jira, Linear, Zendesk, ...) would force you through. Reported live
+# 2026-08-21: "I can see that ticket can be moved to status New from
+# closed ticket."
+#
+# Design:
+#   - A terminal status (TERMINAL_STATUSES above) can ONLY move to
+#     "reopened" -- never straight back to an active working status, and
+#     never sideways to a different terminal status either (e.g. Resolved
+#     can't jump straight to Cancelled -- reopen it first). This mirrors
+#     routes/me_tickets.py's self-service reopen_my_ticket, which already
+#     enforces exactly this ("Only a Resolved or Closed ticket can be
+#     reopened", landing on "reopened" specifically) -- the admin console
+#     now follows the identical rule instead of being able to bypass it
+#     via the generic PATCH endpoint. This is the one hard rule that
+#     actually matters here -- it's what a real collaboration tool (Jira's
+#     "Reopen" transition clearing the Resolution field, Linear/ClickUp's
+#     "Done"/"Cancelled" columns not being drag-targets from each other)
+#     universally enforces, and it's the exact bug reported live
+#     2026-08-21 ("ticket can be moved to status New from closed ticket").
+#   - Every non-terminal ("active") status can move to ANY other status --
+#     including terminal ones (an admin can resolve/close/complete/fail/
+#     cancel a ticket from wherever it currently sits, without being
+#     forced through a rigid step-by-step sequence first) and including
+#     each other (new -> in_progress directly is common -- an admin
+#     picking up a fresh ticket and diving straight in shouldn't have to
+#     detour through "open" first). Real collaboration tools are
+#     deliberately permissive here; the workflow discipline they actually
+#     enforce is almost always just "terminal states are one-way doors
+#     without an explicit reopen", not a rigid linear sequence for
+#     everything before that.
+#   - "reopened" is itself active, not terminal -- a landing pad, not a
+#     dead end: from there a ticket re-enters the normal active workflow
+#     (open/assigned/in_progress/waiting_*) or can be closed out again,
+#     same freedom as a freshly triaged ticket.
+#   - Same-status "transitions" (body.status == ticket.status) are always
+#     a no-op regardless of this table -- routes/tickets.py's
+#     update_ticket() only consults TRANSITIONS when the value is actually
+#     changing.
+ACTIVE_STATUSES: frozenset[str] = frozenset(set(STATUSES) - TERMINAL_STATUSES)
+TRANSITIONS: dict[str, frozenset[str]] = {
+    **{s: frozenset(set(STATUSES) - {s}) for s in ACTIVE_STATUSES},
+    **{s: frozenset({"reopened"}) for s in TERMINAL_STATUSES},
+}
+
+
+def allowed_next_statuses(current_status: str) -> frozenset[str]:
+    """The set of statuses `current_status` may PATCH into next, per
+    TRANSITIONS above. An unrecognized current_status (shouldn't happen --
+    DB values are only ever written from STATUSES) allows nothing rather
+    than raising, so a caller can always safely iterate the result."""
+    return TRANSITIONS.get(current_status, frozenset())
+
+
 PRIORITIES: tuple[str, ...] = ("low", "medium", "high", "critical")
 PRIORITY_LABELS: dict[str, str] = {"low": "Low", "medium": "Medium", "high": "High", "critical": "Critical"}
 DEFAULT_PRIORITY = "medium"

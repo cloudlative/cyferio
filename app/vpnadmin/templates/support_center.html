@@ -141,10 +141,10 @@ function renderTicketTable() {
 		: pageRows.map((t) => `
 			<tr class="clickable-row">
 				<td onclick="event.stopPropagation()"><input type="checkbox" class="sc-row-select" data-id="${t.id}" ${selectedIds.has(t.id) ? "checked" : ""}></td>
-				<td class="mono muted" onclick="window.location.href='/support-center/${t.id}'">#${t.id}</td>
+				<td class="mono muted" onclick="window.location.href='/support-center/${t.id}'">${formatTicketId(t.id)}</td>
 				<td onclick="window.location.href='/support-center/${t.id}'">
 					${t.subject}
-					${t.duplicate_of_ticket_id ? ` <span class="activity-action" title="Duplicate of Ticket #${t.duplicate_of_ticket_id}">Duplicate of #${t.duplicate_of_ticket_id}</span>` : ""}
+					${t.duplicate_of_ticket_id ? ` <span class="activity-action" title="Duplicate of Ticket ${formatTicketId(t.duplicate_of_ticket_id)}">Duplicate of ${formatTicketId(t.duplicate_of_ticket_id)}</span>` : ""}
 					${t.duplicate_count ? ` <span class="activity-action" title="${t.duplicate_count} linked duplicate(s)">${t.duplicate_count} duplicate(s)</span>` : ""}
 					${t.locked ? ` <span class="activity-action" title="Locked">🔒</span>` : ""}
 					${t.deleted ? ` <span class="status-pill status-offline">Deleted</span>` : ""}
@@ -330,7 +330,7 @@ async function loadClusters() {
 				${cluster.tickets.map((t) => `
 					<label class="checkbox-label" style="display:block;margin-bottom:4px">
 						<input type="radio" name="sc-cluster-parent-${ci}" value="${t.id}" ${t.id === cluster.suggested_parent_id ? "checked" : ""}>
-						#${t.id} -- ${t.subject} <span class="muted">(${t.status_label}, created ${new Date(t.created_at).toLocaleString()})</span>
+						${formatTicketId(t.id)} -- ${t.subject} <span class="muted">(${t.status_label}, created ${new Date(t.created_at).toLocaleString()})</span>
 					</label>
 				`).join("")}
 				<button type="button" class="btn-secondary btn-sm" data-cluster-idx="${ci}" data-cluster-mark>Mark selected parent's siblings as duplicates</button>
