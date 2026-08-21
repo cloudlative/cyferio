@@ -215,6 +215,35 @@ fi
 TARGET_IMAGE_TAG="${TAG#v}"
 CURRENT_IMAGE_TAG=$(grep -E '^IMAGE_TAG=' .env | head -1 | cut -d= -f2-)
 
+# .env's own IMAGE_TAG is not trustworthy ground truth on its own -- Phase
+# 4 below has to write it BEFORE `docker compose up -d` even runs (Compose
+# reads ${IMAGE_TAG} from .env to know what to pull/start in the first
+# place, so the write can't be deferred until after success). A deploy
+# that aborts partway through Phase 4 -- reproduced live 2026-08-21: the
+# very first blue/green migration run failed inside `docker compose up -d`
+# (a stale host-specific docker-compose.override.yml still referencing the
+# old single `app` service) -- leaves .env claiming the target release
+# while no container running it ever actually started. A bare string
+# compare against .env on retry would then report "already up to date"
+# and exit 0 with the site fully down and no app container running at
+# all. Cross-check against whatever's ACTUALLY running instead, in the
+# same priority order Phase 4 itself looks for an active slot in: the
+# blue/green containers first, then the legacy pre-blue/green name for an
+# install that hasn't done its first migration deploy yet. Only overrides
+# CURRENT_IMAGE_TAG when a container is actually running -- a genuinely
+# fresh install with nothing up yet still falls back to .env's stated
+# value (or the "unset" message below).
+for _candidate in cyferio-app-blue cyferio-app-green cyferio-app; do
+	if docker ps --format '{{.Names}}' | grep -qx "$_candidate"; then
+		_running_tag=$(docker inspect --format='{{.Config.Image}}' "$_candidate" 2>/dev/null | sed -E 's#.*:##')
+		if [[ -n "$_running_tag" && "$_running_tag" != "$CURRENT_IMAGE_TAG" ]]; then
+			log "  .env says IMAGE_TAG=${CURRENT_IMAGE_TAG:-<unset>}, but $_candidate is actually running tag $_running_tag -- trusting the running container."
+			CURRENT_IMAGE_TAG="$_running_tag"
+		fi
+		break
+	fi
+done
+
 log "  target release:  $TAG  (image tag: $TARGET_IMAGE_TAG)"
 log "  current image:   ${CURRENT_IMAGE_TAG:-<unset, currently tracking 'latest'>}"
 
