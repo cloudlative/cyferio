@@ -82,12 +82,13 @@
 {# Detail drawer -- slides in from the right instead of rendering inline
    below the table (see renderClientDetailPanel() below for why: with a
    large/filtered client list, "below the table" could be hundreds of rows
-   down from whichever one you actually selected). Same off-canvas idiom
-   base.html's mobile sidebar already uses (fixed + translateX + backdrop,
-   toggled via an .open class) -- kept as siblings of the card, not nested
-   inside it, so position:fixed is relative to the viewport with no
-   ancestor transform/overflow to fight. #}
-<div class="client-detail-backdrop" id="client-detail-backdrop"></div>
+   down from whichever one you actually selected). Same off-canvas
+   fixed+translateX idiom base.html's mobile sidebar uses, but a PUSH
+   drawer, not a modal overlay -- no backdrop -- since the table/toolbar
+   need to stay usable while it's open (see .content's body.drawer-open
+   rule in style.css). Kept as a sibling of the card, not nested inside
+   it, so position:fixed is relative to the viewport with no ancestor
+   transform/overflow to fight. #}
 <div class="client-detail-drawer" id="client-detail-panel"></div>
 
 <dialog id="macs-dialog">
@@ -487,7 +488,6 @@ function renderClients() {
 // whichever one client is currently selected, right below the table.
 function closeClientDetailDrawer() {
 	document.getElementById("client-detail-panel").classList.remove("open");
-	document.getElementById("client-detail-backdrop").classList.remove("open");
 	document.body.classList.remove("drawer-open");
 }
 
@@ -502,13 +502,18 @@ function deselectClient() {
 	renderClientDetailPanel();
 }
 
-// One-time wiring for the drawer's two other close affordances (its own
-// Close button is wired fresh on every render() call above, since the
-// button itself is destroyed/recreated each time) -- backdrop click, and
-// Escape from anywhere on the page. Escape also closes the "More" menu
-// first if that's open, matching the usual "closest overlay first" feel
-// rather than closing both at once.
-document.getElementById("client-detail-backdrop").addEventListener("click", deselectClient);
+// One-time wiring for the drawer's other close affordance (its own Close
+// button is wired fresh on every render() call above, since the button
+// itself is destroyed/recreated each time) -- Escape, from anywhere on
+// the page. No click-outside-to-close / backdrop here on purpose: unlike
+// the "More" menu (a true transient popover), this drawer sits alongside
+// the rest of the page -- the whole point of the content-push above (see
+// body.drawer-open) is that the table/toolbar/filters stay fully usable
+// while it's open, e.g. picking Manage Restrictions for the very client
+// the drawer is showing. A page-wide "click anywhere closes it" would
+// fight that directly. Escape also closes the "More" menu first if
+// that's open, matching the usual "closest overlay first" feel rather
+// than closing both at once.
 document.addEventListener("keydown", (ev) => {
 	if (ev.key !== "Escape") return;
 	const panel = document.getElementById("client-actions-panel");
@@ -541,7 +546,6 @@ function renderClientDetailPanel() {
 		? fmtDuration((Date.now() / 1000) - session.connected_since_epoch)
 		: null;
 	panel.classList.add("open");
-	document.getElementById("client-detail-backdrop").classList.add("open");
 	document.body.classList.add("drawer-open");
 	panel.innerHTML = `
 		<div class="toolbar" style="margin-bottom:12px">
