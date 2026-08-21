@@ -22,11 +22,20 @@
 		<div class="toolbar"><h2 style="margin:0">Host Machine</h2><span class="status-pill" id="host-health-badge">—</span></div>
 		<div id="host-health-result"><p class="muted">Loading…</p></div>
 	</div>
+</div>
 
-	<div class="card">
-		<div class="toolbar"><h2 style="margin:0">Traefik</h2><span class="status-pill" id="traefik-health-badge">—</span></div>
-		<div id="traefik-health-result"><p class="muted">Loading…</p></div>
-	</div>
+{# Traefik gets its own full-width card, not a 4th slot in .health-grid
+   above -- it has far more to report (entrypoints/services/routers/
+   middlewares/request metrics) than App/Database/Host Machine ever do,
+   and a CSS grid row stretches every item to match its tallest sibling
+   by default. With Traefik inside that grid, App/Database/Host Machine
+   were all stretching to Traefik's full height, leaving a large empty
+   gap below their own (much shorter) actual content. Full width here
+   lets Traefik's own detail breathe instead, and leaves the top row
+   sized to its own natural (short) content. #}
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">Traefik</h2><span class="status-pill" id="traefik-health-badge">—</span></div>
+	<div id="traefik-health-result"><p class="muted">Loading…</p></div>
 </div>
 
 <div class="card">
@@ -197,13 +206,27 @@ async function loadTraefikHealth() {
 
 		let html = "";
 
-		html += '<h3 style="margin:14px 0 4px">Entrypoints</h3>';
+		let entrypointsHtml = '<h3 style="margin:14px 0 4px">Entrypoints</h3>';
 		if (d.entrypoints.length) {
-			html += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Name</th><th>Address</th></tr></thead><tbody>${d.entrypoints.map(e => `
+			entrypointsHtml += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Name</th><th>Address</th></tr></thead><tbody>${d.entrypoints.map(e => `
 				<tr><td>${escapeHtml(e.name || "—")}</td><td class="mono">${escapeHtml(e.address || "—")}</td></tr>`).join("")}</tbody></table></div>`;
 		} else {
-			html += '<p class="muted">No entrypoints reported.</p>';
+			entrypointsHtml += '<p class="muted">No entrypoints reported.</p>';
 		}
+		let middlewaresHtml = "";
+		if (d.middlewares.length) {
+			middlewaresHtml = '<h3 style="margin:14px 0 4px">Middlewares</h3>';
+			middlewaresHtml += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Name</th><th>Type</th></tr></thead><tbody>${d.middlewares.map(m => `
+				<tr><td class="mono">${escapeHtml(m.name || "—")}</td><td>${escapeHtml(m.type || "—")}</td></tr>`).join("")}</tbody></table></div>`;
+		}
+		// Side by side, not stacked -- both are short (a handful of rows at
+		// most), and this card is now full-width (see the template's own
+		// comment on why Traefik moved out of .health-grid) with plenty of
+		// room to spare. align-items:start on the wrapper, not the grid
+		// default of stretch -- exactly the "sibling gets stretched to
+		// match a taller one" issue this whole redesign exists to avoid,
+		// just contained to two short tables instead of four whole cards.
+		html += `<div class="traefik-subsection-grid">${entrypointsHtml}${middlewaresHtml}</div>`;
 
 		html += '<h3 style="margin:14px 0 4px">Services &amp; backends</h3>';
 		if (d.services.length) {
@@ -238,19 +261,13 @@ async function loadTraefikHealth() {
 			html += '<p class="muted">No routers reported.</p>';
 		}
 
-		if (d.middlewares.length) {
-			html += '<h3 style="margin:14px 0 4px">Middlewares</h3>';
-			html += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Name</th><th>Type</th></tr></thead><tbody>${d.middlewares.map(m => `
-				<tr><td class="mono">${escapeHtml(m.name || "—")}</td><td>${escapeHtml(m.type || "—")}</td></tr>`).join("")}</tbody></table></div>`;
-		}
-
 		html += '<h3 style="margin:14px 0 4px">Requests</h3>';
 		if (d.metrics) {
 			html += '<p class="note" style="margin:0 0 6px"><strong>Note:</strong> cumulative totals since Traefik last started, not a live rate.</p>';
-			html += '<p class="muted" style="font-size:0.85rem;margin:6px 0 2px">By service</p>';
-			html += traefikReqTotals(d.metrics.services);
-			html += '<p class="muted" style="font-size:0.85rem;margin:10px 0 2px">By entrypoint</p>';
-			html += traefikReqTotals(d.metrics.entrypoints);
+			html += `<div class="traefik-subsection-grid">
+				<div><p class="muted" style="font-size:0.85rem;margin:6px 0 2px">By service</p>${traefikReqTotals(d.metrics.services)}</div>
+				<div><p class="muted" style="font-size:0.85rem;margin:6px 0 2px">By entrypoint</p>${traefikReqTotals(d.metrics.entrypoints)}</div>
+			</div>`;
 		} else if (d.metrics_error) {
 			html += `<p class="muted">${escapeHtml(d.metrics_error)}</p>`;
 		} else {

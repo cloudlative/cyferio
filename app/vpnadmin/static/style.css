@@ -1881,6 +1881,16 @@ tr.team-row:hover .team-row-view, tr.team-row:focus-visible .team-row-view { opa
 .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; margin-bottom: 22px; }
 .health-grid .card { margin-bottom: 0; min-width: 0; }
 
+/* Pairs of short subsections inside the (now full-width) Traefik health
+   card -- Entrypoints+Middlewares, Requests' By-service+By-entrypoint --
+   side by side instead of stacked, since there's a full card's width to
+   use. align-items:start, not the grid default of stretch -- exactly the
+   "a shorter sibling gets stretched to match a taller one" issue
+   health.html's own comment explains for why Traefik left .health-grid
+   in the first place, just scoped here to two short tables instead of
+   four whole cards. */
+.traefik-subsection-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 4px 24px; align-items: start; }
+
 /* --- Reports' Analytics section (see reports.html; moved here from the
    Dashboard) -- one tile per chart, same responsive-grid-of-cards shape as
    .health-grid above but nested inside a single outer .card rather than
