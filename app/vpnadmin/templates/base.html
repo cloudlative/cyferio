@@ -83,7 +83,7 @@
 			   bottom-of-nav, ungrouped link) since it's a personal action
 			   ("my own tickets"), not a management one -- see Support
 			   Center below for the admin-console counterpart. #}
-			<a href="/support" class="{{ 'active' if request.url.path.startswith('/support') and not request.url.path.startswith('/support-center') }}"><span class="nav-icon">✉</span>Support</a>
+			<a href="/support" class="{{ 'active' if request.url.path.startswith('/support') and not request.url.path.startswith('/support-center') }}"><span class="nav-icon">✉</span>My Support</a>
 
 			{% if can_view_clients %}
 			<div class="nav-section-label">VPN Management</div>

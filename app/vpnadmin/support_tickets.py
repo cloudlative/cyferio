@@ -59,6 +59,8 @@ CATEGORIES: dict[str, list[tuple[str, str, str]]] = {
          "Which country are you connecting from? Check My Connection Issues for the exact restriction reason."),
         ("vpn_city_restriction", "City restriction issue", "Which city are you connecting from?"),
         ("vpn_asn_restriction", "ASN restriction issue", "Which ISP/network are you connecting from?"),
+        ("vpn_os_restriction", "Device OS restriction issue", "Which device/OS are you connecting from? Check My Connection Issues for the exact restriction reason."),
+        ("vpn_ip_restriction", "IP address restriction issue", "Which IP address are you connecting from? Check My Connection Issues for the exact restriction reason."),
         ("vpn_profile_issue", "VPN profile issue", "Describe what's wrong with your VPN profile/.ovpn file."),
     ],
     "Account Issues": [

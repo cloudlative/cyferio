@@ -73,6 +73,7 @@ function renderCards(cards) {
 function renderRowDetail(row, data) {
 	const parts = [];
 	if (row.detected_mac) parts.push(`<div><label>Detected MAC</label><div class="mono">${escapeHtml(row.detected_mac)}</div></div>`);
+	if (row.detected_os) parts.push(`<div><label>Detected OS</label><div>${escapeHtml(row.detected_os)}</div></div>`);
 	if (row.detected_country) parts.push(`<div><label>Detected Country</label><div>${escapeHtml(row.detected_country)}</div></div>`);
 	if (row.detected_city) parts.push(`<div><label>Detected City</label><div>${escapeHtml(row.detected_city)}</div></div>`);
 	if (row.detected_asn) parts.push(`<div><label>Detected ASN</label><div class="mono">${escapeHtml(row.detected_asn)}${row.detected_asn_name ? " — " + escapeHtml(row.detected_asn_name) : ""}</div></div>`);
@@ -91,6 +92,11 @@ function renderRowDetail(row, data) {
 		actionHtml = `
 			<p class="muted" style="margin:0 0 8px">Your profile currently allows VPN connections only from ${data.login_country ? `<strong>${escapeHtml(data.login_country)}</strong>` : "a restricted set of countries"}.</p>
 			<a class="btn-primary btn-sm" href="/my-vpn-profile#login-country-form">Update Allowed Country</a>`;
+	} else if (row.reason === "os_not_allowed") {
+		actionHtml = `<p class="muted" style="margin:0">Your connection was rejected because your device's OS${row.detected_os ? ` (<strong>${escapeHtml(row.detected_os)}</strong>)` : ""} is not permitted by administrator-defined access policies.
+			${(data.allowed_os && data.allowed_os.length) ? ` Your profile currently allows: <strong>${data.allowed_os.map(escapeHtml).join(", ")}</strong>.` : ""}
+			Please contact your administrator if this device should be allowed.</p>
+			<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`;
 	} else if (row.category === "city") {
 		actionHtml = `<p class="muted" style="margin:0">Your connection was rejected because your current city is not permitted by administrator-defined access policies. Please contact your administrator if this location should be allowed.</p>
 			<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`;
@@ -130,8 +136,15 @@ function wireRowActions(container, row) {
 	});
 	container.querySelectorAll("[data-request-review]").forEach((btn) => {
 		btn.addEventListener("click", async () => {
-			await auditAction("request_access_review", row.reason);
-			toast("Your administrator has been notified via the audit log. Reach out directly for anything urgent.", "success");
+			btn.disabled = true;
+			try {
+				const r = await apiFetch("/api/me/connection-issues/request-review", { method: "POST", body: { timestamp: row.timestamp } });
+				toast(`Support ticket #${r.ticket_id} created -- an administrator has been notified.`, "success");
+				btn.outerHTML = `<a href="/support/${r.ticket_id}" class="btn btn-secondary btn-sm" style="margin-top:8px">View Ticket #${r.ticket_id} →</a>`;
+			} catch (e) {
+				toast(e.message, "error");
+				btn.disabled = false;
+			}
 		});
 	});
 }

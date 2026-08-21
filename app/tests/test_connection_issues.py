@@ -106,6 +106,29 @@ class TestMyConnectionIssuesApi:
         assert len(data["history"]) == 1
         assert data["history"][0]["detected_mac"] == "AA:BB:CC:DD:EE:FF"
 
+    def test_detected_os_included_for_os_not_allowed(self, app_client, db_session):
+        _make_self_service_user(db_session, "alice", vpn_client_name="alice")
+        _add_rejection(db_session, "alice", "os_not_allowed", detected_os="ios")
+        login(app_client, "alice", "somepass123")
+        r = app_client.get("/api/me/connection-issues")
+        assert r.status_code == 200
+        assert r.json()["history"][0]["detected_os"] == "ios"
+
+    def test_allowed_os_reflects_configured_policy(self, app_client, db_session, tmp_path, monkeypatch):
+        from vpnadmin import policy_store
+        from vpnadmin.config import settings as env_settings
+
+        monkeypatch.setattr(env_settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
+        monkeypatch.setattr(env_settings, "CLIENT_USAGE_FILE", str(tmp_path / "client_usage.json"))
+        policy_store.set_policy("alice", allowed_os=["windows", "linux"])
+
+        _make_self_service_user(db_session, "alice", vpn_client_name="alice")
+        _add_rejection(db_session, "alice", "os_not_allowed", detected_os="ios")
+        login(app_client, "alice", "somepass123")
+        r = app_client.get("/api/me/connection-issues")
+        assert r.status_code == 200
+        assert sorted(r.json()["allowed_os"]) == ["linux", "windows"]
+
     def test_recommended_action_mapping(self, app_client, db_session):
         _make_self_service_user(db_session, "alice", vpn_client_name="alice")
         _add_rejection(db_session, "alice", "mac_mismatch")
@@ -177,7 +200,7 @@ class TestMyConnectionIssuesAudit:
         r = app_client.post("/api/me/connection-issues/audit", json={"action": "delete_everything"})
         assert r.status_code == 400
 
-    @pytest.mark.parametrize("action", ["copy_mac", "view_details", "request_access_review"])
+    @pytest.mark.parametrize("action", ["copy_mac", "view_details"])
     def test_allowed_actions_write_audit_row(self, app_client, db_session, action):
         _make_self_service_user(db_session, "alice", vpn_client_name="alice")
         login(app_client, "alice", "somepass123")
@@ -186,6 +209,73 @@ class TestMyConnectionIssuesAudit:
         entry = db_session.query(AuditLog).filter_by(action=f"self_{action}").first()
         assert entry is not None
         assert entry.target == "AA:BB:CC:DD:EE:FF"
+
+    def test_request_access_review_no_longer_a_valid_audit_action(self, app_client, db_session):
+        # "request_access_review" moved to its own endpoint (POST
+        # .../request-review, see TestRequestAccessReview below) that
+        # creates a real ticket and notifies admins -- this asserts it
+        # stays rejected here rather than silently regressing back to a
+        # pure, unnotified audit-log write.
+        _make_self_service_user(db_session, "alice", vpn_client_name="alice")
+        login(app_client, "alice", "somepass123")
+        r = app_client.post("/api/me/connection-issues/audit", json={"action": "request_access_review"})
+        assert r.status_code == 400
+
+
+class TestRequestAccessReview:
+    def test_creates_ticket_with_reason_matched_category(self, app_client, db_session):
+        from vpnadmin.models import SupportTicket
+
+        _make_self_service_user(db_session, "alice", vpn_client_name="alice")
+        row = _add_rejection(db_session, "alice", "os_not_allowed", detected_os="ios", source_ip="203.0.113.9")
+        login(app_client, "alice", "somepass123")
+        r = app_client.post("/api/me/connection-issues/request-review", json={"timestamp": row.timestamp.isoformat()})
+        assert r.status_code == 201
+        ticket = db_session.query(SupportTicket).filter_by(id=r.json()["ticket_id"]).one()
+        assert ticket.category == "vpn_os_restriction"
+        assert ticket.created_by_user_id == db_session.query(User).filter_by(username="alice").one().id
+        assert "Device OS Restriction" in ticket.subject
+        assert ticket.messages[0].body.count("203.0.113.9") == 1
+
+    def test_creates_ticket_and_notifies_admin(self, app_client, db_session):
+        from vpnadmin.models import TicketNotification
+
+        admin = db_session.query(User).filter_by(username="admin").one()
+        _make_self_service_user(db_session, "alice", vpn_client_name="alice")
+        row = _add_rejection(db_session, "alice", "mac_mismatch", detected_mac="AA:BB:CC:DD:EE:FF")
+        login(app_client, "alice", "somepass123")
+        r = app_client.post("/api/me/connection-issues/request-review", json={"timestamp": row.timestamp.isoformat()})
+        assert r.status_code == 201
+        ticket_id = r.json()["ticket_id"]
+        assert db_session.query(TicketNotification).filter_by(user_id=admin.id, ticket_id=ticket_id).count() >= 1
+
+    def test_reason_with_no_mapping_falls_back_to_general_inquiry(self, app_client, db_session):
+        from vpnadmin.models import SupportTicket
+
+        _make_self_service_user(db_session, "alice", vpn_client_name="alice")
+        row = _add_rejection(db_session, "alice", "some_future_reason_not_yet_mapped")
+        login(app_client, "alice", "somepass123")
+        r = app_client.post("/api/me/connection-issues/request-review", json={"timestamp": row.timestamp.isoformat()})
+        assert r.status_code == 201
+        ticket = db_session.query(SupportTicket).filter_by(id=r.json()["ticket_id"]).one()
+        assert ticket.category == "other_general_inquiry"
+
+    def test_unknown_timestamp_404s(self, app_client, db_session):
+        _make_self_service_user(db_session, "alice", vpn_client_name="alice")
+        login(app_client, "alice", "somepass123")
+        r = app_client.post(
+            "/api/me/connection-issues/request-review",
+            json={"timestamp": datetime(2020, 1, 1, tzinfo=timezone.utc).isoformat()},
+        )
+        assert r.status_code == 404
+
+    def test_cannot_request_review_for_someone_elses_rejection(self, app_client, db_session):
+        _make_self_service_user(db_session, "alice", vpn_client_name="alice")
+        _make_self_service_user(db_session, "bob", vpn_client_name="bob")
+        row = _add_rejection(db_session, "bob", "mac_mismatch")
+        login(app_client, "alice", "somepass123")
+        r = app_client.post("/api/me/connection-issues/request-review", json={"timestamp": row.timestamp.isoformat()})
+        assert r.status_code == 404
 
 
 class TestMyConnectionIssuesPage:
