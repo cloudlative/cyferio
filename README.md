@@ -30,6 +30,7 @@ Cyferio started as, and still includes, a small self-contained OpenVPN road-warr
 | `upgrade.sh` | Upgrades an **already-deployed** web app portal host to the latest (or a pinned `--tag`) release — idempotent, run directly on the host; see [app/README.md](app/README.md#upgrading-an-already-deployed-host). Not for a first-time install — that's `setup-new-machine.sh` above |
 | `vpn-status.py` | Live connection status, all-clients view, bandwidth, rejected-attempt auditing |
 | `vpn-tools.conf.example` | Copy to `/etc/openvpn/vpn-tools.conf` to override any default path/setting |
+| `docker-compose.override.yml.example` | Copy to `docker-compose.override.yml` (gitignored, auto-merged by `docker compose`) to enable the host-executor deploy-key mount without editing the tracked `docker-compose.yml` — `setup-new-machine.sh` does this for you automatically |
 | `completions/*.bash` | Optional bash tab-completion for both tools' CLI flags |
 | `app/` | Cyferio Admin — the full web admin UI (FastAPI): RBAC, MAC/geo/ASN restrictions, bandwidth quotas, reporting, and audit logging — see [app/README.md](app/README.md) |
 

@@ -229,6 +229,16 @@ services:
       #     default: the live-session actions (Clients page) fail soft with
       #     a clear 400/empty list (see clients.py's _host_executor_config)
       #     until this is set up, same fail-soft pattern SMTP already uses.
+      #
+      #     DO NOT uncomment this line in place -- that edits a tracked
+      #     file, which permanently diverges this host from git and blocks
+      #     every future `git pull`/upgrade.sh with a dirty-tree error
+      #     (reproduced live on the test box 2026-08-21). Instead, either
+      #     run setup-new-machine.sh (writes this into a gitignored
+      #     docker-compose.override.yml automatically), or hand-write that
+      #     same override file yourself -- see
+      #     docker-compose.override.yml.example. `docker compose` merges it
+      #     in on every `up`, no extra flag needed.
       # - ${HOST_SSH_KEY_SOURCE_PATH:-./secrets/cyferio-deploy-key}:/run/secrets/cyferio-deploy-key:ro
     # This app manipulates root-owned files under /etc/openvpn and runs
     # easyrsa, so it runs as root inside the container (the image's
