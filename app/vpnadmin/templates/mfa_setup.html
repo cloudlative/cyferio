@@ -22,7 +22,7 @@
 				{% for c in recovery_codes %}<div>{{ c }}</div>{% endfor %}
 			</div>
 		</div>
-		<a href="/" class="btn-primary" style="display:block;text-align:center;text-decoration:none">Continue</a>
+		<a href="/" class="btn btn-primary" style="display:flex;text-align:center;text-decoration:none;justify-content:center">Continue</a>
 		{% else %}
 		{% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
 		{% if mandatory %}

@@ -324,7 +324,12 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	height: 32px;
 	padding: 6px;
 	border-radius: 10px;
-	background: var(--accent-gradient);
+	/* Fixed, not var(--accent-gradient) -- the real brand mark's own teal/
+	   amber (see base.html's own comment) needs a constant dark backdrop
+	   to read correctly; a shifting per-theme tile is what made it look
+	   washed out/invisible in some themes to begin with. The glow stays
+	   theme-reactive -- only the tile itself is pinned. */
+	background: #0b0f1a;
 	box-shadow: var(--accent-glow);
 }
 .sidebar .brand-icon svg { display: block; }
@@ -743,9 +748,61 @@ h2 { font-size: 1.08rem; font-weight: 700; margin: 0 0 14px; color: var(--text);
 	height: 3px;
 	background: var(--accent-gradient);
 }
-.welcome-banner-text h2 { margin: 0 0 4px; font-size: 1.1rem; }
+.welcome-banner-text h2 { margin: 0 0 4px; font-size: 1.1rem; display: flex; align-items: center; gap: 9px; }
 .welcome-banner-text p { margin: 0; color: var(--text-muted); font-size: 0.88rem; }
-.welcome-banner .btn-primary { flex: none; white-space: nowrap; }
+
+/* "Something's here" pulse -- a small live-style dot (not a static icon)
+   next to the banner's heading, the same visual shorthand as a
+   notification/live badge elsewhere on the web. Pure CSS, no new asset. */
+.pulse-dot {
+	position: relative;
+	display: inline-block;
+	width: 9px;
+	height: 9px;
+	border-radius: 50%;
+	background: #22c55e;
+	flex: none;
+	animation: pulse-dot-ring 2.2s ease-out infinite;
+}
+@keyframes pulse-dot-ring {
+	0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+	70% { box-shadow: 0 0 0 9px rgba(34, 197, 94, 0); }
+	100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+
+/* Dedicated CTA pill for the "Manage Users" nudge (Dashboard's banner and
+   VPN Clients' toolbar) -- deliberately its own class, not .btn-primary,
+   because .btn-primary's fill is var(--accent-gradient), which is
+   per-theme and can be too close to the (also dark) page background to
+   read as an obvious call-to-action in some of the 10 themes. This uses
+   a fixed, always-vivid indigo/violet/cyan gradient + a real glow, so
+   it stands out consistently no matter which theme is active -- the one
+   button on the page whose whole job is to be impossible to miss. */
+.btn-cta {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex: none;
+	white-space: nowrap;
+	padding: 10px 22px;
+	border-radius: 999px;
+	border: none;
+	font: inherit;
+	font-weight: 700;
+	font-size: 0.92rem;
+	color: #fff;
+	background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #22d3ee 130%);
+	box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.5), 0 6px 22px rgba(99, 102, 241, 0.45);
+	text-decoration: none;
+	cursor: pointer;
+	transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.btn-cta:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.7), 0 10px 30px rgba(99, 102, 241, 0.55);
+	text-decoration: none;
+	color: #fff;
+}
 
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 18px; margin-bottom: 28px; }
 a.stat-card, button.stat-card, .stat-card {
@@ -1318,6 +1375,7 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 
 @media (prefers-reduced-motion: reduce) {
 	.login-bg svg path, .login-bg .sweep { animation: none !important; }
+	.pulse-dot { animation: none !important; }
 }
 
 .login-box {
@@ -1342,7 +1400,11 @@ input.input-invalid, select.input-invalid { border-color: var(--danger-strong); 
 .login-box .login-logo {
 	width: 52px; height: 52px;
 	border-radius: 14px;
-	background: var(--accent-gradient);
+	/* Fixed, not var(--accent-gradient) -- see .sidebar .brand-icon's own
+	   comment. Same fixed tile color for both, so the mark reads
+	   identically whether the visitor is looking at the login page or
+	   already inside the app. */
+	background: #0b0f1a;
 	display: flex; align-items: center; justify-content: center;
 	font-size: 1.4rem;
 	box-shadow: var(--accent-glow);

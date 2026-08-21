@@ -62,3 +62,30 @@ def test_registered_mac_at_time_line_matches_vpn_status_parser_format():
         "registered_mac_at_time has a space before its colon -- unparseable "
         "by vpn-status.py's ENV_LINE_RE, same bug class as the OS-detection regression."
     )
+
+
+def test_reason_line_matches_vpn_status_parser_format():
+    """Regression guard for the bug found live 2026-08-21: reject()'s
+    "reason" line had a stray space before its colon in the LogFile.write()
+    form ("reason : {0}") while its print() form correctly had none
+    ("reason: {0}") -- same bug class as the two tests above, but this one
+    silently corrupted every non-mac_mismatch rejection: with "reason"
+    never actually parsing into iter_env_blocks()'s dict,
+    cmd_rejected()'s `b.get("reason", "mac_mismatch")` fallback made
+    os_not_allowed/country_not_allowed/city_not_allowed/asn_not_allowed/
+    ip_not_allowed/bandwidth_exceeded rejections all display as
+    "mac_mismatch" in the admin's Recent Rejected Connection Attempts,
+    even though the flat log genuinely had the correct reason recorded."""
+    with open(_SCRIPT_PATH) as f:
+        source = f.read()
+    assert 'print("reason: {0}".format(' in source, (
+        "couldn't find the print() form of the reason line"
+    )
+    assert 'log.write("reason: {0}\\n".format(' in source, (
+        "couldn't find the LogFile.write() form of the reason line"
+    )
+    assert 'reason : ' not in source, (
+        "reason has a space before its colon -- unparseable by vpn-status.py's "
+        "ENV_LINE_RE, silently mislabeling every non-mac_mismatch rejection reason "
+        "as mac_mismatch via cmd_rejected()'s fallback default."
+    )

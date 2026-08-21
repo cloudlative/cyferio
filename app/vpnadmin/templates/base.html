@@ -13,17 +13,24 @@
 	{% if user %}
 	<aside class="sidebar" id="sidebar">
 		<a href="/" class="brand">
-			{# White-on-gradient, not the brand-color mark -- the tile
-			   background (--accent-gradient) changes hue per active theme,
-			   and the mark's own teal/amber strokes lose contrast against a
-			   same-hued tile. A fixed light glyph reads clearly on every
-			   theme. Inline (not a CSS ::before) so it behaves like any
+			{# The real brand mark (teal #23D6C4 / amber #F2A93B, matching
+			   branding/assets/logo-*-dark-bg.svg exactly) on a FIXED dark
+			   tile -- not var(--accent-gradient), which shifts hue per
+			   active theme and used to wash the mark's own brand colors out
+			   against a same-hued tile (the previous fix for that was to
+			   drop the brand colors entirely and use a flat white glyph
+			   instead, which worked but meant the sidebar never actually
+			   showed the real logo). Pinning the tile to one fixed dark
+			   color guarantees the true brand colors read correctly no
+			   matter which of the 10 themes is active -- the glow still
+			   tints per-theme (a nice ambient touch), just not the tile
+			   itself. Inline (not a CSS ::before) so it behaves like any
 			   other markup element rather than a background-image hack. #}
 			<span class="brand-icon">
 				<svg width="20" height="20" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-					<circle cx="50" cy="50" r="43" stroke="#fff" stroke-opacity="0.95" stroke-width="5.5" stroke-dasharray="230 41" stroke-linecap="round" transform="rotate(-90 50 50)"/>
-					<circle cx="50" cy="50" r="28.5" stroke="#fff" stroke-opacity="0.65" stroke-width="4.5" stroke-dasharray="152 27" stroke-linecap="round" transform="rotate(60 50 50)"/>
-					<circle cx="50" cy="50" r="8" fill="#fff"/>
+					<circle cx="50" cy="50" r="43" stroke="#23D6C4" stroke-width="5.5" stroke-dasharray="230 41" stroke-linecap="round" transform="rotate(-90 50 50)"/>
+					<circle cx="50" cy="50" r="28.5" stroke="#F2A93B" stroke-width="4.5" stroke-dasharray="152 27" stroke-linecap="round" transform="rotate(60 50 50)"/>
+					<circle cx="50" cy="50" r="8" fill="#23D6C4"/>
 				</svg>
 			</span>
 			{{ app_settings.app_name }}

@@ -220,7 +220,22 @@ def reject(log, reason, message, **detected):
     docstring for why that mattered)."""
     report_rejection(reason, message, **detected)
     print("reason: {0}".format(reason))
-    log.write("reason : {0}\n".format(reason))
+    # No space before the colon -- vpn-status.py's ENV_LINE_RE
+    # (r"^([A-Za-z_][A-Za-z0-9_]*): (.*)$") requires exactly "KEY: value".
+    # This line previously had a stray space before its colon (same class
+    # of bug this file's own env-dump loop already had and fixed further
+    # down) -- unparseable by that regex, so `reason` was NEVER actually
+    # captured into a rejected-connection's block dict for ANY rejection,
+    # mac_mismatch included. cmd_rejected()'s `b.get("reason",
+    # "mac_mismatch")` fallback masked this completely: every reason
+    # silently defaulted to "mac_mismatch" instead of raising a KeyError,
+    # so os_not_allowed/country_not_allowed/city_not_allowed/
+    # asn_not_allowed/ip_not_allowed/bandwidth_exceeded rejections all
+    # showed up mislabeled as MAC mismatches in the admin's "Recent
+    # Rejected Connection Attempts" list -- found live 2026-08-21: the
+    # flat log had 4 os_not_allowed + 2 bandwidth_exceeded entries, but
+    # vpn-status.py --rejected-connections reported 100% mac_mismatch.
+    log.write("reason: {0}\n".format(reason))
     if "registered_mac" in detected:
         registered_mac_line = detected["registered_mac"] or "none"
         print("registered_mac_at_time: {0}".format(registered_mac_line))

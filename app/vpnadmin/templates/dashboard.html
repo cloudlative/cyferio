@@ -11,15 +11,16 @@
    route) -- this banner is the first thing an admin sees on login, so
    it's the one deliberately prominent nudge toward Users (add/edit
    accounts, roles, VPN profiles) rather than a plain toolbar button
-   easily lost next to the page title. VPN Clients' own "Manage Users"
-   link stays a normal toolbar button -- it's a secondary page, not the
-   landing one, so it doesn't need the same visual weight. #}
+   easily lost next to the page title. The pulse-dot + .btn-cta (not
+   .btn-primary -- see that class's own comment on why) are both about
+   making this one element impossible to miss on first login, the same
+   way VPN Clients' matching button does on a smaller scale. #}
 <div class="welcome-banner">
 	<div class="welcome-banner-text">
-		<h2>Need to manage accounts?</h2>
+		<h2><span class="pulse-dot" aria-hidden="true"></span>Need to manage accounts?</h2>
 		<p>Add, edit, or remove portal users, assign roles, and attach VPN profiles -- all from Users.</p>
 	</div>
-	<a href="/users" class="btn-primary">Manage Users →</a>
+	<a href="/users" class="btn-cta">Manage Users →</a>
 </div>
 {% endif %}
 
@@ -92,16 +93,6 @@
 		</div>
 	</div>
 </div>
-
-{% if can_view_reports %}
-{# Usage Analytics moved to Reports (see reports.html's Analytics card) --
-   this is just a pointer for anyone used to finding it here. Gated on
-   can_view_reports, not can_view_clients, since that's the permission
-   that actually controls whether following this link goes anywhere. #}
-<p class="muted" style="margin:-8px 0 4px;font-size:0.9rem">
-	📊 Usage analytics and trends have moved to <a href="/reports">Reports</a>.
-</p>
-{% endif %}
 {% endblock %}
 
 {% block scripts %}
