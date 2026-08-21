@@ -252,16 +252,28 @@ if [[ "$CURRENT_IMAGE_TAG" == "$TARGET_IMAGE_TAG" ]]; then
 	exit 0
 fi
 
+# "$TAG^{commit}", not "$TAG" -- a release tag here is always an ANNOTATED
+# tag (`git tag -a`, see the release process), and `git rev-parse` on an
+# annotated tag's name returns the TAG OBJECT's own SHA, not the commit it
+# points at. Comparing that against `git rev-parse HEAD` (always a commit
+# SHA) is a permanent mismatch, not a transient one -- reproduced live
+# 2026-08-22 upgrading a real host to v2.12.0: NEEDS_FF was always
+# (wrongly) 1 even once HEAD truly was at the tagged commit, so Phase 3's
+# re-exec-after-fast-forward kept firing every single time (a no-op `git
+# merge --ff-only` followed by an unconditional re-exec), looping forever
+# until manually interrupted. `^{commit}` dereferences an annotated tag to
+# the commit it points to; it's also a harmless no-op for a lightweight
+# tag (which already points directly at a commit).
 NEEDS_FF=0
 if [[ "$GIT_AVAILABLE" -eq 1 && "$SKIP_GIT_SYNC" -eq 0 ]]; then
-	if [[ "$(git rev-parse HEAD)" != "$(git rev-parse "$TAG")" ]]; then
+	if [[ "$(git rev-parse HEAD)" != "$(git rev-parse "$TAG^{commit}")" ]]; then
 		NEEDS_FF=1
 	fi
 fi
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
 	log "--dry-run: would update IMAGE_TAG $CURRENT_IMAGE_TAG -> $TARGET_IMAGE_TAG"
-	[[ "$NEEDS_FF" -eq 1 ]] && log "--dry-run: would fast-forward master to $TAG ($(git rev-parse --short "$TAG"))"
+	[[ "$NEEDS_FF" -eq 1 ]] && log "--dry-run: would fast-forward master to $TAG ($(git rev-parse --short "$TAG^{commit}"))"
 	log "--dry-run: would run 'docker compose pull && docker compose up -d' and verify /login"
 	exit 0
 fi
