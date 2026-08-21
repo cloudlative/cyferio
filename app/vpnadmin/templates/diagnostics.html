@@ -205,13 +205,48 @@ async function loadFailureAnalytics() {
 
 // --- Dropped / Instant Connections ---------------------------------------
 
+const DROPPED_PAGE_SIZE = 10;
+let droppedRows = [];
+let droppedPage = 1;
+
+function renderDroppedSessionsTable() {
+	const el = document.getElementById("dropped-sessions-result");
+	const totalPages = Math.max(1, Math.ceil(droppedRows.length / DROPPED_PAGE_SIZE));
+	droppedPage = Math.min(Math.max(droppedPage, 1), totalPages);
+	const start = (droppedPage - 1) * DROPPED_PAGE_SIZE;
+	const pageRows = droppedRows.slice(start, start + DROPPED_PAGE_SIZE);
+
+	el.innerHTML = `<p class="muted" style="margin-top:0">${droppedRows.length} dropped connection${droppedRows.length === 1 ? "" : "s"} in this range.</p>
+		<table><thead><tr><th>Connected</th><th>VPN Profile</th><th>Duration</th><th>Source IP</th></tr></thead><tbody>${
+			pageRows.map(r => `<tr>
+				<td class="mono">${escapeHtml(fmtTimestamp(r.connected_at))}</td>
+				<td>${escapeHtml(r.client)}</td>
+				<td class="mono">${r.duration_seconds}s</td>
+				<td class="mono">${escapeHtml(r.source_ip || "n/a")}</td>
+			</tr>`).join("")
+		}</tbody></table>
+		<div class="toolbar" style="margin-top:14px">
+			<span class="muted" style="font-size:0.85rem">Showing ${droppedRows.length === 0 ? 0 : start + 1}–${Math.min(start + DROPPED_PAGE_SIZE, droppedRows.length)} of ${droppedRows.length}</span>
+			<div class="form-row" style="gap:8px">
+				<button type="button" class="btn-secondary btn-sm" id="dropped-prev-page" ${droppedPage <= 1 ? "disabled" : ""}>← Prev</button>
+				<span class="muted" style="font-size:0.85rem;align-self:center">Page ${droppedPage} of ${totalPages}</span>
+				<button type="button" class="btn-secondary btn-sm" id="dropped-next-page" ${droppedPage >= totalPages ? "disabled" : ""}>Next →</button>
+			</div>
+		</div>`;
+
+	const prevBtn = document.getElementById("dropped-prev-page");
+	const nextBtn = document.getElementById("dropped-next-page");
+	if (prevBtn) prevBtn.addEventListener("click", () => { droppedPage -= 1; renderDroppedSessionsTable(); });
+	if (nextBtn) nextBtn.addEventListener("click", () => { droppedPage += 1; renderDroppedSessionsTable(); });
+}
+
 async function loadDroppedSessions() {
 	const card = document.getElementById("dropped-sessions-card");
 	const el = document.getElementById("dropped-sessions-result");
 	const days = document.getElementById("fa-range").value;
 	let data;
 	try {
-		data = await apiFetch(`/api/reports/dropped-sessions?days=${days}&limit=50`);
+		data = await apiFetch(`/api/reports/dropped-sessions?days=${days}&limit=500`);
 	} catch (e) {
 		card.style.display = "";
 		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
@@ -222,15 +257,9 @@ async function loadDroppedSessions() {
 		return;
 	}
 	card.style.display = "";
-	el.innerHTML = `<p class="muted" style="margin-top:0">${data.total} dropped connection${data.total === 1 ? "" : "s"} in this range.</p>
-		<table><thead><tr><th>Connected</th><th>VPN Profile</th><th>Duration</th><th>Source IP</th></tr></thead><tbody>${
-			data.rows.map(r => `<tr>
-				<td class="mono">${escapeHtml(fmtTimestamp(r.connected_at))}</td>
-				<td>${escapeHtml(r.client)}</td>
-				<td class="mono">${r.duration_seconds}s</td>
-				<td class="mono">${escapeHtml(r.source_ip || "n/a")}</td>
-			</tr>`).join("")
-		}</tbody></table>`;
+	droppedRows = data.rows;
+	droppedPage = 1;
+	renderDroppedSessionsTable();
 }
 
 document.getElementById("fa-range").addEventListener("change", () => { loadFailureAnalytics(); loadDroppedSessions(); });

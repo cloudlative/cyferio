@@ -525,9 +525,21 @@ async function refreshMacsDialog(name) {
 		}
 		checkboxes.forEach(cb => cb.addEventListener("change", updateSelectedState));
 
+		const macCount = (data.macs || []).length;
 		content.querySelectorAll(".mac-remove-btn").forEach(btn => {
 			btn.addEventListener("click", async () => {
-				const ok = await confirmDialog(`Remove MAC <span class="mono">${escapeHtml(btn.dataset.mac)}</span> from <strong>${escapeHtml(name)}</strong>?`, { confirmLabel: "Remove" });
+				// Removing a client's ONLY registered MAC leaves them with
+				// none at all -- openvpn-mac-addr-check.py's identity gate
+				// then rejects every connection attempt (see Diagnostics'
+				// MAC-DB Consistency check, which flags exactly this as
+				// "valid cert but no MAC-db entry"). A generic "remove
+				// this MAC?" confirmation doesn't make that consequence
+				// obvious, so this is called out explicitly rather than
+				// silently leaving the client unable to connect.
+				const message = macCount <= 1
+					? `Remove MAC <span class="mono">${escapeHtml(btn.dataset.mac)}</span> from <strong>${escapeHtml(name)}</strong>? This is their <strong>only</strong> registered MAC -- they won't be able to connect until a MAC is added back.`
+					: `Remove MAC <span class="mono">${escapeHtml(btn.dataset.mac)}</span> from <strong>${escapeHtml(name)}</strong>?`;
+				const ok = await confirmDialog(message, { confirmLabel: "Remove" });
 				if (!ok) return;
 				try {
 					await apiFetch(`/api/clients/${encodeURIComponent(name)}/macs/${encodeURIComponent(btn.dataset.mac)}`, { method: "DELETE" });
@@ -541,7 +553,10 @@ async function refreshMacsDialog(name) {
 			removeSelectedBtn.addEventListener("click", async () => {
 				const macs = [...content.querySelectorAll(".mac-checkbox:checked")].map(cb => cb.value);
 				if (macs.length === 0) return;
-				const ok = await confirmDialog(`Remove ${macs.length} selected MAC address${macs.length === 1 ? "" : "es"} from <strong>${escapeHtml(name)}</strong>?`, { confirmLabel: "Remove all" });
+				const message = macs.length >= macCount
+					? `Remove all ${macs.length} MAC address${macs.length === 1 ? "" : "es"} from <strong>${escapeHtml(name)}</strong>? They'll have <strong>none</strong> registered afterward and won't be able to connect until one is added back.`
+					: `Remove ${macs.length} selected MAC address${macs.length === 1 ? "" : "es"} from <strong>${escapeHtml(name)}</strong>?`;
+				const ok = await confirmDialog(message, { confirmLabel: "Remove all" });
 				if (!ok) return;
 				removeSelectedBtn.disabled = true;
 				let failed = 0;

@@ -271,14 +271,11 @@ async function loadMfaStatus() {
 	}
 }
 
-function promptCurrentPassword() {
-	return prompt("Confirm your current password to continue:");
-}
-
 document.getElementById("mfa-disable-btn").addEventListener("click", async () => {
-	const password = promptCurrentPassword();
+	const ok = await confirmDialog("Disable multi-factor authentication on your account?", { confirmLabel: "Disable MFA" });
+	if (!ok) return;
+	const password = await passwordConfirmDialog("Confirm your current password to disable MFA.", { confirmLabel: "Disable MFA" });
 	if (!password) return;
-	if (!confirm("Disable multi-factor authentication on your account?")) return;
 	try {
 		await apiFetch("/api/me/mfa/disable", { method: "POST", body: { password } });
 		toast("MFA disabled.");
@@ -289,7 +286,7 @@ document.getElementById("mfa-disable-btn").addEventListener("click", async () =>
 });
 
 document.getElementById("mfa-regenerate-btn").addEventListener("click", async () => {
-	const password = promptCurrentPassword();
+	const password = await passwordConfirmDialog("Confirm your current password to regenerate recovery codes.", { confirmLabel: "Regenerate" });
 	if (!password) return;
 	try {
 		const r = await apiFetch("/api/me/mfa/recovery-codes/regenerate", { method: "POST", body: { password } });

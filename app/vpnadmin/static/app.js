@@ -153,6 +153,58 @@ function confirmDialog(message, { confirmLabel = "Confirm", danger = true } = {}
 	});
 }
 
+/**
+ * Step-up-auth password prompt -- a masked (with the same show/hide toggle
+ * every other password field on this app gets, see addPasswordToggle
+ * above), real `<dialog>`, replacing the browser's native `prompt()`.
+ * `prompt()` has three real problems for a password: no `type="password"`
+ * masking exists for it (the value is shown in plain text as the person
+ * types), it's a blocking, unstyled OS-native dialog most browsers now
+ * flag as a legacy/deprecated pattern, and (unlike every other input in
+ * this app) it gets zero autocomplete/credential-manager integration.
+ * Resolves to the entered password (a non-empty string) on Confirm, or
+ * `null` on Cancel/Escape/backdrop-dismiss -- callers already treat a
+ * falsy return from the old promptCurrentPassword() as "user backed out",
+ * so this is a drop-in replacement for that call shape.
+ */
+function passwordConfirmDialog(message, { confirmLabel = "Confirm" } = {}) {
+	return new Promise((resolve) => {
+		const dlg = document.createElement("dialog");
+		dlg.innerHTML = `
+			<div class="dialog-body">
+				<p>${message}</p>
+				<div class="field">
+					<label for="password-confirm-input">Current Password</label>
+					<input type="password" id="password-confirm-input" autocomplete="current-password" autofocus>
+				</div>
+				<div class="dialog-actions">
+					<button class="btn-secondary" data-action="cancel">Cancel</button>
+					<button class="btn-primary" data-action="confirm">${confirmLabel}</button>
+				</div>
+			</div>`;
+		document.body.appendChild(dlg);
+		const input = dlg.querySelector("#password-confirm-input");
+		addPasswordToggle(input);
+
+		let confirmed = false;
+		const submit = () => { confirmed = true; dlg.close(); };
+		dlg.addEventListener("close", () => {
+			resolve(confirmed && input.value ? input.value : null);
+			dlg.remove();
+		});
+		dlg.querySelector('[data-action="cancel"]').onclick = () => dlg.close();
+		dlg.querySelector('[data-action="confirm"]').onclick = submit;
+		// Enter submits, same as a normal <form> -- this dialog has no
+		// <form> of its own (nothing to actually POST here, the resolved
+		// password is handed back to the caller's own apiFetch call), so
+		// Enter needs its own explicit handler instead of relying on a
+		// submit-button-triggered form submission.
+		input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") submit(); });
+		dlg.showModal();
+		input.focus();
+	});
+}
+
 // A small set of colors reused across every chart on the site, drawn from
 // the same accent/status palette already defined in style.css (:root
 // custom properties) so charts never introduce a clashing color scheme.
@@ -2075,9 +2127,14 @@ document.addEventListener("click", (e) => {
 	const EYE_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
 	const EYE_OFF_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a20.3 20.3 0 0 1 5.06-6.06M9.9 4.24A10.4 10.4 0 0 1 12 4c7 0 11 8 11 8a20.28 20.28 0 0 1-3.22 4.44M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 
-	document.querySelectorAll('input[type="password"]').forEach((input) => {
-		// Already wrapped (defensive -- nothing currently calls this twice,
-		// but harmless to guard against a future double-init).
+	// Exposed globally (not just the forEach below) so code that builds a
+	// password input AFTER this script has already run -- e.g.
+	// passwordConfirmDialog()'s dynamically-created <dialog>, same pattern
+	// as confirmDialog() -- can opt that field into the same show/hide
+	// toggle instead of shipping a second, inconsistent password field.
+	window.addPasswordToggle = function (input) {
+		// Already wrapped (defensive -- guards against a future double-call
+		// on the same input, e.g. a dialog re-opened without being removed).
 		if (input.closest(".password-toggle-wrap")) return;
 
 		const wrap = document.createElement("div");
@@ -2098,7 +2155,9 @@ document.addEventListener("click", (e) => {
 			btn.setAttribute("aria-label", showing ? "Show password" : "Hide password");
 			btn.innerHTML = showing ? EYE_ICON : EYE_OFF_ICON;
 		});
-	});
+	};
+
+	document.querySelectorAll('input[type="password"]').forEach(window.addPasswordToggle);
 
 	// A handful of templates (users.html's Add/Edit User dialogs) reset a
 	// password input's `.type` back to "password" straight from their own
