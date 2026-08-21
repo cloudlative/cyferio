@@ -31,7 +31,14 @@
 #      bind-mounted openvpn-install.sh/vpn-status.py -- see
 #      docker-compose.yml's OPENVPN_INSTALL_SCRIPT/VPN_STATUS_SCRIPT -- come
 #      from THIS checkout, not the app image, so they'd otherwise silently
-#      drift out of sync with whatever the new app image expects).
+#      drift out of sync with whatever the new app image expects). That
+#      fast-forward just rewrote THIS SCRIPT on disk too -- since bash
+#      doesn't re-read an already-running script mid-execution, step 4
+#      re-execs itself right after (`exec "$0" ...`) so steps 5-7 below
+#      always run whatever fix/change actually landed in THEM as part of
+#      this same release, not stale pre-upgrade logic. Transparent to an
+#      operator -- same phase numbering/log lines either way, just now
+#      guaranteed to reflect the code this run just pulled.
 #   5. Backs up .env (timestamped copy), updates IMAGE_TAG.
 #   6. docker compose pull && docker compose up -d (whole stack -- cheap/
 #      no-op for every service whose image/config didn't change).
@@ -233,6 +240,32 @@ if [[ "$NEEDS_FF" -eq 1 ]]; then
 	# rewrite), fail loudly here rather than silently discarding a commit
 	# nobody else has a copy of.
 	git merge --ff-only "$TAG" || die "master could not be fast-forwarded to $TAG -- master has diverged from origin. Resolve manually (this repo's convention is 100% linear direct-to-master history, so a divergence here means something unusual happened)."
+
+	# This merge just rewrote upgrade.sh itself (this very file) on disk,
+	# along with everything else -- but bash does NOT re-read an
+	# already-running script from disk mid-execution; it keeps using
+	# whatever this process already has buffered from before the pull.
+	# Phases 4/5 below would silently run stale, pre-upgrade logic,
+	# ignorant of any fix that landed in THEM between the commit this run
+	# started on and $TAG. Reproduced live 2026-08-21: upgrading to
+	# v2.8.0 (which fixed Phase 5's running-tag parsing, see the
+	# RUNNING_TAG comment further down) still hit the exact bug that
+	# release fixed, because this process had already started running
+	# the pre-fix Phase 5 before this exact line pulled the fix onto
+	# disk -- confirmed by re-running the (now on-disk) fixed parser by
+	# hand right after, which worked correctly. The very NEXT invocation
+	# (NEEDS_FF=0, nothing left to pull) used the fixed code fine on its
+	# own -- this makes that reliably true on the FIRST invocation too,
+	# by re-executing from the freshly-pulled file instead of limping
+	# through the rest of this run on stale in-memory logic. `--yes` is
+	# forced on the re-exec since the operator already confirmed this
+	# exact upgrade above -- asking again would be a confusing double-
+	# prompt for what's now this script's own implementation detail, not
+	# a new decision. `--tag`/`--repo-dir` are pinned to the already-
+	# resolved values (not re-derived) so a re-exec can never land on a
+	# DIFFERENT tag than the one just confirmed, however unlikely.
+	log "  re-executing the freshly-pulled upgrade.sh to pick up any fix that just landed in it"
+	exec "$0" --tag "$TAG" --repo-dir "$REPO_DIR" --yes
 else
 	log "Phase 3: git sync (already at $TAG, or --skip-git-sync)"
 fi
