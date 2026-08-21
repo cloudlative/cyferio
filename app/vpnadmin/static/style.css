@@ -1179,21 +1179,15 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
    the right instead of rendering inline below the table. With a large or
    filtered client list, "below the table" could be hundreds of rows past
    whichever one was actually selected, forcing a long scroll every time.
-   Same off-canvas idiom the mobile sidebar above already uses
-   (position:fixed + translateX + a backdrop, toggled via .open) -- reused
-   rather than inventing a second overlay pattern. z-index sits above the
-   mobile sidebar's own 190/200 so the drawer still wins if both are ever
-   open at once (sidebar is off-canvas only below 860px, same breakpoint
-   this drawer goes full-width at). */
-.client-detail-backdrop {
-	display: none;
-	position: fixed;
-	inset: 0;
-	z-index: 300;
-	background: rgba(0, 0, 0, 0.45);
-}
-.client-detail-backdrop.open { display: block; }
-
+   Same off-canvas idiom the mobile sidebar above uses for the SLIDE itself
+   (position:fixed + translateX, toggled via .open) but deliberately no
+   backdrop/modal overlay -- this is a PUSH drawer (see body.drawer-open
+   below): the table/toolbar/filters need to stay clickable while it's
+   open (e.g. picking Manage Restrictions for the very client the drawer
+   is showing), which a backdrop would block regardless of z-index. z-index
+   still sits above the mobile sidebar's own 190/200 so the drawer wins if
+   both are ever open at once (sidebar is off-canvas only below 860px,
+   same breakpoint this drawer goes full-width at). */
 .client-detail-drawer {
 	position: fixed;
 	top: 0;
