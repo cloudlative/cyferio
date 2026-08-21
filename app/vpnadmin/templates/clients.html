@@ -41,19 +41,38 @@
 	   one-action-button-per-row layout (5-7 buttons crammed into every row
 	   forced horizontal scrolling on any normal-width screen). Every button
 	   starts disabled until selectedClientName is set; see
-	   updateClientToolbarState() below. #}
+	   updateClientToolbarState() below.
+
+	   Redesigned again 2026-08-21 ("any other pretty way to pretty the VPN
+	   Clients page") -- the 3 actions used most often (Manage MACs, Manage
+	   Restrictions, View/Copy .ovpn) stay as full visible buttons with an
+	   icon each; the other 5 (Monitoring/Email/Reset Usage/Disconnect/
+	   Revoke -- all admin-only via can_manage_clients, same as before) move
+	   into a single "More" dropdown, same anchored-panel shape as
+	   #notif-bell/#theme-quick-switch in base.html (relative wrapper,
+	   absolutely-positioned panel, closed on outside click -- see app.js's
+	   initClientActionsMenu()). Every button keeps its EXACT same id as
+	   before this redesign -- updateClientToolbarState() and every
+	   .addEventListener() further down needed zero changes, only where
+	   each button physically lives moved. #}
 	<div class="toolbar client-action-toolbar" id="client-action-toolbar" style="margin-top:12px">
 		<span class="muted" id="client-toolbar-hint" style="font-size:0.85rem">Select a client below to enable actions.</span>
-		<div style="display:flex;gap:8px;flex-wrap:wrap">
-			<button class="btn-secondary btn-sm" id="action-macs-btn" disabled>Manage MACs</button>
+		<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+			<button class="btn-secondary btn-sm" id="action-macs-btn" disabled><span class="btn-icon">◇</span>Manage MACs</button>
 			{% if can_manage_clients %}
-			<button class="btn-secondary btn-sm" id="action-policy-btn" disabled>Manage Restrictions</button>
-			<button class="btn-secondary btn-sm" id="action-monitoring-btn" disabled>Manage Monitoring</button>
-			<button class="btn-secondary btn-sm" id="action-ovpn-btn" disabled>View / Copy .ovpn</button>
-			<button class="btn-secondary btn-sm" id="action-email-btn" disabled>Email Profile</button>
-			<button class="btn-secondary btn-sm" id="action-reset-usage-btn" disabled>Reset Usage</button>
-			<button class="btn-danger btn-sm" id="action-disconnect-btn" disabled>Disconnect</button>
-			<button class="btn-danger btn-sm" id="action-revoke-btn" disabled>Revoke</button>
+			<button class="btn-secondary btn-sm" id="action-policy-btn" disabled><span class="btn-icon">⛨</span>Manage Restrictions</button>
+			<button class="btn-secondary btn-sm" id="action-ovpn-btn" disabled><span class="btn-icon">⭳</span>View / Copy .ovpn</button>
+			<div class="client-actions-menu" id="client-actions-menu">
+				<button class="btn-secondary btn-sm" id="client-actions-toggle" disabled aria-haspopup="true" aria-expanded="false">More<span class="dropdown-caret"></span></button>
+				<div class="client-actions-panel" id="client-actions-panel" style="display:none">
+					<button type="button" class="client-actions-item" id="action-monitoring-btn"><span class="btn-icon">◉</span>Manage Monitoring</button>
+					<button type="button" class="client-actions-item" id="action-email-btn"><span class="btn-icon">✉</span>Email Profile</button>
+					<button type="button" class="client-actions-item" id="action-reset-usage-btn"><span class="btn-icon">↺</span>Reset Usage</button>
+					<div class="client-actions-divider"></div>
+					<button type="button" class="client-actions-item danger" id="action-disconnect-btn"><span class="btn-icon">✕</span>Disconnect</button>
+					<button type="button" class="client-actions-item danger" id="action-revoke-btn"><span class="btn-icon">⛔</span>Revoke</button>
+				</div>
+			</div>
 			{% endif %}
 		</div>
 	</div>
@@ -528,6 +547,17 @@ function updateClientToolbarState() {
 		document.getElementById("action-reset-usage-btn").disabled = !hasSelection;
 		document.getElementById("action-disconnect-btn").disabled = !hasSelection || !online;
 		document.getElementById("action-revoke-btn").disabled = !hasSelection;
+		// The "More" dropdown toggle itself -- enabled whenever ANY item
+		// inside it would be (i.e. a client is selected), independent of
+		// Disconnect's extra online-only condition above (that's still
+		// enforced on the individual item, not the toggle). Closes the
+		// panel too if selection is cleared out from under it (e.g. the
+		// selected row gets revoked by a concurrent admin and the table
+		// re-renders) so a disabled toggle never leaves a stale-looking
+		// open panel behind.
+		const actionsToggle = document.getElementById("client-actions-toggle");
+		actionsToggle.disabled = !hasSelection;
+		if (!hasSelection) closeClientActionsMenu();
 	}
 }
 
@@ -1156,6 +1186,35 @@ if (isAdmin) {
 	document.getElementById("action-reset-usage-btn").addEventListener("click", () => { if (selectedClientName) resetClientUsage(selectedClientName); });
 	document.getElementById("action-disconnect-btn").addEventListener("click", () => { if (selectedClientName) disconnectClient(selectedClientName); });
 	document.getElementById("action-revoke-btn").addEventListener("click", () => { if (selectedClientName) revokeClient(selectedClientName); });
+
+	// "More" dropdown (Manage Monitoring/Email Profile/Reset Usage/
+	// Disconnect/Revoke) -- same anchored-panel toggle shape as base.html's
+	// initThemeQuickSwitch()/initNotificationBell() (plain style.display,
+	// closed on outside click), just page-local here rather than in app.js
+	// since this menu only exists on this one page.
+	const clientActionsMenu = document.getElementById("client-actions-menu");
+	const clientActionsToggle = document.getElementById("client-actions-toggle");
+	const clientActionsPanel = document.getElementById("client-actions-panel");
+	window.closeClientActionsMenu = () => {
+		clientActionsPanel.style.display = "none";
+		clientActionsToggle.setAttribute("aria-expanded", "false");
+	};
+	clientActionsToggle.addEventListener("click", () => {
+		const willOpen = clientActionsPanel.style.display !== "block";
+		clientActionsPanel.style.display = willOpen ? "block" : "none";
+		clientActionsToggle.setAttribute("aria-expanded", String(willOpen));
+	});
+	document.addEventListener("click", (ev) => {
+		if (!clientActionsMenu.contains(ev.target)) closeClientActionsMenu();
+	});
+	// Any item inside closes the panel on click too -- each item's own
+	// action-open-a-dialog/confirm-and-act listener above already fires
+	// (listeners on the same element all run), this just tidies the menu
+	// away afterward instead of leaving it open behind whatever dialog/
+	// confirm the click just triggered.
+	clientActionsPanel.querySelectorAll(".client-actions-item").forEach((item) => {
+		item.addEventListener("click", closeClientActionsMenu);
+	});
 }
 
 document.getElementById("refresh-btn").addEventListener("click", loadClients);
