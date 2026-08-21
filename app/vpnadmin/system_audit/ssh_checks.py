@@ -17,6 +17,7 @@ finding."""
 import os
 import re
 import stat
+from dataclasses import dataclass
 
 from . import Finding
 
@@ -71,75 +72,110 @@ def _parse_sshd_config(host_root: str) -> dict[str, str]:
 # violated, why-it-matters, remediation line. `default_if_absent` is
 # sshd's own compiled-in default per its manual page -- used so an ABSENT
 # directive is evaluated against what sshd actually does, not silently
-# skipped as "no finding".
+# skipped as "no finding". A dataclass, not a list of dict(key="value")
+# calls -- besides being properly typed (a plain dict literal makes mypy
+# widen every field to the join of all value types, since it can't see
+# per-key types), the dict-call shape's repeated `directive="...", ...
+# ="yes"` pattern was flagged as a false-positive "generic-api-key" by
+# gitleaks' secret scan (two adjacent quoted assignments look enough like
+# a credential pair to trip its entropy heuristic) -- a dataclass's
+# positional/keyword construction doesn't have that textual shape at all.
+@dataclass(frozen=True)
+class _DirectiveCheck:
+    check_id: str
+    directive: str
+    default_if_absent: str
+    bad_values: frozenset[str]
+    severity: str
+    title: str
+    why: str
+    expected: str
+    remediation: str
+
+
 _DIRECTIVE_CHECKS = [
-    dict(check_id="ssh.permit_root_login", directive="permitrootlogin", default_if_absent="prohibit-password",
-         bad_values={"yes"}, severity="critical", title="SSH Root Login Enabled",
-         why="Allowing direct root login increases the impact of credential compromise -- an attacker with "
-             "the root password/key gets full system access in one step, and root logins can't be "
-             "individually attributed to a person the way a named-user-plus-sudo login can.",
-         expected="no (or prohibit-password to still allow root's key for automation, e.g. this app's own "
-                  "host-executor)",
-         remediation="Set 'PermitRootLogin no' in sshd_config after confirming an administrative user with "
-                     "working sudo access exists, then restart sshd."),
-    dict(check_id="ssh.password_authentication", directive="passwordauthentication", default_if_absent="yes",
-         bad_values={"yes"}, severity="high", title="SSH Password Authentication Enabled",
-         why="Password authentication is vulnerable to brute-force and credential-stuffing attacks in a way "
-             "public-key authentication is not.",
-         expected="no (key-based authentication only)",
-         remediation="Ensure every admin has a working SSH key installed, then set "
-                     "'PasswordAuthentication no' and restart sshd."),
-    dict(check_id="ssh.permit_empty_passwords", directive="permitemptypasswords", default_if_absent="no",
-         bad_values={"yes"}, severity="critical", title="SSH Empty Passwords Permitted",
-         why="Would allow login with a blank password if any account happens to have one set.",
-         expected="no", remediation="Set 'PermitEmptyPasswords no' and restart sshd."),
-    dict(check_id="ssh.permit_user_environment", directive="permituserenvironment", default_if_absent="no",
-         bad_values={"yes"}, severity="medium", title="SSH PermitUserEnvironment Enabled",
-         why="Lets a client set arbitrary environment variables for the SSH session (e.g. LD_PRELOAD-style "
-             "variables), which has historically been used to bypass restrictions in forced-command setups.",
-         expected="no", remediation="Set 'PermitUserEnvironment no' and restart sshd."),
-    dict(check_id="ssh.x11_forwarding", directive="x11forwarding", default_if_absent="no",
-         bad_values={"yes"}, severity="low", title="SSH X11 Forwarding Enabled",
-         why="Rarely needed on a headless VPN server; an unused feature is unnecessary attack surface.",
-         expected="no (unless genuinely needed for GUI application access)",
-         remediation="Set 'X11Forwarding no' and restart sshd."),
-    dict(check_id="ssh.agent_forwarding", directive="allowagentforwarding", default_if_absent="yes",
-         bad_values={"yes"}, severity="low", title="SSH Agent Forwarding Allowed",
-         why="If this server is ever compromised, agent forwarding lets an attacker use a connected admin's "
-             "forwarded SSH agent to authenticate onward to OTHER systems, without ever obtaining the key "
-             "itself.",
-         expected="no, unless a specific documented workflow needs it",
-         remediation="Set 'AllowAgentForwarding no' and restart sshd."),
-    dict(check_id="ssh.tcp_forwarding", directive="allowtcpforwarding", default_if_absent="yes",
-         bad_values={"yes"}, severity="low", title="SSH TCP Forwarding Allowed",
-         why="Lets an SSH session tunnel arbitrary TCP traffic, which can be used to pivot into or out of "
-             "the network, bypassing firewall rules that would otherwise apply.",
-         expected="no, unless a specific documented workflow needs it",
-         remediation="Set 'AllowTcpForwarding no' and restart sshd."),
+    _DirectiveCheck(
+        "ssh.permit_root_login", "permitrootlogin", "prohibit-password", frozenset({"yes"}),
+        "critical", "SSH Root Login Enabled",
+        "Allowing direct root login increases the impact of credential compromise -- an attacker with "
+        "the root password/key gets full system access in one step, and root logins can't be "
+        "individually attributed to a person the way a named-user-plus-sudo login can.",
+        "no (or prohibit-password to still allow root's key for automation, e.g. this app's own "
+        "host-executor)",
+        "Set 'PermitRootLogin no' in sshd_config after confirming an administrative user with "
+        "working sudo access exists, then restart sshd.",
+    ),
+    _DirectiveCheck(
+        "ssh.password_authentication", "passwordauthentication", "yes", frozenset({"yes"}),
+        "high", "SSH Password Authentication Enabled",
+        "Password authentication is vulnerable to brute-force and credential-stuffing attacks in a way "
+        "public-key authentication is not.",
+        "no (key-based authentication only)",
+        "Ensure every admin has a working SSH key installed, then set "
+        "'PasswordAuthentication no' and restart sshd.",
+    ),
+    _DirectiveCheck(
+        "ssh.permit_empty_passwords", "permitemptypasswords", "no", frozenset({"yes"}),
+        "critical", "SSH Empty Passwords Permitted",
+        "Would allow login with a blank password if any account happens to have one set.",
+        "no", "Set 'PermitEmptyPasswords no' and restart sshd.",
+    ),
+    _DirectiveCheck(
+        "ssh.permit_user_environment", "permituserenvironment", "no", frozenset({"yes"}),
+        "medium", "SSH PermitUserEnvironment Enabled",
+        "Lets a client set arbitrary environment variables for the SSH session (e.g. LD_PRELOAD-style "
+        "variables), which has historically been used to bypass restrictions in forced-command setups.",
+        "no", "Set 'PermitUserEnvironment no' and restart sshd.",
+    ),
+    _DirectiveCheck(
+        "ssh.x11_forwarding", "x11forwarding", "no", frozenset({"yes"}),
+        "low", "SSH X11 Forwarding Enabled",
+        "Rarely needed on a headless VPN server; an unused feature is unnecessary attack surface.",
+        "no (unless genuinely needed for GUI application access)",
+        "Set 'X11Forwarding no' and restart sshd.",
+    ),
+    _DirectiveCheck(
+        "ssh.agent_forwarding", "allowagentforwarding", "yes", frozenset({"yes"}),
+        "low", "SSH Agent Forwarding Allowed",
+        "If this server is ever compromised, agent forwarding lets an attacker use a connected admin's "
+        "forwarded SSH agent to authenticate onward to OTHER systems, without ever obtaining the key "
+        "itself.",
+        "no, unless a specific documented workflow needs it",
+        "Set 'AllowAgentForwarding no' and restart sshd.",
+    ),
+    _DirectiveCheck(
+        "ssh.tcp_forwarding", "allowtcpforwarding", "yes", frozenset({"yes"}),
+        "low", "SSH TCP Forwarding Allowed",
+        "Lets an SSH session tunnel arbitrary TCP traffic, which can be used to pivot into or out of "
+        "the network, bypassing firewall rules that would otherwise apply.",
+        "no, unless a specific documented workflow needs it",
+        "Set 'AllowTcpForwarding no' and restart sshd.",
+    ),
 ]
 
 
 def _check_directives(host_root: str, directives: dict[str, str]) -> list[Finding]:
     findings = []
     for spec in _DIRECTIVE_CHECKS:
-        value = directives.get(spec["directive"], spec["default_if_absent"]).lower()
-        source = "sshd_config" if spec["directive"] in directives else "sshd's compiled-in default (not set in config)"
-        if value in spec["bad_values"]:
+        value = directives.get(spec.directive, spec.default_if_absent).lower()
+        source = "sshd_config" if spec.directive in directives else "sshd's compiled-in default (not set in config)"
+        if value in spec.bad_values:
             findings.append(Finding(
-                check_id=spec["check_id"], category="ssh", severity=spec["severity"], title=spec["title"],
-                description=f"{spec['directive']} is set to '{value}' ({source}).",
-                why_it_matters=spec["why"],
-                current_state=f"{spec['directive']} {value}", expected_state=spec["expected"],
-                evidence=f"/etc/ssh/sshd_config: {spec['directive']} {value}"
-                         + ("" if spec["directive"] in directives else " (default, not explicitly set)"),
-                remediation=spec["remediation"],
+                check_id=spec.check_id, category="ssh", severity=spec.severity, title=spec.title,
+                description=f"{spec.directive} is set to '{value}' ({source}).",
+                why_it_matters=spec.why,
+                current_state=f"{spec.directive} {value}", expected_state=spec.expected,
+                evidence=f"/etc/ssh/sshd_config: {spec.directive} {value}"
+                         + ("" if spec.directive in directives else " (default, not explicitly set)"),
+                remediation=spec.remediation,
             ))
         else:
+            passed_title = spec.title.replace("Enabled", "Disabled").replace("Permitted", "Not Permitted").replace("Allowed", "Not Allowed")
             findings.append(Finding(
-                check_id=spec["check_id"], category="ssh", severity="passed",
-                title=f"{spec['title'].replace('Enabled', 'Disabled').replace('Permitted', 'Not Permitted').replace('Allowed', 'Not Allowed')}",
-                description=f"{spec['directive']} is set to '{value}' ({source}).",
-                current_state=f"{spec['directive']} {value}",
+                check_id=spec.check_id, category="ssh", severity="passed",
+                title=passed_title,
+                description=f"{spec.directive} is set to '{value}' ({source}).",
+                current_state=f"{spec.directive} {value}",
             ))
     return findings
 
