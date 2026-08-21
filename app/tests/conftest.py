@@ -79,6 +79,13 @@ def _reset_runtime_settings():
         r.release_check_critical_major_bump = True
         r.github_repo = env_settings.RELEASE_CHECK_REPO
         r.last_release_notified_tag = None
+        # VPN Device Availability Monitoring & Offline Alert Notifications --
+        # same leak risk as everything above (test_device_monitoring.py/
+        # test_settings.py save these via the real PATCH endpoint).
+        r.device_monitoring_check_interval_minutes = 5
+        r.device_monitoring_default_offline_threshold_minutes = 15
+        r.device_monitoring_default_cooldown_minutes = 60
+        r.device_monitoring_default_recovery_notify = True
 
     _reset()
     yield

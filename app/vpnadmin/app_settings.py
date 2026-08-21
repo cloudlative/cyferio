@@ -249,6 +249,14 @@ class _RuntimeSettings:
         self.github_repo = env_settings.RELEASE_CHECK_REPO
         self.last_release_notified_tag = None
 
+        # VPN Device Availability Monitoring & Offline Alert Notifications
+        # -- see device_monitoring.py and models.VpnProfileLink's own
+        # monitoring_* columns for what these seed/drive.
+        self.device_monitoring_check_interval_minutes = 5
+        self.device_monitoring_default_offline_threshold_minutes = 15
+        self.device_monitoring_default_cooldown_minutes = 60
+        self.device_monitoring_default_recovery_notify = True
+
 
 runtime = _RuntimeSettings()
 
@@ -352,6 +360,20 @@ def refresh_runtime_cache(db: Session) -> None:
     )
     runtime.github_repo = row.github_repo or env_settings.RELEASE_CHECK_REPO
     runtime.last_release_notified_tag = row.last_release_notified_tag
+
+    runtime.device_monitoring_check_interval_minutes = (
+        row.device_monitoring_check_interval_minutes if row.device_monitoring_check_interval_minutes is not None else 5
+    )
+    runtime.device_monitoring_default_offline_threshold_minutes = (
+        row.device_monitoring_default_offline_threshold_minutes
+        if row.device_monitoring_default_offline_threshold_minutes is not None else 15
+    )
+    runtime.device_monitoring_default_cooldown_minutes = (
+        row.device_monitoring_default_cooldown_minutes if row.device_monitoring_default_cooldown_minutes is not None else 60
+    )
+    runtime.device_monitoring_default_recovery_notify = (
+        row.device_monitoring_default_recovery_notify if row.device_monitoring_default_recovery_notify is not None else True
+    )
 
     # Mirrors the one setting host-scripts/quota_enforcer.py needs but has
     # no DB access to read directly -- see policy_store.write_global_defaults

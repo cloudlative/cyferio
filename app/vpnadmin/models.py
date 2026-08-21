@@ -682,6 +682,18 @@ class AppSettings(Base):
     # restrictions_decoupled_at above.
     last_release_notified_tag = Column(String(64), nullable=True)
 
+    # VPN Device Availability Monitoring & Offline Alert Notifications --
+    # global DEFAULTS only (Settings -> Device Monitoring). Per-device
+    # values (threshold, cooldown mode, etc. -- VpnProfileLink's
+    # monitoring_* columns) always win once a device's own monitoring is
+    # configured; these only seed a new device's config and drive the
+    # background check's own tick cadence. See app_settings.py's
+    # refresh_runtime_cache for the NULL-falls-back-to-these-defaults values.
+    device_monitoring_check_interval_minutes = Column(Integer, nullable=True)  # how often the offline-check tick runs
+    device_monitoring_default_offline_threshold_minutes = Column(Integer, nullable=True)  # pre-filled on a newly-enabled device
+    device_monitoring_default_cooldown_minutes = Column(Integer, nullable=True)  # pre-filled "repeat" cooldown value
+    device_monitoring_default_recovery_notify = Column(Boolean, nullable=True)  # pre-filled "notify on recovery" toggle
+
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
 
@@ -970,6 +982,154 @@ class VpnProfileLink(Base):
     # default; it's User.vpn_profile_link, the reverse side, that needs to
     # be told not to be a collection).
     user = relationship("User", backref=backref("vpn_profile_link", uselist=False))
+
+    # --- VPN Device Availability Monitoring & Offline Alert Notifications --
+    # Per-profile monitoring CONFIG lives here (columns on the existing
+    # 1:1 user<->VPN-profile link), not a new parallel entity -- see
+    # device_monitoring.py's module docstring for the full reasoning.
+    # Everything below defaults to "monitoring off" so an upgrade never
+    # starts alerting on a client nobody has opted in.
+    monitoring_enabled = Column(Boolean, nullable=False, default=False)
+    monitoring_name = Column(String(128), nullable=True)  # optional friendly label, e.g. "Head Office Gateway"
+
+    # A pluggable "check type" hook for future monitoring kinds (heartbeat,
+    # latency, packet loss, tunnel health, bandwidth, external endpoint --
+    # see the feature spec's "design for extensibility" section) without a
+    # rearchitect: device_monitoring.CHECK_TYPES is the registry, only
+    # "connectivity" (online/offline via the existing status snapshot) is
+    # implemented today. Stored per-profile (not hardcoded) so a future
+    # check type can be turned on for one device at a time going forward.
+    check_type = Column(String(32), nullable=False, default="connectivity")
+
+    # "Expected Connectivity" -- informational scheduling context an admin
+    # sets to describe what "normal" looks like for this device.
+    # "always"/"business_hours"/"custom" per the spec. Only "always" (24x7)
+    # actually changes alerting behavior today (business_hours/custom are
+    # captured and surfaced, but the offline-check tick doesn't yet apply a
+    # schedule window to them -- see device_monitoring.py's docstring on
+    # why that's a deliberately deferred V2, not a half-built V1 that
+    # silently produces wrong schedule-aware alerts).
+    expected_connectivity = Column(String(24), nullable=False, default="always")
+
+    # Offline Detection Threshold, in minutes -- one of
+    # device_monitoring.OFFLINE_THRESHOLD_CHOICES_MINUTES.
+    offline_threshold_minutes = Column(Integer, nullable=False, default=15)
+
+    # Notification Configuration -- independent Email/Slack toggles, plus
+    # WHO gets the email (assigned user / selected admins / custom
+    # addresses). Slack has no per-device recipient list of its own -- it
+    # always fans out to every enabled, subscribed SlackWorkspace (see
+    # slack_notifications.notify), same as every other event type in this
+    # app; there's no per-device Slack routing today.
+    notify_email_enabled = Column(Boolean, nullable=False, default=True)
+    notify_slack_enabled = Column(Boolean, nullable=False, default=True)
+    notify_assigned_user = Column(Boolean, nullable=False, default=True)
+    # JSON list of User.id -- admins selected to also receive the email.
+    notify_admin_user_ids = Column(Text, nullable=True)
+    # JSON list of extra email addresses (no portal account required).
+    notify_additional_emails = Column(Text, nullable=True)
+    # Recovery ("device came back online") notification -- optional per spec.
+    notify_on_recovery = Column(Boolean, nullable=False, default=True)
+
+    # Alert Cooldown / Noise Reduction -- "once" (a single alert per
+    # offline episode, silent until it recovers) or "repeat" (re-alert
+    # every alert_cooldown_repeat_minutes while still offline). See
+    # device_monitoring.py's run_offline_check for how this is applied.
+    alert_cooldown_mode = Column(String(16), nullable=False, default="once")
+    alert_cooldown_repeat_minutes = Column(Integer, nullable=True)  # only meaningful when mode == "repeat"
+
+    # Maintenance Mode -- admin-toggled, temporarily suppresses OFFLINE
+    # alerts for this device (a planned outage/upgrade) without disabling
+    # monitoring itself: status/outage history keeps being tracked (so the
+    # availability report stays accurate), only the notification fan-out is
+    # skipped. `maintenance_mode_until`, if set, is an optional auto-expiry
+    # the offline-check tick enforces (see run_offline_check) so a
+    # maintenance window an admin forgets to close doesn't silently suppress
+    # alerts forever.
+    maintenance_mode = Column(Boolean, nullable=False, default=False)
+    maintenance_mode_note = Column(String(255), nullable=True)
+    maintenance_mode_until = Column(DateTime(timezone=True), nullable=True)
+
+
+class VpnDeviceStatus(Base):
+    """One row per monitored VPN profile (vpn_client_name) -- the CURRENT
+    state device_monitoring.run_offline_check() maintains: is it online or
+    offline right now (from the monitoring engine's point of view, which is
+    threshold-aware -- distinct from the live "online"/"offline" the
+    Clients page shows straight from vpn-status.py), since when, and when
+    the last alert for the current episode went out (for cooldown).
+
+    Deliberately its own table rather than columns on VpnProfileLink --
+    this is mutable, high-churn STATE written by a background loop on every
+    tick, while VpnProfileLink's monitoring_* columns above are admin-edited
+    CONFIG written rarely, from a request handler. Keeping them apart means
+    the frequent background writes never contend with (or get swept into)
+    an admin's config-save transaction, and a future second check_type can
+    reuse this same table (keyed by (vpn_client_name, check_type)) without
+    VpnProfileLink growing a further set of check-type-specific columns.
+
+    Row lifecycle: created the first time monitoring is turned on for a
+    profile (or the first tick after), never deleted while monitoring stays
+    on -- see device_monitoring.get_or_create_status(). Left in place (not
+    deleted) if monitoring is later disabled, so re-enabling doesn't lose
+    the last-known last_seen_at/history linkage; only current_status resets
+    to "unknown" on disable (see disable path)."""
+    __tablename__ = "vpn_device_statuses"
+
+    id = Column(Integer, primary_key=True)
+    vpn_client_name = Column(String(64), nullable=False, index=True)
+    check_type = Column(String(32), nullable=False, default="connectivity")
+
+    # "online" | "offline" | "unknown" (unknown = monitoring just turned on,
+    # no tick has classified it yet). Deliberately NOT "warning" as a status
+    # value -- the dashboard widget derives "warning" for its own display
+    # (e.g. "offline but within threshold, not yet alerted") from
+    # current_status + offline_since + the profile's own threshold, rather
+    # than persisting a third state here that would just be a projection of
+    # the same two columns.
+    current_status = Column(String(16), nullable=False, default="unknown")
+
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)  # last tick this device was observed online
+    offline_since = Column(DateTime(timezone=True), nullable=True)  # set when current_status flips to "offline"
+
+    # Cooldown bookkeeping for the CURRENT offline episode -- cleared
+    # (set back to None) every time the device comes back online, so a
+    # fresh episode always starts from "no alert sent yet" regardless of
+    # how the previous episode's cooldown played out.
+    last_alert_sent_at = Column(DateTime(timezone=True), nullable=True)
+    alert_count = Column(Integer, nullable=False, default=0)  # alerts sent so far THIS episode
+
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    __table_args__ = (UniqueConstraint("vpn_client_name", "check_type", name="uq_device_status_client_check"),)
+
+
+class VpnDeviceOutage(Base):
+    """One row per completed (or in-progress) offline episode for a
+    monitored VPN profile -- the Device Availability report's (routes/
+    device_monitoring.py) raw data: uptime %, downtime %, outage count, and
+    average outage duration are all derived by aggregating these rows over
+    a date range, rather than replaying VpnDeviceStatus's current-state-only
+    columns (which have no history once an episode ends).
+
+    `ended_at`/`duration_seconds` are NULL while the outage is still
+    ongoing -- opened by run_offline_check() the moment a device is first
+    observed offline (not only once the alert threshold is crossed, so a
+    brief blip that never quite reaches the alert threshold still counts
+    against availability), closed the moment it's observed online again."""
+    __tablename__ = "vpn_device_outages"
+
+    id = Column(Integer, primary_key=True)
+    vpn_client_name = Column(String(64), nullable=False, index=True)
+    check_type = Column(String(32), nullable=False, default="connectivity")
+    started_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    # Whether this outage ever actually crossed the alert threshold (vs. a
+    # blip shorter than offline_threshold_minutes that recovered on its
+    # own) -- lets the "Most Unstable Devices" report distinguish real
+    # alerted outages from sub-threshold noise if it ever needs to.
+    alerted = Column(Boolean, nullable=False, default=False)
 
 
 class MigrationReport(Base):
