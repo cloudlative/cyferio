@@ -1215,6 +1215,24 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 	.client-detail-drawer { width: 100vw; }
 }
 
+/* .content has no max-width tight enough to guarantee a right-aligned
+   toolbar (clients.html's Manage MACs/Manage Restrictions/.../More row)
+   sits clear of a 480px-wide fixed drawer -- without this, opening the
+   drawer visually clipped whatever toolbar button happened to fall under
+   its left edge instead of cleanly covering or avoiding it. Pushing
+   .content's padding (not margin -- margin:0 auto is what centers it;
+   padding shrinks the box border-box already accounts for) reflows the
+   real page content out from under the drawer while it's open, same
+   general idea as the sidebar's own off-canvas push. Skipped below 640px
+   -- the drawer is already full-viewport-width there (see above), so
+   there's nothing beside it left to make room for. */
+@media (min-width: 641px) {
+	body.drawer-open .content {
+		padding-right: calc(32px + min(480px, 100vw));
+		transition: padding-right 0.22s ease;
+	}
+}
+
 /* Key/value list for the drawer's field set (OS, Source IP, Connected
    Since, ...) -- label left, value right, one pair per row. Tried
    .form-grid first (label stacked above value, multi-column) but at the

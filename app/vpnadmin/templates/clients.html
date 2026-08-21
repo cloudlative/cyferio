@@ -488,6 +488,7 @@ function renderClients() {
 function closeClientDetailDrawer() {
 	document.getElementById("client-detail-panel").classList.remove("open");
 	document.getElementById("client-detail-backdrop").classList.remove("open");
+	document.body.classList.remove("drawer-open");
 }
 
 // Radio inputs can't be un-clicked natively (once selected, clicking it
@@ -541,6 +542,7 @@ function renderClientDetailPanel() {
 		: null;
 	panel.classList.add("open");
 	document.getElementById("client-detail-backdrop").classList.add("open");
+	document.body.classList.add("drawer-open");
 	panel.innerHTML = `
 		<div class="toolbar" style="margin-bottom:12px">
 			<h3 style="margin:0">${escapeHtml(selectedClientName)} — Details</h3>
