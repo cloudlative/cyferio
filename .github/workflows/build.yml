@@ -32,6 +32,19 @@ jobs:
       contents: read
       security-events: write
       pull-requests: write
+    with:
+      # Skip the ~25min Test job on every release build (confirmed live
+      # 2026-08-21) -- every other ci.yml job (lint/typecheck/secret-scan/
+      # SAST/CodeQL/IaC-scan/dependency-audit/OSV-scan) still runs and
+      # still gates build-push below via `needs: ci`; only the pytest
+      # suite itself is skipped here. ci.yml's own `run_tests` input
+      # already anticipated exactly this use ("build.yml passing
+      # run_tests: false through its own workflow_call if a release ever
+      # needs to bypass it deliberately") -- the PR-triggered run still
+      # defaults to true (see ci.yml's `pull_request:` trigger has no
+      # `with:` to override), so tests still gate every PR merge into
+      # master, just not the tag-triggered release build itself.
+      run_tests: false
 
   build-push:
     name: Build and push image
