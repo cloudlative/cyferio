@@ -36,6 +36,33 @@ from . import Finding
 # equivalent for them to continue from.
 
 
+# Remediation actions (Phase 4, added 2026-08-22) -- see services/system/
+# audit_remediate.py's module docstring for the actual safety mechanics.
+# Each dispatches through the SAME host-executor channel Phase 2's live
+# probe already uses; the caller only ever names WHICH allowlisted action
+# to run, never any parameter that changes WHAT it does.
+_UFW_ACTION = {"type": "firewall", "action": "ufw_allow_ssh_and_enable"}
+_UFW_RISK = (
+    "This adds an 'allow <ssh port>/tcp' rule BEFORE enabling ufw, specifically to avoid locking out "
+    "SSH -- but any OTHER service you depend on (a web UI, a monitoring agent) that isn't otherwise "
+    "allowed will become unreachable the moment ufw is enabled. Review what else needs to stay open "
+    "first; this only guarantees SSH access is preserved."
+)
+_FIREWALLD_ACTION = {"type": "firewall", "action": "firewalld_allow_ssh_and_enable"}
+_FIREWALLD_RISK = (
+    "This adds the 'ssh' service to firewalld's default zone (if not already present) BEFORE starting "
+    "it, specifically to avoid locking out SSH -- but any OTHER service you depend on that isn't in "
+    "the default zone's allowed services will become unreachable once firewalld is running. Review "
+    "the default zone's configured services first; this only guarantees SSH access is preserved."
+)
+_IPTABLES_UNIT_ACTION = {"type": "firewall", "action": "enable_openvpn_iptables_unit"}
+_IPTABLES_UNIT_RISK = (
+    "Low risk -- this only enables this project's own openvpn-iptables.service (NAT/forward rules for "
+    "the VPN subnet) to start at boot. It does not change any currently-active firewall rule or "
+    "policy, and does not affect SSH access."
+)
+
+
 def _p(host_root: str, *parts: str) -> str:
     return os.path.join(host_root, *(p.lstrip("/") for p in parts))
 
@@ -94,6 +121,7 @@ def _check_ufw(host_root: str) -> list[Finding]:
             evidence="/etc/ufw/ufw.conf",
             remediation="Review 'ufw status verbose' rules for correctness, then 'ufw enable'. Ensure SSH is "
                          "explicitly allowed BEFORE enabling, to avoid losing remote access.",
+            remediation_action=_UFW_ACTION, remediation_risk=_UFW_RISK,
         ))
     else:
         findings.append(Finding(
@@ -159,6 +187,7 @@ def _check_firewalld(host_root: str) -> list[Finding]:
             expected_state="firewalld.service enabled",
             remediation="Review firewalld's configured zones/rules for correctness, then enable and start "
                          "the service. Ensure SSH access is preserved before doing so.",
+            remediation_action=_FIREWALLD_ACTION, remediation_risk=_FIREWALLD_RISK,
         )]
     if enabled is True:
         return [Finding(
@@ -195,6 +224,7 @@ def _check_project_iptables_unit(host_root: str) -> list[Finding]:
                             "the OpenVPN process itself starts fine.",
             expected_state=f"{unit_name} enabled",
             remediation=f"systemctl enable {unit_name}",
+            remediation_action=_IPTABLES_UNIT_ACTION, remediation_risk=_IPTABLES_UNIT_RISK,
         )]
     if enabled is True:
         return [Finding(
@@ -262,6 +292,7 @@ def _live_findings(data: dict) -> list[Finding]:
                 evidence=ufw.get("status_output"),
                 remediation="Review 'ufw status verbose' rules for correctness, then 'ufw enable'. Ensure SSH "
                              "is explicitly allowed BEFORE enabling, to avoid losing remote access.",
+                remediation_action=_UFW_ACTION, remediation_risk=_UFW_RISK,
             ))
 
     iptables = data.get("iptables", {})
@@ -331,6 +362,7 @@ def _live_findings(data: dict) -> list[Finding]:
                 expected_state="firewalld running",
                 remediation="Review firewalld's configured zones/rules for correctness, then start the "
                              "service. Ensure SSH access is preserved before doing so.",
+                remediation_action=_FIREWALLD_ACTION, remediation_risk=_FIREWALLD_RISK,
             ))
 
     unit_states = data.get("units", {})
@@ -352,6 +384,7 @@ def _live_findings(data: dict) -> list[Finding]:
                                 "if the OpenVPN process itself starts fine.",
                 expected_state="enabled",
                 remediation="systemctl enable openvpn-iptables.service",
+                remediation_action=_IPTABLES_UNIT_ACTION, remediation_risk=_IPTABLES_UNIT_RISK,
             ))
 
     if not findings:

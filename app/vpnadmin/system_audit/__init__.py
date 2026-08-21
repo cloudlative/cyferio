@@ -100,18 +100,21 @@ class Finding:
     remediation: str | None = None
     # Machine-actionable remediation, distinct from `remediation` above
     # (that's always just human-readable instructions). Phase 3 (added
-    # 2026-08-22): {"type": "chmod", "path": "<abs host path>", "mode":
-    # "<3-4 digit octal string>"} for the handful of file-permission
-    # checks that support "Fix Automatically" -- see remediation.py's
-    # module docstring for the FULL safety story (strict path allowlist,
-    # confirmation, audit logging, undo). None means no automated
-    # remediation is available for this finding -- the overwhelming
-    # majority of checks (every SSH directive check, every firewall
-    # check) have no entry here at all, deliberately: this repo's own
-    # task spec is explicit that SSH/firewall/auth changes need heavier
-    # safeguards (backup+validate+rollback+explicit lockout warning) than
-    # a single atomic chmod, and that machinery isn't built yet.
+    # 2026-08-22): {"type": "chmod", "path": "<abs host path>"} for the
+    # handful of file-permission checks that support "Fix Automatically".
+    # Phase 4 (added 2026-08-22) extends this to {"type": "ssh_directive",
+    # "directive": "<lowercase sshd_config directive>"} and {"type":
+    # "firewall", "action": "<allowlisted action name>"} -- see
+    # services/system/audit_remediate.py's module docstring for the FULL
+    # safety story on each (backup, validate, rollback, what's still
+    # deliberately excluded). None means no automated remediation is
+    # available for this finding.
     remediation_action: dict | None = None
+    # Paired with remediation_action -- see AuditFinding.remediation_risk's
+    # own comment for why this exists and who sets it. None for chmod
+    # actions (no lockout risk); every ssh_directive/firewall action sets
+    # this to a concrete warning.
+    remediation_risk: str | None = None
 
     def __post_init__(self):
         if self.severity not in AUDIT_SEVERITIES:
@@ -263,7 +266,7 @@ def run_audit(db: Session, *, trigger: str, triggered_by_user: User | None = Non
                 run_id=run.id, check_id=f.check_id, category=f.category, severity=f.severity,
                 title=f.title, description=f.description, why_it_matters=f.why_it_matters,
                 current_state=f.current_state, expected_state=f.expected_state,
-                evidence=f.evidence, remediation=f.remediation,
+                evidence=f.evidence, remediation=f.remediation, remediation_risk=f.remediation_risk,
                 # Only ever True for a non-passed finding that actually
                 # carries a remediation_action -- a "passed" finding has
                 # nothing to fix, and remediation.py's own apply endpoint

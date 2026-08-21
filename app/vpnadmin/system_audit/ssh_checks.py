@@ -91,6 +91,14 @@ class _DirectiveCheck:
     why: str
     expected: str
     remediation: str
+    # Shown next to the "Fix Automatically" confirmation (Phase 4, added
+    # 2026-08-22) -- every directive here changes how remote access works,
+    # so every one gets a warning, not just PermitRootLogin/
+    # PasswordAuthentication. See services/system/audit_remediate.py's
+    # remediate_ssh_directive() for the actual safety mechanics (backup,
+    # `sshd -t` validation, automatic rollback on an invalid config) this
+    # warning text refers to.
+    remediation_risk: str
 
 
 _DIRECTIVE_CHECKS = [
@@ -104,6 +112,12 @@ _DIRECTIVE_CHECKS = [
         "host-executor)",
         "Set 'PermitRootLogin no' in sshd_config after confirming an administrative user with "
         "working sudo access exists, then restart sshd.",
+        "If root is currently the ONLY account you can SSH in as (no other admin user with sudo "
+        "access exists), applying this will lock out root logins entirely -- key-based root login "
+        "(prohibit-password) is kept available for automation (e.g. this app's own host-executor), "
+        "but interactive root login will stop working. The config is validated with 'sshd -t' before "
+        "sshd is reloaded, and automatically rolled back if invalid -- but a VALID config that still "
+        "removes your only access path will not be caught by that check.",
     ),
     _DirectiveCheck(
         "ssh.password_authentication", "passwordauthentication", "yes", frozenset({"yes"}),
@@ -113,12 +127,19 @@ _DIRECTIVE_CHECKS = [
         "no (key-based authentication only)",
         "Ensure every admin has a working SSH key installed, then set "
         "'PasswordAuthentication no' and restart sshd.",
+        "If any admin currently logs in with a password only (no SSH key installed for that "
+        "account), applying this will lock them out. The config is validated with 'sshd -t' and "
+        "rolled back automatically if invalid, then sshd is reloaded -- confirm every admin who "
+        "needs SSH access has a working key installed BEFORE fixing this.",
     ),
     _DirectiveCheck(
         "ssh.permit_empty_passwords", "permitemptypasswords", "no", frozenset({"yes"}),
         "critical", "SSH Empty Passwords Permitted",
         "Would allow login with a blank password if any account happens to have one set.",
         "no", "Set 'PermitEmptyPasswords no' and restart sshd.",
+        "Low risk -- this only removes the ability to log in with a BLANK password, which no "
+        "legitimate account should be relying on. Validated with 'sshd -t' and rolled back "
+        "automatically if invalid before sshd is reloaded.",
     ),
     _DirectiveCheck(
         "ssh.permit_user_environment", "permituserenvironment", "no", frozenset({"yes"}),
@@ -126,6 +147,9 @@ _DIRECTIVE_CHECKS = [
         "Lets a client set arbitrary environment variables for the SSH session (e.g. LD_PRELOAD-style "
         "variables), which has historically been used to bypass restrictions in forced-command setups.",
         "no", "Set 'PermitUserEnvironment no' and restart sshd.",
+        "Low risk -- does not affect whether you can log in, only whether a client can set "
+        "environment variables once connected. Validated with 'sshd -t' and rolled back "
+        "automatically if invalid before sshd is reloaded.",
     ),
     _DirectiveCheck(
         "ssh.x11_forwarding", "x11forwarding", "no", frozenset({"yes"}),
@@ -133,6 +157,8 @@ _DIRECTIVE_CHECKS = [
         "Rarely needed on a headless VPN server; an unused feature is unnecessary attack surface.",
         "no (unless genuinely needed for GUI application access)",
         "Set 'X11Forwarding no' and restart sshd.",
+        "Low risk -- does not affect login capability, only forwarded GUI application traffic. "
+        "Validated with 'sshd -t' and rolled back automatically if invalid before sshd is reloaded.",
     ),
     _DirectiveCheck(
         "ssh.agent_forwarding", "allowagentforwarding", "yes", frozenset({"yes"}),
@@ -142,6 +168,9 @@ _DIRECTIVE_CHECKS = [
         "itself.",
         "no, unless a specific documented workflow needs it",
         "Set 'AllowAgentForwarding no' and restart sshd.",
+        "Low risk -- does not affect login capability, only whether a connected session can forward "
+        "an SSH agent onward. Validated with 'sshd -t' and rolled back automatically if invalid "
+        "before sshd is reloaded. Confirm no admin workflow relies on agent forwarding first.",
     ),
     _DirectiveCheck(
         "ssh.tcp_forwarding", "allowtcpforwarding", "yes", frozenset({"yes"}),
@@ -150,6 +179,9 @@ _DIRECTIVE_CHECKS = [
         "the network, bypassing firewall rules that would otherwise apply.",
         "no, unless a specific documented workflow needs it",
         "Set 'AllowTcpForwarding no' and restart sshd.",
+        "Low risk -- does not affect login capability, only whether a session can tunnel other TCP "
+        "traffic. Validated with 'sshd -t' and rolled back automatically if invalid before sshd is "
+        "reloaded. Confirm no admin workflow relies on TCP forwarding/tunneling first.",
     ),
 ]
 
@@ -168,6 +200,12 @@ def _check_directives(host_root: str, directives: dict[str, str]) -> list[Findin
                 evidence=f"/etc/ssh/sshd_config: {spec.directive} {value}"
                          + ("" if spec.directive in directives else " (default, not explicitly set)"),
                 remediation=spec.remediation,
+                # "Fix Automatically" -- see services/system/
+                # audit_remediate.py's remediate_ssh_directive(). Its own
+                # _SSH_DIRECTIVE_TARGETS allowlist decides the target
+                # value; this only ever names WHICH directive to fix.
+                remediation_action={"type": "ssh_directive", "directive": spec.directive},
+                remediation_risk=spec.remediation_risk,
             ))
         else:
             passed_title = spec.title.replace("Enabled", "Disabled").replace("Permitted", "Not Permitted").replace("Allowed", "Not Allowed")

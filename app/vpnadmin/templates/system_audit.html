@@ -9,6 +9,14 @@
 		{% endif %}
 		<button class="btn-secondary" id="refresh-btn">Refresh</button>
 		<button class="btn-secondary" id="export-csv-btn" disabled>Export CSV</button>
+		<select id="export-pdf-report" title="Report type">
+			<option value="full">Full Report</option>
+			<option value="summary">Security Summary</option>
+			<option value="firewall">Firewall Report</option>
+			<option value="ssh">SSH Report</option>
+			<option value="system">System Config Report</option>
+		</select>
+		<button class="btn-secondary" id="export-pdf-btn" disabled>Export PDF</button>
 	</div>
 </div>
 <p class="page-subtitle" style="margin-top:-10px">Server hardening and security posture -- system configuration, SSH, and firewall checks.</p>
@@ -185,42 +193,86 @@ function renderFindingDetail(f) {
 		`<dt>${escapeHtml(label)}</dt><dd class="${isEvidence ? 'evidence-block' : ''}">${escapeHtml(value)}</dd>`
 	).join("")}</dl>`;
 	if (f.remediated_at) {
-		const r = f.remediation_result;
 		html += `<p class="note" style="margin-top:14px">
 			<strong>Fixed</strong> by ${escapeHtml(f.remediated_by || "—")} on ${fmtTimestamp(f.remediated_at)}` +
-			(r ? ` -- ${escapeHtml(r.previous_mode)} → ${escapeHtml(r.new_mode)}` : "") +
+			(remediationResultSummary(f.remediation_result) ? ` -- ${remediationResultSummary(f.remediation_result)}` : "") +
 			`. Re-run the audit to confirm this shows as resolved.</p>`;
-	} else if (f.automated_remediation_available && canRunAudit) {
-		html += `<button type="button" class="btn-danger btn-sm" data-remediate-finding-id="${f.id}" style="margin-top:14px">Fix Automatically</button>`;
-	} else if (f.automated_remediation_available) {
-		html += '<p class="muted" style="margin-top:12px;font-size:0.82rem">An automated fix is available for this finding, but you don\'t have permission to apply it.</p>';
 	} else {
-		html += '<p class="muted" style="margin-top:12px;font-size:0.82rem">Automated "Fix Automatically" remediation is not available for this finding -- apply the remediation above manually.</p>';
+		if (f.automated_remediation_available && f.remediation_risk) {
+			html += `<p class="note" style="margin-top:14px;border-left:3px solid var(--color-warning,#b45309);padding-left:10px">
+				<strong>Before you fix this automatically:</strong> ${escapeHtml(f.remediation_risk)}</p>`;
+		}
+		if (f.automated_remediation_available && canRunAudit) {
+			html += `<button type="button" class="btn-danger btn-sm" data-remediate-finding-id="${f.id}" style="margin-top:10px">Fix Automatically</button>`;
+		} else if (f.automated_remediation_available) {
+			html += '<p class="muted" style="margin-top:12px;font-size:0.82rem">An automated fix is available for this finding, but you don\'t have permission to apply it.</p>';
+		} else {
+			html += '<p class="muted" style="margin-top:12px;font-size:0.82rem">Automated "Fix Automatically" remediation is not available for this finding -- apply the remediation above manually.</p>';
+		}
+		// A remediation attempt can complete without raising (ssh_directive's
+		// config-validated-invalid-so-rolled-back outcome) -- remediated_at
+		// stays unset in that case (see routes/system_audit.py), so this is
+		// the only place that outcome is visible without re-opening the row.
+		if (f.remediation_result && !f.remediated_at) {
+			const r = f.remediation_result;
+			if (r.rolled_back) {
+				html += `<p class="note" style="margin-top:10px;border-left:3px solid var(--color-danger,#b91c1c);padding-left:10px">
+					<strong>Last attempt was rolled back</strong> -- the proposed config did not validate
+					(<span class="mono">${escapeHtml(r.validation_error || "")}</span>). Nothing was changed on the
+					server; sshd was never reloaded.</p>`;
+			}
+		}
 	}
 	return html;
 }
 
-// "Fix Automatically" -- chmod-only remediation (Phase 3), see routes/
-// system_audit.py's POST .../remediate for the full safety story. This
+// Result shapes differ by remediation type (chmod: previous_mode/new_mode;
+// ssh_directive: previous_line/new_value; firewall: action/ssh_port_allowed)
+// -- summarized here rather than in three separate call sites.
+function remediationResultSummary(r) {
+	if (!r) return "";
+	if (r.previous_mode !== undefined) return `${escapeHtml(r.previous_mode)} → ${escapeHtml(r.new_mode)}`;
+	if (r.new_value !== undefined) return `set to <span class="mono">${escapeHtml(r.new_value)}</span>`;
+	if (r.action === "ufw_allow_ssh_and_enable") return `SSH (port ${escapeHtml(String(r.ssh_port_allowed))}) allowed, ufw enabled`;
+	if (r.action) return escapeHtml(r.action.replace(/_/g, " "));
+	return "";
+}
+
+// "Fix Automatically" -- see routes/system_audit.py's POST .../remediate
+// for the full safety story (chmod: Phase 3; ssh_directive/firewall:
+// Phase 4, each with its own backup+validate+rollback mechanics). This
 // confirm step is the ONLY gate before the fix actually runs (no second
-// server-side confirmation, matching every other state-changing action
-// in this app) -- the exact command is already visible in the finding's
-// own Remediation text shown just above the button, repeated here so the
-// confirm dialog doesn't require scrolling back up to see what's about
-// to happen.
+// server-side confirmation, matching every other state-changing action in
+// this app) -- the exact command is already visible in the finding's own
+// Remediation text shown just above the button, repeated here so the
+// confirm dialog doesn't require scrolling back up to see what's about to
+// happen. For ssh_directive/firewall actions, remediation_risk (this
+// finding's own lockout-risk disclosure, set by the check that produced
+// it) is shown IN the confirm dialog too, not just above the button --
+// the button can be reached by keyboard/scroll without the warning ever
+// having been read otherwise.
 async function onRemediateClick(finding, btn) {
+	const riskHtml = finding.remediation_risk
+		? `<p style="margin:10px 0;color:var(--color-danger,#b91c1c)"><strong>Risk:</strong> ${escapeHtml(finding.remediation_risk)}</p>`
+		: "";
 	const ok = await confirmDialog(
-		`Apply this fix now?<br><br><span class="mono">${escapeHtml(finding.remediation || "")}</span><br><br>` +
-		`This runs on the server immediately over the host-executor SSH channel. The file's previous permission ` +
-		`mode is recorded (shown after) so it can be reviewed, but there is no one-click undo.`,
+		`Apply this fix now?<br><br><span class="mono">${escapeHtml(finding.remediation || "")}</span>` +
+		riskHtml +
+		`<br>This runs on the server immediately over the host-executor SSH channel. The previous state is ` +
+		`recorded (shown after) so it can be reviewed, but there is no one-click undo.`,
 		{ confirmLabel: "Fix Now", danger: true },
 	);
 	if (!ok) return;
 	btn.disabled = true;
 	btn.textContent = "Applying…";
 	try {
-		await apiFetch(`/api/system-audit/findings/${finding.id}/remediate`, { method: "POST" });
-		toast("Fix applied.", "success");
+		const data = await apiFetch(`/api/system-audit/findings/${finding.id}/remediate`, { method: "POST" });
+		const result = data.finding && data.finding.remediation_result;
+		if (result && result.rolled_back) {
+			toast("Change did not validate -- rolled back, nothing was applied.", "error");
+		} else {
+			toast("Fix applied.", "success");
+		}
 		if (viewingRun) await viewRun(viewingRun.id);
 	} catch (e) {
 		toast(e.message, "error");
@@ -250,6 +302,7 @@ async function loadLatest() {
 		latestRun = data.run;
 		viewingRun = data.run;
 		document.getElementById("export-csv-btn").disabled = false;
+		document.getElementById("export-pdf-btn").disabled = false;
 		renderScoreCard(latestRun);
 		renderFindings();
 		loadHistory();
@@ -322,6 +375,44 @@ if (runAuditBtn) {
 		}
 	});
 }
+
+// PDF export -- unlike CSV (JSON {csv, filename} -> client-built Blob,
+// see below), export.pdf returns real binary content directly (see
+// routes/system_audit.py's own comment on why) -- fetched here as a Blob
+// rather than through apiFetch() (which always parses the response as
+// JSON) so error handling/401-redirect still matches every other request
+// in this app, just with res.blob() instead of res.json() at the end.
+document.getElementById("export-pdf-btn").addEventListener("click", async () => {
+	if (!viewingRun) return;
+	const report = document.getElementById("export-pdf-report").value;
+	const btn = document.getElementById("export-pdf-btn");
+	btn.disabled = true;
+	try {
+		const res = await fetch(`/api/system-audit/runs/${viewingRun.id}/export.pdf?report=${encodeURIComponent(report)}`);
+		if (res.status === 401) { window.location.href = "/login"; return; }
+		if (!res.ok) {
+			let detail = `Request failed (${res.status})`;
+			try { const data = await res.json(); if (data && data.detail) detail = data.detail; } catch (_) { /* not JSON */ }
+			throw new Error(detail);
+		}
+		const blob = await res.blob();
+		const disposition = res.headers.get("Content-Disposition") || "";
+		const match = /filename="([^"]+)"/.exec(disposition);
+		const filename = match ? match[1] : `system-audit-run-${viewingRun.id}-${report}.pdf`;
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(url);
+	} catch (e) {
+		toast(e.message, "error");
+	} finally {
+		btn.disabled = false;
+	}
+});
 
 document.getElementById("export-csv-btn").addEventListener("click", async () => {
 	if (!viewingRun) return;

@@ -1572,12 +1572,21 @@ class AuditFinding(Base):
     expected_state = Column(Text, nullable=True)
     evidence = Column(Text, nullable=True)
     remediation = Column(Text, nullable=True)
-    # JSON-encoded {"type": "chmod", "path": ..., "mode": ...} -- see
-    # system_audit/__init__.py's Finding.remediation_action docstring.
-    # NULL for the overwhelming majority of findings (every SSH/firewall
-    # check, every "passed"/informational finding) -- only the specific
-    # file-permission checks that support "Fix Automatically" set this.
+    # JSON-encoded {"type": "chmod", "path": ...} | {"type": "ssh_directive",
+    # "directive": ...} | {"type": "firewall", "action": ...} -- see
+    # system_audit/__init__.py's Finding.remediation_action docstring. NULL
+    # for the majority of findings ("passed"/informational, and any check
+    # whose fix doesn't fit one of the three actions above) -- only checks
+    # that explicitly opt in to "Fix Automatically" set this.
     remediation_action = Column(Text, nullable=True)
+    # Human-readable risk disclosure shown next to the "Fix Automatically"
+    # confirmation for actions that CAN affect remote access if misapplied
+    # (an SSH directive change, a firewall enable) -- NULL for the file-
+    # permission (chmod) actions, which have no such risk. Set by the check
+    # module, not computed generically, so the exact wording matches what
+    # that specific action actually does (see ssh_checks.py/
+    # firewall_checks.py for the text each one sets).
+    remediation_risk = Column(Text, nullable=True)
     automated_remediation_available = Column(Boolean, nullable=False, default=False)
     # Set by routes/system_audit.py's POST .../remediate once a fix has
     # actually been applied to THIS finding (a specific row on a specific
