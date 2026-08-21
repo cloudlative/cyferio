@@ -15,7 +15,16 @@
 # fast-forward over local edits to tracked files, forever, on every future
 # release. Keep docker-compose.yml itself untouched on every host --
 # this file is where host-specific config belongs instead.
+# Applied to BOTH app-blue and app-green (not a single `app` service --
+# see docker-compose.yml's "Zero-downtime rollout" comment for why there
+# are two): either one can be the currently-active slot, and a rollout
+# briefly runs both at once, so both need this mount for the live-session
+# actions to keep working regardless of which slot answers a given
+# request.
 services:
-  app:
+  app-blue:
+    volumes:
+      - ${HOST_SSH_KEY_SOURCE_PATH:-./secrets/cyferio-deploy-key}:/run/secrets/cyferio-deploy-key:ro
+  app-green:
     volumes:
       - ${HOST_SSH_KEY_SOURCE_PATH:-./secrets/cyferio-deploy-key}:/run/secrets/cyferio-deploy-key:ro
