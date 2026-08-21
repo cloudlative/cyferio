@@ -197,6 +197,22 @@
 	</div>
 </div>
 
+<div class="card" id="device-availability-report">
+	<div class="toolbar">
+		<h2 style="margin:0">Device Availability</h2>
+		<div class="form-row" style="gap:10px;align-items:center">
+			<select id="dar-range" style="width:auto">
+				<option value="7">Last 7 days</option>
+				<option value="30" selected>Last 30 days</option>
+				<option value="90">Last 3 months</option>
+			</select>
+			<button class="btn-secondary" id="dar-refresh">Refresh</button>
+		</div>
+	</div>
+	<p class="page-subtitle" style="margin:-6px 0 18px">Uptime/downtime for every device with VPN Device Availability Monitoring enabled (Clients page's "Manage Monitoring" dialog) -- sorted worst-availability-first, so this table doubles as "Most Unstable Devices".</p>
+	<div id="dar-table"><p class="muted">Loading…</p></div>
+</div>
+
 {% if can_view_db_reporting %}
 <div class="card" id="db-reporting">
 	<div class="toolbar">
@@ -1037,5 +1053,37 @@ document.getElementById("user-search").addEventListener("input", (ev) => {
 });
 document.getElementById("refresh-btn").addEventListener("click", loadReports);
 loadReports();
+
+// Device Availability report (VPN Device Availability Monitoring) -- its
+// own fetch/refresh, independent of loadReports() above, same "own
+// section, own load function" pattern as Database Reporting's loadDbReport
+// further down this file.
+async function loadDeviceAvailabilityReport() {
+	const days = document.getElementById("dar-range").value;
+	const el = document.getElementById("dar-table");
+	try {
+		const data = await apiFetch(`/api/reports/device-availability?days=${encodeURIComponent(days)}`);
+		if (!data.devices || data.devices.length === 0) {
+			el.innerHTML = '<div class="empty-state">No devices have monitoring enabled yet. Turn it on from the Clients page\'s "Manage Monitoring" dialog.</div>';
+			return;
+		}
+		el.innerHTML = `<div class="table-scroll"><table>
+			<thead><tr><th>Device</th><th>User</th><th>Uptime</th><th>Downtime</th><th>Outages</th><th>Avg Outage Duration</th></tr></thead>
+			<tbody>${data.devices.map(d => `<tr>
+				<td class="mono">${escapeHtml(d.device_name)}</td>
+				<td>${d.username ? escapeHtml(d.username) : '<span class="muted">—</span>'}</td>
+				<td>${d.uptime_pct}%</td>
+				<td>${d.downtime_pct}%</td>
+				<td>${d.total_outages}</td>
+				<td>${d.avg_outage_duration_seconds ? fmtDuration(d.avg_outage_duration_seconds) : "—"}</td>
+			</tr>`).join("")}</tbody>
+		</table></div>`;
+	} catch (e) {
+		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+document.getElementById("dar-refresh").addEventListener("click", loadDeviceAvailabilityReport);
+document.getElementById("dar-range").addEventListener("change", loadDeviceAvailabilityReport);
+loadDeviceAvailabilityReport();
 </script>
 {% endblock %}

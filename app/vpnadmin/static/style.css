@@ -960,6 +960,14 @@ tr.clickable-row:hover td { background: var(--surface-alt); }
 .status-offline::before { background: #64748b; }
 .status-revoked { background: var(--danger-bg); color: var(--danger-text); }
 .status-revoked::before { background: var(--danger-strong); box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.2); }
+/* VPN Device Availability Monitoring's "warning" bucket -- offline but
+   still within its own grace threshold, not yet alert-worthy (see
+   device_monitoring.widget_snapshot's own comment on why this is a
+   derived display state, not a persisted one). Amber, distinct from both
+   the neutral-grey "genuinely offline, past threshold" (.status-offline)
+   and the red "revoked" -- a warning isn't a failure yet. */
+.status-warning { background: var(--warning-bg, #fef3c7); color: var(--warning-text, #92400e); }
+.status-warning::before { background: #d97706; box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.2); }
 
 /* Ticket priority badge -- same pill shape as .status-pill (reused, not
    duplicated) but color keyed to PRIORITIES (low/medium/high/critical)

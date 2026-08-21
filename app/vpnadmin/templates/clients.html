@@ -48,6 +48,7 @@
 			<button class="btn-secondary btn-sm" id="action-macs-btn" disabled>Manage MACs</button>
 			{% if can_manage_clients %}
 			<button class="btn-secondary btn-sm" id="action-policy-btn" disabled>Manage Restrictions</button>
+			<button class="btn-secondary btn-sm" id="action-monitoring-btn" disabled>Manage Monitoring</button>
 			<button class="btn-secondary btn-sm" id="action-ovpn-btn" disabled>View / Copy .ovpn</button>
 			<button class="btn-secondary btn-sm" id="action-email-btn" disabled>Email Profile</button>
 			<button class="btn-secondary btn-sm" id="action-reset-usage-btn" disabled>Reset Usage</button>
@@ -191,6 +192,82 @@
 				<button type="submit" class="btn-primary" id="policy-submit" disabled>Save Restrictions</button>
 			</div>
 		</form>
+	</div>
+</dialog>
+
+<dialog id="monitoring-dialog">
+	<div class="dialog-body">
+		<h2 id="monitoring-dialog-title">Manage Monitoring</h2>
+		<form id="monitoring-form">
+			<p class="muted" style="margin-top:0">VPN Device Availability Monitoring -- for a device expected to keep a continuous VPN connection (a branch gateway, an always-on server, a kiosk). If it drops offline for longer than the threshold below, an alert is sent through the channels you enable.</p>
+			<div class="checkbox-row">
+				<label class="checkbox-label"><input type="checkbox" id="monitoring-enabled"> Enable monitoring for this device</label>
+			</div>
+			<div class="field-stack" id="monitoring-fields">
+				<div class="field">
+					<label for="monitoring-name">Monitoring Name <span class="muted">(optional friendly label, e.g. "Head Office Gateway")</span></label>
+					<input type="text" id="monitoring-name" maxlength="128" placeholder="Defaults to the VPN profile name">
+				</div>
+				<div class="field">
+					<label for="monitoring-connectivity">Expected Connectivity</label>
+					<select id="monitoring-connectivity">
+						<option value="always">Always Connected (24x7)</option>
+						<option value="business_hours">Business Hours Only</option>
+						<option value="custom">Custom Schedule</option>
+					</select>
+					<p class="field-hint">Informational for now -- every monitored device is checked and alerted 24x7 regardless of this setting; a business-hours/custom-schedule-aware quiet period isn't implemented yet.</p>
+				</div>
+				<div class="field">
+					<label for="monitoring-threshold">Offline Detection Threshold <span class="muted">(alert if not connected for longer than this)</span></label>
+					<select id="monitoring-threshold">
+						<option value="1">1 minute</option>
+						<option value="5">5 minutes</option>
+						<option value="10">10 minutes</option>
+						<option value="15">15 minutes</option>
+						<option value="30">30 minutes</option>
+						<option value="60">60 minutes</option>
+					</select>
+				</div>
+				<fieldset>
+					<legend>Notifications</legend>
+					<div class="checkbox-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+						<label class="checkbox-label"><input type="checkbox" id="monitoring-notify-email"> Email alert</label>
+						<label class="checkbox-label"><input type="checkbox" id="monitoring-notify-slack"> Slack alert <span class="muted">(to the workspace configured in Settings -> Integrations)</span></label>
+						<label class="checkbox-label"><input type="checkbox" id="monitoring-notify-assigned-user"> Email the assigned portal user</label>
+						<label class="checkbox-label"><input type="checkbox" id="monitoring-notify-recovery"> Also notify when the device comes back online</label>
+					</div>
+					<div class="field" style="margin-top:10px">
+						<label for="monitoring-additional-emails">Additional Recipients <span class="muted">(one email per line, optional)</span></label>
+						<textarea id="monitoring-additional-emails" rows="2" class="mono" placeholder="ops@example.com"></textarea>
+					</div>
+				</fieldset>
+				<fieldset>
+					<legend>Alert Cooldown</legend>
+					<div class="checkbox-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+						<label class="checkbox-label"><input type="radio" name="monitoring-cooldown-mode" value="once" checked> Send one alert, then stay silent until it reconnects</label>
+						<label class="checkbox-label"><input type="radio" name="monitoring-cooldown-mode" value="repeat"> Repeat while still offline, every
+							<input type="text" id="monitoring-cooldown-minutes" inputmode="numeric" style="width:70px;display:inline-block;margin:0 6px" placeholder="60"> minutes
+						</label>
+					</div>
+				</fieldset>
+			</div>
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" id="monitoring-dialog-cancel">Cancel</button>
+				<button type="submit" class="btn-primary" id="monitoring-submit">Save Monitoring Config</button>
+			</div>
+		</form>
+		<div class="card" style="margin:18px 0 0;padding:14px" id="monitoring-maintenance-card">
+			<h3 style="margin:0 0 8px">Maintenance Mode</h3>
+			<p class="muted" style="margin:0 0 10px;font-size:0.85rem">Temporarily suppresses offline alerts for this device (a planned outage or upgrade) without turning monitoring off -- status is still tracked for the Device Availability report.</p>
+			<div class="field" style="margin-bottom:10px">
+				<input type="text" id="monitoring-maintenance-note" maxlength="255" placeholder="Reason (optional, e.g. Firmware upgrade)">
+			</div>
+			<div class="form-row" style="gap:8px">
+				<button type="button" class="btn-secondary btn-sm" id="monitoring-maintenance-enable">Enable Maintenance Mode</button>
+				<button type="button" class="btn-secondary btn-sm" id="monitoring-maintenance-disable">Disable Maintenance Mode</button>
+			</div>
+			<p class="muted" style="margin-top:8px;font-size:0.82rem" id="monitoring-maintenance-status"></p>
+		</div>
 	</div>
 </dialog>
 {% endif %}
@@ -445,6 +522,7 @@ function updateClientToolbarState() {
 	document.getElementById("action-macs-btn").disabled = !hasSelection;
 	if (isAdmin) {
 		document.getElementById("action-policy-btn").disabled = !hasSelection;
+		document.getElementById("action-monitoring-btn").disabled = !hasSelection;
 		document.getElementById("action-ovpn-btn").disabled = !hasSelection;
 		document.getElementById("action-email-btn").disabled = !hasSelection;
 		document.getElementById("action-reset-usage-btn").disabled = !hasSelection;
@@ -894,6 +972,112 @@ if (isAdmin) {
 			submitBtn.disabled = false;
 		}
 	});
+}
+
+// --- VPN Device Availability Monitoring -------------------------------
+// Manage Monitoring dialog -- see routes/clients.py's GET/PUT
+// /{name}/monitoring and device_monitoring.py for the backend. Only
+// rendered/wired inside `if (isAdmin)` (below), matching Manage
+// Restrictions' own admin-only gate.
+if (isAdmin) {
+	let monitoringClientName = null;
+
+	function toggleMonitoringFields() {
+		document.getElementById("monitoring-fields").style.opacity = document.getElementById("monitoring-enabled").checked ? "1" : "0.5";
+	}
+	document.getElementById("monitoring-enabled").addEventListener("change", toggleMonitoringFields);
+
+	async function openMonitoringDialog(name) {
+		monitoringClientName = name;
+		document.getElementById("monitoring-dialog-title").textContent = `Manage Monitoring — ${name}`;
+		document.getElementById("monitoring-form").reset();
+		document.getElementById("monitoring-maintenance-note").value = "";
+		document.getElementById("monitoring-maintenance-status").textContent = "";
+		const dlg = document.getElementById("monitoring-dialog");
+		dlg.showModal();
+		try {
+			const data = await apiFetch(`/api/clients/${encodeURIComponent(name)}/monitoring`);
+			const c = data.config;
+			document.getElementById("monitoring-enabled").checked = !!c.monitoring_enabled;
+			document.getElementById("monitoring-name").value = c.monitoring_name || "";
+			document.getElementById("monitoring-connectivity").value = c.expected_connectivity || "always";
+			document.getElementById("monitoring-threshold").value = String(c.offline_threshold_minutes || 15);
+			document.getElementById("monitoring-notify-email").checked = c.notify_email_enabled !== false;
+			document.getElementById("monitoring-notify-slack").checked = c.notify_slack_enabled !== false;
+			document.getElementById("monitoring-notify-assigned-user").checked = c.notify_assigned_user !== false;
+			document.getElementById("monitoring-notify-recovery").checked = c.notify_on_recovery !== false;
+			document.getElementById("monitoring-additional-emails").value = (c.notify_additional_emails || []).join("\n");
+			const cooldownEl = document.querySelector(`input[name="monitoring-cooldown-mode"][value="${c.alert_cooldown_mode || "once"}"]`);
+			if (cooldownEl) cooldownEl.checked = true;
+			document.getElementById("monitoring-cooldown-minutes").value = c.alert_cooldown_repeat_minutes || "";
+			toggleMonitoringFields();
+
+			const status = data.status || {};
+			const maintNote = c.maintenance_mode
+				? `Maintenance mode is ON${c.maintenance_mode_note ? " — " + c.maintenance_mode_note : ""}.`
+				: "Maintenance mode is off.";
+			const statusNote = status.current_status === "offline" && status.offline_duration_seconds != null
+				? ` Currently offline for ${fmtDuration(status.offline_duration_seconds)}.`
+				: status.current_status === "online" ? " Currently online." : "";
+			document.getElementById("monitoring-maintenance-status").textContent = maintNote + statusNote;
+		} catch (e) {
+			toast(e.message, "error");
+			dlg.close();
+		}
+	}
+	window.openMonitoringDialog = openMonitoringDialog;
+
+	document.getElementById("monitoring-dialog-cancel").addEventListener("click", () => document.getElementById("monitoring-dialog").close());
+	document.getElementById("monitoring-form").addEventListener("submit", async (ev) => {
+		ev.preventDefault();
+		const submitBtn = document.getElementById("monitoring-submit");
+		submitBtn.disabled = true;
+		const body = {
+			monitoring_enabled: document.getElementById("monitoring-enabled").checked,
+			monitoring_name: document.getElementById("monitoring-name").value.trim() || null,
+			expected_connectivity: document.getElementById("monitoring-connectivity").value,
+			offline_threshold_minutes: Number(document.getElementById("monitoring-threshold").value),
+			notify_email_enabled: document.getElementById("monitoring-notify-email").checked,
+			notify_slack_enabled: document.getElementById("monitoring-notify-slack").checked,
+			notify_assigned_user: document.getElementById("monitoring-notify-assigned-user").checked,
+			notify_on_recovery: document.getElementById("monitoring-notify-recovery").checked,
+			notify_additional_emails: parseLineList(document.getElementById("monitoring-additional-emails").value),
+			alert_cooldown_mode: document.querySelector('input[name="monitoring-cooldown-mode"]:checked')?.value || "once",
+			alert_cooldown_repeat_minutes: (() => {
+				const v = document.getElementById("monitoring-cooldown-minutes").value.trim();
+				return v ? Number(v) : null;
+			})(),
+		};
+		try {
+			await apiFetch(`/api/clients/${encodeURIComponent(monitoringClientName)}/monitoring`, { method: "PUT", body });
+			document.getElementById("monitoring-dialog").close();
+			toast("Monitoring configuration updated.", "success");
+		} catch (e) {
+			toast(e.message, "error");
+		} finally {
+			submitBtn.disabled = false;
+		}
+	});
+
+	async function setMonitoringMaintenance(enabled) {
+		try {
+			const result = await apiFetch(`/api/clients/${encodeURIComponent(monitoringClientName)}/monitoring/maintenance`, {
+				method: "POST",
+				body: { enabled, note: document.getElementById("monitoring-maintenance-note").value.trim() || null },
+			});
+			const c = result.config;
+			document.getElementById("monitoring-maintenance-status").textContent = c.maintenance_mode
+				? `Maintenance mode is ON${c.maintenance_mode_note ? " — " + c.maintenance_mode_note : ""}.`
+				: "Maintenance mode is off.";
+			toast(enabled ? "Maintenance mode enabled -- offline alerts suppressed for this device." : "Maintenance mode disabled.", "success");
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	}
+	document.getElementById("monitoring-maintenance-enable").addEventListener("click", () => setMonitoringMaintenance(true));
+	document.getElementById("monitoring-maintenance-disable").addEventListener("click", () => setMonitoringMaintenance(false));
+
+	document.getElementById("action-monitoring-btn").addEventListener("click", () => { if (selectedClientName) openMonitoringDialog(selectedClientName); });
 }
 
 async function revokeClient(name) {

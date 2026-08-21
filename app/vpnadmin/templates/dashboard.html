@@ -71,6 +71,15 @@
 	<div id="connected-table"><p class="muted">Loading…</p></div>
 </div>
 
+<div class="card" id="critical-devices-card">
+	<div class="toolbar">
+		<h2 style="margin:0">Critical VPN Devices</h2>
+		<span class="muted" id="critical-devices-summary" style="font-size:0.85rem"></span>
+	</div>
+	<p class="page-subtitle" style="margin:-6px 0 14px">Devices with VPN Device Availability Monitoring turned on (Clients page's "Manage Monitoring" dialog) -- branch gateways, servers, kiosks expected to stay continuously connected.</p>
+	<div id="critical-devices-table"><p class="muted">Loading…</p></div>
+</div>
+
 <div class="card" id="dashboard-overview-card">
 	<div class="toolbar"><h2 style="margin:0">Operational Overview</h2></div>
 	<div class="ua-grid">
@@ -192,6 +201,44 @@ async function loadConnectedStats() {
 		toast(e.message, "error");
 	}
 }
+
+// Critical VPN Devices widget -- VPN Device Availability Monitoring's
+// dashboard surface (GET /api/dashboard/critical-devices, backed by
+// device_monitoring.widget_snapshot()). Loaded independently of
+// loadConnectedStats()'s snapshot above -- monitored-device status is its
+// own background-refreshed table (VpnDeviceStatus), not part of
+// cli_wrapper's dashboard snapshot.
+const CRITICAL_DEVICE_STATUS_LABELS = { online: "Online", offline: "Offline", warning: "Warning", unknown: "Unknown" };
+const CRITICAL_DEVICE_STATUS_PILLS = { online: "status-online", offline: "status-revoked", warning: "status-warning", unknown: "status-offline" };
+
+async function loadCriticalDevices() {
+	try {
+		const data = await apiFetch("/api/dashboard/critical-devices");
+		const counts = data.counts || {};
+		document.getElementById("critical-devices-summary").textContent =
+			`${counts.total || 0} monitored — ${counts.online || 0} online, ${counts.warning || 0} warning, ${counts.offline || 0} offline`;
+		const el = document.getElementById("critical-devices-table");
+		if (!data.devices || data.devices.length === 0) {
+			el.innerHTML = '<div class="empty-state">No devices have monitoring enabled yet. Turn it on from the Clients page\'s "Manage Monitoring" dialog.</div>';
+			return;
+		}
+		el.innerHTML = `<div class="table-scroll"><table>
+			<thead><tr><th>Device</th><th>User</th><th>VPN Profile</th><th>Status</th><th>Last Seen</th><th>Offline Duration</th></tr></thead>
+			<tbody>${data.devices.map(d => `<tr>
+				<td>${escapeHtml(d.device_name)}${d.maintenance_mode ? ' <span class="status-pill" style="font-size:0.72em">Maintenance</span>' : ""}</td>
+				<td>${d.username ? escapeHtml(d.username) : '<span class="muted">—</span>'}</td>
+				<td class="mono">${escapeHtml(d.vpn_client_name)}</td>
+				<td><span class="status-pill ${CRITICAL_DEVICE_STATUS_PILLS[d.display_status] || ""}">${CRITICAL_DEVICE_STATUS_LABELS[d.display_status] || d.display_status}</span></td>
+				<td>${d.last_seen_at ? fmtTimestamp(d.last_seen_at) : '<span class="muted">Never</span>'}</td>
+				<td>${d.offline_duration_seconds != null ? fmtDuration(d.offline_duration_seconds) : "—"}</td>
+			</tr>`).join("")}</tbody>
+		</table></div>`;
+	} catch (e) {
+		document.getElementById("critical-devices-table").innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+loadCriticalDevices();
+setInterval(() => { if (!document.hidden) loadCriticalDevices(); }, 30000);
 
 function ovStat(value, label) {
 	return `<div class="ua-summary-stat"><div class="ua-summary-value">${value}</div><div class="ua-summary-label">${label}</div></div>`;

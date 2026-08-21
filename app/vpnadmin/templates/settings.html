@@ -276,6 +276,37 @@
 			<label class="checkbox-label"><input type="checkbox" id="s-notify-ticket-created"> Email me on new tickets, user replies, reopened tickets, and critical-priority tickets</label>
 		</div>
 	</div>
+
+	<div class="card">
+		<h2>Device Monitoring</h2>
+		<p class="muted" style="margin-top:0">Global defaults for VPN Device Availability Monitoring (Clients page's "Manage Monitoring" dialog). Per-device settings, once configured, always take priority over these -- see that dialog's own Offline Detection Threshold/Alert Cooldown fields.</p>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-devmon-interval">Offline Check Interval <span class="muted">(minutes)</span>
+					<button type="button" class="info-tip" data-tip="How often the background job re-checks every monitored device's connection status against its own offline threshold. Lowering this makes offline detection more responsive at the cost of more frequent checks." aria-label="More info on Offline Check Interval">i</button>
+				</label>
+				<input type="text" id="s-devmon-interval" inputmode="numeric" placeholder="5">
+			</div>
+			<div class="field">
+				<label for="s-devmon-default-threshold">Default Offline Threshold <span class="muted">(pre-filled on a newly-monitored device)</span></label>
+				<select id="s-devmon-default-threshold">
+					<option value="1">1 minute</option>
+					<option value="5">5 minutes</option>
+					<option value="10">10 minutes</option>
+					<option value="15">15 minutes</option>
+					<option value="30">30 minutes</option>
+					<option value="60">60 minutes</option>
+				</select>
+			</div>
+			<div class="field">
+				<label for="s-devmon-default-cooldown">Default Repeat-Alert Cooldown <span class="muted">(minutes, used when a device's own cooldown mode is "Repeat")</span></label>
+				<input type="text" id="s-devmon-default-cooldown" inputmode="numeric" placeholder="60">
+			</div>
+		</div>
+		<div class="checkbox-row" style="margin-top:12px">
+			<label class="checkbox-label"><input type="checkbox" id="s-devmon-default-recovery"> Notify on recovery by default <span class="muted">(pre-fills a newly-monitored device's "notify when back online" toggle)</span></label>
+		</div>
+	</div>
 	</div>
 
 	<div class="settings-group" id="sg-auth-alerts">
@@ -632,6 +663,10 @@ async function loadSettings() {
 		setVal("s-support-max-attachments", s.support_max_attachments_per_message != null ? s.support_max_attachments_per_message : 5);
 		setVal("s-ticket-duplicate-window", s.ticket_duplicate_window_minutes != null ? s.ticket_duplicate_window_minutes : 1440);
 		document.getElementById("s-notify-ticket-created").checked = !!s.notify_admin_on_ticket_created;
+		setVal("s-devmon-interval", s.device_monitoring_check_interval_minutes != null ? s.device_monitoring_check_interval_minutes : 5);
+		document.getElementById("s-devmon-default-threshold").value = String(s.device_monitoring_default_offline_threshold_minutes != null ? s.device_monitoring_default_offline_threshold_minutes : 15);
+		setVal("s-devmon-default-cooldown", s.device_monitoring_default_cooldown_minutes != null ? s.device_monitoring_default_cooldown_minutes : 60);
+		document.getElementById("s-devmon-default-recovery").checked = s.device_monitoring_default_recovery_notify !== false;
 		document.getElementById("s-mfa-mode").value = s.mfa_mode || "optional";
 		const rememberDays = s.mfa_remember_device_days || 0;
 		const rememberSelect = document.getElementById("s-mfa-remember-device");
@@ -930,6 +965,10 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		support_max_attachments_per_message: intOrNull(val("s-support-max-attachments")),
 		ticket_duplicate_window_minutes: intOrNull(val("s-ticket-duplicate-window")),
 		notify_admin_on_ticket_created: document.getElementById("s-notify-ticket-created").checked,
+		device_monitoring_check_interval_minutes: intOrNull(val("s-devmon-interval")),
+		device_monitoring_default_offline_threshold_minutes: intOrNull(document.getElementById("s-devmon-default-threshold").value),
+		device_monitoring_default_cooldown_minutes: intOrNull(val("s-devmon-default-cooldown")),
+		device_monitoring_default_recovery_notify: document.getElementById("s-devmon-default-recovery").checked,
 		mfa_mode: document.getElementById("s-mfa-mode").value,
 		mfa_remember_device_days: (() => {
 			const sel = document.getElementById("s-mfa-remember-device").value;
