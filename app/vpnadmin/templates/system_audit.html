@@ -5,7 +5,11 @@
 	<div class="toolbar-title"><h1 style="margin:0">System Audit</h1></div>
 	<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
 		{% if can_run_audit %}
-		<button class="btn-primary" id="run-audit-btn" style="flex-shrink:0">Run Audit Now</button>
+		<!-- .btn-secondary, not .btn-primary -- the blue/cyan accent gradient
+		     read as too loud for this action (user feedback, 2026-08-22).
+		     Scoped to this one button, not a change to .btn-primary itself,
+		     which is still used for actual primary CTAs elsewhere in the app. -->
+		<button class="btn-secondary" id="run-audit-btn" style="flex-shrink:0">Run Audit Now</button>
 		{% endif %}
 		<button class="btn-secondary" id="refresh-btn" style="flex-shrink:0">Refresh</button>
 		<button class="btn-secondary" id="export-csv-btn" style="flex-shrink:0" disabled>Export CSV</button>
@@ -90,6 +94,18 @@ let selectedSeverity = null;  // null = all
 let selectedCategory = "all";
 let viewingRun = null;  // the run currently shown in Findings -- defaults to latest, can switch via History
 
+// Client-side pagination -- same "fetch/hold the full set, slice 30 rows
+// per page in render" shape as users_activity.html's ACTIVITY_PAGE_SIZE.
+// Findings are already all in viewingRun.findings from one API call;
+// history re-fetches its (much smaller, capped) full set on every
+// loadHistory() call and paginates the cached result client-side rather
+// than re-fetching per page.
+const FINDINGS_PAGE_SIZE = 30;
+const HISTORY_PAGE_SIZE = 30;
+let findingsPage = 1;
+let historyPage = 1;
+let historyRuns = [];
+
 const SEVERITY_ORDER = ["critical", "high", "medium", "low", "info", "passed"];
 const SEVERITY_LABELS = { critical: "Critical", high: "High", medium: "Medium", low: "Low", info: "Informational", passed: "Passed" };
 
@@ -128,6 +144,7 @@ function renderScoreCard(run) {
 		el.addEventListener("click", () => {
 			const sev = el.dataset.severity;
 			selectedSeverity = selectedSeverity === sev ? null : sev;
+			findingsPage = 1;
 			renderScoreCard(run);
 			renderFindings();
 		});
@@ -154,9 +171,20 @@ function renderFindings() {
 		el.innerHTML = '<div class="empty-state">No findings match this filter.</div>';
 		return;
 	}
+
+	const totalPages = Math.max(1, Math.ceil(findings.length / FINDINGS_PAGE_SIZE));
+	if (findingsPage > totalPages) findingsPage = totalPages;
+	if (findingsPage < 1) findingsPage = 1;
+	const start = (findingsPage - 1) * FINDINGS_PAGE_SIZE;
+	// data-row-idx/data-detail-idx stay indices into the FULL (unpaginated)
+	// `findings` array, not page-local -- the click handler below closes
+	// over that same array (findings[idx]), so this is what keeps "Details"
+	// working correctly on every page, not just the first.
+	const pageEntries = findings.slice(start, start + FINDINGS_PAGE_SIZE).map((f, pageI) => [start + pageI, f]);
+
 	el.innerHTML = `<div class="table-scroll"><table>
 		<thead><tr><th></th><th>Severity</th><th>Category</th><th>Title</th><th></th></tr></thead>
-		<tbody>${findings.map((f, i) => `
+		<tbody>${pageEntries.map(([i, f]) => `
 			<tr class="audit-finding-row" data-row-idx="${i}">
 				<td>${f.status === "new" ? '<span class="audit-badge-new">NEW</span>' : f.status === "resolved" ? '<span class="audit-badge-resolved">RESOLVED</span>' : ""}</td>
 				<td>${severityPill(f.severity)}</td>
@@ -166,7 +194,15 @@ function renderFindings() {
 			</tr>
 			<tr class="audit-finding-detail-row" data-detail-idx="${i}" style="display:none"><td colspan="5"></td></tr>
 		`).join("")}</tbody>
-	</table></div>`;
+	</table></div>
+	<div class="toolbar" style="margin-top:14px">
+		<span class="muted" style="font-size:0.85rem">Showing ${start + 1}–${Math.min(start + FINDINGS_PAGE_SIZE, findings.length)} of ${findings.length}</span>
+		<div class="form-row" style="gap:8px">
+			<button type="button" class="btn-secondary btn-sm" id="findings-prev-page" ${findingsPage <= 1 ? "disabled" : ""}>← Prev</button>
+			<span class="muted" style="font-size:0.85rem;align-self:center">Page ${findingsPage} of ${totalPages}</span>
+			<button type="button" class="btn-secondary btn-sm" id="findings-next-page" ${findingsPage >= totalPages ? "disabled" : ""}>Next →</button>
+		</div>
+	</div>`;
 
 	el.querySelectorAll("tr[data-row-idx]").forEach(tr => {
 		tr.addEventListener("click", () => {
@@ -182,6 +218,10 @@ function renderFindings() {
 			detailRow.style.display = "";
 		});
 	});
+	const findingsPrevBtn = document.getElementById("findings-prev-page");
+	const findingsNextBtn = document.getElementById("findings-next-page");
+	if (findingsPrevBtn) findingsPrevBtn.addEventListener("click", () => { findingsPage -= 1; renderFindings(); });
+	if (findingsNextBtn) findingsNextBtn.addEventListener("click", () => { findingsPage += 1; renderFindings(); });
 }
 
 function renderFindingDetail(f) {
@@ -288,6 +328,7 @@ async function onRemediateClick(finding, btn) {
 document.getElementById("category-filter-bar").querySelectorAll(".filter-chip").forEach(chip => {
 	chip.addEventListener("click", () => {
 		selectedCategory = chip.dataset.category;
+		findingsPage = 1;
 		document.querySelectorAll("#category-filter-bar .filter-chip").forEach(c => c.classList.toggle("active", c === chip));
 		renderFindings();
 	});
@@ -305,6 +346,8 @@ async function loadLatest() {
 		document.getElementById("audit-content").style.display = "";
 		latestRun = data.run;
 		viewingRun = data.run;
+		findingsPage = 1;
+		historyPage = 1;
 		document.getElementById("export-csv-btn").disabled = false;
 		document.getElementById("export-pdf-btn").disabled = false;
 		renderScoreCard(latestRun);
@@ -318,32 +361,62 @@ async function loadLatest() {
 async function loadHistory() {
 	const el = document.getElementById("history-table");
 	try {
-		const data = await apiFetch("/api/system-audit/runs?limit=20");
-		const runs = data.runs || [];
-		if (runs.length === 0) {
-			el.innerHTML = '<p class="muted">No audit history yet.</p>';
-			return;
-		}
-		el.innerHTML = `<div class="table-scroll"><table>
-			<thead><tr><th>Date &amp; Time</th><th>Trigger</th><th>Status</th><th>Score</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>New</th><th>Resolved</th></tr></thead>
-			<tbody>${runs.map(r => `
-				<tr data-run-id="${r.id}" style="cursor:pointer" class="${viewingRun && viewingRun.id === r.id ? 'row-selected' : ''}">
-					<td class="mono">${fmtTimestamp(r.started_at)}</td>
-					<td class="muted">${escapeHtml(r.trigger)}${r.triggered_by ? " (" + escapeHtml(r.triggered_by) + ")" : ""}</td>
-					<td>${r.status === "completed"
-						? '<span class="status-pill status-online">completed</span>'
-						: r.status === "failed" ? '<span class="status-pill status-revoked">failed</span>' : '<span class="status-pill status-offline">running</span>'}</td>
-					<td>${r.score != null ? r.score : "—"}</td>
-					<td>${r.critical_count}</td><td>${r.high_count}</td><td>${r.medium_count}</td><td>${r.low_count}</td>
-					<td>${r.new_findings_count}</td><td>${r.resolved_findings_count}</td>
-				</tr>`).join("")}</tbody>
-		</table></div>`;
-		el.querySelectorAll("tr[data-run-id]").forEach(tr => {
-			tr.addEventListener("click", () => viewRun(Number(tr.dataset.runId)));
-		});
+		// 200 = the API's own max (routes/system_audit.py clamps `limit`
+		// there) -- fetched once per load/refresh and paginated client-side
+		// below (renderHistoryTable), same shape as Findings and as
+		// users_activity.html's ACTIVITY_PAGE_SIZE convention, rather than
+		// a request per page.
+		const data = await apiFetch("/api/system-audit/runs?limit=200");
+		historyRuns = data.runs || [];
+		renderHistoryTable();
 	} catch (e) {
 		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
 	}
+}
+
+function renderHistoryTable() {
+	const el = document.getElementById("history-table");
+	if (historyRuns.length === 0) {
+		el.innerHTML = '<p class="muted">No audit history yet.</p>';
+		return;
+	}
+
+	const totalPages = Math.max(1, Math.ceil(historyRuns.length / HISTORY_PAGE_SIZE));
+	if (historyPage > totalPages) historyPage = totalPages;
+	if (historyPage < 1) historyPage = 1;
+	const start = (historyPage - 1) * HISTORY_PAGE_SIZE;
+	const pageRuns = historyRuns.slice(start, start + HISTORY_PAGE_SIZE);
+
+	el.innerHTML = `<div class="table-scroll"><table>
+		<thead><tr><th>Date &amp; Time</th><th>Trigger</th><th>Status</th><th>Score</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>New</th><th>Resolved</th></tr></thead>
+		<tbody>${pageRuns.map(r => `
+			<tr data-run-id="${r.id}" style="cursor:pointer" class="${viewingRun && viewingRun.id === r.id ? 'row-selected' : ''}">
+				<td class="mono">${fmtTimestamp(r.started_at)}</td>
+				<td class="muted">${escapeHtml(r.trigger)}${r.triggered_by ? " (" + escapeHtml(r.triggered_by) + ")" : ""}</td>
+				<td>${r.status === "completed"
+					? '<span class="status-pill status-online">completed</span>'
+					: r.status === "failed" ? '<span class="status-pill status-revoked">failed</span>' : '<span class="status-pill status-offline">running</span>'}</td>
+				<td>${r.score != null ? r.score : "—"}</td>
+				<td>${r.critical_count}</td><td>${r.high_count}</td><td>${r.medium_count}</td><td>${r.low_count}</td>
+				<td>${r.new_findings_count}</td><td>${r.resolved_findings_count}</td>
+			</tr>`).join("")}</tbody>
+	</table></div>
+	<div class="toolbar" style="margin-top:14px">
+		<span class="muted" style="font-size:0.85rem">Showing ${start + 1}–${Math.min(start + HISTORY_PAGE_SIZE, historyRuns.length)} of ${historyRuns.length}</span>
+		<div class="form-row" style="gap:8px">
+			<button type="button" class="btn-secondary btn-sm" id="history-prev-page" ${historyPage <= 1 ? "disabled" : ""}>← Prev</button>
+			<span class="muted" style="font-size:0.85rem;align-self:center">Page ${historyPage} of ${totalPages}</span>
+			<button type="button" class="btn-secondary btn-sm" id="history-next-page" ${historyPage >= totalPages ? "disabled" : ""}>Next →</button>
+		</div>
+	</div>`;
+
+	el.querySelectorAll("tr[data-run-id]").forEach(tr => {
+		tr.addEventListener("click", () => viewRun(Number(tr.dataset.runId)));
+	});
+	const historyPrevBtn = document.getElementById("history-prev-page");
+	const historyNextBtn = document.getElementById("history-next-page");
+	if (historyPrevBtn) historyPrevBtn.addEventListener("click", () => { historyPage -= 1; renderHistoryTable(); });
+	if (historyNextBtn) historyNextBtn.addEventListener("click", () => { historyPage += 1; renderHistoryTable(); });
 }
 
 async function viewRun(runId) {
@@ -351,9 +424,10 @@ async function viewRun(runId) {
 		const data = await apiFetch(`/api/system-audit/runs/${runId}`);
 		viewingRun = data.run;
 		selectedSeverity = null;
+		findingsPage = 1;
 		renderScoreCard(viewingRun);
 		renderFindings();
-		loadHistory();  // re-render to move the row-selected highlight
+		renderHistoryTable();  // re-render (cached data, no re-fetch) to move the row-selected highlight
 	} catch (e) {
 		toast(e.message, "error");
 	}

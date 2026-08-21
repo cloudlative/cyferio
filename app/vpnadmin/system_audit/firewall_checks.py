@@ -270,8 +270,52 @@ def _live_probe() -> dict | None:
         return None
 
 
+def _managed_firewall_active(data: dict) -> tuple[bool, list[str]]:
+    """True if a higher-level firewall MANAGER (ufw, firewalld, or
+    nftables) is confirmed active -- cross-checked against BOTH its own
+    CLI-reported state (`ufw status`, `firewall-cmd --state`, `nft list
+    ruleset`) AND systemd's own is-active view of its unit (added
+    2026-08-22, per explicit request: check which firewall service is
+    actually enabled via systemd before reporting raw-iptables findings
+    as issues) -- either signal alone can be misleading (a unit shown
+    enabled that crashed at boot, or a CLI probe that ran under a
+    different user context than the real service). A manager counts as
+    active if EITHER signal confirms it, since a false negative here
+    (missing an active manager) is the more damaging failure mode: it's
+    what causes the false positives below.
+
+    Why this matters at all: ufw, firewalld, and nftables commonly leave
+    the base iptables INPUT chain's own policy as ACCEPT and do their
+    real enforcement in a separate chain (ufw-before-input,
+    firewalld's zone chains, nftables' own base chains) -- reading ONLY
+    the base INPUT policy/rules (as probe_iptables() does) and flagging
+    ACCEPT as a finding is a false positive whenever one of these is
+    actually the host's real firewall manager. Returns (active, names)
+    so callers can name which manager(s) were found, for the finding
+    text."""
+    names: list[str] = []
+    ufw = data.get("ufw", {})
+    if ufw.get("installed") and ufw.get("active"):
+        names.append("ufw")
+    firewalld = data.get("firewalld", {})
+    if firewalld.get("installed") and firewalld.get("running"):
+        names.append("firewalld")
+    nft = data.get("nftables", {})
+    if nft.get("installed") and nft.get("has_rules"):
+        names.append("nftables")
+    units = data.get("units", {})
+    for unit_name, manager_name in (
+        ("ufw.service", "ufw"), ("firewalld.service", "firewalld"), ("nftables.service", "nftables"),
+    ):
+        state = units.get(unit_name)
+        if state and state.get("active") == "active" and manager_name not in names:
+            names.append(manager_name)
+    return bool(names), names
+
+
 def _live_findings(data: dict) -> list[Finding]:
     findings: list[Finding] = []
+    managed_active, managed_names = _managed_firewall_active(data)
 
     ufw = data.get("ufw", {})
     if ufw.get("installed"):
@@ -308,22 +352,44 @@ def _live_findings(data: dict) -> list[Finding]:
         ))
     if iptables.get("installed"):
         input_policy = iptables.get("policies", {}).get("INPUT")
+        managed_note = (
+            f" (Note: {', '.join(managed_names)} is confirmed active/enabled on this host -- it enforces its "
+            f"own rules in a separate chain, so this base-chain policy alone is not conclusive about actual "
+            f"traffic filtering.)" if managed_active else ""
+        )
         if input_policy == "ACCEPT":
-            findings.append(Finding(
-                check_id="firewall.iptables_input_policy", category="firewall", severity="medium",
-                title="iptables INPUT chain default policy is ACCEPT",
-                description="The INPUT chain's default policy accepts any packet that doesn't match an "
-                             "explicit rule, rather than dropping/rejecting it.",
-                why_it_matters="With an ACCEPT default policy, only explicit DROP/REJECT rules block traffic -- "
-                                "any port not specifically closed is open by default. A DROP/REJECT default "
-                                "with explicit ACCEPT rules for needed services is the more defensible posture "
-                                "(deny-by-default).",
-                current_state="INPUT ACCEPT", expected_state="INPUT DROP or REJECT, with explicit ACCEPT rules "
-                               "for needed services (SSH, the VPN port, ...)",
-                evidence="\n".join(f"-P {k} {v}" for k, v in iptables.get("policies", {}).items()),
-                remediation="Add explicit ACCEPT rules for every port that needs to stay reachable, THEN set "
-                             "the INPUT default policy to DROP -- in that order, to avoid locking yourself out.",
-            ))
+            if managed_active:
+                # ufw/firewalld/nftables commonly leave the base INPUT
+                # chain's OWN policy as ACCEPT and do the real filtering
+                # in a chain they own (see _managed_firewall_active's
+                # docstring) -- flagging this as a problem here would be
+                # a false positive whenever one of those is confirmed
+                # active via systemd/CLI. Reported Informational (not
+                # silently dropped) so the raw value is still visible.
+                findings.append(Finding(
+                    check_id="firewall.iptables_input_policy", category="firewall", severity="info",
+                    title="iptables base INPUT policy is ACCEPT (a managed firewall is active)",
+                    description=f"The raw iptables INPUT chain policy is ACCEPT.{managed_note}",
+                    evidence="\n".join(f"-P {k} {v}" for k, v in iptables.get("policies", {}).items()),
+                ))
+            else:
+                findings.append(Finding(
+                    check_id="firewall.iptables_input_policy", category="firewall", severity="medium",
+                    title="iptables INPUT chain default policy is ACCEPT",
+                    description="The INPUT chain's default policy accepts any packet that doesn't match an "
+                                 "explicit rule, rather than dropping/rejecting it. No managed firewall (ufw/"
+                                 "firewalld/nftables) was confirmed active via either its own status command or "
+                                 "systemd's is-active state, so this base chain IS the actual enforcement point.",
+                    why_it_matters="With an ACCEPT default policy, only explicit DROP/REJECT rules block traffic "
+                                    "-- any port not specifically closed is open by default. A DROP/REJECT "
+                                    "default with explicit ACCEPT rules for needed services is the more "
+                                    "defensible posture (deny-by-default).",
+                    current_state="INPUT ACCEPT", expected_state="INPUT DROP or REJECT, with explicit ACCEPT "
+                                   "rules for needed services (SSH, the VPN port, ...)",
+                    evidence="\n".join(f"-P {k} {v}" for k, v in iptables.get("policies", {}).items()),
+                    remediation="Add explicit ACCEPT rules for every port that needs to stay reachable, THEN set "
+                                 "the INPUT default policy to DROP -- in that order, to avoid locking yourself out.",
+                ))
         elif input_policy:
             findings.append(Finding(
                 check_id="firewall.iptables_input_policy", category="firewall", severity="passed",
@@ -333,17 +399,21 @@ def _live_findings(data: dict) -> list[Finding]:
         open_rules = iptables.get("unrestricted_accept_rules") or []
         if open_rules:
             findings.append(Finding(
-                check_id="firewall.iptables_unrestricted_rules", category="firewall", severity="medium",
-                title="iptables has ACCEPT rules open to any source, on specific ports",
+                check_id="firewall.iptables_unrestricted_rules", category="firewall",
+                severity="info" if managed_active else "medium",
+                title="iptables has ACCEPT rules open to any source, on specific ports"
+                      + (" (managed firewall active)" if managed_active else ""),
                 description=f"{len(open_rules)} rule(s) accept traffic on a specific port from any source "
-                             f"(no -s restriction).",
+                             f"(no -s restriction).{managed_note}",
                 why_it_matters="A rule with no source restriction accepts traffic from anywhere on the "
                                 "internet. This may be intentional for a public service (VPN, HTTPS) but is "
                                 "worth deliberately confirming for anything else, especially management ports.",
                 current_state="\n".join(open_rules[:15]) + (f"\n... and {len(open_rules) - 15} more" if len(open_rules) > 15 else ""),
                 evidence="iptables -S",
-                remediation="For each rule, confirm the port is meant to be publicly reachable. Add "
-                             "'-s <ip/cidr>' for anything that should be limited to specific networks.",
+                remediation=None if managed_active else (
+                    "For each rule, confirm the port is meant to be publicly reachable. Add "
+                    "'-s <ip/cidr>' for anything that should be limited to specific networks."
+                ),
             ))
 
     firewalld = data.get("firewalld", {})
@@ -363,6 +433,41 @@ def _live_findings(data: dict) -> list[Finding]:
                 remediation="Review firewalld's configured zones/rules for correctness, then start the "
                              "service. Ensure SSH access is preserved before doing so.",
                 remediation_action=_FIREWALLD_ACTION, remediation_risk=_FIREWALLD_RISK,
+            ))
+
+    # nftables wasn't previously surfaced as its own finding at all here,
+    # even though probe_firewall() already collects it -- meant a host
+    # using nftables as its ONLY firewall manager (no ufw/firewalld
+    # installed) fell all the way through to "No firewall detected"
+    # below, despite a real, active firewall being in place.
+    nft = data.get("nftables", {})
+    if nft.get("installed"):
+        if nft.get("has_rules"):
+            findings.append(Finding(
+                check_id="firewall.nftables_active", category="firewall", severity="passed",
+                title="nftables is active with a loaded ruleset",
+                description="`nft list ruleset` returned a non-empty ruleset.",
+                evidence=(nft.get("ruleset") or "")[:2000],
+            ))
+        else:
+            # High, not Info -- matches the ufw/firewalld "installed but
+            # not active" precedent just above (also High): "installed
+            # but not doing anything" needs to actually surface as a real
+            # gap, not get buried as a footnote. Without this, a host
+            # where nftables is the ONLY firewall tool installed and it's
+            # sitting empty would show zero High/Critical findings --
+            # misleadingly "clean" for a genuinely unprotected host.
+            findings.append(Finding(
+                check_id="firewall.nftables_active", category="firewall", severity="high",
+                title="nftables is installed but has no rules loaded",
+                description="`nft list ruleset` returned an empty ruleset -- nftables does not appear to be "
+                             "actively filtering anything on this host.",
+                why_it_matters="An installed-but-empty firewall tool provides no protection -- if nftables is "
+                                "meant to be this host's firewall, no traffic is currently being filtered by it.",
+                expected_state="A non-empty ruleset, or a different active firewall manager (ufw/firewalld) "
+                                "confirmed in its place.",
+                remediation="Load a ruleset into nftables, or confirm a different firewall (ufw/firewalld) is "
+                             "actually the one protecting this host.",
             ))
 
     unit_states = data.get("units", {})
@@ -387,16 +492,39 @@ def _live_findings(data: dict) -> list[Finding]:
                 remediation_action=_IPTABLES_UNIT_ACTION, remediation_risk=_IPTABLES_UNIT_RISK,
             ))
 
-    if not findings:
+    # Deliberately NOT "if not findings:" -- nftables-installed-but-empty
+    # above adds its own (Informational) finding, which would otherwise
+    # make this block never fire even when nftables is the only thing
+    # "detected" and it's confirmed to have NO rules loaded, i.e. genuinely
+    # not protecting anything. "Something detected" instead means: a
+    # managed firewall confirmed ACTIVE (ufw/firewalld/nftables, via CLI
+    # or systemd), OR any of ufw/firewalld/nftables installed AT ALL
+    # (installed-but-inactive is itself already reported as its own
+    # finding above, not silently equivalent to "nothing here"), OR
+    # iptables successfully probed (installed True, or ran but errored --
+    # that's "couldn't fully verify", not "confirmed nothing").
+    something_detected = (
+        managed_active
+        or ufw.get("installed")
+        or firewalld.get("installed")
+        or nft.get("installed")
+        or iptables.get("installed") is True
+        or iptables.get("installed") is None
+    )
+    if not something_detected:
         # The probe ran and returned data, but none of ufw/iptables/
-        # firewalld were detected as installed at all -- genuinely
+        # firewalld/nftables were detected as installed at all, AND no
+        # firewall-relevant systemd unit (ufw.service/firewalld.service/
+        # nftables.service) was found enabled or active either -- checked
+        # via BOTH signals (see _managed_firewall_active), genuinely
         # different from "couldn't check" (Phase 1's Informational
         # fallback): this IS the live answer, and the live answer is
-        # "no recognized firewall found".
+        # "no recognized firewall found by either method".
         findings.append(Finding(
             check_id="firewall.openvpn_iptables_unit", category="firewall", severity="high",
             title="No firewall detected",
-            description="Live probe found none of ufw, firewalld, or iptables rules on this host.",
+            description="Live probe found none of ufw, firewalld, nftables, or iptables rules on this host, "
+                         "and no firewall-related systemd unit was found enabled or active.",
             why_it_matters="With no firewall active, every port a service listens on is reachable from "
                             "anywhere.",
             remediation="Install and configure a firewall (ufw is the simplest option) allowing only the "

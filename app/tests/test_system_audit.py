@@ -300,6 +300,95 @@ class TestFirewallLiveFindings:
         assert findings[0].severity == "high"
         assert "No firewall detected" in findings[0].title
 
+    def test_iptables_accept_policy_not_flagged_when_ufw_active(self):
+        """Regression guard (2026-08-22): ufw commonly leaves the base
+        iptables INPUT policy as ACCEPT and does its real enforcement in
+        its own chain -- flagging the base policy as a Medium finding
+        here is a false positive whenever ufw is confirmed active."""
+        from vpnadmin.system_audit.firewall_checks import _live_findings
+
+        data = {
+            "ufw": {"installed": True, "active": True, "status_output": "Status: active"},
+            "iptables": {
+                "installed": True,
+                "policies": {"INPUT": "ACCEPT", "FORWARD": "DROP", "OUTPUT": "ACCEPT"},
+                "unrestricted_accept_rules": ["-A INPUT -p tcp --dport 53 -j ACCEPT"],
+            },
+            "firewalld": {"installed": False},
+            "units": {},
+        }
+        findings = _live_findings(data)
+        by_id = {f.check_id: f for f in findings}
+        assert by_id["firewall.iptables_input_policy"].severity == "info"
+        assert by_id["firewall.iptables_unrestricted_rules"].severity == "info"
+
+    def test_iptables_accept_policy_not_flagged_when_only_systemd_confirms_manager(self):
+        """The CLI probes (ufw/firewall-cmd/nft) can miss an active
+        manager (e.g. ran in a context without the right permissions) --
+        systemd's own is-active view of the unit is checked as a second,
+        independent signal (2026-08-22 ask: confirm via systemd before
+        reporting firewall issues), so this must ALSO gate the finding
+        even when the CLI-level probes show nothing active."""
+        from vpnadmin.system_audit.firewall_checks import _live_findings
+
+        data = {
+            "ufw": {"installed": False},
+            "iptables": {
+                "installed": True,
+                "policies": {"INPUT": "ACCEPT"},
+                "unrestricted_accept_rules": [],
+            },
+            "firewalld": {"installed": False},
+            "units": {"firewalld.service": {"enabled": "enabled", "active": "active"}},
+        }
+        findings = _live_findings(data)
+        by_id = {f.check_id: f for f in findings}
+        assert by_id["firewall.iptables_input_policy"].severity == "info"
+        assert "firewalld" in by_id["firewall.iptables_input_policy"].description
+
+    def test_nftables_active_reported_and_prevents_no_firewall_detected(self):
+        """A host using nftables as its ONLY firewall manager (no ufw/
+        firewalld installed) must not fall through to "No firewall
+        detected" -- regression guard: nftables' own probe data was
+        previously collected but never actually read by _live_findings()."""
+        from vpnadmin.system_audit.firewall_checks import _live_findings
+
+        data = {
+            "ufw": {"installed": False},
+            "iptables": {"installed": False},
+            "firewalld": {"installed": False},
+            "nftables": {"installed": True, "has_rules": True, "ruleset": "table inet filter { ... }"},
+            "units": {},
+        }
+        findings = _live_findings(data)
+        by_id = {f.check_id: f for f in findings}
+        assert by_id["firewall.nftables_active"].severity == "passed"
+        assert "No firewall detected" not in [f.title for f in findings]
+
+    def test_nftables_installed_empty_is_flagged_high_not_silently_ok(self):
+        """The opposite direction of the fix above: nftables installed
+        but confirmed to have NO rules loaded, and nothing else active,
+        must not be silently treated as "fine" -- matches the ufw/
+        firewalld "installed but not active" precedent (also High), so a
+        genuinely unprotected host doesn't show zero High findings."""
+        from vpnadmin.system_audit.firewall_checks import _live_findings
+
+        data = {
+            "ufw": {"installed": False},
+            "iptables": {"installed": False},
+            "firewalld": {"installed": False},
+            "nftables": {"installed": True, "has_rules": False, "ruleset": ""},
+            "units": {},
+        }
+        findings = _live_findings(data)
+        by_id = {f.check_id: f for f in findings}
+        assert by_id["firewall.nftables_active"].severity == "high"
+        # "installed but empty" IS the substantive warning here -- a
+        # separate, redundant "No firewall detected" on top of it would
+        # be confusing, not additionally useful (same as ufw/firewalld's
+        # own installed-but-inactive findings, which also stand alone).
+        assert "No firewall detected" not in [f.title for f in findings]
+
     def test_run_falls_back_to_file_checks_when_live_probe_unavailable(self, monkeypatch, tmp_path):
         """_live_probe() returns None (host-executor not configured, the
         default in every test/dev environment) -- run() must fall back to
