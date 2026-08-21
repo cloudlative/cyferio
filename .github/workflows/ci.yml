@@ -25,7 +25,25 @@ name: CI
 on:
   pull_request:
     branches: [master]
-  workflow_call: {}
+  # `run_tests` (default true on every trigger) lets the Test job be
+  # skipped on demand -- e.g. a manual workflow_dispatch run to quickly
+  # re-check lint/security jobs alone without waiting on the ~25min test
+  # suite, or build.yml passing run_tests: false through its own
+  # workflow_call if a release ever needs to bypass it deliberately. Every
+  # OTHER job here is unaffected -- this only gates the `test` job below.
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: "Run the Test job (uncheck to skip it)"
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      run_tests:
+        description: "Run the Test job (false to skip it)"
+        type: boolean
+        default: true
+        required: false
 
 permissions:
   contents: read
@@ -327,6 +345,12 @@ jobs:
   # ---- Testing --------------------------------------------------------
   test:
     name: Test
+    # `inputs.run_tests` is only populated on a workflow_dispatch/
+    # workflow_call trigger -- on a plain pull_request run it resolves to
+    # null, and `null != false` is true, so the job still runs by default
+    # there too. Only an explicit `false` (dispatch input unchecked, or
+    # build.yml passing run_tests: false) skips it.
+    if: ${{ inputs.run_tests != false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     defaults:
