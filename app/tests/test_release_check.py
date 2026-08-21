@@ -3,8 +3,6 @@ caching/classification logic, routes/release.py's lazy status endpoint,
 and the Upgrade Assignment Workflow's auto-ticket-filing. Every test mocks
 the actual GitHub HTTP call (release_check._fetch_latest_release) --
 never hits the real GitHub API."""
-from datetime import datetime, timezone
-
 from vpnadmin import release_check
 from vpnadmin.models import SupportTicket
 

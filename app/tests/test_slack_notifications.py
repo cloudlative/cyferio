@@ -2,8 +2,6 @@
 fan-out module and routes/settings.py's Slack section. Every test mocks
 the actual outbound HTTP call (slack_notifications._post_webhook) --
 never hits a real Slack endpoint, per this feature's testing requirement."""
-import pytest
-
 from vpnadmin import slack_notifications
 from vpnadmin.models import SlackDeliveryLog, SlackWorkspace
 
