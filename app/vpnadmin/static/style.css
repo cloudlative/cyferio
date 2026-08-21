@@ -772,6 +772,46 @@ h2 { font-size: 1.08rem; font-weight: 700; margin: 0 0 14px; color: var(--text);
 	box-shadow: var(--shadow);
 }
 
+/* Settings page: groups a run of related .card sections under one labeled
+   heading (see settings.html) -- the page was previously ~17 flat, equally-
+   weighted cards in a row with no structure above "top to bottom", which
+   read as scattered rather than organized. Purely a visual/navigational
+   grouping layer -- every .card inside keeps its own id/markup/JS wiring
+   completely unchanged, this only wraps them. */
+.settings-group { margin-bottom: 36px; scroll-margin-top: 84px; }
+.settings-group:last-of-type { margin-bottom: 22px; }
+.settings-group-title {
+	display: flex; align-items: center; gap: 10px;
+	font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+	color: var(--text-muted); margin: 0 0 12px; padding-bottom: 8px;
+	border-bottom: 1px solid var(--border-light);
+}
+.settings-group-title .settings-group-icon {
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 22px; height: 22px; border-radius: 7px;
+	background: var(--accent-soft, rgba(35, 214, 196, 0.14)); color: var(--accent-2);
+	font-size: 0.85rem; flex: none;
+}
+.settings-group .card:last-child { margin-bottom: 0; }
+
+/* Sticky quick-jump bar -- one pill per group, scrolls the page to that
+   group's anchor instead of making an admin hunt-and-scroll through the
+   whole page to find e.g. Slack settings. */
+.settings-quicknav {
+	position: sticky; top: 0; z-index: 5;
+	display: flex; flex-wrap: wrap; gap: 8px;
+	background: var(--bg); padding: 10px 0 16px;
+	margin-bottom: 8px;
+	border-bottom: 1px solid var(--border-light);
+}
+.settings-quicknav a {
+	font-size: 0.82rem; font-weight: 600; color: var(--text-muted);
+	background: var(--surface-alt); border: 1px solid var(--border-light);
+	padding: 6px 13px; border-radius: 999px; text-decoration: none;
+	transition: color 0.15s, border-color 0.15s;
+}
+.settings-quicknav a:hover { color: var(--text); border-color: var(--accent-2); }
+
 /* Dashboard's admin-only "Manage Users" nudge -- the one deliberately
    prominent callout on this app's default landing page, distinct from a
    plain .card (accent top stripe + glow, same visual language as
@@ -920,6 +960,19 @@ tr.clickable-row:hover td { background: var(--surface-alt); }
 .status-offline::before { background: #64748b; }
 .status-revoked { background: var(--danger-bg); color: var(--danger-text); }
 .status-revoked::before { background: var(--danger-strong); box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.2); }
+
+/* Ticket priority badge -- same pill shape as .status-pill (reused, not
+   duplicated) but color keyed to PRIORITIES (low/medium/high/critical)
+   instead of a connection/session state. low/medium stay neutral (a
+   routine ticket shouldn't visually compete with an actually urgent one);
+   high/critical use the danger palette so an upgrade-required or
+   otherwise urgent ticket reads as red at a glance in both the ticket
+   list and detail view, not just in its plain-text label. critical adds
+   a stronger border on top of high's fill so the two are still
+   distinguishable from each other, not just from low/medium. */
+.priority-low, .priority-medium { background: var(--surface-alt); color: var(--text-muted); border: 1px solid var(--border-light); }
+.priority-high { background: var(--danger-bg); color: var(--danger-text); }
+.priority-critical { background: var(--danger-bg); color: var(--danger-text); border: 1px solid var(--danger-strong); }
 
 /* Dashboard Recent Activity table (see dashboard.html) -- a pill for the
    humanized action label (same visual weight/shape as .role-badge, just

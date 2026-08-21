@@ -280,9 +280,15 @@ class UpdateSettingsRequest(BaseModel):
     def _release_check_interval(cls, v):
         # Lower bound guards against an admin accidentally hammering
         # GitHub's unauthenticated 60-req/hour rate limit; upper bound is
-        # a sanity cap, not a real design limit.
-        if v is not None and not (5 <= v <= 1440):
-            raise ValueError("Release check interval must be between 5 and 1440 minutes.")
+        # a sanity cap, not a real design limit. Raised from 5 to 60
+        # minutes per explicit admin request 2026-08-21 -- a floor of
+        # exactly one check per hour is the simplest possible guarantee of
+        # staying under that 60/hour limit (a single admin session opening
+        # the header indicator/refreshing the page can't accidentally
+        # trigger more than one real GitHub call per hour), rather than
+        # relying on the interval alone to keep well under it.
+        if v is not None and not (60 <= v <= 1440):
+            raise ValueError("Release check interval must be between 60 and 1440 minutes.")
         return v
 
     @field_validator("github_repo")

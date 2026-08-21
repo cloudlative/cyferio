@@ -110,6 +110,27 @@ class TestFileUpgradeTicket:
         assert ticket.category == "sysmaint_application_upgrade"
         assert "v9.9.9" in ticket.subject
 
+    def test_auto_assigns_to_a_support_capable_admin(self, db_session, monkeypatch):
+        """Per explicit admin request 2026-08-21: an auto-filed upgrade
+        ticket should never just sit Unassigned -- it's pre-assigned to the
+        lowest-id account with support_tickets update/manage (same
+        candidate pool as routes/tickets.py's list_assignable_admins),
+        still reassignable afterward like any other ticket."""
+        monkeypatch.setattr(release_check, "_fetch_latest_release", lambda *a, **k: {
+            "tag_name": "v9.9.9", "name": None, "body": None, "html_url": None, "published_at": None,
+        })
+        from vpnadmin.auth import hash_password
+        from vpnadmin.models import Role, User
+        admin = User(username="admin", password_hash=hash_password("adminpass123"), role=Role.admin)
+        viewer = User(username="viewer", password_hash=hash_password("viewerpass123"), role=Role.viewer)
+        db_session.add_all([admin, viewer])
+        db_session.commit()
+
+        release_check.check_for_new_release(force=True)
+        ticket = release_check.file_upgrade_ticket(db_session)
+        assert ticket.assigned_admin_id == admin.id
+        assert ticket.priority == "high"
+
     def test_idempotent_per_release_tag(self, db_session, monkeypatch):
         monkeypatch.setattr(release_check, "_fetch_latest_release", lambda *a, **k: {
             "tag_name": "v9.9.9", "name": None, "body": None, "html_url": None, "published_at": None,

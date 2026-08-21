@@ -137,7 +137,7 @@ function statusPillClass(status) {
 function renderBadges(t) {
 	document.getElementById("td-badges").innerHTML = `
 		<span class="status-pill ${statusPillClass(t.status)}">${t.status_label}</span>
-		<span class="activity-action">${t.priority_label} priority</span>
+		<span class="status-pill priority-${t.priority}">${t.priority_label} priority</span>
 		<span class="activity-action">${t.category_label}</span>
 	`;
 }
@@ -228,7 +228,7 @@ async function loadTicket() {
 	} else {
 		document.getElementById("td-details").innerHTML = `
 			Category: <strong>${t.category_label}</strong><br>
-			Priority: <strong>${t.priority_label}</strong><br>
+			Priority: <span class="status-pill priority-${t.priority}">${t.priority_label}</span><br>
 			Assigned to: <strong>${t.assigned_admin || "Unassigned"}</strong><br>
 			Created: <strong>${new Date(t.created_at).toLocaleString()}</strong>
 		`;

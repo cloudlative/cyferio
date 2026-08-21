@@ -7,7 +7,19 @@
 </div>
 <p class="page-subtitle" style="margin-top:-10px">Admin-only. Changes apply immediately, app-wide -- no restart or redeploy needed.</p>
 
+<nav class="settings-quicknav">
+	<a href="#sg-general">General</a>
+	<a href="#sg-integrations">Integrations</a>
+	<a href="#sg-appearance">Appearance &amp; Locale</a>
+	<a href="#sg-security">Security &amp; Access</a>
+	<a href="#sg-vpn-support">VPN &amp; Support</a>
+	<a href="#sg-auth-alerts">Authentication &amp; Alerts</a>
+	<a href="#sg-operations">Operations</a>
+</nav>
+
 <form id="settings-form">
+	<div class="settings-group" id="sg-general">
+		<h2 class="settings-group-title"><span class="settings-group-icon">⛭</span>General</h2>
 	<div class="card">
 		<h2>Platform Settings</h2>
 		<div class="form-grid">
@@ -18,7 +30,10 @@
 			</div>
 		</div>
 	</div>
+	</div>
 
+	<div class="settings-group" id="sg-integrations">
+		<h2 class="settings-group-title"><span class="settings-group-icon">✉</span>Integrations</h2>
 	<div class="card">
 		<div class="toolbar">
 			<h2 style="margin:0">Outbound Email</h2>
@@ -53,7 +68,10 @@
 			<button type="button" class="btn-primary btn-sm" id="slack-save-btn">Save Slack Settings</button>
 		</div>
 	</div>
+	</div>
 
+	<div class="settings-group" id="sg-appearance">
+		<h2 class="settings-group-title"><span class="settings-group-icon">◐</span>Appearance &amp; Locale</h2>
 	<div class="card">
 		<h2>Theme</h2>
 		<p class="muted" style="margin-top:0">Controls the login-page animated background and the sidebar/accent color palette across every logged-in page. Applies immediately, no restart needed.</p>
@@ -84,7 +102,10 @@
 			</div>
 		</div>
 	</div>
+	</div>
 
+	<div class="settings-group" id="sg-security">
+		<h2 class="settings-group-title"><span class="settings-group-icon">⚿</span>Security &amp; Access</h2>
 	<div class="card">
 		<h2>Security</h2>
 		<div class="form-grid">
@@ -187,7 +208,10 @@
 			</div>
 		</div>
 	</div>
+	</div>
 
+	<div class="settings-group" id="sg-vpn-support">
+		<h2 class="settings-group-title"><span class="settings-group-icon">⚡</span>VPN &amp; Support</h2>
 	<div class="card">
 		<h2>VPN Management</h2>
 		<div class="form-grid">
@@ -252,7 +276,10 @@
 			<label class="checkbox-label"><input type="checkbox" id="s-notify-ticket-created"> Email me on new tickets, user replies, reopened tickets, and critical-priority tickets</label>
 		</div>
 	</div>
+	</div>
 
+	<div class="settings-group" id="sg-auth-alerts">
+		<h2 class="settings-group-title"><span class="settings-group-icon">⚑</span>Authentication &amp; Alerts</h2>
 	<div class="card">
 		<h2>Multi-Factor Authentication</h2>
 		<p class="muted" style="margin-top:0">TOTP (authenticator app) second factor for every portal account. A role or individual account can always override the global setting below -- see the per-role table and each user's own MFA policy in User Management.</p>
@@ -330,6 +357,7 @@
 			<div class="field">
 				<label for="s-release-check-interval">Check Interval <span class="muted">(minutes)</span></label>
 				<input type="text" id="s-release-check-interval" inputmode="numeric" placeholder="60">
+				<p class="field-hint">60-1440 minutes -- the floor keeps this well under GitHub's 60-request/hour unauthenticated rate limit.</p>
 			</div>
 			<div class="field">
 				<label for="s-github-repo">GitHub Repository <span class="muted">(optional -- "owner/repo")</span></label>
@@ -341,7 +369,10 @@
 			<label class="checkbox-label"><input type="checkbox" id="s-release-critical-major-bump"> Treat a major version bump as critical</label>
 		</div>
 	</div>
+	</div>
 
+	<div class="settings-group" id="sg-operations">
+		<h2 class="settings-group-title"><span class="settings-group-icon">⚙</span>Operations</h2>
 	<div class="card">
 		<h2>Logging &amp; Auditing</h2>
 		<div class="form-grid">
@@ -396,6 +427,7 @@
 		<div class="checkbox-row" style="margin-top:12px">
 			<label class="checkbox-label"><input type="checkbox" id="s-maintenance-mode"> Maintenance mode <span class="muted">(blocks login for everyone except Admin/Super Admin)</span></label>
 		</div>
+	</div>
 	</div>
 
 	<div class="form-row">

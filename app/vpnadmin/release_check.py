@@ -187,6 +187,7 @@ def file_upgrade_ticket(db: Session):
     from .app_settings import get_settings_row
     from .audit import log_action
     from .models import SupportTicket, SupportTicketMessage, User
+    from .permissions import has_permission_any_scope
     from .support_tickets import DEFAULT_STATUS
 
     latest_tag = _cache.get("latest_tag")
@@ -199,6 +200,20 @@ def file_upgrade_ticket(db: Session):
     system_user = db.query(User).filter(User.is_active.is_(True), User.deleted.is_(False)).order_by(User.id).first()
     if system_user is None:
         return None  # no account to attribute the ticket to yet (e.g. a brand-new, empty test DB)
+
+    # Pre-assigned to SOME admin by default (deterministically the lowest
+    # user id with support_tickets update/manage, same candidate pool as
+    # routes/tickets.py's list_assignable_admins) rather than left
+    # Unassigned -- per explicit admin request 2026-08-21, so an upgrade
+    # ticket never just sits in the queue with nobody responsible for it.
+    # Still fully reassignable afterward via the normal PATCH endpoint (see
+    # that route's own reassignment/audit behavior) -- this only sets who
+    # owns it FIRST, it doesn't lock ownership.
+    default_assignee = next(
+        (u for u in db.query(User).filter(User.is_active.is_(True), User.deleted.is_(False)).order_by(User.id)
+         if has_permission_any_scope(db, u, "support_tickets", "update")),
+        None,
+    )
 
     haystack = " ".join(filter(None, [latest_tag, _cache.get("latest_name"), _cache.get("latest_body")]))
     is_security = bool(_SECURITY_WORDS_RE.search(haystack))
@@ -222,7 +237,15 @@ def file_upgrade_ticket(db: Session):
 
     ticket = SupportTicket(
         created_by_user_id=system_user.id, subject=subject, category=category,
-        priority="high" if is_security else "medium", status=DEFAULT_STATUS,
+        # Always "high" (not conditional on is_security any more) per
+        # explicit admin request 2026-08-21 -- an available upgrade is
+        # worth flagging above routine tickets regardless of whether this
+        # particular release happens to mention "security"/"critical" in
+        # its own notes; that wording still separately drives sysmaint_
+        # security_update's category choice above and could still push a
+        # future critical-severity distinction if ever added.
+        priority="high", status=DEFAULT_STATUS,
+        assigned_admin_id=default_assignee.id if default_assignee else None,
     )
     db.add(ticket)
     db.flush()
@@ -230,7 +253,8 @@ def file_upgrade_ticket(db: Session):
     row.last_release_notified_tag = latest_tag
     db.commit()
 
-    log_action(db, system_user, "release_detected", target=f"TCK-{ticket.id}", detail=f"{env_settings.APP_VERSION} -> {latest_tag}")
+    assignee_detail = f"; assigned_admin {default_assignee.username}" if default_assignee else "; unassigned (no admin found)"
+    log_action(db, system_user, "release_detected", target=f"TCK-{ticket.id}", detail=f"{env_settings.APP_VERSION} -> {latest_tag}{assignee_detail}")
     ticket_notifications.ticket_created(db, ticket)
     from . import slack_notifications
     slack_notifications.notify(db, "release_available", f":rocket: New Cyferio release available: {latest_tag} (installed: {env_settings.APP_VERSION}). Ticket #{ticket.id} filed.")
