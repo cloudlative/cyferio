@@ -1,8 +1,13 @@
 {% extends "base.html" %}
 {% block title %}VPN Clients — {{ app_settings.app_name }}{% endblock %}
 {% block content %}
-<h1>VPN Clients</h1>
-<p class="page-subtitle">Everyone with a valid VPN certificate.</p>
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">VPN Clients</h1></div>
+	{% if is_admin %}
+	<a href="/users" class="btn-secondary">Go to Users</a>
+	{% endif %}
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Everyone with a valid VPN certificate.</p>
 
 {# "Add a New Client" was removed here -- VPN profile provisioning now
    happens exclusively through Users (Add User's Device MAC Address field,

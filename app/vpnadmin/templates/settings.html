@@ -998,10 +998,19 @@ function renderDynamicFields(typeKey, existingConfig) {
 				</select>
 			</div>`;
 		}
-		const inputType = f.input_type === "number" ? "number" : (f.input_type === "password" ? "password" : (f.input_type === "email" ? "email" : "text"));
+		// Numeric fields (e.g. SMTP Port) use type="text" inputmode="numeric"
+		// rather than the native type="number" -- same convention as every
+		// other numeric field on this page (rate limits, retention days,
+		// thresholds, etc.). type="number" falls outside this page's shared
+		// input styling (only text/password/date/email/tel/search are
+		// covered) and adds the browser's own spinner arrows, both of which
+		// made the Port field look broken/unstyled next to its neighbors.
+		const isNumeric = f.input_type === "number";
+		const inputType = isNumeric ? "text" : (f.input_type === "password" ? "password" : (f.input_type === "email" ? "email" : "text"));
+		const inputmodeAttr = isNumeric ? 'inputmode="numeric"' : "";
 		return `<div class="field">
 			<label for="${id}">${escapeHtml(f.label)}${f.required ? "" : ' <span class="muted">(optional)</span>'}</label>
-			<input type="${inputType}" id="${id}" data-ep-field="${escapeHtml(f.key)}" value="${escapeHtml(String(value))}" ${requiredAttr} autocomplete="off">
+			<input type="${inputType}" id="${id}" data-ep-field="${escapeHtml(f.key)}" data-ep-field-numeric="${isNumeric ? "1" : "0"}" value="${escapeHtml(String(value))}" ${requiredAttr} ${inputmodeAttr} autocomplete="off">
 		</div>`;
 	}).join("");
 }
@@ -1009,7 +1018,7 @@ function renderDynamicFields(typeKey, existingConfig) {
 function collectDynamicFieldsConfig() {
 	const config = {};
 	document.querySelectorAll("#ep-dynamic-fields [data-ep-field]").forEach(el => {
-		config[el.dataset.epField] = el.type === "number" ? intOrNull(el.value.trim()) : el.value.trim();
+		config[el.dataset.epField] = el.dataset.epFieldNumeric === "1" ? intOrNull(el.value.trim()) : el.value.trim();
 	});
 	return config;
 }

@@ -43,10 +43,16 @@
 				itself gated on the same condition(s) as the links inside
 				it, so a group with nothing visible in it never prints an
 				empty heading.
+
+				Dashboard is the only top-level (ungrouped) link and is
+				this app's default landing page (see pages.py's root route)
+				-- Users moved into Administration (it's an admin action,
+				not a daily landing spot) and Users Activity moved into
+				Monitoring (it's an audit/observability view, not account
+				management) -- both reachable via the "Go to Users" button
+				on Dashboard/VPN Clients for anyone who still wants the
+				one-click path.
 			-->
-			{% if is_admin %}
-			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
-			{% endif %}
 			{% if can_view_dashboard %}
 			<a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' }}"><span class="nav-icon">⊞</span>Dashboard</a>
 			{% endif %}
@@ -65,7 +71,7 @@
 			<a href="/connection-history" class="{{ 'active' if request.url.path == '/connection-history' }}"><span class="nav-icon">⏱</span>Connection History</a>
 			{% endif %}
 
-			{% if can_view_health or can_view_reports %}
+			{% if can_view_health or can_view_reports or is_admin %}
 			<div class="nav-section-label">Monitoring</div>
 			{% if can_view_health %}
 			<a href="/diagnostics" class="{{ 'active' if request.url.path == '/diagnostics' }}"><span class="nav-icon">⚙</span>Diagnostics</a>
@@ -74,13 +80,16 @@
 			{% if can_view_reports %}
 			<a href="/reports" class="{{ 'active' if request.url.path == '/reports' }}"><span class="nav-icon">▥</span>Reports</a>
 			{% endif %}
+			{% if is_admin %}
+			<a href="/users/activity" class="{{ 'active' if request.url.path == '/users/activity' }}"><span class="nav-icon">☰</span>Users Activity</a>
+			{% endif %}
 			{% endif %}
 
 			{% if is_admin or can_manage_roles or can_manage_support %}
 			<div class="nav-section-label">Administration</div>
 			{% if is_admin %}
+			<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
 			<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
-			<a href="/users/activity" class="{{ 'active' if request.url.path == '/users/activity' }}"><span class="nav-icon">☰</span>Users Activity</a>
 			{% endif %}
 			{% if can_manage_roles %}
 			<a href="/roles" class="{{ 'active' if request.url.path == '/roles' }}"><span class="nav-icon">⚿</span>Roles</a>

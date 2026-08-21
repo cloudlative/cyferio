@@ -29,14 +29,14 @@ class TestLoginFlow:
         r = app_client.get("/login")
         assert r.status_code == 200
 
-    def test_correct_login_redirects_to_users(self, app_client):
-        # Users is the default landing page for an account that can manage
-        # users (see pages.py's root() route) -- httpx TestClient follows
-        # redirects by default, so this exercises the full "/" -> "/users"
-        # chain, not just the login endpoint's own immediate redirect.
+    def test_correct_login_redirects_to_dashboard(self, app_client):
+        # Dashboard is this app's default landing page (see pages.py's
+        # root() route) -- httpx TestClient follows redirects by default,
+        # so this exercises the full "/" -> "/dashboard" chain, not just
+        # the login endpoint's own immediate redirect.
         r = login(app_client, "admin", "adminpass123")
         assert r.status_code == 200
-        assert r.url.path == "/users"
+        assert r.url.path == "/dashboard"
 
     def test_wrong_password_rejected(self, app_client):
         r = login(app_client, "admin", "wrongpassword")
@@ -67,19 +67,40 @@ class TestLoginFlow:
         r = app_client.get("/dashboard")
         assert r.status_code == 200
 
-    def test_root_lands_on_users_for_admin(self, app_client):
+    def test_root_lands_on_dashboard_for_admin(self, app_client):
         login(app_client, "admin", "adminpass123")
         r = app_client.get("/", follow_redirects=False)
         assert r.status_code == 303
-        assert r.headers["location"] == "/users"
+        assert r.headers["location"] == "/dashboard"
 
-    def test_root_lands_on_dashboard_when_no_users_permission(self, app_client):
+    def test_root_lands_on_dashboard_for_viewer(self, app_client):
         # "viewer" can view the dashboard but doesn't have users:manage --
-        # should fall through to /dashboard, not /users.
+        # dashboard is checked first regardless, so this lands the same
+        # place an admin does.
         login(app_client, "viewer", "viewerpass123")
         r = app_client.get("/", follow_redirects=False)
         assert r.status_code == 303
         assert r.headers["location"] == "/dashboard"
+
+    def test_root_falls_through_to_users_without_dashboard_permission(self, app_client, db_session):
+        # A role with users:manage but no dashboard visibility at all --
+        # dashboard is checked first and fails, so this falls through to
+        # the next-best admin-only destination, /users.
+        from vpnadmin.models import ObjectPermission, RoleDef
+
+        role = RoleDef(slug="users-only", name="Users Only", is_system=False)
+        db_session.add(role)
+        db_session.commit()
+        db_session.add(ObjectPermission(role_id=role.id, object_key="users", can_manage=True))
+        db_session.commit()
+        u = User(username="usersonly", password_hash=hash_password("somepass123"), role_id=role.id)
+        db_session.add(u)
+        db_session.commit()
+
+        login(app_client, "usersonly", "somepass123")
+        r = app_client.get("/", follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/users"
 
     def test_logout_clears_session(self, app_client):
         login(app_client, "admin", "adminpass123")
@@ -169,7 +190,7 @@ class TestForgotPasswordFlow:
         # New password works, old one no longer does.
         r = login(app_client, "admin", "BrandNewPass1!")
         assert r.status_code == 200
-        assert r.url.path == "/users"
+        assert r.url.path == "/dashboard"
         app_client.post("/logout")
         r = login(app_client, "admin", "adminpass123")
         assert r.status_code == 401
@@ -239,7 +260,7 @@ class TestLoginCaptcha:
         monkeypatch.setattr(auth_mod.captcha, "verify", lambda token, remote_ip=None: True)
         r = login(app_client, "admin", "adminpass123")
         assert r.status_code == 200
-        assert r.url.path == "/users"
+        assert r.url.path == "/dashboard"
 
 
 class TestRoleGating:
