@@ -44,7 +44,7 @@
 				<input type="text" id="slack-channel" placeholder="#ops-alerts">
 			</div>
 		</div>
-		<div class="checkbox-row" style="margin-top:12px">
+		<div class="checkbox-col" style="margin-top:12px">
 			<label class="checkbox-label"><input type="checkbox" id="slack-enabled"> Enable Slack Notifications</label>
 		</div>
 		<div id="slack-notify-types" style="margin-top:14px"></div>
@@ -1178,9 +1178,9 @@ async function loadSlackSettings() {
 		document.getElementById("slack-enabled").checked = !!s.is_enabled;
 		const typesEl = document.getElementById("slack-notify-types");
 		typesEl.innerHTML = (s.event_groups || []).map(group => `
-			<div style="margin-bottom:10px">
+			<div style="margin-bottom:14px">
 				<strong style="font-size:0.85rem">${escapeHtml(group.group)}</strong>
-				<div class="checkbox-row" style="margin-top:6px">
+				<div class="checkbox-col">
 					${group.options.map(o => `
 						<label class="checkbox-label">
 							<input type="checkbox" class="slack-notify-type" data-key="${escapeHtml(o.key)}" ${s.notify_types && s.notify_types[o.key] ? "checked" : ""}>

@@ -1213,6 +1213,11 @@ input[type="radio"]:disabled { opacity: 0.5; cursor: not-allowed; }
    macOS "Allowed Device OS" set) -- wraps on narrow screens instead of
    overflowing. */
 .checkbox-row { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 4px; }
+/* Vertical variant, one checkbox-label per line -- for a long list of
+   independent toggles (Settings -> Slack Integration's per-event-type
+   checkboxes) where a wrapping horizontal row reads as a jumbled grid
+   instead of a scannable list. Same gap as .checkbox-row, just stacked. */
+.checkbox-col { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
 
 /* --- Phone input (dial-code <select> + local-number field), see app.js's
    createPhoneInput -- used anywhere a User.phone is entered/edited.
