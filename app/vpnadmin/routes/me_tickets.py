@@ -89,7 +89,7 @@ def _attach_validated_files(db: Session, message: SupportTicketMessage, ticket_i
 def _require_own_ticket(db: Session, user: User, ticket_id: int) -> SupportTicket:
     ticket = (
         db.query(SupportTicket)
-        .filter(SupportTicket.id == ticket_id, SupportTicket.created_by_user_id == user.id)
+        .filter(SupportTicket.id == ticket_id, SupportTicket.created_by_user_id == user.id, SupportTicket.deleted.is_(False))
         .one_or_none()
     )
     if ticket is None:
@@ -111,8 +111,19 @@ def _serialize_ticket_summary(t: SupportTicket) -> dict:
         "status": t.status,
         "status_label": status_label(t.status),
         "assigned_admin": t.assigned_admin.display_name if t.assigned_admin else None,
+        "assigned_admin_id": t.assigned_admin_id,
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+        "created_by": t.created_by.display_name if t.created_by else None,
+        # Duplicate Ticket Management -- derived at serialize time, never
+        # denormalized (see SupportTicket.duplicate_of_ticket_id's own
+        # docstring). duplicate_count is only meaningful for a PARENT (a
+        # ticket nobody points at has an empty `duplicates` list, len 0).
+        "duplicate_of_ticket_id": t.duplicate_of_ticket_id,
+        "duplicate_of_subject": t.duplicate_of.subject if t.duplicate_of else None,
+        "duplicate_count": len(t.duplicates) if t.duplicates else 0,
+        "locked": bool(t.locked),
+        "deleted": bool(t.deleted),
     }
 
 
@@ -136,8 +147,26 @@ def _serialize_message(m: SupportTicketMessage, *, is_admin_view: bool) -> dict:
     }
 
 
+def is_duplicate_locked(t: SupportTicket) -> bool:
+    """Option A enforcement (see SupportTicket.duplicate_of_ticket_id's
+    docstring): a ticket marked as a duplicate of another is kept open/
+    readable but blocked from further independent processing -- both
+    self-service replies (routes/me_tickets.py) and admin replies/status
+    changes (routes/tickets.py) check this before acting."""
+    return t.duplicate_of_ticket_id is not None
+
+
 def _serialize_ticket_detail(t: SupportTicket, *, is_admin_view: bool) -> dict:
     messages = t.messages if is_admin_view else [m for m in t.messages if not m.is_internal_note]
+    # can_reply already excludes terminal statuses; a locked ticket (admin
+    # freeze) or a ticket marked as a duplicate (Option A) blocks
+    # self-service replies too, on top of that -- the admin console has
+    # its own separate can_reply logic in _serialize_ticket_detail's admin
+    # branch below isn't needed since admins can always act EXCEPT on a
+    # duplicate (see routes/tickets.py's reply_to_ticket/update_ticket,
+    # which enforce this server-side regardless of what this flag says;
+    # this is purely for the UI to gray out the reply box up front).
+    can_reply = t.status not in TERMINAL_STATUSES and not t.locked and not is_duplicate_locked(t)
     return {
         **_serialize_ticket_summary(t),
         "created_by": t.created_by.display_name if t.created_by else "Unknown",
@@ -145,7 +174,17 @@ def _serialize_ticket_detail(t: SupportTicket, *, is_admin_view: bool) -> dict:
         "context_snapshot": json.loads(t.context_snapshot) if t.context_snapshot else None,
         "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None,
         "closed_at": t.closed_at.isoformat() if t.closed_at else None,
-        "can_reply": t.status not in TERMINAL_STATUSES,
+        "can_reply": can_reply,
+        "locked_at": t.locked_at.isoformat() if t.locked_at else None,
+        "locked_by": t.locked_by.display_name if t.locked_by else None,
+        "marked_duplicate_at": t.marked_duplicate_at.isoformat() if t.marked_duplicate_at else None,
+        "marked_duplicate_by": t.marked_duplicate_by.display_name if t.marked_duplicate_by else None,
+        # Linked duplicates -- only populated (non-empty) on a PARENT ticket,
+        # for the "Linked Duplicates (N)" section (spec section 4).
+        "duplicates": [
+            {"id": d.id, "subject": d.subject, "status": d.status, "status_label": status_label(d.status)}
+            for d in t.duplicates
+        ] if is_admin_view else [],
         "messages": [_serialize_message(m, is_admin_view=is_admin_view) for m in messages],
     }
 
@@ -180,7 +219,7 @@ def _build_context_snapshot(user: User, db: Session, request: Request) -> tuple[
 def list_my_tickets(user: User = Depends(require_permission("support_tickets", "view")), db: Session = Depends(get_db)):
     rows = (
         db.query(SupportTicket)
-        .filter(SupportTicket.created_by_user_id == user.id)
+        .filter(SupportTicket.created_by_user_id == user.id, SupportTicket.deleted.is_(False))
         .order_by(SupportTicket.updated_at.desc())
         .limit(200)
         .all()
@@ -278,6 +317,14 @@ def reply_to_my_ticket(
         raise HTTPException(status_code=422, detail=f"Reply must be {MAX_DESCRIPTION_LENGTH} characters or fewer.")
     if ticket.status in TERMINAL_STATUSES:
         raise HTTPException(status_code=409, detail="This ticket is closed -- reopen it before replying.")
+    if ticket.locked:
+        raise HTTPException(status_code=409, detail="This ticket has been locked by an administrator and can't be replied to.")
+    if is_duplicate_locked(ticket):
+        raise HTTPException(
+            status_code=409,
+            detail=f"This ticket was marked as a duplicate of Ticket #{ticket.duplicate_of_ticket_id} -- "
+                   f"please continue the conversation there instead.",
+        )
     if _rate_limited(db, user):
         s = app_settings.runtime
         raise HTTPException(
@@ -305,6 +352,12 @@ def reopen_my_ticket(ticket_id: int, user: User = Depends(require_permission("su
     ticket = _require_own_ticket(db, user, ticket_id)
     if ticket.status not in TERMINAL_STATUSES:
         raise HTTPException(status_code=409, detail="Only a Resolved or Closed ticket can be reopened.")
+    if is_duplicate_locked(ticket):
+        raise HTTPException(
+            status_code=409,
+            detail=f"This ticket was marked as a duplicate of Ticket #{ticket.duplicate_of_ticket_id} -- "
+                   f"please continue the conversation there instead.",
+        )
     old_status = ticket.status
     ticket.status = "reopened"
     ticket.resolved_at = None

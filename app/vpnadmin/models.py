@@ -633,6 +633,13 @@ class AppSettings(Base):
     # notify_admin_on_client_revoked -- gated by admin_notification_email
     # being set (see routes/settings.py's notify_fields check).
     notify_admin_on_ticket_created = Column(Boolean, nullable=True)
+    # Duplicate Cleanup Tools -- the "created within a configurable time
+    # window of each other" heuristic used by GET /api/tickets/
+    # duplicate-clusters (routes/tickets.py) to group candidate duplicates
+    # by (subject) or (user + category) proximity in time. Admin-tweakable
+    # per the Settings tunables preference -- NOT a hardcoded constant.
+    # NULL falls back to 1440 (24h, app_settings.py's refresh_runtime_cache).
+    ticket_duplicate_window_minutes = Column(Integer, nullable=True)
 
     # Multi-Factor Authentication (TOTP) -- see mfa.py's effective_policy
     # for how these three combine with User.mfa_policy_override.
@@ -1012,10 +1019,93 @@ class SupportTicket(Base):
     resolved_at = Column(DateTime(timezone=True), nullable=True)
     closed_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Soft delete -- same "hide from every normal list/detail query, keep
+    # the row (and its audit trail) around, restorable" pattern as
+    # User.deleted/deleted_at above (see that column's own docstring).
+    # Deliberately no hard-delete path anywhere in the UI/API -- a ticket
+    # can hold a support conversation an admin may need to reference again
+    # later (compliance, a re-opened complaint, a duplicate-cleanup
+    # decision made in error).
+    deleted = Column(Boolean, nullable=False, default=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Lock/Unlock (Enhanced Ticket Management Controls) -- an admin-only
+    # freeze distinct from "duplicate" below: a locked ticket is NOT
+    # necessarily a duplicate of anything, it's just had further
+    # self-service action paused on it (e.g. a ticket under dispute/
+    # investigation). Blocks self-service replies/reopen the same way a
+    # duplicate does (routes/me_tickets.py), but the admin console itself
+    # is never blocked -- an admin needs to be able to act on (and unlock)
+    # a locked ticket.
+    locked = Column(Boolean, nullable=False, default=False)
+    locked_at = Column(DateTime(timezone=True), nullable=True)
+    locked_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # --- Duplicate Ticket Management ----------------------------------------
+    # A ticket becomes a duplicate by pointing at its "parent" -- a plain
+    # nullable self-FK, deliberately NOT a new `STATUSES` value (see
+    # support_tickets.py's STATUSES docstring for why that set is
+    # load-bearing for lifecycle checks): "is this ticket a duplicate" is
+    # orthogonal to its actual status (a duplicate can still be new/open/
+    # resolved/etc independently), so folding it into status would force
+    # every status-based check in this app to also special-case duplicate-
+    # ness. The parent's subject/etc is intentionally NOT denormalized onto
+    # this row -- derived at serialize time via the `duplicate_of`
+    # relationship below, same as every other *_.display_name-style
+    # derived field in this codebase (e.g. t.assigned_admin.display_name).
+    #
+    # Behavior once set (Option A, the spec's Recommended choice): the
+    # duplicate stays open/readable, but independent processing is
+    # blocked -- routes/me_tickets.py refuses a self-service reply/reopen,
+    # and routes/tickets.py's admin reply/update endpoints also refuse
+    # further action, redirecting the admin to the parent ticket instead.
+    # (Option B -- auto-closing the duplicate -- was considered and
+    # rejected: closing would fire the normal "your ticket is closed"
+    # notification/timestamp semantics on a ticket that isn't actually
+    # resolved, and would make the duplicate's own history read as if the
+    # issue was addressed on ITS thread rather than the parent's, which is
+    # exactly the confusion this feature exists to prevent.)
+    duplicate_of_ticket_id = Column(Integer, ForeignKey("support_tickets.id"), nullable=True, index=True)
+    marked_duplicate_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    marked_duplicate_at = Column(DateTime(timezone=True), nullable=True)
+
     created_by = relationship("User", foreign_keys=[created_by_user_id])
     assigned_admin = relationship("User", foreign_keys=[assigned_admin_id])
+    deleted_by = relationship("User", foreign_keys=[deleted_by_user_id])
+    locked_by = relationship("User", foreign_keys=[locked_by_user_id])
+    marked_duplicate_by = relationship("User", foreign_keys=[marked_duplicate_by_user_id])
+    # remote_side pins which end of this self-referential FK is "one" (the
+    # parent) -- duplicate_of is this ticket's parent (scalar), duplicates
+    # is the parent's list of tickets pointing at it (collection), same
+    # shape as any other one-to-many backref, just self-joined.
+    duplicate_of = relationship("SupportTicket", remote_side=[id], foreign_keys=[duplicate_of_ticket_id],
+                                 backref=backref("duplicates", order_by="SupportTicket.created_at"))
     messages = relationship("SupportTicketMessage", backref="ticket", order_by="SupportTicketMessage.created_at",
                              cascade="all, delete-orphan")
+
+    # --- Merge scaffolding (deferred) ---------------------------------------
+    # TODO(duplicate-merge): section 5 of the Duplicate Cleanup Tools spec
+    # asks only for the DATA MODEL to support a future real merge, not a
+    # working merge UI/endpoint in this pass. What a full merge would need,
+    # deferred here on purpose (matches this app's "future consideration"
+    # comment style, see config.py's APP_VERSION):
+    #   - Re-parenting every SupportTicketMessage/SupportTicketAttachment
+    #     row from the duplicate(s) onto the parent ticket_id (a plain
+    #     UPDATE ... WHERE ticket_id IN (...), no schema change needed --
+    #     both tables already key on ticket_id alone).
+    #   - Preserving audit history: AuditLog rows are keyed by
+    #     target=f"TCK-{id}" per-ticket (see AuditLog's own docstring), so a
+    #     merge would need to decide whether to also log a synthetic
+    #     "merged from TCK-{dup_id}" marker on the parent rather than
+    #     silently orphaning the duplicate's own history -- no new column
+    #     needed for that, just a log_action call at merge time.
+    #   - What happens to the duplicate's OWN id/row afterward (soft-delete
+    #     it via `deleted` above, most likely, rather than removing the
+    #     self-FK trail) is a product decision, not a schema question --
+    #     duplicate_of_ticket_id already gives a merge implementation
+    #     everything it needs to find "every ticket that pointed at this
+    #     parent" without a new column or table.
 
 
 class SupportTicketMessage(Base):

@@ -61,6 +61,7 @@
 
 	<div>
 		{% if is_admin_view %}
+		<div id="td-duplicate-banner" style="display:none;margin-bottom:14px"></div>
 		<div class="card">
 			<h3 style="margin-top:0">Manage</h3>
 			<div class="field">
@@ -72,10 +73,23 @@
 				<select id="td-priority-select"></select>
 			</div>
 			<div class="field">
-				<label for="td-assignee-select">Assigned To</label>
+				<label for="td-assignee-select">Assigned To <span class="muted">(Transfer Ownership)</span></label>
 				<select id="td-assignee-select"><option value="">Unassigned</option></select>
 			</div>
 			<button type="button" class="btn-primary" id="td-save-manage" style="width:100%">Save</button>
+			<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+				<button type="button" class="btn-secondary btn-sm" id="td-escalate-btn">Escalate</button>
+				<button type="button" class="btn-secondary btn-sm" id="td-lock-btn">Lock</button>
+				<button type="button" class="btn-secondary btn-sm" id="td-unlock-btn" style="display:none">Unlock</button>
+				<button type="button" class="btn-secondary btn-sm" id="td-mark-duplicate-btn">Mark as Duplicate</button>
+				{% if can_delete_tickets %}
+				<button type="button" class="btn-danger btn-sm" id="td-delete-btn">Delete Ticket</button>
+				{% endif %}
+			</div>
+		</div>
+		<div id="td-duplicates-card" class="card" style="display:none">
+			<h3 style="margin-top:0">Linked Duplicates <span id="td-duplicates-count" class="muted"></span></h3>
+			<div id="td-duplicates-list"></div>
 		</div>
 		<div class="card">
 			<h3 style="margin-top:0">Activity History</h3>
@@ -89,6 +103,23 @@
 		{% endif %}
 	</div>
 </div>
+
+{% if is_admin_view %}
+<dialog id="td-duplicate-dialog">
+	<div class="dialog-body" style="min-width:420px;max-width:90vw">
+		<h3 style="margin-top:0">Mark as Duplicate</h3>
+		<p class="muted">Search for the ticket this one duplicates, then confirm.</p>
+		<div class="field">
+			<label for="td-duplicate-search">Search tickets by subject</label>
+			<input type="text" id="td-duplicate-search" placeholder="Subject...">
+		</div>
+		<div id="td-duplicate-results" style="max-height:260px;overflow-y:auto;margin-bottom:10px"></div>
+		<div class="dialog-actions">
+			<button type="button" class="btn-secondary" id="td-duplicate-cancel">Cancel</button>
+		</div>
+	</div>
+</dialog>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>
@@ -145,6 +176,42 @@ function renderReplyArea(t) {
 	if (IS_ADMIN_VIEW) document.getElementById("td-reply-form").style.display = "block";
 }
 
+function renderDuplicateUi(t) {
+	const banner = document.getElementById("td-duplicate-banner");
+	if (t.duplicate_of_ticket_id) {
+		banner.style.display = "block";
+		banner.innerHTML = `<div class="card" style="border-color:var(--warning-strong,#f59e0b)">
+			Duplicate of <a href="/support-center/${t.duplicate_of_ticket_id}">Ticket #${t.duplicate_of_ticket_id}</a>${t.duplicate_of_subject ? `: ${escapeHtml(t.duplicate_of_subject)}` : ""}.
+			Replies and status changes are blocked here -- act on the linked ticket instead.
+			<button type="button" class="btn-secondary btn-sm" id="td-unmark-duplicate-btn" style="margin-top:8px;display:block">Unmark as Duplicate</button>
+		</div>`;
+		document.getElementById("td-unmark-duplicate-btn").addEventListener("click", async () => {
+			try {
+				await apiFetch(`/api/tickets/${TICKET_ID}/unmark-duplicate`, { method: "POST" });
+				toast("Duplicate marking removed.");
+				await loadTicket();
+			} catch (err) { toast(err.message, "error"); }
+		});
+	} else {
+		banner.style.display = "none";
+		banner.innerHTML = "";
+	}
+
+	const dupCard = document.getElementById("td-duplicates-card");
+	if (t.duplicates && t.duplicates.length) {
+		dupCard.style.display = "block";
+		document.getElementById("td-duplicates-count").textContent = `(${t.duplicates.length})`;
+		document.getElementById("td-duplicates-list").innerHTML = t.duplicates.map((d) => `
+			<div style="margin-bottom:6px"><a href="/support-center/${d.id}">Ticket #${d.id}</a> -- ${escapeHtml(d.subject)} <span class="status-pill ${statusPillClass(d.status)}">${d.status_label}</span></div>
+		`).join("");
+	} else {
+		dupCard.style.display = "none";
+	}
+
+	document.getElementById("td-lock-btn").style.display = t.locked ? "none" : "inline-block";
+	document.getElementById("td-unlock-btn").style.display = t.locked ? "inline-block" : "none";
+}
+
 async function loadTicket() {
 	currentTicket = await apiFetch(`${API_BASE}/${TICKET_ID}`);
 	const t = currentTicket;
@@ -156,6 +223,7 @@ async function loadTicket() {
 	if (IS_ADMIN_VIEW) {
 		document.getElementById("td-status-select").value = t.status;
 		document.getElementById("td-priority-select").value = t.priority;
+		renderDuplicateUi(t);
 		loadHistory();
 	} else {
 		document.getElementById("td-details").innerHTML = `
@@ -242,6 +310,77 @@ if (IS_ADMIN_VIEW) {
 			toast(err.message, "error");
 		}
 	});
+
+	document.getElementById("td-escalate-btn").addEventListener("click", async () => {
+		try {
+			await apiFetch(`/api/tickets/${TICKET_ID}/escalate`, { method: "POST" });
+			await loadTicket();
+			toast("Ticket escalated to critical priority.");
+		} catch (err) { toast(err.message, "error"); }
+	});
+	document.getElementById("td-lock-btn").addEventListener("click", async () => {
+		try {
+			await apiFetch(`/api/tickets/${TICKET_ID}/lock`, { method: "POST" });
+			await loadTicket();
+			toast("Ticket locked.");
+		} catch (err) { toast(err.message, "error"); }
+	});
+	document.getElementById("td-unlock-btn").addEventListener("click", async () => {
+		try {
+			await apiFetch(`/api/tickets/${TICKET_ID}/unlock`, { method: "POST" });
+			await loadTicket();
+			toast("Ticket unlocked.");
+		} catch (err) { toast(err.message, "error"); }
+	});
+
+	document.getElementById("td-delete-btn")?.addEventListener("click", async () => {
+		const confirmed = await confirmDialog(
+			`Are you sure you want to delete Ticket #${TICKET_ID}: ${currentTicket ? currentTicket.subject : ""}?`,
+			{ confirmLabel: "Delete Ticket", danger: true },
+		);
+		if (!confirmed) return;
+		try {
+			await apiFetch(`/api/tickets/${TICKET_ID}`, { method: "DELETE" });
+			toast("Ticket deleted.");
+			window.location.href = "/support-center";
+		} catch (err) { toast(err.message, "error"); }
+	});
+
+	// --- Mark as Duplicate ---------------------------------------------------
+	let duplicateSearchResults = [];
+	async function runDuplicateSearch(q) {
+		const results = document.getElementById("td-duplicate-results");
+		const data = await apiFetch("/api/tickets?include_deleted=false");
+		duplicateSearchResults = data.tickets
+			.filter((t) => t.id !== TICKET_ID && (!q || t.subject.toLowerCase().includes(q.toLowerCase())))
+			.slice(0, 25);
+		results.innerHTML = duplicateSearchResults.length === 0
+			? '<p class="muted">No matching tickets.</p>'
+			: duplicateSearchResults.map((t) => `
+				<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border,#333)">
+					<span>#${t.id} -- ${escapeHtml(t.subject)} <span class="muted">(${t.status_label})</span></span>
+					<button type="button" class="btn-secondary btn-sm" data-pick-parent="${t.id}">Pick</button>
+				</div>
+			`).join("");
+		results.querySelectorAll("[data-pick-parent]").forEach((btn) => {
+			btn.addEventListener("click", async () => {
+				const parentId = Number(btn.dataset.pickParent);
+				try {
+					await apiFetch(`/api/tickets/${TICKET_ID}/mark-duplicate`, { method: "POST", body: { parent_ticket_id: parentId } });
+					document.getElementById("td-duplicate-dialog").close();
+					await loadTicket();
+					toast(`Marked as a duplicate of Ticket #${parentId}.`);
+				} catch (err) { toast(err.message, "error"); }
+			});
+		});
+	}
+	document.getElementById("td-mark-duplicate-btn").addEventListener("click", async () => {
+		document.getElementById("td-duplicate-search").value = "";
+		document.getElementById("td-duplicate-dialog").showModal();
+		await runDuplicateSearch("");
+	});
+	document.getElementById("td-duplicate-search").addEventListener("input", (e) => runDuplicateSearch(e.target.value));
+	document.getElementById("td-duplicate-cancel").addEventListener("click", () => document.getElementById("td-duplicate-dialog").close());
 }
 
 (async function init() {

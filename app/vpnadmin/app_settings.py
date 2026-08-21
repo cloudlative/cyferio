@@ -234,6 +234,7 @@ class _RuntimeSettings:
         self.support_max_attachment_size_mb = 10
         self.support_max_attachments_per_message = 5
         self.notify_admin_on_ticket_created = False
+        self.ticket_duplicate_window_minutes = 1440  # 24h -- see AppSettings.ticket_duplicate_window_minutes
 
         # Multi-Factor Authentication (TOTP) -- see mfa.py's effective_policy.
         self.mfa_mode = "optional"
@@ -333,6 +334,9 @@ def refresh_runtime_cache(db: Session) -> None:
         row.support_max_attachments_per_message if row.support_max_attachments_per_message is not None else 5
     )
     runtime.notify_admin_on_ticket_created = bool(row.notify_admin_on_ticket_created)
+    runtime.ticket_duplicate_window_minutes = (
+        row.ticket_duplicate_window_minutes if row.ticket_duplicate_window_minutes is not None else 1440
+    )
 
     runtime.mfa_mode = row.mfa_mode if row.mfa_mode in ("disabled", "optional", "required") else "optional"
     runtime.mfa_role_requirements = row.mfa_role_requirements

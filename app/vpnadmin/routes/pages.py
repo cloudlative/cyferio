@@ -72,6 +72,13 @@ def _ctx(user: User, db: Session, **extra) -> dict:
         # me_tickets.py); any_scope is what distinguishes "can see the
         # admin console" from "can use My Support".
         "can_manage_support": has_permission_any_scope(db, user, "support_tickets", "update"),
+        # Individual/Bulk Ticket Deletion + the "Deleted Tickets" filter
+        # (spec sections 2/3/6) -- a distinct, more dangerous capability
+        # than "update" above (see routes/tickets.py's _require_ticket_deleter
+        # docstring). support_center.html only shows delete-related UI
+        # (row checkboxes' Delete bulk action, single-ticket Delete button,
+        # the Deleted Tickets filter option) when this is true.
+        "can_delete_tickets": has_permission_any_scope(db, user, "support_tickets", "delete"),
         # Database Reporting -- a stricter, separate gate than "reports"
         # itself (see permissions.py's OBJECTS entry for "db_reporting"),
         # so Reports' own nav link/page stays visible under "can_view_reports"

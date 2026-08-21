@@ -3,7 +3,12 @@
 {% block content %}
 <div class="toolbar">
 	<div class="toolbar-title"><h1 style="margin:0">Support Center</h1></div>
-	<button type="button" class="btn-secondary" id="refresh-btn">Refresh</button>
+	<div style="display:flex;gap:10px">
+		{% if can_delete_tickets %}
+		<a href="#" class="btn-secondary" id="sc-duplicate-cleanup-btn">Duplicate Cleanup</a>
+		{% endif %}
+		<button type="button" class="btn-secondary" id="refresh-btn">Refresh</button>
+	</div>
 </div>
 <p class="page-subtitle" style="margin-top:-10px">Every ticket, from every user -- filter, search, and act on them below.</p>
 
@@ -25,22 +30,66 @@
 			<label for="sc-filter-priority">Priority</label>
 			<select id="sc-filter-priority"><option value="">All</option></select>
 		</div>
+		<div class="field">
+			<label for="sc-filter-assignee">Assigned Administrator</label>
+			<select id="sc-filter-assignee"><option value="">All</option><option value="__unassigned__">Unassigned</option></select>
+		</div>
+		<div class="field">
+			<label for="sc-filter-special">Ticket Type</label>
+			<select id="sc-filter-special">
+				<option value="">All</option>
+				<option value="duplicates">Duplicate Tickets</option>
+				<option value="parents">Parent Tickets (have duplicates)</option>
+				{% if can_delete_tickets %}<option value="deleted">Deleted Tickets</option>{% endif %}
+			</select>
+		</div>
 	</div>
+
+	<div id="sc-bulk-toolbar" class="card" style="display:none;margin-bottom:14px;background:var(--surface-alt,rgba(127,127,127,0.06))">
+		<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+			<strong id="sc-bulk-count">0 selected</strong>
+			<button type="button" class="btn-secondary btn-sm" id="sc-bulk-close">Close</button>
+			<button type="button" class="btn-secondary btn-sm" id="sc-bulk-resolve">Mark Resolved</button>
+			<select id="sc-bulk-assign-select" class="btn-sm" style="max-width:220px"><option value="">Assign to...</option></select>
+			<button type="button" class="btn-secondary btn-sm" id="sc-bulk-export">Export Selected (CSV)</button>
+			{% if can_delete_tickets %}
+			<button type="button" class="btn-danger btn-sm" id="sc-bulk-delete">Delete</button>
+			{% endif %}
+			<button type="button" class="btn-secondary btn-sm" id="sc-bulk-clear" style="margin-left:auto">Clear Selection</button>
+		</div>
+	</div>
+
 	<div style="overflow-x:auto">
 		<table>
-			<thead><tr><th>Subject</th><th>Category</th><th>Priority</th><th>Status</th><th>Assigned To</th><th>Updated</th></tr></thead>
-			<tbody id="sc-list-body"><tr><td colspan="6" class="muted">Loading...</td></tr></tbody>
+			<thead><tr>
+				<th style="width:28px"><input type="checkbox" id="sc-select-all"></th>
+				<th>Subject</th><th>Category</th><th>Priority</th><th>Status</th><th>Assigned To</th><th>Updated</th>
+			</tr></thead>
+			<tbody id="sc-list-body"><tr><td colspan="7" class="muted">Loading...</td></tr></tbody>
 		</table>
 	</div>
 	<div class="pagination" id="sc-pagination" style="margin-top:14px"></div>
 </div>
+
+<dialog id="sc-cluster-dialog">
+	<div class="dialog-body" style="min-width:520px;max-width:90vw">
+		<h3 style="margin-top:0">Duplicate Cleanup</h3>
+		<p class="muted">Candidate duplicate clusters -- tickets grouped by matching subject or (creator + category), created within the configured detection window of each other. Pick a parent for each cluster and mark the rest as duplicates in one action.</p>
+		<div id="sc-cluster-body"><p class="muted">Loading...</p></div>
+		<div class="dialog-actions">
+			<button type="button" class="btn-secondary" id="sc-cluster-close">Close</button>
+		</div>
+	</div>
+</dialog>
 {% endblock %}
 {% block scripts %}
 <script>
 let allTickets = [];
 let categoryData = [];
+let assignableAdmins = [];
 let ticketPage = 1;
 const TICKET_PAGE_SIZE = 20;
+let selectedIds = new Set();
 
 function statusPillClass(status) {
 	if (status === "resolved" || status === "closed") return "status-offline";
@@ -53,12 +102,30 @@ function currentFilteredTickets() {
 	const status = document.getElementById("sc-filter-status").value;
 	const category = document.getElementById("sc-filter-category").value;
 	const priority = document.getElementById("sc-filter-priority").value;
-	return allTickets.filter((t) =>
-		(!q || t.subject.toLowerCase().includes(q)) &&
-		(!status || t.status === status) &&
-		(!category || t.category === category) &&
-		(!priority || t.priority === priority)
-	);
+	const assignee = document.getElementById("sc-filter-assignee").value;
+	const special = document.getElementById("sc-filter-special").value;
+	return allTickets.filter((t) => {
+		// Deleted tickets are only ever shown under the "Deleted Tickets"
+		// filter itself -- every other view (including "All") stays a
+		// normal active-ticket list, same as every other soft-delete list
+		// in this app.
+		if (t.deleted && special !== "deleted") return false;
+		if (special === "deleted" && !t.deleted) return false;
+		if (special === "duplicates" && !t.duplicate_of_ticket_id) return false;
+		if (special === "parents" && !(t.duplicate_count > 0)) return false;
+		if (assignee === "__unassigned__" && t.assigned_admin) return false;
+		if (assignee && assignee !== "__unassigned__" && t.assigned_admin_id != assignee) return false;
+		return (!q || t.subject.toLowerCase().includes(q)) &&
+			(!status || t.status === status) &&
+			(!category || t.category === category) &&
+			(!priority || t.priority === priority);
+	});
+}
+
+function updateBulkToolbar() {
+	const toolbar = document.getElementById("sc-bulk-toolbar");
+	toolbar.style.display = selectedIds.size > 0 ? "block" : "none";
+	document.getElementById("sc-bulk-count").textContent = `${selectedIds.size} selected`;
 }
 
 function renderTicketTable() {
@@ -70,17 +137,34 @@ function renderTicketTable() {
 
 	const tbody = document.getElementById("sc-list-body");
 	tbody.innerHTML = pageRows.length === 0
-		? '<tr><td colspan="6" class="muted">No tickets found.</td></tr>'
+		? '<tr><td colspan="7" class="muted">No tickets found.</td></tr>'
 		: pageRows.map((t) => `
-			<tr class="clickable-row" onclick="window.location.href='/support-center/${t.id}'">
-				<td>${t.subject}</td>
-				<td>${t.category_label}</td>
-				<td>${t.priority_label}</td>
-				<td><span class="status-pill ${statusPillClass(t.status)}">${t.status_label}</span></td>
-				<td class="muted">${t.assigned_admin || "Unassigned"}</td>
-				<td class="muted">${new Date(t.updated_at).toLocaleString()}</td>
+			<tr class="clickable-row">
+				<td onclick="event.stopPropagation()"><input type="checkbox" class="sc-row-select" data-id="${t.id}" ${selectedIds.has(t.id) ? "checked" : ""}></td>
+				<td onclick="window.location.href='/support-center/${t.id}'">
+					${t.subject}
+					${t.duplicate_of_ticket_id ? ` <span class="activity-action" title="Duplicate of Ticket #${t.duplicate_of_ticket_id}">Duplicate of #${t.duplicate_of_ticket_id}</span>` : ""}
+					${t.duplicate_count ? ` <span class="activity-action" title="${t.duplicate_count} linked duplicate(s)">${t.duplicate_count} duplicate(s)</span>` : ""}
+					${t.locked ? ` <span class="activity-action" title="Locked">🔒</span>` : ""}
+					${t.deleted ? ` <span class="status-pill status-offline">Deleted</span>` : ""}
+				</td>
+				<td onclick="window.location.href='/support-center/${t.id}'">${t.category_label}</td>
+				<td onclick="window.location.href='/support-center/${t.id}'">${t.priority_label}</td>
+				<td onclick="window.location.href='/support-center/${t.id}'"><span class="status-pill ${statusPillClass(t.status)}">${t.status_label}</span></td>
+				<td class="muted" onclick="window.location.href='/support-center/${t.id}'">${t.assigned_admin || "Unassigned"}</td>
+				<td class="muted" onclick="window.location.href='/support-center/${t.id}'">${new Date(t.updated_at).toLocaleString()}</td>
 			</tr>
 		`).join("");
+
+	tbody.querySelectorAll(".sc-row-select").forEach((cb) => {
+		cb.addEventListener("change", () => {
+			const id = Number(cb.dataset.id);
+			if (cb.checked) selectedIds.add(id); else selectedIds.delete(id);
+			document.getElementById("sc-select-all").checked = pageRows.length > 0 && pageRows.every((t) => selectedIds.has(t.id));
+			updateBulkToolbar();
+		});
+	});
+	document.getElementById("sc-select-all").checked = pageRows.length > 0 && pageRows.every((t) => selectedIds.has(t.id));
 
 	const pager = document.getElementById("sc-pagination");
 	pager.innerHTML = totalPages <= 1 ? "" : `
@@ -95,7 +179,82 @@ function renderTicketTable() {
 }
 
 for (const id of ["sc-search"]) document.getElementById(id).addEventListener("input", () => { ticketPage = 1; renderTicketTable(); });
-for (const id of ["sc-filter-status", "sc-filter-category", "sc-filter-priority"]) document.getElementById(id).addEventListener("change", () => { ticketPage = 1; renderTicketTable(); });
+for (const id of ["sc-filter-status", "sc-filter-category", "sc-filter-priority", "sc-filter-assignee", "sc-filter-special"]) {
+	document.getElementById(id).addEventListener("change", () => { ticketPage = 1; renderTicketTable(); });
+}
+
+document.getElementById("sc-select-all").addEventListener("change", (e) => {
+	const filtered = currentFilteredTickets();
+	const start = (ticketPage - 1) * TICKET_PAGE_SIZE;
+	const pageRows = filtered.slice(start, start + TICKET_PAGE_SIZE);
+	for (const t of pageRows) { if (e.target.checked) selectedIds.add(t.id); else selectedIds.delete(t.id); }
+	renderTicketTable();
+	updateBulkToolbar();
+});
+
+document.getElementById("sc-bulk-clear").addEventListener("click", () => {
+	selectedIds.clear();
+	renderTicketTable();
+	updateBulkToolbar();
+});
+
+async function runBulkAction(url, extra, successMsg) {
+	try {
+		await apiFetch(url, { method: "POST", body: { ticket_ids: [...selectedIds], ...extra } });
+		toast(successMsg);
+		selectedIds.clear();
+		await loadTickets();
+		updateBulkToolbar();
+	} catch (err) {
+		toast(err.message, "error");
+	}
+}
+
+document.getElementById("sc-bulk-close").addEventListener("click", async () => {
+	if (selectedIds.size === 0) return;
+	const confirmed = await confirmDialog(`Close ${selectedIds.size} selected ticket(s)?`, { confirmLabel: "Close Tickets", danger: false });
+	if (confirmed) runBulkAction("/api/tickets/bulk/close", {}, "Selected tickets closed.");
+});
+document.getElementById("sc-bulk-resolve").addEventListener("click", async () => {
+	if (selectedIds.size === 0) return;
+	const confirmed = await confirmDialog(`Mark ${selectedIds.size} selected ticket(s) as resolved?`, { confirmLabel: "Mark Resolved", danger: false });
+	if (confirmed) runBulkAction("/api/tickets/bulk/resolve", {}, "Selected tickets marked resolved.");
+});
+document.getElementById("sc-bulk-assign-select").addEventListener("change", async (e) => {
+	const adminId = e.target.value;
+	e.target.value = "";
+	if (!adminId || selectedIds.size === 0) return;
+	runBulkAction("/api/tickets/bulk/assign", { assigned_admin_id: Number(adminId) }, "Selected tickets assigned.");
+});
+document.getElementById("sc-bulk-export").addEventListener("click", async () => {
+	if (selectedIds.size === 0) return;
+	try {
+		const r = await apiFetch("/api/tickets/bulk/export", { method: "POST", body: { ticket_ids: [...selectedIds] } });
+		const blob = new Blob([r.csv], { type: "text/csv" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url; a.download = `tickets-export-${Date.now()}.csv`;
+		document.body.appendChild(a); a.click(); a.remove();
+		URL.revokeObjectURL(url);
+		toast(`Exported ${r.count} ticket(s).`);
+	} catch (err) {
+		toast(err.message, "error");
+	}
+});
+{% if can_delete_tickets %}
+document.getElementById("sc-bulk-delete").addEventListener("click", async () => {
+	if (selectedIds.size === 0) return;
+	// Bulk delete stays fully recoverable (soft delete, same as a single
+	// ticket) -- see routes/tickets.py's bulk_delete_tickets docstring for
+	// why this copy is still worded as irreversible: a bulk mistake is far
+	// costlier to notice and manually undo one ticket at a time.
+	const confirmed = await confirmDialog(
+		`You are about to delete ${selectedIds.size} ticket(s). This action cannot be undone.`,
+		{ confirmLabel: "Delete Tickets", danger: true },
+	);
+	if (confirmed) runBulkAction("/api/tickets/bulk/delete", {}, "Selected tickets deleted.");
+});
+{% endif %}
 
 (async function init() {
 	const catData = await apiFetch("/api/tickets/categories");
@@ -124,16 +283,84 @@ for (const id of ["sc-filter-status", "sc-filter-category", "sc-filter-priority"
 		prioritySel.appendChild(o);
 	}
 
+	const adminsData = await apiFetch("/api/tickets/assignable-admins");
+	assignableAdmins = adminsData.admins;
+	const assigneeSel = document.getElementById("sc-filter-assignee");
+	const bulkAssignSel = document.getElementById("sc-bulk-assign-select");
+	for (const a of assignableAdmins) {
+		const o1 = document.createElement("option"); o1.value = a.id; o1.textContent = a.display_name;
+		assigneeSel.appendChild(o1);
+		const o2 = document.createElement("option"); o2.value = a.id; o2.textContent = a.display_name;
+		bulkAssignSel.appendChild(o2);
+	}
+
 	await loadTickets();
 })();
 
 async function loadTickets() {
-	const data = await apiFetch("/api/tickets");
+	// Always requests include_deleted -- the server no-ops it for a caller
+	// without delete visibility (see routes/tickets.py's list_tickets), so
+	// this is safe regardless of role; currentFilteredTickets() is what
+	// actually keeps deleted rows out of every view except the "Deleted
+	// Tickets" filter itself.
+	const data = await apiFetch("/api/tickets?include_deleted=true");
 	allTickets = data.tickets;
 	ticketPage = 1;
 	renderTicketTable();
 }
 
 document.getElementById("refresh-btn").addEventListener("click", loadTickets);
+
+// --- Duplicate Cleanup (spec section 5) -------------------------------------
+{% if can_delete_tickets %}
+async function loadClusters() {
+	const body = document.getElementById("sc-cluster-body");
+	body.innerHTML = '<p class="muted">Loading...</p>';
+	try {
+		const data = await apiFetch("/api/tickets/duplicate-clusters");
+		if (data.clusters.length === 0) {
+			body.innerHTML = `<p class="muted">No candidate duplicate clusters found within the current ${data.window_minutes}-minute detection window.</p>`;
+			return;
+		}
+		body.innerHTML = data.clusters.map((cluster, ci) => `
+			<div class="card" style="margin-bottom:12px">
+				<div class="muted" style="margin-bottom:6px">Cluster ${ci + 1} -- ${cluster.tickets.length} tickets</div>
+				${cluster.tickets.map((t) => `
+					<label class="checkbox-label" style="display:block;margin-bottom:4px">
+						<input type="radio" name="sc-cluster-parent-${ci}" value="${t.id}" ${t.id === cluster.suggested_parent_id ? "checked" : ""}>
+						#${t.id} -- ${t.subject} <span class="muted">(${t.status_label}, created ${new Date(t.created_at).toLocaleString()})</span>
+					</label>
+				`).join("")}
+				<button type="button" class="btn-secondary btn-sm" data-cluster-idx="${ci}" data-cluster-mark>Mark selected parent's siblings as duplicates</button>
+			</div>
+		`).join("");
+		body.querySelectorAll("[data-cluster-mark]").forEach((btn) => {
+			btn.addEventListener("click", async () => {
+				const ci = btn.dataset.clusterIdx;
+				const cluster = data.clusters[ci];
+				const parentId = Number(document.querySelector(`input[name="sc-cluster-parent-${ci}"]:checked`).value);
+				const others = cluster.tickets.map((t) => t.id).filter((id) => id !== parentId);
+				try {
+					await apiFetch("/api/tickets/bulk/mark-duplicate", { method: "POST", body: { ticket_ids: others, parent_ticket_id: parentId } });
+					toast(`Marked ${others.length} ticket(s) as duplicates of #${parentId}.`);
+					await loadTickets();
+					await loadClusters();
+				} catch (err) {
+					toast(err.message, "error");
+				}
+			});
+		});
+	} catch (err) {
+		body.innerHTML = `<p class="muted">${escapeHtml(err.message)}</p>`;
+	}
+}
+
+document.getElementById("sc-duplicate-cleanup-btn").addEventListener("click", async (e) => {
+	e.preventDefault();
+	document.getElementById("sc-cluster-dialog").showModal();
+	await loadClusters();
+});
+document.getElementById("sc-cluster-close").addEventListener("click", () => document.getElementById("sc-cluster-dialog").close());
+{% endif %}
 </script>
 {% endblock %}

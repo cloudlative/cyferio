@@ -51,6 +51,7 @@ class UpdateSettingsRequest(BaseModel):
     support_max_attachment_size_mb: int | None = None
     support_max_attachments_per_message: int | None = None
     notify_admin_on_ticket_created: bool | None = None
+    ticket_duplicate_window_minutes: int | None = None
 
     # Multi-Factor Authentication (TOTP) -- see mfa.py's effective_policy /
     # models.py's AppSettings columns for the full precedence design.
@@ -243,7 +244,8 @@ class UpdateSettingsRequest(BaseModel):
         return v
 
     @field_validator("support_ticket_rate_limit_count", "support_ticket_rate_limit_window_minutes",
-                      "support_max_attachment_size_mb", "support_max_attachments_per_message")
+                      "support_max_attachment_size_mb", "support_max_attachments_per_message",
+                      "ticket_duplicate_window_minutes")
     @classmethod
     def _support_tunable_positive(cls, v):
         if v is not None and v < 1:
@@ -408,6 +410,9 @@ def _serialize() -> dict:
             s.support_max_attachments_per_message if s.support_max_attachments_per_message is not None else 5
         ),
         "notify_admin_on_ticket_created": bool(s.notify_admin_on_ticket_created),
+        "ticket_duplicate_window_minutes": (
+            s.ticket_duplicate_window_minutes if s.ticket_duplicate_window_minutes is not None else 1440
+        ),
         "mfa_mode": s.mfa_mode,
         "mfa_role_requirements": json.loads(s.mfa_role_requirements) if s.mfa_role_requirements else {},
         "mfa_remember_device_days": s.mfa_remember_device_days,
@@ -490,6 +495,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                    "quota_notify_warning_pct", "quota_notify_critical_pct", "notify_admin_on_quota_critical",
                    "support_ticket_rate_limit_count", "support_ticket_rate_limit_window_minutes",
                    "support_max_attachment_size_mb", "support_max_attachments_per_message", "notify_admin_on_ticket_created",
+                   "ticket_duplicate_window_minutes",
                    "mfa_mode", "mfa_remember_device_days", "notify_admin_on_mfa_disabled",
                    "release_check_enabled", "release_check_interval_minutes",
                    "release_check_critical_major_bump", "github_repo",

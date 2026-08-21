@@ -242,8 +242,12 @@
 				<label for="s-support-max-attachments">Max Attachments <span class="muted">(per message)</span></label>
 				<input type="text" id="s-support-max-attachments" inputmode="numeric" placeholder="5">
 			</div>
+			<div class="field">
+				<label for="s-ticket-duplicate-window">Duplicate Detection Window <span class="muted">(minutes)</span></label>
+				<input type="text" id="s-ticket-duplicate-window" inputmode="numeric" placeholder="1440">
+			</div>
 		</div>
-		<p class="field-hint">Allowed attachment types (images, PDF, txt/log/csv, zip) are fixed and not configurable here.</p>
+		<p class="field-hint">Allowed attachment types (images, PDF, txt/log/csv, zip) are fixed and not configurable here. The Duplicate Detection Window controls how close together (in time) two tickets must be created to be surfaced as a candidate duplicate cluster in Support Center's Duplicate Cleanup tool.</p>
 		<div class="checkbox-row" style="margin-top:12px">
 			<label class="checkbox-label"><input type="checkbox" id="s-notify-ticket-created"> Email me on new tickets, user replies, reopened tickets, and critical-priority tickets</label>
 		</div>
@@ -594,6 +598,7 @@ async function loadSettings() {
 		setVal("s-support-rate-limit-window", s.support_ticket_rate_limit_window_minutes != null ? s.support_ticket_rate_limit_window_minutes : 60);
 		setVal("s-support-max-attachment-size", s.support_max_attachment_size_mb != null ? s.support_max_attachment_size_mb : 10);
 		setVal("s-support-max-attachments", s.support_max_attachments_per_message != null ? s.support_max_attachments_per_message : 5);
+		setVal("s-ticket-duplicate-window", s.ticket_duplicate_window_minutes != null ? s.ticket_duplicate_window_minutes : 1440);
 		document.getElementById("s-notify-ticket-created").checked = !!s.notify_admin_on_ticket_created;
 		document.getElementById("s-mfa-mode").value = s.mfa_mode || "optional";
 		const rememberDays = s.mfa_remember_device_days || 0;
@@ -891,6 +896,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		support_ticket_rate_limit_window_minutes: intOrNull(val("s-support-rate-limit-window")),
 		support_max_attachment_size_mb: intOrNull(val("s-support-max-attachment-size")),
 		support_max_attachments_per_message: intOrNull(val("s-support-max-attachments")),
+		ticket_duplicate_window_minutes: intOrNull(val("s-ticket-duplicate-window")),
 		notify_admin_on_ticket_created: document.getElementById("s-notify-ticket-created").checked,
 		mfa_mode: document.getElementById("s-mfa-mode").value,
 		mfa_remember_device_days: (() => {

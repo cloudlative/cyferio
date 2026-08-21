@@ -168,14 +168,17 @@ function wireRowActions(container, row) {
 			// (same confirmDialog() app.js already uses for every other
 			// consequential action in this app).
 			const confirmed = await confirmDialog(
-				"This will create a support ticket from this rejection and notify an administrator. Continue?",
-				{ confirmLabel: "Request Review", danger: false },
+				"This will open a VPN Access Issues support ticket for this rejected connection attempt. " +
+				"Diagnostic information -- your VPN profile, source IP, country, city, ASN, and the access " +
+				"restriction details for this attempt -- may be included to help an administrator review the " +
+				"request. An administrator will review the request and follow up on the ticket.",
+				{ confirmLabel: "Create Ticket", danger: false },
 			);
 			if (!confirmed) return;
 			btn.disabled = true;
 			try {
 				const r = await apiFetch("/api/me/connection-issues/request-review", { method: "POST", body: { timestamp: row.timestamp } });
-				toast(`Support ticket #${r.ticket_id} created -- an administrator has been notified.`, "success");
+				toast(`Access review request submitted successfully. Ticket #${r.ticket_id} created.`, "success");
 				btn.outerHTML = `<a href="/support/${r.ticket_id}" class="btn btn-secondary btn-sm" style="margin-top:8px">View Ticket #${r.ticket_id} →</a>`;
 			} catch (e) {
 				toast(e.message, "error");

@@ -101,6 +101,20 @@ def admin_replied(db: Session, ticket: SupportTicket) -> None:
     )
 
 
+def ticket_marked_duplicate(db: Session, ticket: SupportTicket) -> None:
+    """New event -- fired when routes/tickets.py's mark-duplicate endpoint
+    sets duplicate_of_ticket_id. Notifies the ticket's own creator (not
+    every admin -- this isn't an admin-actionable event the way
+    ticket_created/user_replied are); the parent ticket's owner is not
+    separately notified since nothing about THEIR ticket changed."""
+    _notify_user(
+        db, ticket, "ticket_status_changed",
+        f"Ticket #{ticket.id} was marked as a duplicate of Ticket #{ticket.duplicate_of_ticket_id}",
+        email_headline="Your ticket was marked as a duplicate",
+        email_body=f"Please see Ticket #{ticket.duplicate_of_ticket_id} for the ongoing conversation.",
+    )
+
+
 def status_changed(db: Session, ticket: SupportTicket, old_status: str, new_status: str) -> None:
     _notify_user(
         db, ticket, "ticket_status_changed",
