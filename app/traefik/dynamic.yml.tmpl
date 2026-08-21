@@ -124,6 +124,17 @@ http:
         - traefik
       service: ping@internal
 
+    # Prometheus-format request metrics (see docker-compose.yml's
+    # --metrics.prometheus=* flags) -- same "traefik" entrypoint, same
+    # never-published-publicly posture as the two routers above. prometheus@
+    # internal is the metrics registry's own internal service name, exactly
+    # like api@internal/ping@internal.
+    traefik-internal-metrics:
+      rule: "PathPrefix(`/metrics`)"
+      entryPoints:
+        - traefik
+      service: prometheus@internal
+
   services:
     # Zero-downtime rollout (see docker-compose.yml's app-blue/app-green
     # comment for the full design): BOTH slots are listed here permanently

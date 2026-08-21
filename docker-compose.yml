@@ -108,6 +108,23 @@ services:
       - --entrypoints.vpninternal.address=:8000
       - --api=true
       - --ping=true
+      # Request-level metrics (counts by status code, latency histograms)
+      # for the Health page -- --api=true alone does NOT provide this; the
+      # router/service JSON endpoints only ever report static config +
+      # current up/down state, never traffic. Prometheus is the mechanism
+      # Traefik actually uses to emit that, exposed as a text-format
+      # /metrics endpoint. No separate entrypoint needed: it defaults to
+      # the same "traefik" entrypoint as the JSON API above (8080, never
+      # published -- see `ports:` below), so this adds no new public
+      # surface. The add*Labels flags break counters down per
+      # entrypoint/service/router (e.g. app-blue vs app-green) instead of
+      # one undifferentiated total -- the whole point, given this app's
+      # blue/green setup. Scraped by health.py's get_traefik_health(), not
+      # an external Prometheus server -- no extra service to run.
+      - --metrics.prometheus=true
+      - --metrics.prometheus.addEntryPointsLabels=true
+      - --metrics.prometheus.addServicesLabels=true
+      - --metrics.prometheus.addRoutersLabels=true
       - --log.level=INFO
     ports:
       - "80:80"

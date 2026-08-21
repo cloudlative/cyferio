@@ -159,6 +159,29 @@ async function loadHostHealth() {
 }
 
 // --- Traefik ---------------------------------------------------------------
+function serverStatusPill(state) {
+	const up = (state || "").toUpperCase() === "UP";
+	return `<span class="status-pill ${up ? "status-online" : "status-revoked"}">${escapeHtml(state || "unknown")}</span>`;
+}
+
+function traefikReqTotals(entries) {
+	// entries: [{name, total, by_code, avg_latency_ms}]
+	if (!entries || !entries.length) return '<p class="muted">No requests recorded yet.</p>';
+	return `<div class="table-scroll"><table class="traefik-router-table" style="margin-top:4px"><thead><tr><th>Name</th><th>Requests</th><th>By status</th><th>Avg latency</th></tr></thead><tbody>${entries.map(e => {
+		const codes = Object.entries(e.by_code || {}).sort((a, b) => a[0].localeCompare(b[0]))
+			.map(([code, n]) => {
+				const cls = code.startsWith("5") ? "status-revoked" : code.startsWith("4") ? "status-offline" : "status-online";
+				return `<span class="status-pill ${cls}" style="margin-right:4px">${escapeHtml(code)}: ${n}</span>`;
+			}).join("");
+		return `<tr>
+			<td class="mono">${escapeHtml(e.name)}</td>
+			<td>${e.total}</td>
+			<td>${codes || "—"}</td>
+			<td>${e.avg_latency_ms != null ? e.avg_latency_ms + " ms" : "—"}</td>
+		</tr>`;
+	}).join("")}</tbody></table></div>`;
+}
+
 async function loadTraefikHealth() {
 	const el = document.getElementById("traefik-health-result");
 	const badge = document.getElementById("traefik-health-badge");
@@ -171,12 +194,42 @@ async function loadTraefikHealth() {
 		}
 		const routerIssues = d.routers.filter(r => r.status !== "enabled" || (r.errors && r.errors.length));
 		okBadge(badge, d.ping_ok && routerIssues.length === 0, "Healthy", "Issues found");
+
 		let html = "";
+
+		html += '<h3 style="margin:14px 0 4px">Entrypoints</h3>';
+		if (d.entrypoints.length) {
+			html += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Name</th><th>Address</th></tr></thead><tbody>${d.entrypoints.map(e => `
+				<tr><td>${escapeHtml(e.name || "—")}</td><td class="mono">${escapeHtml(e.address || "—")}</td></tr>`).join("")}</tbody></table></div>`;
+		} else {
+			html += '<p class="muted">No entrypoints reported.</p>';
+		}
+
+		html += '<h3 style="margin:14px 0 4px">Services &amp; backends</h3>';
+		if (d.services.length) {
+			html += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Service</th><th>Backend</th><th>Status</th></tr></thead><tbody>${d.services.map(s => {
+				const servers = Object.entries(s.server_status || {});
+				if (!servers.length) {
+					return `<tr><td>${escapeHtml(s.name || "—")}</td><td class="mono">—</td><td>${serverStatusPill(s.status)}</td></tr>`;
+				}
+				return servers.map(([url, state], i) => `
+					<tr>
+						<td>${i === 0 ? escapeHtml(s.name || "—") : ""}</td>
+						<td class="mono">${escapeHtml(url)}</td>
+						<td>${serverStatusPill(state)}</td>
+					</tr>`).join("");
+			}).join("")}</tbody></table></div>`;
+		} else {
+			html += '<p class="muted">No services reported.</p>';
+		}
+
+		html += '<h3 style="margin:14px 0 4px">Routers</h3>';
 		if (d.routers.length) {
-			html += `<div class="table-scroll"><table class="traefik-router-table" style="margin-top:4px"><thead><tr><th>Router</th><th>Rule</th><th>Status</th></tr></thead><tbody>${d.routers.map(r => `
+			html += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Router</th><th>Rule</th><th>Middlewares</th><th>Status</th></tr></thead><tbody>${d.routers.map(r => `
 				<tr>
 					<td>${escapeHtml(r.name || "—")}</td>
 					<td class="mono traefik-rule-cell">${escapeHtml(r.rule || "—")}</td>
+					<td class="mono">${(r.middlewares || []).map(escapeHtml).join(", ") || "—"}</td>
 					<td>${r.status === "enabled" && !(r.errors && r.errors.length)
 						? '<span class="status-pill status-online">enabled</span>'
 						: `<span class="status-pill status-revoked">${escapeHtml(r.status || "unknown")}</span>`}</td>
@@ -184,6 +237,26 @@ async function loadTraefikHealth() {
 		} else {
 			html += '<p class="muted">No routers reported.</p>';
 		}
+
+		if (d.middlewares.length) {
+			html += '<h3 style="margin:14px 0 4px">Middlewares</h3>';
+			html += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Name</th><th>Type</th></tr></thead><tbody>${d.middlewares.map(m => `
+				<tr><td class="mono">${escapeHtml(m.name || "—")}</td><td>${escapeHtml(m.type || "—")}</td></tr>`).join("")}</tbody></table></div>`;
+		}
+
+		html += '<h3 style="margin:14px 0 4px">Requests</h3>';
+		if (d.metrics) {
+			html += '<p class="note" style="margin:0 0 6px"><strong>Note:</strong> cumulative totals since Traefik last started, not a live rate.</p>';
+			html += '<p class="muted" style="font-size:0.85rem;margin:6px 0 2px">By service</p>';
+			html += traefikReqTotals(d.metrics.services);
+			html += '<p class="muted" style="font-size:0.85rem;margin:10px 0 2px">By entrypoint</p>';
+			html += traefikReqTotals(d.metrics.entrypoints);
+		} else if (d.metrics_error) {
+			html += `<p class="muted">${escapeHtml(d.metrics_error)}</p>`;
+		} else {
+			html += '<p class="muted">No metrics reported.</p>';
+		}
+
 		if (d.error) html += `<p style="color:var(--danger-text);margin-top:10px">${escapeHtml(d.error)}</p>`;
 		el.innerHTML = html;
 	} catch (e) {
