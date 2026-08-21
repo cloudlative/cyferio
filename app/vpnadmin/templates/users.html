@@ -881,7 +881,7 @@ function renderUsers() {
 		return;
 	}
 	el.innerHTML = `<table>
-		<thead><tr><th>User</th><th>VPN Profile</th><th>Teams</th><th>Role</th><th>Status</th><th>Restrictions</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
+		<thead><tr><th>User</th><th>VPN Profile</th><th>Teams</th><th>Role</th><th>Status</th><th>MFA</th><th>Restrictions</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
 		<tbody>${filtered.map(u => `
 			<tr data-id="${u.id}">
 				<td>
@@ -891,9 +891,8 @@ function renderUsers() {
 				<td class="mono">${u.vpn_client_name ? escapeHtml(u.vpn_client_name) : '<span class="muted">— unlinked —</span>'}</td>
 				<td class="muted">${u.teams && u.teams.length ? escapeHtml(u.teams.join(", ")) : "—"}</td>
 				<td><span class="role-badge role-${u.role}">${u.role}</span>${u.is_bootstrap_admin ? ' <span class="muted" style="font-size:0.78em">(bootstrap)</span>' : ""}</td>
-				<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}
-					<div class="muted" style="font-size:0.78em;margin-top:2px">MFA: ${u.mfa_enabled ? "Enabled" : (u.mfa_setup_required ? "Pending" : "Disabled")}</div>
-				</td>
+				<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
+				<td>${u.mfa_enabled ? '<span class="status-pill status-online">Enabled</span>' : (u.mfa_setup_required ? '<span class="status-pill status-offline">Pending</span>' : '<span class="muted">Disabled</span>')}</td>
 				<td>${combinedRestrictionCellHtml(u)}</td>
 				<td class="muted">${fmtDate(u.created_at)}</td>
 				<td class="muted">${fmtDate(u.last_login_at)}</td>

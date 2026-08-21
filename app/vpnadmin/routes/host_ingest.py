@@ -44,6 +44,7 @@ class ConnectionRejectionIn(BaseModel):
     detected_city: str | None = None
     detected_asn: str | None = None
     detected_asn_name: str | None = None
+    detected_os: str | None = None
     # What was actually on file for this identity at the MOMENT of
     # rejection (mac_mismatch only) -- see
     # models.ConnectionRejectionLog.registered_mac_at_time's docstring for
@@ -63,6 +64,7 @@ def ingest_connection_rejection(body: ConnectionRejectionIn, db: Session = Depen
         detected_city=(body.detected_city or "")[:128] or None,
         detected_asn=(body.detected_asn or "")[:16] or None,
         detected_asn_name=(body.detected_asn_name or "")[:255] or None,
+        detected_os=(body.detected_os or "")[:64] or None,
         registered_mac_at_time=(body.registered_mac or "")[:255] or None,
     )
     db.add(row)

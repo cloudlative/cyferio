@@ -333,6 +333,20 @@ def status_rejected(limit: int = 20) -> list[dict]:
         _parse_json_or_raise(_run_status_script("--rejected-connections", str(limit), "--json")))
 
 
+def _raw_session_history(fetch_limit: int, client: str | None) -> list[dict]:
+    """Unfiltered fetch straight from vpn-status.py --session-history --
+    every ended session in the requested window, newest-disconnected-first,
+    with no distinction yet drawn between a real session and a dropped/
+    instant one (see AppSettings.min_session_duration_seconds). Both
+    status_session_history() and status_dropped_sessions() below are just
+    two different filters over this same call, kept as one cached fetch so
+    a page that wants both (e.g. Diagnostics) doesn't pay for two separate
+    subprocess spawns."""
+    return _cached(("status_session_history_raw", fetch_limit, client), lambda:
+        _parse_json_or_raise(_run_status_script(
+            "--session-history", str(fetch_limit), *(["--client", client] if client else []), "--json")))
+
+
 def status_session_history(limit: int = 20, client: str | None = None) -> list[dict]:
     """Connection History page's data source -- past (ended) sessions, each
     with connected/disconnected timestamps, duration, source IP, and byte
@@ -348,12 +362,44 @@ def status_session_history(limit: int = 20, client: str | None = None) -> list[d
     the same 500-row window) -- added for Per-User Analytics (see
     routes/reports.py), which needs one user's own session history without
     shipping/filtering the full window client-side the way
-    connection_history.html's page-level search does. `client` is part of
-    the cache key so a scoped and an unscoped call for the same `limit`
-    never collide in the 3s TTL cache."""
-    return _cached(("status_session_history", limit, client), lambda:
-        _parse_json_or_raise(_run_status_script(
-            "--session-history", str(limit), *(["--client", client] if client else []), "--json")))
+    connection_history.html's page-level search does.
+
+    Excludes sessions shorter than AppSettings.min_session_duration_seconds
+    (the VPN Client Management / Connection Failures work -- see that
+    column's docstring): a connect that lasted a couple of seconds passed
+    every client-connect gate (it is NOT a ConnectionRejectionLog policy
+    rejection) but doesn't represent real usage, and was previously mixed
+    into every session-based report (session counts, average duration,
+    connection trends, peak usage), skewing all of them. The excluded rows
+    aren't lost -- see status_dropped_sessions() below, surfaced on
+    Diagnostics instead. Always over-fetches (500, vpn-status.py's own cap)
+    rather than asking the script for exactly `limit` filtered rows, since
+    the script has no concept of this threshold -- asking for exactly
+    `limit` unfiltered rows could silently under-fill the caller's window
+    once short sessions are excluded."""
+    threshold = app_settings.runtime.min_session_duration_seconds
+    raw = _raw_session_history(500, client)
+    if threshold:
+        raw = [r for r in raw if (r.get("duration_seconds") or 0) >= threshold]
+    return raw[:limit]
+
+
+def status_dropped_sessions(limit: int = 200, client: str | None = None) -> list[dict]:
+    """The complement of status_session_history() above -- sessions that
+    connected and disconnected too fast (duration_seconds below
+    AppSettings.min_session_duration_seconds) to count as a real session.
+    Surfaced on Diagnostics as "Dropped / Instant Connections", kept
+    separate from ConnectionRejectionLog's policy-reasoned rejections since
+    these clients were never actually rejected by a gate -- there is no
+    `reason` for them, only a too-short duration. Empty list when the
+    threshold is disabled (0) -- there is no "dropped" bucket in that case,
+    every session counts, matching status_session_history()'s own
+    behavior."""
+    threshold = app_settings.runtime.min_session_duration_seconds
+    if not threshold:
+        return []
+    raw = _raw_session_history(500, client)
+    return [r for r in raw if (r.get("duration_seconds") or 0) < threshold][:limit]
 
 
 # --- Combined dashboard summary ------------------------------------------

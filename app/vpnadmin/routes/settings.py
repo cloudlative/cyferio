@@ -42,6 +42,7 @@ class UpdateSettingsRequest(BaseModel):
     default_bandwidth_monthly_gb: float | None = None
     default_quota_enforcement_policy: str | None = None
     allow_duplicate_macs: bool | None = None
+    min_session_duration_seconds: int | None = None
 
     # Support Ticketing System -- admin-tweakable preferences, see
     # AppSettings' own columns for why these aren't hardcoded constants.
@@ -166,6 +167,16 @@ class UpdateSettingsRequest(BaseModel):
     def _connection_issue_retention(cls, v):
         if v is not None and v < 0:
             raise ValueError("Connection issue log retention can't be negative.")
+        return v
+
+    @field_validator("min_session_duration_seconds")
+    @classmethod
+    def _min_session_duration(cls, v):
+        # Upper bound is a sanity cap (10 minutes) -- this setting is meant
+        # to filter out near-instant network blips, not to reclassify
+        # genuinely short-but-real sessions as noise.
+        if v is not None and not (0 <= v <= 600):
+            raise ValueError("Minimum session duration must be between 0 and 600 seconds.")
         return v
 
     @field_validator("notification_duration_ms")
@@ -363,6 +374,7 @@ def _serialize() -> dict:
         "quota_notify_critical_pct": s.quota_notify_critical_pct,
         "notify_admin_on_quota_critical": s.notify_admin_on_quota_critical,
         "allow_duplicate_macs": bool(s.allow_duplicate_macs),
+        "min_session_duration_seconds": s.min_session_duration_seconds if s.min_session_duration_seconds is not None else 3,
         "support_ticket_rate_limit_count": s.support_ticket_rate_limit_count if s.support_ticket_rate_limit_count is not None else 5,
         "support_ticket_rate_limit_window_minutes": (
             s.support_ticket_rate_limit_window_minutes if s.support_ticket_rate_limit_window_minutes is not None else 60
@@ -444,7 +456,8 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                    "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
                    "password_history_count",
                    "audit_retention_days", "connection_issue_retention_days", "log_failed_login_attempts", "default_new_user_role",
-                   "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "allow_duplicate_macs", "admin_notification_email",
+                   "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "allow_duplicate_macs",
+                   "min_session_duration_seconds", "admin_notification_email",
                    "notify_admin_on_user_created", "notify_admin_on_client_revoked",
                    "quota_notify_warning_pct", "quota_notify_critical_pct", "notify_admin_on_quota_critical",
                    "support_ticket_rate_limit_count", "support_ticket_rate_limit_window_minutes",

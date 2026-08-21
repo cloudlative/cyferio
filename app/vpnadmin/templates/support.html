@@ -4,11 +4,16 @@
 <div class="toolbar">
 	<div class="toolbar-title"><h1 style="margin:0">My Support</h1></div>
 	<div style="display:flex;gap:8px">
+		{% if can_manage_support %}
+		<a href="/support-center" class="btn-cta">Support Center →</a>
+		{% endif %}
 		<button type="button" class="btn-secondary" id="refresh-btn">Refresh</button>
 		<button type="button" class="btn-primary" id="new-ticket-btn">New Ticket</button>
 	</div>
 </div>
-<p class="page-subtitle" style="margin-top:-10px">Didn't find your answer in the <a href="/faq">FAQ</a>? Open a ticket below -- you'll be able to track its status and reply to an administrator right here.</p>
+<p class="page-subtitle" style="margin-top:-10px">Didn't find your answer in the <a href="/faq">FAQ</a>? Open a ticket below -- you'll be able to track its status and reply to an administrator right here.
+	{% if can_manage_support %}This page only shows tickets <strong>you</strong> filed -- every user's tickets live in <a href="/support-center">Support Center</a>.{% endif %}
+</p>
 
 <div class="card">
 	<div class="form-row" style="margin-bottom:14px">

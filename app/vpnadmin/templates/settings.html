@@ -185,6 +185,15 @@
 			<label class="checkbox-label"><input type="checkbox" id="s-allow-duplicate-macs"> Allow Duplicate MAC Addresses</label>
 		</div>
 		<p class="field-hint">When off (default), a MAC address can only be assigned to one client across the whole system -- registering an already-used MAC to another client is rejected. When on, the same MAC may be registered to multiple clients (e.g. shared/virtualized devices). Does not affect connection-time enforcement, which always checks a MAC against the connecting client's own registrations only.</p>
+		<div class="form-grid" style="margin-top:14px">
+			<div class="field">
+				<label for="s-min-session-duration">Minimum Meaningful Session Duration <span class="muted">(seconds; 0 = count every session)</span>
+					<button type="button" class="info-tip" data-tip="A connection that connects and disconnects faster than this is treated as a dropped/instant connection, not a real session -- excluded from Connection History and every session-based report (session counts, average duration, connection trends, peak usage). Still visible on Diagnostics." aria-label="More info on Minimum Meaningful Session Duration">i</button>
+				</label>
+				<input type="text" id="s-min-session-duration" inputmode="numeric" placeholder="3">
+			</div>
+		</div>
+		<p class="field-hint">Keeps quick network blips and duplicate-connection kicks from skewing session-count/duration reports. These short sessions aren't discarded -- they show up on Diagnostics as dropped connections.</p>
 	</div>
 
 	<div class="card">
@@ -474,6 +483,7 @@ const sAdminNotifyEmailValidation = attachInlineValidation(document.getElementBy
 });
 const sAuditRetentionValidation = attachInlineValidation(document.getElementById("s-audit-retention"), (v) => numberRangeError(v, { min: 0, label: "Audit log retention", emptyOk: true }));
 const sConnectionIssueRetentionValidation = attachInlineValidation(document.getElementById("s-connection-issue-retention"), (v) => numberRangeError(v, { min: 0, label: "Connection issue log retention", emptyOk: true }));
+const sMinSessionDurationValidation = attachInlineValidation(document.getElementById("s-min-session-duration"), (v) => numberRangeError(v, { min: 0, max: 600, label: "Minimum meaningful session duration", emptyOk: true }));
 // Guarded on element presence -- this field only renders for
 // can_view_db_reporting accounts (see the conditional block around this
 // field further up this template), narrower than what gets someone onto
@@ -534,6 +544,7 @@ async function loadSettings() {
 		const quotaPolicyEl = document.querySelector(`input[name="s-quota-policy"][value="${s.default_quota_enforcement_policy || "soft"}"]`);
 		if (quotaPolicyEl) quotaPolicyEl.checked = true;
 		document.getElementById("s-allow-duplicate-macs").checked = !!s.allow_duplicate_macs;
+		setVal("s-min-session-duration", s.min_session_duration_seconds);
 		setVal("s-support-rate-limit-count", s.support_ticket_rate_limit_count != null ? s.support_ticket_rate_limit_count : 5);
 		setVal("s-support-rate-limit-window", s.support_ticket_rate_limit_window_minutes != null ? s.support_ticket_rate_limit_window_minutes : 60);
 		setVal("s-support-max-attachment-size", s.support_max_attachment_size_mb != null ? s.support_max_attachment_size_mb : 10);
@@ -794,7 +805,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 	const numericChecks = [
 		sMinPwLenValidation, sSessionTimeoutValidation,
 		sLockoutThresholdValidation, sLockoutMinutesValidation, sPasswordHistoryValidation, sDefaultBandwidthValidation,
-		sAdminNotifyEmailValidation, sAuditRetentionValidation, sConnectionIssueRetentionValidation, sNotificationDurationValidation,
+		sAdminNotifyEmailValidation, sAuditRetentionValidation, sConnectionIssueRetentionValidation, sMinSessionDurationValidation, sNotificationDurationValidation,
 		sDbSnapshotRetentionValidation, // null (and filtered out) if this field isn't rendered
 		sQuotaWarningPctValidation, sQuotaCriticalPctValidation,
 	].filter(Boolean);
@@ -826,6 +837,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		default_bandwidth_monthly_gb: val("s-default-bandwidth") ? Number(val("s-default-bandwidth")) : null,
 		default_quota_enforcement_policy: document.querySelector('input[name="s-quota-policy"]:checked')?.value || "soft",
 		allow_duplicate_macs: document.getElementById("s-allow-duplicate-macs").checked,
+		min_session_duration_seconds: intOrNull(val("s-min-session-duration")),
 		support_ticket_rate_limit_count: intOrNull(val("s-support-rate-limit-count")),
 		support_ticket_rate_limit_window_minutes: intOrNull(val("s-support-rate-limit-window")),
 		support_max_attachment_size_mb: intOrNull(val("s-support-max-attachment-size")),

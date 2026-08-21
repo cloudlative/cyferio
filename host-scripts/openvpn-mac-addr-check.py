@@ -174,7 +174,7 @@ def report_rejection(reason, message, **detected):
     unreachable, timeout, bad response) is swallowed -- this must never
     change the connect decision or slow it down noticeably. `detected` may
     include source_ip/detected_mac/detected_country/detected_city/
-    detected_asn/detected_asn_name; any omitted key is sent as null."""
+    detected_asn/detected_asn_name/detected_os; any omitted key is sent as null."""
     url = policy_lib.CFG.get("APP_INGEST_URL")
     token = policy_lib.CFG.get("APP_INGEST_TOKEN")
     if not url or not token:
@@ -204,7 +204,7 @@ def reject(log, reason, message, **detected):
     every other reason) -- see that function's own comment for why both
     phrases are recognized rather than replacing the original one.
     `detected` (source_ip/detected_mac/detected_country/detected_city/
-    detected_asn/detected_asn_name/registered_mac, whichever are known at
+    detected_asn/detected_asn_name/detected_os/registered_mac, whichever are known at
     this call site) is passed straight through to report_rejection()
     above (the new DB-backed history). When "registered_mac" is one of
     the given keys (mac_mismatch only -- see its call site), it's
@@ -274,7 +274,7 @@ with open(log_file, 'a') as LogFile:
     if not db_lookup(env_user, env_mac_addr):
         reject(LogFile, "mac_mismatch",
                "The MAC address of the client machine could not be found in the database",
-               source_ip=env_trusted_ip, detected_mac=env_mac_addr,
+               source_ip=env_trusted_ip, detected_mac=env_mac_addr, detected_os=env_iv_plat,
                registered_mac=db_lookup_registered(env_user))
 
     # Identity established (cert CN + device MAC both matched) -- look up
@@ -307,7 +307,7 @@ with open(log_file, 'a') as LogFile:
             reject(LogFile, "os_not_allowed",
                    "OpenVPN connection rejected: client OS '{0}' is not in {1}'s allowed OS list ({2})".format(
                        env_iv_plat or "unknown", env_user, ", ".join(allowed_os)),
-                   source_ip=env_trusted_ip)
+                   source_ip=env_trusted_ip, detected_os=env_iv_plat)
 
     # 3) Country restriction (GeoIP) -----------------------------------------
     # Fail-safe: only even attempts a GeoIP lookup at all if this specific
@@ -328,12 +328,12 @@ with open(log_file, 'a') as LogFile:
             reject(LogFile, "country_lookup_failed",
                    "OpenVPN connection rejected: GeoIP country lookup failed ({0}) for {1} while a country restriction is configured for {2}".format(
                        err, env_trusted_ip or "unknown", env_user),
-                   source_ip=env_trusted_ip)
+                   source_ip=env_trusted_ip, detected_os=env_iv_plat)
         if country not in allowed_countries:
             reject(LogFile, "country_not_allowed",
                    "OpenVPN connection rejected: client country '{0}' is not in {1}'s allowed countries ({2})".format(
                        country or "unknown", env_user, ", ".join(allowed_countries)),
-                   source_ip=env_trusted_ip, detected_country=country)
+                   source_ip=env_trusted_ip, detected_country=country, detected_os=env_iv_plat)
 
     # 4) City restriction (GeoIP) --------------------------------------------
     allowed_cities = policy.get("allowed_cities") or []
@@ -344,13 +344,13 @@ with open(log_file, 'a') as LogFile:
             reject(LogFile, "city_lookup_failed",
                    "OpenVPN connection rejected: GeoIP city lookup failed ({0}) for {1} while a city restriction is configured for {2}".format(
                        err, env_trusted_ip or "unknown", env_user),
-                   source_ip=env_trusted_ip)
+                   source_ip=env_trusted_ip, detected_os=env_iv_plat)
         allowed_cities_lower = {c.lower() for c in allowed_cities}
         if (city or "").lower() not in allowed_cities_lower:
             reject(LogFile, "city_not_allowed",
                    "OpenVPN connection rejected: client city '{0}' is not in {1}'s allowed cities ({2})".format(
                        city or "unknown", env_user, ", ".join(allowed_cities)),
-                   source_ip=env_trusted_ip, detected_city=city)
+                   source_ip=env_trusted_ip, detected_city=city, detected_os=env_iv_plat)
 
     # 5) Network/ASN restriction (GeoIP) --------------------------------------
     allowed_asns = policy.get("allowed_asns") or []
@@ -361,12 +361,12 @@ with open(log_file, 'a') as LogFile:
             reject(LogFile, "asn_lookup_failed",
                    "OpenVPN connection rejected: GeoIP ASN lookup failed ({0}) for {1} while a network restriction is configured for {2}".format(
                        err, env_trusted_ip or "unknown", env_user),
-                   source_ip=env_trusted_ip)
+                   source_ip=env_trusted_ip, detected_os=env_iv_plat)
         if asn not in allowed_asns:
             reject(LogFile, "asn_not_allowed",
                    "OpenVPN connection rejected: client network '{0}' is not in {1}'s allowed networks ({2})".format(
                        asn or "unknown", env_user, ", ".join(allowed_asns)),
-                   source_ip=env_trusted_ip, detected_asn=asn)
+                   source_ip=env_trusted_ip, detected_asn=asn, detected_os=env_iv_plat)
 
     # 6) IP address restriction ------------------------------------------------
     # No GeoIP database involved -- a direct trusted_ip-vs-allowlist
@@ -378,7 +378,7 @@ with open(log_file, 'a') as LogFile:
             reject(LogFile, "ip_not_allowed",
                    "OpenVPN connection rejected: client IP '{0}' is not in {1}'s allowed IP list ({2})".format(
                        env_trusted_ip or "unknown", env_user, ", ".join(allowed_ips)),
-                   source_ip=env_trusted_ip)
+                   source_ip=env_trusted_ip, detected_os=env_iv_plat)
 
     # 7) Monthly bandwidth quota (soft cutoff, connect-time only) -----------
     quota_gb = policy.get("bandwidth_monthly_gb")
@@ -398,7 +398,7 @@ with open(log_file, 'a') as LogFile:
             reject(LogFile, "bandwidth_exceeded",
                    "OpenVPN connection rejected: {0}'s monthly bandwidth quota exceeded ({1:.2f} / {2} GB used this month)".format(
                        env_user, used_bytes / (1024 ** 3), quota_gb),
-                   source_ip=env_trusted_ip)
+                   source_ip=env_trusted_ip, detected_os=env_iv_plat)
 
     print("The MAC address of the client machine has been successfully matched to the database")
     LogFile.write("\nThe MAC address of the client machine has been successfully matched to the database\n\n")

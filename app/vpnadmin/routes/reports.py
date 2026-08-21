@@ -16,11 +16,12 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 
+from .. import app_settings
 from .. import cli_wrapper as cli
 from .. import geoip, health, policy_store
 from ..cli_wrapper import ScriptError
 from ..db import engine, get_db
-from ..models import AuditLog, DbStatSnapshot, QuotaNotification, Team, User, VpnProfileLink
+from ..models import AuditLog, ConnectionRejectionLog, DbStatSnapshot, Team, User, VpnProfileLink
 from ..permissions import require_permission_any_scope
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -32,6 +33,11 @@ require_reports_view = require_permission_any_scope("reports", "view")
 # more sensitive than anything else "reports" exposes; excluded from the
 # Viewer role by default, unlike "reports" itself).
 require_db_reporting_view = require_permission_any_scope("db_reporting", "view")
+# Connection Failures (below) is gated on "health", matching Diagnostics'
+# own page-level gate (routes/pages.py's diagnostics_page) rather than
+# "reports" -- it's additive data for that same page, not a new report an
+# admin without health:view but with reports:view should be able to reach.
+require_health_view = require_permission_any_scope("health", "view")
 
 
 def _per_client_row(user: User, client_name: str | None, policies: dict, usage: dict) -> dict:
@@ -93,36 +99,6 @@ def _source_ip_summary(sessions: list[dict]) -> dict:
     }
 
 
-def _recent_quota_warnings(db: Session, limit: int = 50) -> list[dict]:
-    """Every user's recent bandwidth-quota-threshold QuotaNotification rows
-    (main.py's _quota_notification_loop), newest first -- an ADMIN-WIDE
-    view across every user, unlike routes/notifications.py's own
-    list_my_notifications() which is deliberately scoped to just the
-    caller's own rows. Used by Diagnostics' "Active Quota Warnings" panel
-    and the Dashboard's System Insights card -- both want "which users are
-    near/over quota right now", just at different levels of detail."""
-    rows = (
-        db.query(QuotaNotification)
-        .options(selectinload(QuotaNotification.user))
-        .order_by(QuotaNotification.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-    return [
-        {
-            "id": n.id,
-            "username": n.user.username if n.user else None,
-            "display_name": n.user.display_name if n.user else None,
-            "vpn_client_name": n.vpn_client_name,
-            "level": n.level,
-            "pct_used": n.pct_used,
-            "message": n.message,
-            "created_at": n.created_at.isoformat() if n.created_at else None,
-        }
-        for n in rows
-    ]
-
-
 def _load_rows(db: Session) -> list[dict]:
     """Every active, non-deleted user with a linked VPN profile, joined
     against the current policy/usage snapshot -- the common data set every
@@ -144,6 +120,43 @@ def _load_rows(db: Session) -> list[dict]:
             continue
         rows.append(_per_client_row(user, user.vpn_profile_link.vpn_client_name, policies, usage))
     return rows
+
+
+def _active_quota_warnings(db: Session, limit: int = 50) -> list[dict]:
+    """Every user CURRENTLY at/over the configured warning/critical
+    bandwidth-quota threshold, computed live from _load_rows() -- i.e. this
+    reflects usage/quota as they stand RIGHT NOW, not "ever crossed a
+    threshold at some point". Used by Diagnostics' "Active Quota Warnings"
+    panel and the Dashboard's System Insights card, both of which want
+    exactly that live view -- NOT QuotaNotification (models.py), which is
+    an append-only, never-updated EVENT log of past threshold crossings
+    (main.py's _quota_notification_loop), correct for its own job backing
+    the notification bell (routes/notifications.py's list_my_notifications,
+    which deliberately shows history: "you were warned on this date"), but
+    wrong for a panel titled "Active" -- resetting a user's usage after
+    they'd crossed "critical" left their old QuotaNotification row sitting
+    there forever with no way to tell it had been resolved, so this panel
+    kept showing them as critical long after the reset (found live
+    2026-08-21). This function is what actually earns that "Active" label;
+    QuotaNotification/the bell are untouched."""
+    warning_pct = app_settings.runtime.quota_notify_warning_pct
+    critical_pct = app_settings.runtime.quota_notify_critical_pct
+    out = []
+    for r in _load_rows(db):
+        pct = r["pct_used"]
+        if pct is None or pct < warning_pct:
+            continue
+        level = "critical" if pct >= critical_pct else "warning"
+        out.append({
+            "username": r["username"],
+            "display_name": r["display_name"],
+            "vpn_client_name": r["vpn_client_name"],
+            "level": level,
+            "pct_used": pct,
+            "message": f"{pct}% of this month's bandwidth quota used ({r['used_gb']} / {r['quota_gb']} GB).",
+        })
+    out.sort(key=lambda w: w["pct_used"], reverse=True)
+    return out[:limit]
 
 
 @router.get("/users")
@@ -350,6 +363,193 @@ def get_login_activity(
         .all()
     )
     return [{"timestamp": ts.isoformat() if ts else None, "username": username} for ts, username in rows]
+
+
+# --- Connection Failures (VPN Client Management / Connection Failure
+# Tracking) -----------------------------------------------------------------
+# Data source is ConnectionRejectionLog, not the flat openvpn.log file
+# Diagnostics' own /api/status/rejected table reads -- that flat-file path
+# (host-scripts/openvpn-mac-addr-check.py's per-attempt env dump, parsed by
+# vpn-status.py) never captured detected_country/detected_city/detected_asn
+# at all (reject() only ever wrote `reason`/`registered_mac_at_time` lines
+# to the log file itself; the detected_* fields were always POST-only, see
+# report_rejection()). This is genuinely the only place that data exists,
+# so it's the only source rich enough for failure-type/geographic/ASN
+# breakdowns -- Diagnostics' table stays on the flat file (it has its own
+# OS/repeat-count columns this table doesn't track), this is additive.
+
+# reason -> human label, same mapping (and same intentional fallback to the
+# raw string for anything unlisted) as diagnostics.html's own
+# REJECTION_REASON_LABELS -- duplicated rather than shared since one lives
+# in Python (this response) and the other in the template's own JS, and
+# both need to independently keep working if only one is ever updated.
+_FAILURE_REASON_LABELS = {
+    "mac_mismatch": "MAC Address Mismatch / Unregistered Device",
+    "os_not_allowed": "Device OS Restriction",
+    "country_not_allowed": "Country Restriction",
+    "country_lookup_failed": "Country Lookup Failed",
+    "city_not_allowed": "City Restriction",
+    "city_lookup_failed": "City Lookup Failed",
+    "asn_not_allowed": "Network (ASN) Restriction",
+    "asn_lookup_failed": "Network (ASN) Lookup Failed",
+    "ip_not_allowed": "IP Address Restriction",
+    "bandwidth_exceeded": "Bandwidth Quota Exceeded",
+}
+
+
+def _counts_dict(items, *, skip_blank: bool = True) -> dict[str, int]:
+    """value -> occurrence count, over any iterable of (possibly None)
+    strings. `skip_blank=False` folds a missing value into an explicit
+    "n/a" bucket instead of dropping it -- used for by_reason/by_client
+    below, where "how many rows have no value here" is itself meaningful;
+    the geo/IP breakdowns (skip_blank=True, the default) just omit rows
+    with nothing detected rather than clutter a chart with an "n/a" slice."""
+    counts: dict[str, int] = {}
+    for v in items:
+        if not v and skip_blank:
+            continue
+        key = v or "n/a"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _top_counts(items: list[str | None], limit: int = 10) -> list[dict]:
+    counts = _counts_dict(items)
+    return [{"key": k, "count": c} for k, c in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:limit]]
+
+
+@router.get("/connection-failures")
+def get_connection_failures(
+    days: int = Query(30, ge=1, le=365),
+    reason: str | None = Query(None),
+    client: str | None = Query(None, description="Filter to one vpn_client_name"),
+    country: str | None = Query(None, description="Filter to one detected_country code"),
+    limit: int = Query(200, ge=1, le=1000),
+    _: User = Depends(require_health_view),
+    db: Session = Depends(get_db),
+):
+    """Failed Connection Analytics -- every rejected connect attempt
+    (device/location/network/quota policy violations) in the window,
+    aggregated for the summary cards/charts plus a capped list of the raw
+    rows themselves. `reason`/`client`/`country` narrow the SAME window
+    used for both the aggregates and the row list, so a filtered chart and
+    a filtered table are always looking at the same data -- unlike
+    Diagnostics' page-level filters, which narrow client-side after one
+    unfiltered fetch, this narrows the query itself (there can be far more
+    rejection history than the 500-row cap that page works within)."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    q = db.query(ConnectionRejectionLog).filter(ConnectionRejectionLog.timestamp >= cutoff)
+    if reason:
+        q = q.filter(ConnectionRejectionLog.reason == reason)
+    if client:
+        q = q.filter(ConnectionRejectionLog.vpn_client_name == client)
+    if country:
+        q = q.filter(ConnectionRejectionLog.detected_country == country)
+    rows = q.order_by(ConnectionRejectionLog.timestamp.desc()).all()
+
+    # Portal identity for whichever vpn_client_names actually show up here
+    # -- same join-by-name pattern routes/status.py's get_session_history
+    # uses, not a per-row query.
+    client_names = {r.vpn_client_name for r in rows}
+    links = (
+        db.query(VpnProfileLink.vpn_client_name, User.username, User.first_name, User.last_name)
+        .join(User, User.id == VpnProfileLink.user_id)
+        .filter(VpnProfileLink.vpn_client_name.in_(client_names))
+        .all()
+    ) if client_names else []
+    identity_by_client = {
+        name: {"username": username, "display_name": f"{first} {last}".strip() if last else first}
+        for name, username, first, last in links
+    }
+
+    # Daily bucket counts, zero-filled for every day in [cutoff, now] so a
+    # quiet day reads as an honest 0 on the trend chart rather than simply
+    # being absent from the series (which a line chart would otherwise draw
+    # as a straight line across, implying data that isn't there).
+    by_day: dict[str, int] = {}
+    day_cursor = cutoff.date()
+    today = datetime.now(timezone.utc).date()
+    while day_cursor <= today:
+        by_day[day_cursor.isoformat()] = 0
+        day_cursor += timedelta(days=1)
+    for r in rows:
+        key = r.timestamp.date().isoformat() if r.timestamp else None
+        if key in by_day:
+            by_day[key] += 1
+
+    return {
+        "total": len(rows),
+        "unique_clients_affected": len(client_names),
+        "by_reason": [
+            {"reason": k, "label": _FAILURE_REASON_LABELS.get(k, k), "count": v}
+            for k, v in sorted(_counts_dict((r.reason for r in rows), skip_blank=False).items(), key=lambda kv: kv[1], reverse=True)
+        ],
+        "by_country": _top_counts([r.detected_country for r in rows]),
+        "by_city": _top_counts([r.detected_city for r in rows]),
+        "by_asn": _top_counts([f"{r.detected_asn} ({r.detected_asn_name})" if r.detected_asn_name else r.detected_asn for r in rows]),
+        "by_source_ip": _top_counts([r.source_ip for r in rows]),
+        "by_client": [
+            {"vpn_client_name": k, "username": identity_by_client.get(k, {}).get("username"),
+             "display_name": identity_by_client.get(k, {}).get("display_name"), "count": v}
+            for k, v in sorted(_counts_dict(r.vpn_client_name for r in rows).items(), key=lambda kv: kv[1], reverse=True)[:10]
+        ],
+        "time_series": [{"date": k, "count": v} for k, v in sorted(by_day.items())],
+        "rows": [
+            {
+                "id": r.id,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+                "vpn_client_name": r.vpn_client_name,
+                "username": identity_by_client.get(r.vpn_client_name, {}).get("username"),
+                "display_name": identity_by_client.get(r.vpn_client_name, {}).get("display_name"),
+                "reason": r.reason,
+                "reason_label": _FAILURE_REASON_LABELS.get(r.reason, r.reason),
+                "message": r.message,
+                "source_ip": r.source_ip,
+                "detected_mac": r.detected_mac,
+                "detected_country": r.detected_country,
+                "detected_city": r.detected_city,
+                "detected_asn": r.detected_asn,
+                "detected_asn_name": r.detected_asn_name,
+                "detected_os": r.detected_os,
+                "registered_mac_at_time": r.registered_mac_at_time,
+            }
+            for r in rows[:limit]
+        ],
+    }
+
+
+@router.get("/dropped-sessions")
+def get_dropped_sessions(
+    days: int = Query(30, ge=1, le=365),
+    client: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=500),
+    _: User = Depends(require_health_view),
+):
+    """The complement of Connection History -- sessions that connected and
+    disconnected too fast (see AppSettings.min_session_duration_seconds) to
+    count as real usage, excluded from status_session_history() and every
+    session-based report. These are NOT policy rejections (no `reason`,
+    ConnectionRejectionLog has no row for them) -- the client-connect gates
+    all passed -- so they're kept as their own small section rather than
+    folded into get_connection_failures() above, which would otherwise
+    imply a policy reason that doesn't exist for these rows."""
+    try:
+        rows = cli.status_dropped_sessions(500, client)
+    except ScriptError as e:
+        raise HTTPException(status_code=502, detail=e.message)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    in_range = []
+    for r in rows:
+        ts = r.get("disconnected_at") or r.get("connected_at")
+        try:
+            when = datetime.fromisoformat(ts) if ts else None
+        except ValueError:
+            when = None
+        if when is not None and when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        if when is None or when >= cutoff:
+            in_range.append(r)
+    return {"total": len(in_range), "rows": in_range[:limit]}
 
 
 # --- Database Reporting (Phase 3) -----------------------------------------

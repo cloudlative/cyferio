@@ -9,7 +9,7 @@ from ..permissions import require_permission_any_scope
 # Reused rather than duplicated -- see that function's own docstring for
 # why this is deliberately an admin-wide view, unlike routes/notifications.py's
 # self-scoped list_my_notifications().
-from .reports import _recent_quota_warnings
+from .reports import _active_quota_warnings
 
 router = APIRouter(prefix="/api", tags=["diagnostics"])
 
@@ -56,4 +56,4 @@ def get_quota_warnings(
     quota warnings staying visible only to the affected user's own
     notification bell. Same "health"/view any-scope gate as everything
     else on this page -- see _require_diagnostics_viewer above."""
-    return _recent_quota_warnings(db, limit)
+    return _active_quota_warnings(db, limit)

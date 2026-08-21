@@ -72,8 +72,13 @@ class TestArgumentConstruction:
 
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.status_session_history(limit=71)
+        # Always over-fetches the script's own 500-row cap, then filters/
+        # slices to `limit` in Python -- see status_session_history's own
+        # docstring for why asking the script for exactly `limit` rows
+        # would silently under-fill the caller's window once short/dropped
+        # sessions are excluded (AppSettings.min_session_duration_seconds).
         assert seen["args"] == [
-            "sudo", "-n", "python3", "/fake/vpn-status.py", "--session-history", "71", "--json",
+            "sudo", "-n", "python3", "/fake/vpn-status.py", "--session-history", "500", "--json",
         ]
 
     def test_session_history_with_client_passes_flag(self, monkeypatch):
@@ -86,7 +91,7 @@ class TestArgumentConstruction:
         monkeypatch.setattr(subprocess, "run", fake_run)
         cw.status_session_history(limit=72, client="alice")
         assert seen["args"] == [
-            "sudo", "-n", "python3", "/fake/vpn-status.py", "--session-history", "72", "--client", "alice", "--json",
+            "sudo", "-n", "python3", "/fake/vpn-status.py", "--session-history", "500", "--client", "alice", "--json",
         ]
 
     def test_session_history_client_filter_has_isolated_cache_key(self, monkeypatch):

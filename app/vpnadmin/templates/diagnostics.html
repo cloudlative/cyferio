@@ -9,6 +9,52 @@
 
 <div class="ua-summary-row" id="violations-summary"></div>
 
+<div class="card" id="failure-analytics-card">
+	<div class="toolbar">
+		<h2 style="margin:0">Failed Connection Analytics</h2>
+		<div class="field" style="margin:0;min-width:140px">
+			<select id="fa-range">
+				<option value="7">Last 7 days</option>
+				<option value="30" selected>Last 30 days</option>
+				<option value="90">Last 90 days</option>
+				<option value="365">Last 12 months</option>
+			</select>
+		</div>
+	</div>
+	<p class="page-subtitle" style="margin:-6px 0 18px">Location/network detail (country, city, ASN, source IP) that the flat-file-derived table below can't carry -- drawn from every logged rejection's own detected-at-the-time attributes, not a live re-lookup.</p>
+	<div class="ua-summary-row" id="fa-summary"></div>
+	<div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:18px">
+		<div style="flex:2;min-width:320px">
+			<h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--text-muted);font-weight:700">Failed Attempts Over Time</h3>
+			<div class="chart-canvas-mount" style="height:220px"><canvas id="fa-trend-chart"></canvas></div>
+		</div>
+		<div style="flex:1;min-width:220px">
+			<h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--text-muted);font-weight:700">By Failure Type</h3>
+			<div id="fa-reason-chart"></div>
+		</div>
+	</div>
+	<div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:22px">
+		<div style="flex:1;min-width:260px">
+			<h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--text-muted);font-weight:700">Top Users by Failed Attempts</h3>
+			<div id="fa-top-users"><p class="muted">Loading…</p></div>
+		</div>
+		<div style="flex:1;min-width:260px">
+			<h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--text-muted);font-weight:700">Top Source IPs</h3>
+			<div id="fa-top-ips"><p class="muted">Loading…</p></div>
+		</div>
+		<div style="flex:1;min-width:260px">
+			<h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--text-muted);font-weight:700">Geographic Breakdown</h3>
+			<div id="fa-geo"><p class="muted">Loading…</p></div>
+		</div>
+	</div>
+</div>
+
+<div class="card" id="dropped-sessions-card" style="display:none">
+	<div class="toolbar"><h2 style="margin:0">Dropped / Instant Connections</h2></div>
+	<p class="page-subtitle" style="margin:-6px 0 18px">Connections that passed every device/location/network/quota check (these were NOT rejected) but disconnected too fast to count as real usage -- excluded from Connection History and every session-based report. See Settings -&gt; VPN Management's "Minimum Meaningful Session Duration" to change the threshold.</p>
+	<div id="dropped-sessions-result"><p class="muted">Loading…</p></div>
+</div>
+
 <div class="card" id="quota-warnings-card" style="display:none">
 	<div class="toolbar"><h2 style="margin:0">Active Quota Warnings</h2></div>
 	<p class="page-subtitle" style="margin:-6px 0 18px">Every user currently near or over their monthly bandwidth quota (Settings -&gt; Notifications sets the warning/critical thresholds) -- the same events shown in each affected user's own notification bell, gathered here in one admin-wide view.</p>
@@ -93,6 +139,102 @@ function renderViolationsSummary(rejected, quotaWarnings) {
 	`;
 }
 
+// --- Failed Connection Analytics (ConnectionRejectionLog-backed) ---------
+// Deliberately a separate data source/fetch from the MAC-focused table
+// below (which stays on the flat-file /api/status/rejected) -- see
+// routes/reports.py's get_connection_failures docstring for why the flat
+// file can never carry detected_country/city/asn, only this DB table can.
+
+function faCountryLabel(code) {
+	// Same convention Per-User Analytics' country donut already uses
+	// elsewhere on this app (raw ISO codes are all this data has -- no
+	// full country-name table shipped client-side).
+	return code || "(unknown)";
+}
+
+async function loadFailureAnalytics() {
+	const days = document.getElementById("fa-range").value;
+	let data;
+	try {
+		data = await apiFetch(`/api/reports/connection-failures?days=${days}&limit=1`);
+	} catch (e) {
+		document.getElementById("fa-summary").innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+		return;
+	}
+	document.getElementById("fa-summary").innerHTML = `
+		<div class="ua-summary-stat"><div class="ua-summary-value">${data.total}</div><div class="ua-summary-label">Total Failed Attempts</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${data.unique_clients_affected}</div><div class="ua-summary-label">VPN Profiles Affected</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${data.by_reason[0] ? data.by_reason[0].label : "—"}</div><div class="ua-summary-label">Most Common Reason</div></div>
+		<div class="ua-summary-stat"><div class="ua-summary-value">${data.by_country[0] ? faCountryLabel(data.by_country[0].key) : "—"}</div><div class="ua-summary-label">Top Source Country</div></div>
+	`;
+
+	renderChart(document.getElementById("fa-trend-chart"),
+		buildChartJsConfig("line", data.time_series.map(p => ({ label: p.date.slice(5), value: p.count }))));
+
+	renderDonutChart(document.getElementById("fa-reason-chart"),
+		data.by_reason.slice(0, 8).map(r => ({ label: r.label, value: r.count })));
+
+	const usersEl = document.getElementById("fa-top-users");
+	usersEl.innerHTML = data.by_client.length
+		? `<table><thead><tr><th>User</th><th>VPN Profile</th><th>Attempts</th></tr></thead><tbody>${
+			data.by_client.map(c => `<tr><td>${escapeHtml(c.display_name || c.username || "—")}</td><td class="mono">${escapeHtml(c.vpn_client_name)}</td><td>${c.count}</td></tr>`).join("")
+		}</tbody></table>`
+		: '<p class="muted">No failed attempts in this range.</p>';
+
+	const ipsEl = document.getElementById("fa-top-ips");
+	ipsEl.innerHTML = data.by_source_ip.length
+		? `<table><thead><tr><th>Source IP</th><th>Attempts</th></tr></thead><tbody>${
+			data.by_source_ip.map(i => `<tr><td class="mono">${escapeHtml(i.key)}</td><td>${i.count}</td></tr>`).join("")
+		}</tbody></table>`
+		: '<p class="muted">No source IPs recorded in this range.</p>';
+
+	const geoEl = document.getElementById("fa-geo");
+	if (data.by_country.length === 0 && data.by_city.length === 0) {
+		geoEl.innerHTML = '<p class="muted">No location-restricted rejections in this range.</p>';
+	} else {
+		geoEl.innerHTML = `<table><thead><tr><th>Country</th><th>Attempts</th></tr></thead><tbody>${
+			data.by_country.slice(0, 8).map(c => `<tr><td>${escapeHtml(faCountryLabel(c.key))}</td><td>${c.count}</td></tr>`).join("")
+		}</tbody></table>`;
+		if (data.by_city.length) {
+			geoEl.innerHTML += `<table style="margin-top:10px"><thead><tr><th>City</th><th>Attempts</th></tr></thead><tbody>${
+				data.by_city.slice(0, 8).map(c => `<tr><td>${escapeHtml(c.key)}</td><td>${c.count}</td></tr>`).join("")
+			}</tbody></table>`;
+		}
+	}
+}
+
+// --- Dropped / Instant Connections ---------------------------------------
+
+async function loadDroppedSessions() {
+	const card = document.getElementById("dropped-sessions-card");
+	const el = document.getElementById("dropped-sessions-result");
+	const days = document.getElementById("fa-range").value;
+	let data;
+	try {
+		data = await apiFetch(`/api/reports/dropped-sessions?days=${days}&limit=50`);
+	} catch (e) {
+		card.style.display = "";
+		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+		return;
+	}
+	if (data.total === 0) {
+		card.style.display = "none";
+		return;
+	}
+	card.style.display = "";
+	el.innerHTML = `<p class="muted" style="margin-top:0">${data.total} dropped connection${data.total === 1 ? "" : "s"} in this range.</p>
+		<table><thead><tr><th>Connected</th><th>VPN Profile</th><th>Duration</th><th>Source IP</th></tr></thead><tbody>${
+			data.rows.map(r => `<tr>
+				<td class="mono">${escapeHtml(fmtTimestamp(r.connected_at))}</td>
+				<td>${escapeHtml(r.client)}</td>
+				<td class="mono">${r.duration_seconds}s</td>
+				<td class="mono">${escapeHtml(r.source_ip || "n/a")}</td>
+			</tr>`).join("")
+		}</tbody></table>`;
+}
+
+document.getElementById("fa-range").addEventListener("change", () => { loadFailureAnalytics(); loadDroppedSessions(); });
+
 let lastQuotaWarnings = [];
 
 function renderQuotaWarnings() {
@@ -103,14 +245,21 @@ function renderQuotaWarnings() {
 		return;
 	}
 	card.style.display = "";
+	// Fields here are a LIVE snapshot (routes/reports.py's
+	// _active_quota_warnings, recomputed from current usage/quota on every
+	// load) -- there's no "Raised" timestamp anymore, unlike the old
+	// QuotaNotification-backed version of this panel, since a row here
+	// isn't a discrete past event; it's "still true right now". That old
+	// version kept showing a user as critical forever after their usage
+	// was reset, because it never re-checked -- see that function's own
+	// docstring.
 	el.innerHTML = `<table>
-		<thead><tr><th>User</th><th>VPN Profile</th><th>Level</th><th>Usage</th><th>Raised</th></tr></thead>
+		<thead><tr><th>User</th><th>VPN Profile</th><th>Level</th><th>Usage</th></tr></thead>
 		<tbody>${lastQuotaWarnings.map(n => `<tr>
 				<td>${escapeHtml(n.display_name || n.username || "—")}</td>
 				<td class="mono">${escapeHtml(n.vpn_client_name)}</td>
 				<td><span class="status-pill ${n.level === "critical" ? "status-revoked" : "status-offline"}">${escapeHtml(n.level)}</span></td>
 				<td class="mono">${n.pct_used}%</td>
-				<td class="muted">${escapeHtml(fmtTimestamp(n.created_at))}</td>
 			</tr>`).join("")}</tbody>
 	</table>`;
 }
@@ -299,8 +448,12 @@ async function loadRejected() {
 document.getElementById("rejected-filter-name").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
 document.getElementById("rejected-filter-os").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
 document.getElementById("rejected-filter-reason").addEventListener("change", () => { rejectedPage = 1; renderRejectedTable(); });
-document.getElementById("refresh-btn").addEventListener("click", () => { loadRejected(); loadQuotaWarnings(); });
+document.getElementById("refresh-btn").addEventListener("click", () => {
+	loadRejected(); loadQuotaWarnings(); loadFailureAnalytics(); loadDroppedSessions();
+});
 loadRejected();
 loadQuotaWarnings().then(() => renderViolationsSummary(rejectedEntries, lastQuotaWarnings));
+loadFailureAnalytics();
+loadDroppedSessions();
 </script>
 {% endblock %}

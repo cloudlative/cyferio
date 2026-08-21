@@ -898,6 +898,52 @@ async function copyTextToClipboard(text, sourceEl) {
 	return copied;
 }
 
+/**
+ * Triggers a browser "Save As" download of `text` as a plain-text file
+ * named `filename` -- a Blob + object-URL + synthetic <a download> click,
+ * the standard client-only way to hand the user a file with no server
+ * round-trip. Used for MFA recovery codes (mfa_setup.html, profile.html)
+ * so "save these somewhere safe" has a one-click option beyond manual
+ * copy/paste. Revokes the object URL right after the click so it doesn't
+ * linger in memory.
+ */
+function downloadTextFile(filename, text) {
+	const blob = new Blob([text], { type: "text/plain" });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement("a");
+	a.href = url;
+	a.download = filename;
+	a.style.display = "none";
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	URL.revokeObjectURL(url);
+}
+
+/**
+ * Renders a Copy/Download button pair into `mountEl` for a set of MFA
+ * recovery `codes` -- shared by mfa_setup.html (first-time enrollment) and
+ * profile.html (regenerate) so both places offer the same "save these now,
+ * they won't be shown again" affordances instead of leaving the operator
+ * to manually select/retype a plaintext block (or, worse, screenshot a
+ * plain `alert()`, which is what profile.html's regenerate flow did before
+ * this existed).
+ */
+function renderRecoveryCodesActions(mountEl, codes) {
+	mountEl.innerHTML = `
+		<button type="button" class="btn-secondary btn-sm" id="rc-copy-btn">Copy Codes</button>
+		<button type="button" class="btn-secondary btn-sm" id="rc-download-btn">Download Codes</button>
+	`;
+	mountEl.querySelector("#rc-copy-btn").addEventListener("click", async (ev) => {
+		const ok = await copyTextToClipboard(codes.join("\n"));
+		toast(ok ? "Recovery codes copied to clipboard." : "Couldn't copy automatically -- select and copy the codes above manually.", ok ? "success" : "error");
+	});
+	mountEl.querySelector("#rc-download-btn").addEventListener("click", () => {
+		downloadTextFile("recovery-codes.txt",
+			"Cyferio VPN Portal -- MFA recovery codes\nEach code works once. Keep this file somewhere safe.\n\n" + codes.join("\n") + "\n");
+	});
+}
+
 // --- City/ASN cascading "pick a country, search its GeoIP-real values"
 // pickers -- shared by users.html's Login Restrictions panels AND
 // clients.html's Manage Restrictions dialog (both need identical City/ASN

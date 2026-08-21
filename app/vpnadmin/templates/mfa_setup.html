@@ -21,6 +21,7 @@
 			<div class="mono" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.92rem">
 				{% for c in recovery_codes %}<div>{{ c }}</div>{% endfor %}
 			</div>
+			<div class="form-row" style="margin-top:14px" id="recovery-codes-actions"></div>
 		</div>
 		<a href="/" class="btn btn-primary" style="display:flex;text-align:center;text-decoration:none;justify-content:center">Continue</a>
 		{% else %}
@@ -49,4 +50,22 @@
 		{% endif %}
 	</div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% if recovery_codes %}
+<script>
+// This must live in the "scripts" block, not the "content" block above --
+// base.html renders content BEFORE app.js's own script tag and scripts
+// AFTER it (see base.html's own comment on the two blocks), so calling
+// app.js's renderRecoveryCodesActions() from content would hit it before
+// it's even defined. The surrounding if-check has to be INSIDE the block
+// declaration, not wrapped around it -- Jinja resolves a block tag
+// structurally regardless of any if-check around it, so wrapping the block
+// declaration itself in a runtime condition is a template syntax error,
+// not a no-op (that's the "unknown tag 'endif'" this comment is guarding
+// against regressing back to).
+renderRecoveryCodesActions(document.getElementById("recovery-codes-actions"), {{ recovery_codes | tojson }});
+</script>
+{% endif %}
 {% endblock %}

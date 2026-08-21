@@ -206,6 +206,7 @@ class _RuntimeSettings:
         self.recaptcha_secret_key = env_settings.RECAPTCHA_SECRET_KEY
         self.connection_issue_retention_days = 60  # None/0 (if explicitly set) = keep forever
         self.allow_duplicate_macs = False  # default = strict, matches openvpn-install.sh's original always-on behavior
+        self.min_session_duration_seconds = 3  # see AppSettings.min_session_duration_seconds -- 0 disables the split
 
         # Support Ticketing System -- see AppSettings' own columns for why
         # these are admin-tweakable rather than hardcoded.
@@ -293,6 +294,9 @@ def refresh_runtime_cache(db: Session) -> None:
     # still explicitly set 0 for forever" stance as db_snapshot_retention_days.
     runtime.connection_issue_retention_days = row.connection_issue_retention_days if row.connection_issue_retention_days is not None else 60
     runtime.allow_duplicate_macs = bool(row.allow_duplicate_macs)
+    runtime.min_session_duration_seconds = (
+        row.min_session_duration_seconds if row.min_session_duration_seconds is not None else 3
+    )
 
     runtime.support_ticket_rate_limit_count = row.support_ticket_rate_limit_count if row.support_ticket_rate_limit_count is not None else 5
     runtime.support_ticket_rate_limit_window_minutes = (

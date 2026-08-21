@@ -601,6 +601,23 @@ class AppSettings(Base):
     # actually connect, only whether registering a shared MAC is accepted.
     allow_duplicate_macs = Column(Boolean, nullable=True)
 
+    # Connection History / Reporting accuracy -- a session_history.jsonl
+    # entry (host-scripts/openvpn-client-disconnect.py) whose duration is
+    # BELOW this many seconds is treated as a dropped/instant connection
+    # rather than a real, meaningful VPN session: the client-connect script
+    # already accepted it (it passed the MAC/OS/geo/quota gates -- this is
+    # NOT a ConnectionRejectionLog policy rejection), but it disconnected
+    # too fast to represent actual usage -- e.g. a flaky network, a client
+    # immediately retrying on a stale config, or a duplicate-CN kick.
+    # Excluded from Connection History and every session-based report/chart
+    # (session counts, average duration, connection trends, peak usage,
+    # most-active-clients) -- see cli_wrapper.status_session_history's
+    # filtering and status_dropped_sessions() for the complement, surfaced
+    # on Diagnostics instead. NULL falls back to 3 (app_settings.py's
+    # refresh_runtime_cache); an admin can set 0 to disable the split
+    # entirely (every session counts, the original behavior).
+    min_session_duration_seconds = Column(Integer, nullable=True)
+
     # Support Ticketing System -- admin-tweakable preferences (Settings ->
     # Support), NOT hardcoded constants (unlike the old routes/support.py's
     # fixed MAX_SUBJECT_LENGTH/SUPPORT_REQUEST_RATE_LIMIT it replaces): see
@@ -753,6 +770,15 @@ class ConnectionRejectionLog(Base):
     # users) -- String(255), not String(32) like detected_mac, to leave
     # room for that.
     registered_mac_at_time = Column(String(255), nullable=True)
+
+    # The client's raw IV_PLAT value (env_iv_plat) at the moment of THIS
+    # rejection -- captured for every reason, not just os_not_allowed, so
+    # Diagnostics can show/filter by OS the same way it already does for
+    # the flat-file-derived rejected view (which reads this straight off
+    # the per-attempt env dump instead). Nullable: rows ingested before
+    # this column existed (and, in principle, an attempt where OpenVPN
+    # never reported IV_PLAT at all) simply have no value here.
+    detected_os = Column(String(64), nullable=True)
 
 
 class ClientMac(Base):

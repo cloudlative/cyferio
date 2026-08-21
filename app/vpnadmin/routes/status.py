@@ -17,7 +17,7 @@ from ..cli_wrapper import ScriptError
 from ..db import get_db
 from ..models import AuditLog, User, VpnProfileLink
 from ..permissions import has_permission, require_permission, require_permission_any_scope
-from .reports import _load_rows, _recent_quota_warnings
+from .reports import _active_quota_warnings, _load_rows
 
 router = APIRouter(prefix="/api/status", tags=["status"])
 
@@ -199,7 +199,7 @@ def get_dashboard_overview(user: User = Depends(_require_dashboard_viewer), db: 
     background-cached, since every piece here is either a cheap indexed DB
     query or a call already cached one layer down (cli_wrapper's own
     _script_lock/cache). Reuses existing aggregation wherever it already
-    exists (routes.reports._load_rows/_recent_quota_warnings) rather than
+    exists (routes.reports._load_rows/_active_quota_warnings) rather than
     duplicating that math."""
     from datetime import timedelta
 
@@ -305,7 +305,7 @@ def get_dashboard_overview(user: User = Depends(_require_dashboard_viewer), db: 
                     key=lambda r: r["timestamp"], reverse=True,
                 )
             ][:10],
-            "quota_warnings": _recent_quota_warnings(db, 5),
+            "quota_warnings": _active_quota_warnings(db, 5),
             "health_status": _health_status_summary(),
         },
     }

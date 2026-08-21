@@ -103,6 +103,20 @@
 		</div>
 	</div>
 </div>
+
+<dialog id="recovery-codes-dialog">
+	<div class="dialog-body">
+		<h2 style="margin-top:0">New Recovery Codes</h2>
+		<p class="muted">Save these somewhere safe -- each one works once, and this is the <strong>only time</strong> they're shown. Your old recovery codes no longer work.</p>
+		<div class="card" style="background:var(--surface);margin:14px 0">
+			<div class="mono" id="recovery-codes-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.92rem"></div>
+			<div class="form-row" style="margin-top:14px" id="recovery-codes-actions"></div>
+		</div>
+		<div class="dialog-actions">
+			<button type="button" class="btn-primary" id="recovery-codes-close-btn">Done</button>
+		</div>
+	</div>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
@@ -279,11 +293,16 @@ document.getElementById("mfa-regenerate-btn").addEventListener("click", async ()
 	if (!password) return;
 	try {
 		const r = await apiFetch("/api/me/mfa/recovery-codes/regenerate", { method: "POST", body: { password } });
-		alert("New recovery codes (save these now, they won't be shown again):\n\n" + r.recovery_codes.join("\n"));
+		document.getElementById("recovery-codes-grid").innerHTML = r.recovery_codes.map(c => `<div>${escapeHtml(c)}</div>`).join("");
+		renderRecoveryCodesActions(document.getElementById("recovery-codes-actions"), r.recovery_codes);
+		document.getElementById("recovery-codes-dialog").showModal();
 		loadMfaStatus();
 	} catch (e) {
 		toast(e.message, "error");
 	}
+});
+document.getElementById("recovery-codes-close-btn").addEventListener("click", () => {
+	document.getElementById("recovery-codes-dialog").close();
 });
 
 loadMfaStatus();
