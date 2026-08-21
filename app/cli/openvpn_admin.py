@@ -37,7 +37,7 @@ from app.services.openvpn.management_client import ManagementClient  # noqa: E40
 from app.services.openvpn.paths import OpenVPNPaths  # noqa: E402
 from app.services.openvpn import service_manager  # noqa: E402
 from app.services.openvpn.validator import sanitize_client_name  # noqa: E402
-from app.services.system import audit_probe, network_manager  # noqa: E402
+from app.services.system import audit_probe, audit_remediate, network_manager  # noqa: E402
 
 
 def _to_jsonable(value):
@@ -281,6 +281,16 @@ def build_parser() -> argparse.ArgumentParser:
         "checks -- see services/system/audit_probe.py. Never modifies anything.",
     )
 
+    p = sub.add_parser(
+        "remediate-chmod-permissions",
+        help="System Audit's ONLY automated-remediation action (Phase 3): chmods one "
+        "allowlisted file to its fixed canonical mode -- see services/system/"
+        "audit_remediate.py's module docstring. The caller picks WHICH allowlisted path "
+        "to fix; this script alone decides WHAT mode to set it to, never taking a mode "
+        "argument from the caller.",
+    )
+    p.add_argument("path", help="Must be one of the paths services/system/audit_remediate.py allowlists.")
+
     return parser
 
 
@@ -374,6 +384,8 @@ def main(argv: list[str] | None = None) -> int:
             return _ok({"changes": changes, "restarted": restarted})
         elif args.action == "audit-firewall":
             return _ok(audit_probe.probe_firewall())
+        elif args.action == "remediate-chmod-permissions":
+            return _ok(audit_remediate.remediate_chmod(args.path))
         else:  # pragma: no cover - argparse `required=True` already prevents this
             parser.error(f"Unknown action: {args.action}")
             return 2

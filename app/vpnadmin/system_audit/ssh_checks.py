@@ -304,6 +304,10 @@ def _check_host_key_permissions(host_root: str) -> list[Finding]:
                 current_state=oct(mode), expected_state="0600 (root read/write only)",
                 evidence=f"stat /etc/ssh/{name} (via host mount)",
                 remediation=f"chmod 600 /etc/ssh/{name}",
+                # "Fix Automatically" -- see services/system/
+                # audit_remediate.py's module docstring. Its own
+                # _HOST_KEY_RE allowlist matches this exact path shape.
+                remediation_action={"type": "chmod", "path": f"/etc/ssh/{name}"},
             ))
         else:
             findings.append(Finding(

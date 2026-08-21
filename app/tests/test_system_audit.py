@@ -8,6 +8,8 @@ system_checks.py/ssh_checks.py/firewall_checks.py's actual file-parsing
 logic is exercised by hand against a real filesystem during development,
 not by this suite; what matters here is run_audit()'s own orchestration
 logic, which is check-content-agnostic."""
+import pytest
+
 from vpnadmin import mailer, slack_notifications, system_audit
 from vpnadmin.models import AuditNotification
 from vpnadmin.system_audit import Finding, compute_score
@@ -325,3 +327,145 @@ class TestFirewallLiveFindings:
         assert data["ufw"] == {"installed": False}
         assert data["iptables"]["installed"] is None
         assert data["units"] == {}
+
+
+class TestAuditRemediate:
+    """Phase 3's ONLY automated-remediation action: chmod a file to its
+    fixed canonical mode. See services/system/audit_remediate.py's module
+    docstring for the full safety story -- these tests focus on the two
+    properties that actually matter for a remediation action: it can
+    NEVER touch a path outside its fixed allowlist, and it can NEVER be
+    told what mode to apply (that's fixed per-path, not a parameter)."""
+
+    def test_rejects_path_outside_allowlist(self):
+        from services.openvpn.exceptions import ValidationError
+        from services.system import audit_remediate
+
+        with pytest.raises(ValidationError):
+            audit_remediate.remediate_chmod("/etc/hosts")
+
+    def test_rejects_nonexistent_file(self):
+        from services.openvpn.exceptions import ValidationError
+        from services.system import audit_remediate
+
+        with pytest.raises(ValidationError):
+            audit_remediate.remediate_chmod("/etc/shadow-does-not-exist-at-all")
+
+    def test_fixes_an_allowlisted_target(self, tmp_path):
+        """Uses a real temp file monkeypatched into the allowlist (never
+        touches a real system path) -- confirms the actual chmod syscall,
+        the before/after reporting, and the "target mode is fixed, not
+        caller-supplied" behavior all work end-to-end."""
+        from services.system import audit_remediate
+
+        target = tmp_path / "fake-sshd-config"
+        target.write_text("test")
+        target.chmod(0o666)
+        original_targets = dict(audit_remediate._CHMOD_TARGETS)
+        try:
+            audit_remediate._CHMOD_TARGETS[str(target)] = 0o644
+            result = audit_remediate.remediate_chmod(str(target))
+        finally:
+            audit_remediate._CHMOD_TARGETS.clear()
+            audit_remediate._CHMOD_TARGETS.update(original_targets)
+
+        assert result["changed"] is True
+        assert result["verified"] is True
+        assert result["new_mode"] == "0o644"
+        assert oct(target.stat().st_mode)[-3:] == "644"
+
+    def test_idempotent_when_already_correct(self, tmp_path):
+        from services.system import audit_remediate
+
+        target = tmp_path / "already-fine"
+        target.write_text("test")
+        target.chmod(0o644)
+        original_targets = dict(audit_remediate._CHMOD_TARGETS)
+        try:
+            audit_remediate._CHMOD_TARGETS[str(target)] = 0o644
+            result = audit_remediate.remediate_chmod(str(target))
+        finally:
+            audit_remediate._CHMOD_TARGETS.clear()
+            audit_remediate._CHMOD_TARGETS.update(original_targets)
+
+        assert result["changed"] is False
+        assert result["verified"] is True
+
+    def test_host_key_regex_matches_expected_shape(self):
+        from services.system import audit_remediate
+
+        assert audit_remediate._target_mode_for("/etc/ssh/ssh_host_ed25519_key") == 0o600
+        assert audit_remediate._target_mode_for("/etc/ssh/ssh_host_rsa_key") == 0o600
+        from services.openvpn.exceptions import ValidationError
+        with pytest.raises(ValidationError):
+            # The PUBLIC key must never match -- it's meant to be
+            # world-readable, chmod-ing it to 0600 would break nothing
+            # security-wise but is still outside this action's intent.
+            audit_remediate._target_mode_for("/etc/ssh/ssh_host_ed25519_key.pub")
+
+
+class TestChecksEmitRemediationAction:
+    """The two check functions that populate Finding.remediation_action --
+    confirms the wiring from "a check found a bad permission" through to
+    "the finding carries a machine-actionable fix", not just the human
+    remediation text."""
+
+    def test_permissions_check_sets_remediation_action(self, tmp_path):
+        from vpnadmin.system_audit import system_checks
+
+        etc = tmp_path / "etc"
+        etc.mkdir()
+        (etc / "shadow").write_text("x")
+        (etc / "shadow").chmod(0o666)
+        findings = system_checks._check_permissions(str(tmp_path))
+        shadow_finding = next(f for f in findings if f.check_id == "system.permissions.etc_shadow")
+        assert shadow_finding.remediation_action == {"type": "chmod", "path": "/etc/shadow"}
+
+    def test_host_key_check_sets_remediation_action(self, tmp_path):
+        from vpnadmin.system_audit import ssh_checks
+
+        ssh_dir = tmp_path / "etc" / "ssh"
+        ssh_dir.mkdir(parents=True)
+        (ssh_dir / "ssh_host_ed25519_key").write_text("x")
+        (ssh_dir / "ssh_host_ed25519_key").chmod(0o644)
+        findings = ssh_checks._check_host_key_permissions(str(tmp_path))
+        finding = next(f for f in findings if f.check_id == "ssh.host_key_permissions.ssh_host_ed25519_key")
+        assert finding.remediation_action == {"type": "chmod", "path": "/etc/ssh/ssh_host_ed25519_key"}
+
+
+class TestRemediateApi:
+    def test_finding_without_remediation_action_400s(self, app_client, monkeypatch):
+        _mock_checks(monkeypatch, system=[Finding(check_id="s.one", category="system", severity="medium", title="M", description="d")])
+        login(app_client, "admin", "adminpass123")
+        finding_id = app_client.post("/api/system-audit/run").json()["run"]["findings"][0]["id"]
+        r = app_client.post(f"/api/system-audit/findings/{finding_id}/remediate")
+        assert r.status_code == 400
+
+    def test_nonexistent_finding_404s(self, app_client, monkeypatch):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/system-audit/findings/9999/remediate")
+        assert r.status_code == 404
+
+    def test_host_executor_not_configured_400s(self, app_client, monkeypatch):
+        """Default test/dev environment has no HOST_SSH_TARGET/
+        HOST_SSH_KEY_PATH set -- remediation must fail closed with a
+        clear error, same as every other host-executor-backed endpoint."""
+        finding = Finding(check_id="system.permissions.etc_shadow", category="system", severity="high",
+                           title="T", description="d", remediation_action={"type": "chmod", "path": "/etc/shadow"})
+        _mock_checks(monkeypatch, system=[finding])
+        login(app_client, "admin", "adminpass123")
+        finding_id = app_client.post("/api/system-audit/run").json()["run"]["findings"][0]["id"]
+        r = app_client.post(f"/api/system-audit/findings/{finding_id}/remediate")
+        assert r.status_code == 400
+        assert "not configured" in r.json()["detail"]
+
+    def test_viewer_role_denied(self, app_client, monkeypatch):
+        finding = Finding(check_id="system.permissions.etc_shadow", category="system", severity="high",
+                           title="T", description="d", remediation_action={"type": "chmod", "path": "/etc/shadow"})
+        _mock_checks(monkeypatch, system=[finding])
+        login(app_client, "admin", "adminpass123")
+        finding_id = app_client.post("/api/system-audit/run").json()["run"]["findings"][0]["id"]
+
+        login(app_client, "viewer", "viewerpass123")
+        r = app_client.post(f"/api/system-audit/findings/{finding_id}/remediate")
+        assert r.status_code == 403

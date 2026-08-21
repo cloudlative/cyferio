@@ -3,25 +3,42 @@ system_audit/__init__.py's module docstring for the engine design (why
 read-only via /hostfs, why no remediation yet, multi-node data-model
 intent). This router is thin by design: every real check/scoring/history-
 diff/notification decision lives in system_audit/run_audit(); routes here
-are just auth + (de)serialization + the CSV export format."""
+are just auth + (de)serialization + the CSV export format.
+
+Remediation (Phase 3, added 2026-08-22) is the one exception to "thin
+router" -- POST .../remediate below owns the confirmation-adjacent
+validation (finding must actually offer automated remediation, action
+type must be one this router knows how to dispatch) since that's
+request-shaped, not audit-engine logic; the actual privileged operation
+still lives entirely in services/system/audit_remediate.py, run on the
+HOST via the SSH channel, never in this container."""
 import asyncio
 import csv
 import io
+import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import system_audit
+from ..audit import log_action
 from ..db import get_db
 from ..models import AuditFinding, AuditRun, User
 from ..permissions import require_permission_any_scope
 
 router = APIRouter(prefix="/api/system-audit", tags=["system-audit"])
 
-# view: see runs/findings. execute: trigger a new run ("Run Audit Now").
-# Both any_scope -- there's no "own" scope for a whole-server security
-# posture (see AuditNotification's own docstring for the same point about
-# notifications).
+# view: see runs/findings. execute: trigger a new run ("Run Audit Now") OR
+# apply a remediation -- both any_scope (there's no "own" scope for a
+# whole-server security posture, see AuditNotification's own docstring
+# for the same point about notifications). Remediation deliberately
+# shares "execute" with Run Audit Now rather than getting a stricter
+# gate of its own: RBAC's action taxonomy (view/create/update/delete/
+# execute/manage) has no finer-grained "run privileged host action" tier
+# than execute, and a role trusted to trigger a live audit run (itself
+# a host-executor round-trip, once Phase 2's live firewall probe is
+# configured) is the same trust level this needs.
 _require_viewer = require_permission_any_scope("system_audit", "view")
 _require_runner = require_permission_any_scope("system_audit", "execute")
 
@@ -67,6 +84,9 @@ def _serialize_finding(f: AuditFinding) -> dict:
         "remediation": f.remediation,
         "automated_remediation_available": f.automated_remediation_available,
         "status": f.status,
+        "remediated_at": f.remediated_at.isoformat() if f.remediated_at else None,
+        "remediated_by": f.remediated_by,
+        "remediation_result": json.loads(f.remediation_result) if f.remediation_result else None,
     }
 
 
@@ -178,3 +198,79 @@ def export_run_csv(run_id: int, _: User = Depends(_require_viewer), db: Session 
         ])
     filename = f"system-audit-run-{run.id}-{(run.started_at.date().isoformat() if run.started_at else 'unknown')}.csv"
     return {"csv": buf.getvalue(), "filename": filename, "count": len(run.findings)}
+
+
+def _host_executor_config():
+    """Same construction/fail-closed shape as routes/clients.py's own
+    _host_executor_config() (not imported from there directly -- that
+    module's version is clients-specific in its docstring/error text,
+    and duplicating four lines here avoids a cross-router import for
+    something this small)."""
+    from services.system.host_executor import HostExecutorConfig
+    from ..config import settings
+    if not settings.HOST_SSH_TARGET or not settings.HOST_SSH_KEY_PATH:
+        raise HTTPException(
+            status_code=400,
+            detail="Host executor is not configured -- set HOST_SSH_TARGET and HOST_SSH_KEY_PATH "
+                    "(see .env.example) before automated remediation can run.",
+        )
+    return HostExecutorConfig(
+        ssh_key_path=settings.HOST_SSH_KEY_PATH,
+        ssh_target=settings.HOST_SSH_TARGET,
+        remote_script_path=settings.HOST_SSH_REMOTE_SCRIPT_PATH,
+        use_sudo=settings.HOST_SSH_USE_SUDO,
+        timeout_seconds=settings.HOST_SSH_TIMEOUT_SECONDS,
+        ssh_port=settings.HOST_SSH_PORT,
+    )
+
+
+@router.post("/findings/{finding_id}/remediate")
+async def remediate_finding(finding_id: int, user: User = Depends(_require_runner), db: Session = Depends(get_db)):
+    """"Fix Automatically" (spec section 7). Phase 3 scope: file-
+    permission chmod fixes ONLY -- see services/system/audit_remediate.py's
+    module docstring for exactly why SSH/firewall remediation isn't here
+    yet. The frontend is expected to show its own confirmation dialog
+    (exact path + target mode, from this finding's own expected_state/
+    remediation text, already in hand before this endpoint is ever
+    called) -- this endpoint itself doesn't re-confirm, matching every
+    other state-changing POST in this app (Revoke, Disconnect, ...),
+    which also rely on the frontend's confirmDialog() rather than a
+    second server-side confirmation step.
+
+    Re-validates independently of the frontend's own display logic: looks
+    up the finding fresh, requires remediation_action to actually be
+    present (not just automated_remediation_available -- belt and
+    suspenders, though in practice these should never disagree), and only
+    ever dispatches a "chmod" action. The remote script re-validates the
+    path against its OWN allowlist regardless (see audit_remediate.py) --
+    this endpoint's checks are a fast-fail/clear-error convenience, not
+    the actual trust boundary."""
+    finding = db.get(AuditFinding, finding_id)
+    if finding is None:
+        raise HTTPException(status_code=404, detail="Finding not found.")
+    if not finding.remediation_action:
+        raise HTTPException(status_code=400, detail="This finding has no automated remediation available.")
+    action = json.loads(finding.remediation_action)
+    if action.get("type") != "chmod":
+        raise HTTPException(status_code=400, detail=f"Unknown remediation action type: {action.get('type')!r}.")
+    path = action.get("path")
+    if not path:
+        raise HTTPException(status_code=400, detail="Remediation action is missing a target path.")
+
+    config = _host_executor_config()
+    from services.openvpn.exceptions import OpenVPNError
+    from services.system.host_executor import run_host_command
+    try:
+        result = await asyncio.to_thread(run_host_command, config, "remediate-chmod-permissions", path)
+    except OpenVPNError as e:
+        log_action(db, user, "remediate_finding", target=finding.check_id, detail=f"path={path}: {e.detail}", success=False)
+        raise HTTPException(status_code=502, detail=e.detail)
+
+    finding.remediated_at = datetime.now(timezone.utc)
+    finding.remediated_by = user.username
+    finding.remediation_result = json.dumps(result)
+    db.commit()
+    log_action(db, user, "remediate_finding", target=finding.check_id,
+               detail=f"path={path} {result.get('previous_mode')} -> {result.get('new_mode')} "
+                      f"verified={result.get('verified')}")
+    return {"finding": _serialize_finding(finding)}

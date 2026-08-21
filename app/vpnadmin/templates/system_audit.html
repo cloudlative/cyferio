@@ -66,6 +66,13 @@
 
 {% block scripts %}
 <script>
+// "Fix Automatically" is gated on the SAME permission as Run Audit Now
+// (system_audit/execute -- see routes/system_audit.py's _require_runner)
+// -- can_run_audit is already computed server-side in pages.py's
+// system_audit_page() route for the Run Audit Now button itself, reused
+// here rather than a second permission concept for the same gate.
+const canRunAudit = {{ "true" if can_run_audit else "false" }};
+
 let latestRun = null;
 let selectedSeverity = null;  // null = all
 let selectedCategory = "all";
@@ -158,6 +165,8 @@ function renderFindings() {
 			el.querySelectorAll(".audit-finding-detail-row").forEach(r => (r.style.display = "none"));
 			if (alreadyOpen) return;
 			cell.innerHTML = `<div style="padding:12px 4px">${renderFindingDetail(findings[idx])}</div>`;
+			const remediateBtn = cell.querySelector("[data-remediate-finding-id]");
+			if (remediateBtn) remediateBtn.addEventListener("click", () => onRemediateClick(findings[idx], remediateBtn));
 			detailRow.style.display = "";
 		});
 	});
@@ -172,12 +181,52 @@ function renderFindingDetail(f) {
 		["Evidence", f.evidence, true],
 		["Remediation", f.remediation],
 	].filter(([, v]) => v);
-	return `<dl class="audit-finding-detail">${rows.map(([label, value, isEvidence]) =>
+	let html = `<dl class="audit-finding-detail">${rows.map(([label, value, isEvidence]) =>
 		`<dt>${escapeHtml(label)}</dt><dd class="${isEvidence ? 'evidence-block' : ''}">${escapeHtml(value)}</dd>`
-	).join("")}</dl>` +
-	(f.automated_remediation_available
-		? '<p class="muted" style="margin-top:12px">Automated remediation is not available for this finding.</p>'
-		: '<p class="muted" style="margin-top:12px;font-size:0.82rem">Automated "Fix Automatically" remediation is not available in this release -- apply the remediation above manually.</p>');
+	).join("")}</dl>`;
+	if (f.remediated_at) {
+		const r = f.remediation_result;
+		html += `<p class="note" style="margin-top:14px">
+			<strong>Fixed</strong> by ${escapeHtml(f.remediated_by || "—")} on ${fmtTimestamp(f.remediated_at)}` +
+			(r ? ` -- ${escapeHtml(r.previous_mode)} → ${escapeHtml(r.new_mode)}` : "") +
+			`. Re-run the audit to confirm this shows as resolved.</p>`;
+	} else if (f.automated_remediation_available && canRunAudit) {
+		html += `<button type="button" class="btn-danger btn-sm" data-remediate-finding-id="${f.id}" style="margin-top:14px">Fix Automatically</button>`;
+	} else if (f.automated_remediation_available) {
+		html += '<p class="muted" style="margin-top:12px;font-size:0.82rem">An automated fix is available for this finding, but you don\'t have permission to apply it.</p>';
+	} else {
+		html += '<p class="muted" style="margin-top:12px;font-size:0.82rem">Automated "Fix Automatically" remediation is not available for this finding -- apply the remediation above manually.</p>';
+	}
+	return html;
+}
+
+// "Fix Automatically" -- chmod-only remediation (Phase 3), see routes/
+// system_audit.py's POST .../remediate for the full safety story. This
+// confirm step is the ONLY gate before the fix actually runs (no second
+// server-side confirmation, matching every other state-changing action
+// in this app) -- the exact command is already visible in the finding's
+// own Remediation text shown just above the button, repeated here so the
+// confirm dialog doesn't require scrolling back up to see what's about
+// to happen.
+async function onRemediateClick(finding, btn) {
+	const ok = await confirmDialog(
+		`Apply this fix now?<br><br><span class="mono">${escapeHtml(finding.remediation || "")}</span><br><br>` +
+		`This runs on the server immediately over the host-executor SSH channel. The file's previous permission ` +
+		`mode is recorded (shown after) so it can be reviewed, but there is no one-click undo.`,
+		{ confirmLabel: "Fix Now", danger: true },
+	);
+	if (!ok) return;
+	btn.disabled = true;
+	btn.textContent = "Applying…";
+	try {
+		await apiFetch(`/api/system-audit/findings/${finding.id}/remediate`, { method: "POST" });
+		toast("Fix applied.", "success");
+		if (viewingRun) await viewRun(viewingRun.id);
+	} catch (e) {
+		toast(e.message, "error");
+		btn.disabled = false;
+		btn.textContent = "Fix Automatically";
+	}
 }
 
 document.getElementById("category-filter-bar").querySelectorAll(".filter-chip").forEach(chip => {

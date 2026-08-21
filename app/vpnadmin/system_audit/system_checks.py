@@ -167,6 +167,14 @@ def _check_permissions(host_root: str) -> list[Finding]:
                 current_state=f"{oct(mode)}", expected_state=f"{oct(max_mode)} or stricter",
                 evidence=f"stat {rel_path} (via host mount)",
                 remediation=f"chmod {oct(max_mode)[2:]} {rel_path}",
+                # "Fix Automatically" -- see services/system/
+                # audit_remediate.py's module docstring. Only the four
+                # paths in `checks` above ever get this (its own
+                # allowlist mirrors exactly this list) -- world-writable
+                # findings below deliberately do NOT, since that check
+                # aggregates many paths into one finding and there's no
+                # single target this remediation_action shape could name.
+                remediation_action={"type": "chmod", "path": rel_path},
             ))
         else:
             findings.append(Finding(

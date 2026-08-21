@@ -1572,12 +1572,33 @@ class AuditFinding(Base):
     expected_state = Column(Text, nullable=True)
     evidence = Column(Text, nullable=True)
     remediation = Column(Text, nullable=True)
-    # Phase 1 is read-only/advisory only -- see system_audit/__init__.py's
-    # module docstring for why automated remediation is deliberately not
-    # implemented yet. Column exists now so the finding schema doesn't need
-    # a migration when it is: every row from this phase will just have
-    # False here.
+    # JSON-encoded {"type": "chmod", "path": ..., "mode": ...} -- see
+    # system_audit/__init__.py's Finding.remediation_action docstring.
+    # NULL for the overwhelming majority of findings (every SSH/firewall
+    # check, every "passed"/informational finding) -- only the specific
+    # file-permission checks that support "Fix Automatically" set this.
+    remediation_action = Column(Text, nullable=True)
     automated_remediation_available = Column(Boolean, nullable=False, default=False)
+    # Set by routes/system_audit.py's POST .../remediate once a fix has
+    # actually been applied to THIS finding (a specific row on a specific
+    # past run, not "the current state" -- the next audit run will
+    # naturally re-check and, if the fix held, report status="resolved"
+    # on its own new row; these columns are the permanent record of what
+    # was done and by whom, kept on the original finding row rather than
+    # only in AuditLog free text so the UI can show "Fixed by X on Y"
+    # directly next to the finding it fixed).
+    remediated_at = Column(DateTime(timezone=True), nullable=True)
+    remediated_by = Column(String(64), nullable=True)
+    # JSON-encoded {"previous_mode": ..., "new_mode": ..., "verified": ...}
+    # -- the exact before/after. No one-click "Undo" action is built on
+    # top of this yet (deliberately: audit_remediate.py's chmod action
+    # takes no mode argument from the caller AT ALL, by design -- an undo
+    # would need to reintroduce exactly that "set to a caller-supplied
+    # mode" capability this phase specifically avoided). This column
+    # exists so the UI can still SHOW the previous value for a manual
+    # revert (`chmod <previous_mode> <path>` over a real SSH session) if
+    # an admin ever needs one.
+    remediation_result = Column(Text, nullable=True)
     # "new" | "existing" | "resolved" -- computed by run_audit() relative
     # to the previous completed run, NOT set by the individual check
     # itself (a check has no notion of history). "resolved" rows are
