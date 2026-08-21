@@ -27,6 +27,7 @@ Cyferio started as, and still includes, a small self-contained OpenVPN road-warr
 | `add-machine.sh` | Step 0 for a web-app-portal deployment, run from YOUR OWN machine, not the target host — bootstraps the new box's read-only deploy-key access to this repo and clones it there |
 | `openvpn-install.sh` | Installer + client management (add/revoke/list/check/lint), interactive menu or CLI flags |
 | `setup-new-machine.sh` | One-time bootstrap for the web app portal (Docker, host-executor SSH key, `.env`, Traefik/Let's Encrypt, `docker compose up`) — orchestrated by `setup.sh`, or run directly |
+| `upgrade.sh` | Upgrades an **already-deployed** web app portal host to the latest (or a pinned `--tag`) release — idempotent, run directly on the host; see [app/README.md](app/README.md#upgrading-an-already-deployed-host). Not for a first-time install — that's `setup-new-machine.sh` above |
 | `vpn-status.py` | Live connection status, all-clients view, bandwidth, rejected-attempt auditing |
 | `vpn-tools.conf.example` | Copy to `/etc/openvpn/vpn-tools.conf` to override any default path/setting |
 | `completions/*.bash` | Optional bash tab-completion for both tools' CLI flags |

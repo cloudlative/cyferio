@@ -228,6 +228,29 @@ The container runs as root (needed to touch root-owned `/etc/openvpn` and
 run `easyrsa`) with `USE_SUDO=false` — no `sudo` binary needed since the
 process already has the privilege it would otherwise escalate to.
 
+### Upgrading an already-deployed host
+
+`../upgrade.sh` (repo root) is what the admin portal's Release Availability
+indicator and its auto-filed Upgrade Assignment ticket point at
+(`cd /opt/cyferio && ./upgrade.sh`) — run it on the host itself:
+
+```bash
+cd /opt/cyferio
+./upgrade.sh              # latest published release
+./upgrade.sh --tag v2.6.1 # a specific release instead
+./upgrade.sh --dry-run    # show what it would do, change nothing
+```
+
+Idempotent (a no-op if `.env`'s `IMAGE_TAG` already matches the target) and
+safe to re-run. It fast-forwards this checkout's `master` to the release
+commit (so the bind-mounted `openvpn-install.sh`/`vpn-status.py` stay in
+sync with the app image), updates `IMAGE_TAG`, redeploys, and verifies
+`/login` plus the running container's actual image tag before calling it
+done. See the script's own `--help` for every flag and exactly what each
+phase does. This is a different job from `setup-new-machine.sh` above,
+which only ever bootstraps a brand-new host — never re-run that one against
+a live install just to upgrade it.
+
 ### Database: SQLite (dev) vs PostgreSQL (production)
 
 `docker-compose.yml` ships a `postgres` service alongside `app`. SQLite
