@@ -309,7 +309,7 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	color: #fff;
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 12px;
 	padding: 4px 10px 26px;
 	text-decoration: none;
 }
@@ -320,10 +320,16 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	justify-content: center;
 	flex: none;
 	box-sizing: border-box;
-	width: 32px;
-	height: 32px;
-	padding: 6px;
-	border-radius: 10px;
+	/* Grown from 32px/20px-svg -- a little more visibility for the one
+	   brand mark that anchors the whole top-left corner (reported live
+	   2026-08-21: "grow the logo size in a little bit more"). Padding
+	   scaled proportionally so the ring of dark background around the
+	   glyph stays the same relative thickness, not just a bigger glyph
+	   crammed into the old tile. */
+	width: 40px;
+	height: 40px;
+	padding: 7px;
+	border-radius: 11px;
 	/* Fixed, not var(--accent-gradient) -- the real brand mark's own teal/
 	   amber (see base.html's own comment) needs a constant dark backdrop
 	   to read correctly; a shifting per-theme tile is what made it look
@@ -333,6 +339,27 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	box-shadow: var(--accent-glow);
 }
 .sidebar .brand-icon svg { display: block; }
+/* Name + version stacked, to the icon's right -- version used to live in
+   the content-header (top-right), competing for space with the notif
+   bell/theme switch and reading as disconnected from the app it's the
+   version OF. Directly under "Cyferio" instead reads as one unit at a
+   glance, same idea as a desktop app's About panel pairing the two.
+   Reported live 2026-08-21. */
+.sidebar .brand-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sidebar .brand-name { line-height: 1.15; }
+.sidebar .brand-version {
+	font-size: 0.72rem;
+	font-weight: 500;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	letter-spacing: 0;
+	/* Same var(--text-muted) the nav-section-labels above already rely on
+	   against this same dark sidebar gradient -- proven legible across
+	   every theme already, no new sidebar-specific color needed. Slightly
+	   higher opacity than those (0.6) since a version string is denser/
+	   harder to parse at a glance than an all-caps section label. */
+	color: var(--text-muted);
+	opacity: 0.75;
+}
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 /* Groups the sidebar into labeled sections (My Account / VPN Management /
    Monitoring / Administration) -- see base.html's own comment on why. Not
@@ -456,19 +483,6 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 .content-header a.who-name:hover { color: var(--accent-2); text-decoration: underline; }
 .content-header .link-button { color: var(--text-muted); font-size: 0.85rem; }
 .content-header .link-button:hover { color: var(--text); }
-
-/* Deployed app version indicator -- see base.html/app_settings.py.
-   Deliberately quiet/muted styling (same tone as .content-footer text),
-   not a colored pill -- this is a reference detail, not a status signal. */
-.app-version-badge {
-	font-size: 0.78rem;
-	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-	color: var(--text-muted);
-	border: 1px solid var(--border);
-	border-radius: 999px;
-	padding: 3px 10px;
-	white-space: nowrap;
-}
 
 /* Notification bell -- same anchored-panel shape as .theme-quick-switch
    below (relative wrapper, absolutely-positioned panel toggled via JS'
