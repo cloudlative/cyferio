@@ -2031,7 +2031,16 @@ const THEME_QUICK_LABELS = {
 (function initSidebarSections() {
 	document.querySelectorAll(".nav-section").forEach((section) => {
 		const btn = section.querySelector(".nav-section-label");
-		if (!btn) return;
+		// base.html renders the label as a plain, non-interactive <div>
+		// (no data-nav-section) instead of a <button> for the "User" self-
+		// service role -- collapsing isn't offered to that role at all
+		// (confirmed live 2026-08-21), so there's nothing to wire up here;
+		// leaving that section permanently expanded, same as before this
+		// feature existed. Checking the dataset attribute rather than the
+		// tag name is what actually matters -- a plain <div> still fires
+		// click events same as a <button> would, so skipping wiring based
+		// on tag name alone wouldn't be enough to keep it truly inert.
+		if (!btn || !btn.dataset.navSection) return;
 		const key = `sidebarSectionCollapsed:${btn.dataset.navSection}`;
 		const hasActiveLink = !!section.querySelector(".nav-section-links a.active");
 

@@ -97,7 +97,20 @@
 			   preference, so collapsing a section can never hide where
 			   you actually are. Dashboard/My Support/FAQ stay ungrouped/
 			   always-visible, same as before -- only the 4 labeled groups
-			   gained a toggle. #}
+			   gained a toggle. Not for the "User" self-service role, though
+			   (confirmed live 2026-08-21: "this collapse feature is not
+			   required in an account with User role") -- that role only
+			   ever sees My Account (every other section's own {% if %}
+			   permission gate excludes it), so there's rarely more than a
+			   handful of links to begin with, and a collapse control on
+			   the one section this least-technical audience sees isn't
+			   worth the added interaction surface. `nav_sections_collapsible`
+			   below renders each section's label as a plain, non-interactive
+			   <div> (the exact pre-feature markup) instead of a <button>
+			   for that role, and never applies the `collapsed` class --
+			   the section is simply always expanded, same as before this
+			   feature existed. #}
+			{% set nav_sections_collapsible = user.role_slug != 'user' %}
 
 			{# "My Account" is unconditional -- unlike the VPN-profile items
 			   inside it (gated on has_own_vpn_profile, since not every
@@ -105,8 +118,12 @@
 			   of role, so this section header and the Support link below it
 			   must never depend on that same gate. #}
 			{% set my_account_has_active = request.url.path in ['/my-vpn-profile', '/my-reports', '/my-connection-issues'] or (request.url.path.startswith('/support') and not request.url.path.startswith('/support-center')) %}
-			<div class="nav-section {{ '' if my_account_has_active else 'collapsed' }}">
+			<div class="nav-section {{ '' if (not nav_sections_collapsible or my_account_has_active) else 'collapsed' }}">
+				{% if nav_sections_collapsible %}
 				<button type="button" class="nav-section-label" data-nav-section="my-account" aria-expanded="{{ 'true' if my_account_has_active else 'false' }}">My Account<span class="nav-section-caret"></span></button>
+				{% else %}
+				<div class="nav-section-label">My Account</div>
+				{% endif %}
 				<div class="nav-section-body">
 					<div class="nav-section-links">
 				{% if has_own_vpn_profile %}
@@ -129,8 +146,12 @@
 
 			{% if can_view_clients %}
 			{% set vpn_management_has_active = request.url.path in ['/clients', '/clients/revoked', '/connection-history'] %}
-			<div class="nav-section {{ '' if vpn_management_has_active else 'collapsed' }}">
+			<div class="nav-section {{ '' if (not nav_sections_collapsible or vpn_management_has_active) else 'collapsed' }}">
+				{% if nav_sections_collapsible %}
 				<button type="button" class="nav-section-label" data-nav-section="vpn-management" aria-expanded="{{ 'true' if vpn_management_has_active else 'false' }}">VPN Management<span class="nav-section-caret"></span></button>
+				{% else %}
+				<div class="nav-section-label">VPN Management</div>
+				{% endif %}
 				<div class="nav-section-body">
 					<div class="nav-section-links">
 				<a href="/clients" class="{{ 'active' if request.url.path == '/clients' }}"><span class="nav-icon">◇</span>VPN Clients</a>
@@ -143,8 +164,12 @@
 
 			{% if can_view_health or can_view_reports or is_admin %}
 			{% set monitoring_has_active = request.url.path in ['/diagnostics', '/health', '/reports', '/users/activity'] %}
-			<div class="nav-section {{ '' if monitoring_has_active else 'collapsed' }}">
+			<div class="nav-section {{ '' if (not nav_sections_collapsible or monitoring_has_active) else 'collapsed' }}">
+				{% if nav_sections_collapsible %}
 				<button type="button" class="nav-section-label" data-nav-section="monitoring" aria-expanded="{{ 'true' if monitoring_has_active else 'false' }}">Monitoring<span class="nav-section-caret"></span></button>
+				{% else %}
+				<div class="nav-section-label">Monitoring</div>
+				{% endif %}
 				<div class="nav-section-body">
 					<div class="nav-section-links">
 				{% if can_view_health %}
@@ -164,8 +189,12 @@
 
 			{% if is_admin or can_manage_roles or can_manage_support %}
 			{% set administration_has_active = request.url.path in ['/users', '/teams', '/roles', '/settings'] or request.url.path.startswith('/support-center') %}
-			<div class="nav-section {{ '' if administration_has_active else 'collapsed' }}">
+			<div class="nav-section {{ '' if (not nav_sections_collapsible or administration_has_active) else 'collapsed' }}">
+				{% if nav_sections_collapsible %}
 				<button type="button" class="nav-section-label" data-nav-section="administration" aria-expanded="{{ 'true' if administration_has_active else 'false' }}">Administration<span class="nav-section-caret"></span></button>
+				{% else %}
+				<div class="nav-section-label">Administration</div>
+				{% endif %}
 				<div class="nav-section-body">
 					<div class="nav-section-links">
 				{% if is_admin %}

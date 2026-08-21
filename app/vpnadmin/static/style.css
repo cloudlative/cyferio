@@ -361,29 +361,37 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	opacity: 0.75;
 }
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
-/* Groups the sidebar into labeled, individually collapsible sections (My
-   Account / VPN Management / Monitoring / Administration) -- see base.html's
-   own comment on why the grouping exists, and its Expand/Collapse comment
-   for why each one now toggles (reported live 2026-08-21: "the left panel
-   of the app is grown so much"). .nav-section-label is a real <button> now
-   (was a plain non-interactive <div>) -- reset to look identical to the
-   old label, plus a caret, full-width and keyboard-focusable so the toggle
-   is a real control, not a div with a click handler bolted on. */
+/* Groups the sidebar into labeled sections (My Account / VPN Management /
+   Monitoring / Administration) -- see base.html's own comment on why the
+   grouping exists, and its Expand/Collapse comment for why most roles get
+   a per-section toggle (reported live 2026-08-21: "the left panel of the
+   app is grown so much"). .nav-section-label is a real <button> for those
+   roles (was always a plain non-interactive <div> before this feature) --
+   reset to look identical to the old label, plus a caret, full-width and
+   keyboard-focusable so the toggle is a real control, not a div with a
+   click handler bolted on. Base rule covers BOTH the <button> and the
+   <div> variant (the "User" self-service role, which never gets the
+   toggle -- see base.html's nav_sections_collapsible) so the label reads
+   identically either way; only the interactive affordances below
+   (cursor/hover/focus) are button-only, via the element selector rather
+   than a class, so the static <div> variant never looks clickable. */
 .sidebar nav .nav-section-label {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	width: 100%;
 	margin-top: 14px;
-	/* Vertical padding (was 0, relying only on the 0.7rem text's own line
-	   height) is what actually gives this a real button-sized tap target
-	   instead of a cramped-looking sliver -- reported live 2026-08-21
-	   ("fonts and size of collapse section is not good"). */
+	/* Vertical padding (was 0 on the old plain <div>, relying only on the
+	   0.7rem text's own line height) is what actually gives the <button>
+	   variant a real button-sized tap target instead of a cramped-looking
+	   sliver -- reported live 2026-08-21 ("fonts and size of collapse
+	   section is not good"). Harmless on the static <div> variant too
+	   (just a little breathing room, matches the button's spacing exactly
+	   so the two variants are visually indistinguishable at rest). */
 	padding: 8px 14px;
 	background: none;
 	border: none;
 	font-family: inherit;
-	cursor: pointer;
 	font-size: 0.7rem;
 	font-weight: 700;
 	letter-spacing: 0.06em;
@@ -393,8 +401,9 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	border-radius: 8px;
 	transition: opacity 0.15s ease, background 0.15s ease;
 }
-.sidebar nav .nav-section-label:hover { opacity: 0.9; background: var(--surface); }
-.sidebar nav .nav-section-label:focus-visible {
+.sidebar nav button.nav-section-label { cursor: pointer; }
+.sidebar nav button.nav-section-label:hover { opacity: 0.9; background: var(--surface); }
+.sidebar nav button.nav-section-label:focus-visible {
 	outline: 2px solid var(--accent);
 	outline-offset: -2px;
 }
