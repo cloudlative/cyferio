@@ -63,9 +63,9 @@
 		<table>
 			<thead><tr>
 				<th style="width:28px"><input type="checkbox" id="sc-select-all"></th>
-				<th>Subject</th><th>Category</th><th>Priority</th><th>Status</th><th>Assigned To</th><th>Updated</th>
+				<th>ID</th><th>Subject</th><th>Category</th><th>Priority</th><th>Status</th><th>Created By</th><th>Assigned To</th><th>Updated</th>
 			</tr></thead>
-			<tbody id="sc-list-body"><tr><td colspan="7" class="muted">Loading...</td></tr></tbody>
+			<tbody id="sc-list-body"><tr><td colspan="9" class="muted">Loading...</td></tr></tbody>
 		</table>
 	</div>
 	<div class="pagination" id="sc-pagination" style="margin-top:14px"></div>
@@ -137,10 +137,11 @@ function renderTicketTable() {
 
 	const tbody = document.getElementById("sc-list-body");
 	tbody.innerHTML = pageRows.length === 0
-		? '<tr><td colspan="7" class="muted">No tickets found.</td></tr>'
+		? '<tr><td colspan="9" class="muted">No tickets found.</td></tr>'
 		: pageRows.map((t) => `
 			<tr class="clickable-row">
 				<td onclick="event.stopPropagation()"><input type="checkbox" class="sc-row-select" data-id="${t.id}" ${selectedIds.has(t.id) ? "checked" : ""}></td>
+				<td class="mono muted" onclick="window.location.href='/support-center/${t.id}'">#${t.id}</td>
 				<td onclick="window.location.href='/support-center/${t.id}'">
 					${t.subject}
 					${t.duplicate_of_ticket_id ? ` <span class="activity-action" title="Duplicate of Ticket #${t.duplicate_of_ticket_id}">Duplicate of #${t.duplicate_of_ticket_id}</span>` : ""}
@@ -151,6 +152,7 @@ function renderTicketTable() {
 				<td onclick="window.location.href='/support-center/${t.id}'">${t.category_label}</td>
 				<td onclick="window.location.href='/support-center/${t.id}'">${t.priority_label}</td>
 				<td onclick="window.location.href='/support-center/${t.id}'"><span class="status-pill ${statusPillClass(t.status)}">${t.status_label}</span></td>
+				<td class="muted" onclick="window.location.href='/support-center/${t.id}'">${t.created_by || "Unknown"}</td>
 				<td class="muted" onclick="window.location.href='/support-center/${t.id}'">${t.assigned_admin || "Unassigned"}</td>
 				<td class="muted" onclick="window.location.href='/support-center/${t.id}'">${new Date(t.updated_at).toLocaleString()}</td>
 			</tr>
