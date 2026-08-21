@@ -25,3 +25,13 @@
 97f6d76433fa1b5a7cd07117b3331a7896c871af:app/tests/test_settings.py:generic-api-key:114
 97f6d76433fa1b5a7cd07117b3331a7896c871af:app/tests/test_settings.py:generic-api-key:118
 97f6d76433fa1b5a7cd07117b3331a7896c871af:app/tests/test_settings.py:generic-api-key:130
+
+# Same situation again: test_slack_notifications.py's Workflow Builder
+# webhook regression test used a longer, more realistic-looking random
+# token in this one commit before being swapped for an explicitly lower-
+# entropy fixture (matching VALID_WEBHOOK's own shape) in the very next
+# commit (0bc2a8c). The old commit itself never changes, so it re-flags on
+# every full-history scan otherwise. Verified via a local `gitleaks
+# detect --source . -v` -- the only fingerprint it reports against this
+# exact state of master, not a guess.
+12f4cb6298e36196affd9fc15107143c88db7004:app/tests/test_slack_notifications.py:slack-webhook-url:35
