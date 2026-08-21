@@ -275,7 +275,26 @@ for _ in 1 2 3 4 5 6; do
 	sleep 5
 done
 
-RUNNING_TAG=$(docker compose images app --format json 2>/dev/null | python3 -c 'import json,sys; rows=[json.loads(l) for l in sys.stdin if l.strip()]; print(rows[0]["Tag"] if rows else "")' 2>/dev/null || echo "")
+# `docker compose images --format json` isn't consistent across Compose
+# versions: older ones emit JSON Lines (one object per line), newer ones
+# (reproduced live with Compose v5.4.0 on the test box 2026-08-21) emit a
+# single JSON array on one line instead. Parsing that array as if it were
+# one JSONL row makes rows[0] a list, not a dict, so rows[0]["Tag"] throws
+# -- silently swallowed by the `2>/dev/null || echo ""` below, surfacing
+# as "<could not determine>" even though the upgrade itself succeeded.
+# Handle both shapes: try whole-stdin JSON first (array or single object),
+# fall back to JSONL only if that fails.
+RUNNING_TAG=$(docker compose images app --format json 2>/dev/null | python3 -c '
+import json, sys
+data = sys.stdin.read()
+try:
+	parsed = json.loads(data)
+except json.JSONDecodeError:
+	parsed = [json.loads(l) for l in data.splitlines() if l.strip()]
+if isinstance(parsed, dict):
+	parsed = [parsed]
+print(parsed[0]["Tag"] if parsed else "")
+' 2>/dev/null || echo "")
 
 if [[ "$ok" -eq 1 && "$RUNNING_TAG" == "$TARGET_IMAGE_TAG" ]]; then
 	log "Upgrade complete: https://${APP_DOMAIN:-localhost}/login -> HTTP 200, running image tag $RUNNING_TAG."
