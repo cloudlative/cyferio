@@ -11,7 +11,18 @@
 		<a href="{{ '/support-center' if is_admin_view else '/support' }}" class="link-button">&larr; Back</a>
 		<h1 style="margin:0" id="td-subject">Loading...</h1>
 	</div>
-	<div id="td-badges"></div>
+	<div style="display:flex;align-items:center;gap:10px">
+		<div id="td-badges"></div>
+		{# Neither side gets pushed a live update while this page is open --
+		   a reply, status change, or assignment made by the other party
+		   (admin replies while the user has the ticket open, or vice versa)
+		   only shows up here on a manual reload. A dedicated button (not
+		   just "tell them to refresh the browser") makes that obvious and
+		   keeps the reply draft/attachments picker intact, unlike a full
+		   page reload -- loadTicket() re-fetches everything this page shows
+		   without touching whatever the visitor has half-typed. #}
+		<button type="button" class="btn-secondary btn-sm" id="td-refresh-btn" title="Fetch the latest replies, status, and assignment">&#8635; Refresh</button>
+	</div>
 </div>
 
 <div class="content-grid" style="display:grid;grid-template-columns:2fr 1fr;gap:20px;align-items:start">
@@ -178,6 +189,29 @@ document.getElementById("td-reply-form").addEventListener("submit", async (e) =>
 		toast("Reply sent.");
 	} catch (err) {
 		toast(err.message, "error");
+	}
+});
+
+document.getElementById("td-refresh-btn").addEventListener("click", async () => {
+	// Preserve whatever the visitor has half-typed in the reply box (and
+	// the internal-note checkbox on the admin side) across the refresh --
+	// loadTicket() re-renders td-reply-form's surrounding markup is
+	// untouched (only its inner fields are read/written elsewhere), so the
+	// textarea itself survives, but re-fetching is still a good moment to
+	// explicitly carry the draft through rather than assume it does.
+	const draftBody = document.getElementById("td-reply-body").value;
+	const draftInternalNote = IS_ADMIN_VIEW ? document.getElementById("td-internal-note").checked : false;
+	const btn = document.getElementById("td-refresh-btn");
+	btn.disabled = true;
+	try {
+		await loadTicket();  // already re-loads Activity History too, for the admin view
+		document.getElementById("td-reply-body").value = draftBody;
+		if (IS_ADMIN_VIEW) document.getElementById("td-internal-note").checked = draftInternalNote;
+		toast("Ticket refreshed.");
+	} catch (err) {
+		toast(err.message, "error");
+	} finally {
+		btn.disabled = false;
 	}
 });
 
