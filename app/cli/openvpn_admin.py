@@ -37,7 +37,7 @@ from app.services.openvpn.management_client import ManagementClient  # noqa: E40
 from app.services.openvpn.paths import OpenVPNPaths  # noqa: E402
 from app.services.openvpn import service_manager  # noqa: E402
 from app.services.openvpn.validator import sanitize_client_name  # noqa: E402
-from app.services.system import network_manager  # noqa: E402
+from app.services.system import audit_probe, network_manager  # noqa: E402
 
 
 def _to_jsonable(value):
@@ -274,6 +274,13 @@ def build_parser() -> argparse.ArgumentParser:
         "maintenance window.",
     )
 
+    sub.add_parser(
+        "audit-firewall",
+        help="Read-only live firewall/service state (ufw, iptables, nftables, firewalld, "
+        "systemd unit enabled/active) for the System Audit module's Phase 2 firewall "
+        "checks -- see services/system/audit_probe.py. Never modifies anything.",
+    )
+
     return parser
 
 
@@ -365,6 +372,8 @@ def main(argv: list[str] | None = None) -> int:
                 service_manager.restart(paths.service_name)
                 restarted = True
             return _ok({"changes": changes, "restarted": restarted})
+        elif args.action == "audit-firewall":
+            return _ok(audit_probe.probe_firewall())
         else:  # pragma: no cover - argparse `required=True` already prevents this
             parser.error(f"Unknown action: {args.action}")
             return 2

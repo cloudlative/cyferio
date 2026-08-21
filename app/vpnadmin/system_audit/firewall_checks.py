@@ -1,25 +1,39 @@
-"""Firewall checks -- BEST-EFFORT ONLY, from readable host config files,
-not live kernel netfilter state. See this package's __init__.py module
-docstring for the full "why file reads, not subprocess" explanation.
+"""Firewall checks -- LIVE kernel/service state when the host-executor SSH
+channel is configured (Phase 2, added 2026-08-22: services/system/
+audit_probe.py's probe_firewall(), dispatched via openvpn_admin.py's
+`audit-firewall` action -- the same one whitelisted script that channel
+already runs, so no sudoers/authorized_keys change was needed). Falls
+back to BEST-EFFORT file reads (Phase 1's original scope) when that
+channel isn't configured or the call fails for any reason -- see
+_live_probe() below and this package's __init__.py module docstring for
+the full "why file reads, not subprocess" story that made file-reads the
+Phase 1 default in the first place.
 
-Concretely, this means: ufw's enabled/disabled bit and its rule FILES
-(/etc/ufw/*.rules) can be read directly, so ufw gets real (if static)
-findings. firewalld's config directory can similarly be read. But this
-project's own installer (openvpn-install.sh) uses bare iptables via a
-generated systemd unit (openvpn-iptables.service) rather than ufw or
-firewalld -- iptables rules loaded that way live ONLY in the kernel's
-netfilter tables, with no rules file on disk to read (unless the host
-separately runs iptables-persistent, which does write one). For that
-common case, this module can only confirm the SERVICE that would have
+The fallback's own caveat still applies whenever live data isn't
+available: this project's own installer (openvpn-install.sh) uses bare
+iptables via a generated systemd unit (openvpn-iptables.service) rather
+than ufw or firewalld -- iptables rules loaded that way live ONLY in the
+kernel's netfilter tables, with no rules file on disk to read (unless the
+host separately runs iptables-persistent, which does write one). Without
+live access, this module can only confirm the SERVICE that would have
 loaded the rules is enabled -- it explicitly says so, rather than
 reporting "no firewall" when one may well be active. Do not treat a
 "could not verify" Informational finding here as "no firewall is
-running" -- it means what it says: this check cannot see live rule
-state from inside the container."""
+running" -- it means what it says."""
 import os
 import re
 
 from . import Finding
+
+# Same check_ids on both the live and file-based paths where they're
+# semantically equivalent (firewall.ufw_enabled, firewall.firewalld_enabled,
+# firewall.openvpn_iptables_unit) -- so a host that starts using the
+# host-executor channel after already having audit history doesn't get a
+# spurious "check_id disappeared, new one appeared" discontinuity in that
+# history; it just starts getting a more accurate answer to the same
+# question. Only genuinely new capabilities (real iptables rule/policy
+# inspection) get new check_ids, since there's no static-check
+# equivalent for them to continue from.
 
 
 def _p(host_root: str, *parts: str) -> str:
@@ -197,7 +211,171 @@ def _check_project_iptables_unit(host_root: str) -> list[Finding]:
     )]
 
 
+def _live_probe() -> dict | None:
+    """Attempts to fetch live firewall state over the host-executor SSH
+    channel -- returns None (never raises) if the channel isn't
+    configured (HOST_SSH_TARGET/HOST_SSH_KEY_PATH unset, the common case
+    for an install that hasn't set up the deploy key -- see
+    docker-compose.override.yml.example) or the call fails for any
+    reason at all (SSH unreachable, timeout, remote error). A firewall
+    probe failing must never fail the whole audit run -- it just means
+    this module falls back to the file-based checks below, same as if
+    the channel didn't exist."""
+    try:
+        from services.system.host_executor import HostExecutorConfig, run_host_command
+        from vpnadmin.config import settings
+        if not settings.HOST_SSH_TARGET or not settings.HOST_SSH_KEY_PATH:
+            return None
+        config = HostExecutorConfig(
+            ssh_key_path=settings.HOST_SSH_KEY_PATH,
+            ssh_target=settings.HOST_SSH_TARGET,
+            remote_script_path=settings.HOST_SSH_REMOTE_SCRIPT_PATH,
+            use_sudo=settings.HOST_SSH_USE_SUDO,
+            timeout_seconds=settings.HOST_SSH_TIMEOUT_SECONDS,
+            ssh_port=settings.HOST_SSH_PORT,
+        )
+        data = run_host_command(config, "audit-firewall")
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _live_findings(data: dict) -> list[Finding]:
+    findings: list[Finding] = []
+
+    ufw = data.get("ufw", {})
+    if ufw.get("installed"):
+        if ufw.get("active"):
+            findings.append(Finding(
+                check_id="firewall.ufw_enabled", category="firewall", severity="passed",
+                title="UFW is active", description="`ufw status` reports active.",
+                evidence=ufw.get("status_output"),
+            ))
+        else:
+            findings.append(Finding(
+                check_id="firewall.ufw_enabled", category="firewall", severity="high",
+                title="UFW is installed but not active",
+                description="`ufw status` reports inactive.",
+                why_it_matters="An installed-but-inactive firewall provides no protection -- every port a "
+                                "service listens on is reachable unless something else is filtering traffic.",
+                current_state="inactive", expected_state="active (after confirming the rule set is correct)",
+                evidence=ufw.get("status_output"),
+                remediation="Review 'ufw status verbose' rules for correctness, then 'ufw enable'. Ensure SSH "
+                             "is explicitly allowed BEFORE enabling, to avoid losing remote access.",
+            ))
+
+    iptables = data.get("iptables", {})
+    if iptables.get("installed") is None and iptables.get("error"):
+        # Ran but couldn't read rule data (most likely a permission error
+        # if the host-executor's sudo elevation is ever misconfigured) --
+        # never silently treated as "confirmed zero rules", see
+        # audit_probe.py's probe_iptables() docstring.
+        findings.append(Finding(
+            check_id="firewall.iptables_readable", category="firewall", severity="info",
+            title="Could not read live iptables rules",
+            description=f"The live firewall probe ran but could not read iptables rule state: {iptables.get('error')}",
+        ))
+    if iptables.get("installed"):
+        input_policy = iptables.get("policies", {}).get("INPUT")
+        if input_policy == "ACCEPT":
+            findings.append(Finding(
+                check_id="firewall.iptables_input_policy", category="firewall", severity="medium",
+                title="iptables INPUT chain default policy is ACCEPT",
+                description="The INPUT chain's default policy accepts any packet that doesn't match an "
+                             "explicit rule, rather than dropping/rejecting it.",
+                why_it_matters="With an ACCEPT default policy, only explicit DROP/REJECT rules block traffic -- "
+                                "any port not specifically closed is open by default. A DROP/REJECT default "
+                                "with explicit ACCEPT rules for needed services is the more defensible posture "
+                                "(deny-by-default).",
+                current_state="INPUT ACCEPT", expected_state="INPUT DROP or REJECT, with explicit ACCEPT rules "
+                               "for needed services (SSH, the VPN port, ...)",
+                evidence="\n".join(f"-P {k} {v}" for k, v in iptables.get("policies", {}).items()),
+                remediation="Add explicit ACCEPT rules for every port that needs to stay reachable, THEN set "
+                             "the INPUT default policy to DROP -- in that order, to avoid locking yourself out.",
+            ))
+        elif input_policy:
+            findings.append(Finding(
+                check_id="firewall.iptables_input_policy", category="firewall", severity="passed",
+                title="iptables INPUT chain has a deny-by-default policy",
+                description=f"INPUT chain default policy is {input_policy}.",
+            ))
+        open_rules = iptables.get("unrestricted_accept_rules") or []
+        if open_rules:
+            findings.append(Finding(
+                check_id="firewall.iptables_unrestricted_rules", category="firewall", severity="medium",
+                title="iptables has ACCEPT rules open to any source, on specific ports",
+                description=f"{len(open_rules)} rule(s) accept traffic on a specific port from any source "
+                             f"(no -s restriction).",
+                why_it_matters="A rule with no source restriction accepts traffic from anywhere on the "
+                                "internet. This may be intentional for a public service (VPN, HTTPS) but is "
+                                "worth deliberately confirming for anything else, especially management ports.",
+                current_state="\n".join(open_rules[:15]) + (f"\n... and {len(open_rules) - 15} more" if len(open_rules) > 15 else ""),
+                evidence="iptables -S",
+                remediation="For each rule, confirm the port is meant to be publicly reachable. Add "
+                             "'-s <ip/cidr>' for anything that should be limited to specific networks.",
+            ))
+
+    firewalld = data.get("firewalld", {})
+    if firewalld.get("installed"):
+        if firewalld.get("running"):
+            findings.append(Finding(
+                check_id="firewall.firewalld_enabled", category="firewall", severity="passed",
+                title="firewalld is running", description="`firewall-cmd --state` reports running.",
+            ))
+        else:
+            findings.append(Finding(
+                check_id="firewall.firewalld_enabled", category="firewall", severity="high",
+                title="firewalld is installed but not running",
+                description="`firewall-cmd --state` reports not running.",
+                why_it_matters="An installed-but-not-running firewall provides no protection.",
+                expected_state="firewalld running",
+                remediation="Review firewalld's configured zones/rules for correctness, then start the "
+                             "service. Ensure SSH access is preserved before doing so.",
+            ))
+
+    unit_states = data.get("units", {})
+    unit_state = unit_states.get("openvpn-iptables.service")
+    if unit_state:
+        if unit_state.get("enabled") == "enabled":
+            findings.append(Finding(
+                check_id="firewall.openvpn_iptables_unit", category="firewall", severity="passed",
+                title="openvpn-iptables.service is enabled",
+                description=f"systemctl is-enabled: {unit_state.get('enabled')}, is-active: {unit_state.get('active')}.",
+            ))
+        else:
+            findings.append(Finding(
+                check_id="firewall.openvpn_iptables_unit", category="firewall", severity="medium",
+                title="openvpn-iptables.service is not enabled",
+                description=f"systemctl is-enabled reports: {unit_state.get('enabled')}.",
+                why_it_matters="If this unit doesn't run at boot, the VPN's NAT/forwarding rules won't be "
+                                "reapplied after a reboot, which can silently break client connectivity even "
+                                "if the OpenVPN process itself starts fine.",
+                expected_state="enabled",
+                remediation="systemctl enable openvpn-iptables.service",
+            ))
+
+    if not findings:
+        # The probe ran and returned data, but none of ufw/iptables/
+        # firewalld were detected as installed at all -- genuinely
+        # different from "couldn't check" (Phase 1's Informational
+        # fallback): this IS the live answer, and the live answer is
+        # "no recognized firewall found".
+        findings.append(Finding(
+            check_id="firewall.openvpn_iptables_unit", category="firewall", severity="high",
+            title="No firewall detected",
+            description="Live probe found none of ufw, firewalld, or iptables rules on this host.",
+            why_it_matters="With no firewall active, every port a service listens on is reachable from "
+                            "anywhere.",
+            remediation="Install and configure a firewall (ufw is the simplest option) allowing only the "
+                         "ports actually needed (SSH, the VPN port, HTTP/HTTPS if applicable).",
+        ))
+    return findings
+
+
 def run(host_root: str) -> list[Finding]:
+    live = _live_probe()
+    if live is not None:
+        return _live_findings(live)
     findings: list[Finding] = []
     findings += _check_ufw(host_root)
     findings += _check_firewalld(host_root)

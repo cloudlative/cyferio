@@ -225,3 +225,103 @@ class TestSystemAuditApi:
         login(app_client, "admin", "adminpass123")
         r = app_client.get("/api/system-audit/runs/9999")
         assert r.status_code == 404
+
+
+class TestFirewallLiveFindings:
+    """Phase 2: live firewall state via the host-executor SSH channel
+    (services/system/audit_probe.py's probe_firewall(), dispatched
+    through openvpn_admin.py's audit-firewall action) -- see
+    firewall_checks.py's _live_probe()/_live_findings(). These test
+    _live_findings() directly against a fixed probe_firewall()-shaped
+    dict, not the actual SSH round-trip (which needs a real host and
+    real host-executor config -- exercised manually, see this feature's
+    own commit message for the real-sandbox validation)."""
+
+    def test_iptables_accept_policy_and_open_rules_flagged(self):
+        from vpnadmin.system_audit.firewall_checks import _live_findings
+
+        data = {
+            "ufw": {"installed": False},
+            "iptables": {
+                "installed": True,
+                "policies": {"INPUT": "ACCEPT", "FORWARD": "DROP", "OUTPUT": "ACCEPT"},
+                "unrestricted_accept_rules": ["-A INPUT -p tcp --dport 53 -j ACCEPT"],
+            },
+            "firewalld": {"installed": False},
+            "units": {},
+        }
+        findings = _live_findings(data)
+        by_id = {f.check_id: f for f in findings}
+        assert by_id["firewall.iptables_input_policy"].severity == "medium"
+        assert by_id["firewall.iptables_unrestricted_rules"].severity == "medium"
+
+    def test_iptables_deny_default_passes(self):
+        from vpnadmin.system_audit.firewall_checks import _live_findings
+
+        data = {
+            "ufw": {"installed": True, "active": True, "status_output": "Status: active"},
+            "iptables": {"installed": True, "policies": {"INPUT": "DROP"}, "unrestricted_accept_rules": []},
+            "firewalld": {"installed": False},
+            "units": {},
+        }
+        findings = _live_findings(data)
+        by_id = {f.check_id: f for f in findings}
+        assert by_id["firewall.iptables_input_policy"].severity == "passed"
+        assert by_id["firewall.ufw_enabled"].severity == "passed"
+        assert "firewall.iptables_unrestricted_rules" not in by_id
+
+    def test_iptables_permission_error_not_reported_as_zero_rules(self):
+        """Regression guard: a real error reading iptables state must
+        never be silently indistinguishable from "confirmed zero rules"
+        -- see audit_probe.py's probe_iptables() docstring."""
+        from vpnadmin.system_audit.firewall_checks import _live_findings
+
+        data = {
+            "ufw": {"installed": False},
+            "iptables": {"installed": None, "error": "Permission denied (you must be root)"},
+            "firewalld": {"installed": False},
+            "units": {},
+        }
+        findings = _live_findings(data)
+        by_id = {f.check_id: f for f in findings}
+        assert "firewall.iptables_readable" in by_id
+        assert by_id["firewall.iptables_readable"].severity == "info"
+        assert "firewall.iptables_input_policy" not in by_id
+
+    def test_nothing_detected_is_a_high_finding(self):
+        from vpnadmin.system_audit.firewall_checks import _live_findings
+
+        data = {"ufw": {"installed": False}, "iptables": {"installed": False},
+                "firewalld": {"installed": False}, "units": {}}
+        findings = _live_findings(data)
+        assert len(findings) == 1
+        assert findings[0].severity == "high"
+        assert "No firewall detected" in findings[0].title
+
+    def test_run_falls_back_to_file_checks_when_live_probe_unavailable(self, monkeypatch, tmp_path):
+        """_live_probe() returns None (host-executor not configured, the
+        default in every test/dev environment) -- run() must fall back to
+        the Phase 1 file-based checks, not raise or return nothing."""
+        from vpnadmin.system_audit import firewall_checks
+
+        monkeypatch.setattr(firewall_checks, "_live_probe", lambda: None)
+        findings = firewall_checks.run(str(tmp_path))
+        assert isinstance(findings, list)
+        assert len(findings) > 0
+
+    def test_audit_probe_module_never_raises_on_missing_binaries(self, monkeypatch):
+        """probe_firewall() must degrade gracefully when none of ufw/
+        iptables/nft/firewalld/systemctl exist on the host at all (e.g. a
+        minimal container) -- every _try_run/_try_run_checked call catches
+        CommandError itself, this just confirms the top-level function
+        doesn't let anything slip through uncaught."""
+        from services.system import audit_probe
+        from services.system.process_manager import CommandError
+
+        def _always_missing(args, timeout=10):
+            raise CommandError(f"Command not found: {args[0]!r}")
+        monkeypatch.setattr(audit_probe, "run", _always_missing)
+        data = audit_probe.probe_firewall()
+        assert data["ufw"] == {"installed": False}
+        assert data["iptables"]["installed"] is None
+        assert data["units"] == {}
