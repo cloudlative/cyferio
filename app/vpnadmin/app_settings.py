@@ -241,6 +241,13 @@ class _RuntimeSettings:
         self.mfa_remember_device_days = 0  # 0 = "remember this device" disabled
         self.notify_admin_on_mfa_disabled = False
 
+        # Release Availability Indicator/Popup -- see release_check.py.
+        self.release_check_enabled = True
+        self.release_check_interval_minutes = 60
+        self.release_check_critical_major_bump = True
+        self.github_repo = env_settings.RELEASE_CHECK_REPO
+        self.last_release_notified_tag = None
+
 
 runtime = _RuntimeSettings()
 
@@ -331,6 +338,16 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.mfa_role_requirements = row.mfa_role_requirements
     runtime.mfa_remember_device_days = row.mfa_remember_device_days if row.mfa_remember_device_days is not None else 0
     runtime.notify_admin_on_mfa_disabled = bool(row.notify_admin_on_mfa_disabled)
+
+    runtime.release_check_enabled = row.release_check_enabled if row.release_check_enabled is not None else True
+    runtime.release_check_interval_minutes = (
+        row.release_check_interval_minutes if row.release_check_interval_minutes is not None else 60
+    )
+    runtime.release_check_critical_major_bump = (
+        row.release_check_critical_major_bump if row.release_check_critical_major_bump is not None else True
+    )
+    runtime.github_repo = row.github_repo or env_settings.RELEASE_CHECK_REPO
+    runtime.last_release_notified_tag = row.last_release_notified_tag
 
     # Mirrors the one setting host-scripts/quota_enforcer.py needs but has
     # no DB access to read directly -- see policy_store.write_global_defaults

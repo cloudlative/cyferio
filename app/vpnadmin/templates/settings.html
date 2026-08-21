@@ -29,6 +29,32 @@
 	</div>
 
 	<div class="card">
+		<div class="toolbar">
+			<h2 style="margin:0">Slack Integration</h2>
+			<button type="button" class="btn-secondary btn-sm" id="slack-test-btn">Send Test Notification</button>
+		</div>
+		<p class="muted" style="margin-top:0">Posts to a Slack incoming webhook for the event types checked below, alongside (never instead of) email/in-app notifications.</p>
+		<div class="form-grid">
+			<div class="field">
+				<label for="slack-webhook-url">Webhook URL</label>
+				<input type="text" id="slack-webhook-url" placeholder="https://hooks.slack.com/services/...">
+			</div>
+			<div class="field">
+				<label for="slack-channel">Channel Override <span class="muted">(optional)</span></label>
+				<input type="text" id="slack-channel" placeholder="#ops-alerts">
+			</div>
+		</div>
+		<div class="checkbox-row" style="margin-top:12px">
+			<label class="checkbox-label"><input type="checkbox" id="slack-enabled"> Enable Slack Notifications</label>
+		</div>
+		<div id="slack-notify-types" style="margin-top:14px"></div>
+		<div class="toolbar" style="margin-top:14px">
+			<div></div>
+			<button type="button" class="btn-primary btn-sm" id="slack-save-btn">Save Slack Settings</button>
+		</div>
+	</div>
+
+	<div class="card">
 		<h2>Theme</h2>
 		<p class="muted" style="margin-top:0">Controls the login-page animated background and the sidebar/accent color palette across every logged-in page. Applies immediately, no restart needed.</p>
 		<div class="form-grid">
@@ -291,6 +317,25 @@
 			<label class="checkbox-label"><input type="checkbox" id="s-notify-quota-critical"> Email me when a user hits the critical quota threshold</label>
 		</div>
 		<p class="muted" style="margin:10px 0 0;font-size:0.82rem">Users are always shown their own bandwidth quota warnings in-app (bell icon) at both thresholds -- these two fields set where those thresholds sit; the checkbox above is only about the admin's own email copy at the critical threshold.</p>
+	</div>
+
+	<div class="card">
+		<h2>Release Availability</h2>
+		<p class="muted" style="margin-top:0">Controls the update indicator next to the notification bell (admin-only) -- checks GitHub for a newer Cyferio release and, when one's found, files a System Maintenance ticket automatically.</p>
+		<div class="form-grid">
+			<div class="field">
+				<label for="s-release-check-interval">Check Interval <span class="muted">(minutes)</span></label>
+				<input type="text" id="s-release-check-interval" inputmode="numeric" placeholder="60">
+			</div>
+			<div class="field">
+				<label for="s-github-repo">GitHub Repository <span class="muted">(optional -- "owner/repo")</span></label>
+				<input type="text" id="s-github-repo" placeholder="cloudlative/cyferio">
+			</div>
+		</div>
+		<div class="checkbox-row" style="margin-top:12px">
+			<label class="checkbox-label"><input type="checkbox" id="s-release-check-enabled"> Check for new releases</label>
+			<label class="checkbox-label"><input type="checkbox" id="s-release-critical-major-bump"> Treat a major version bump as critical</label>
+		</div>
 	</div>
 
 	<div class="card">
@@ -563,6 +608,10 @@ async function loadSettings() {
 			rememberCustom.value = String(rememberDays);
 		}
 		document.getElementById("s-notify-mfa-disabled").checked = !!s.notify_admin_on_mfa_disabled;
+		document.getElementById("s-release-check-enabled").checked = s.release_check_enabled !== false;
+		setVal("s-release-check-interval", s.release_check_interval_minutes != null ? s.release_check_interval_minutes : 60);
+		document.getElementById("s-release-critical-major-bump").checked = s.release_check_critical_major_bump !== false;
+		setVal("s-github-repo", s.github_repo);
 		const mfaRoleReqs = s.mfa_role_requirements || {};
 		document.getElementById("s-mfa-role-requirements").innerHTML = (s.role_choices || []).map(r => `
 			<div class="field">
@@ -849,6 +898,10 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 			return sel === "custom" ? intOrNull(val("s-mfa-remember-device-custom")) || 0 : Number(sel);
 		})(),
 		notify_admin_on_mfa_disabled: document.getElementById("s-notify-mfa-disabled").checked,
+		release_check_enabled: document.getElementById("s-release-check-enabled").checked,
+		release_check_interval_minutes: intOrNull(val("s-release-check-interval")),
+		release_check_critical_major_bump: document.getElementById("s-release-critical-major-bump").checked,
+		github_repo: val("s-github-repo") || null,
 		mfa_role_requirements: Object.fromEntries(
 			[...document.querySelectorAll(".s-mfa-role-select")]
 				.filter(el => el.value)
@@ -1110,8 +1163,72 @@ document.getElementById("ep-test-form").addEventListener("submit", async (ev) =>
 	}
 });
 
-document.getElementById("refresh-btn").addEventListener("click", () => { loadSettings(); loadEmailProviders(); });
+// --- Slack Integration -------------------------------------------------
+async function loadSlackSettings() {
+	try {
+		const s = await apiFetch("/api/settings/slack");
+		document.getElementById("slack-webhook-url").value = s.webhook_url || "";
+		document.getElementById("slack-channel").value = s.channel_override || "";
+		document.getElementById("slack-enabled").checked = !!s.is_enabled;
+		const typesEl = document.getElementById("slack-notify-types");
+		typesEl.innerHTML = (s.event_groups || []).map(group => `
+			<div style="margin-bottom:10px">
+				<strong style="font-size:0.85rem">${escapeHtml(group.group)}</strong>
+				<div class="checkbox-row" style="margin-top:6px">
+					${group.options.map(o => `
+						<label class="checkbox-label">
+							<input type="checkbox" class="slack-notify-type" data-key="${escapeHtml(o.key)}" ${s.notify_types && s.notify_types[o.key] ? "checked" : ""}>
+							${escapeHtml(o.label)}
+						</label>`).join("")}
+				</div>
+			</div>`).join("");
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+function _slackFormValues() {
+	return {
+		webhook_url: document.getElementById("slack-webhook-url").value.trim() || null,
+		channel_override: document.getElementById("slack-channel").value.trim() || null,
+	};
+}
+
+document.getElementById("slack-save-btn").addEventListener("click", async () => {
+	try {
+		const notify_types = {};
+		document.querySelectorAll(".slack-notify-type").forEach((el) => { notify_types[el.dataset.key] = el.checked; });
+		await apiFetch("/api/settings/slack", {
+			method: "PATCH",
+			body: JSON.stringify({
+				..._slackFormValues(),
+				is_enabled: document.getElementById("slack-enabled").checked,
+				notify_types,
+			}),
+		});
+		toast("Slack settings saved.");
+		loadSlackSettings();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+document.getElementById("slack-test-btn").addEventListener("click", async () => {
+	const btn = document.getElementById("slack-test-btn");
+	btn.disabled = true;
+	try {
+		const result = await apiFetch("/api/settings/slack/test", { method: "POST", body: JSON.stringify(_slackFormValues()) });
+		toast(result.message || "Test notification sent.");
+	} catch (e) {
+		toast(e.message, "error");
+	} finally {
+		btn.disabled = false;
+	}
+});
+
+document.getElementById("refresh-btn").addEventListener("click", () => { loadSettings(); loadEmailProviders(); loadSlackSettings(); });
 loadSettings();
 loadEmailProviders();
+loadSlackSettings();
 </script>
 {% endblock %}

@@ -24,7 +24,7 @@ routes/tickets.py AFTER the triggering db.commit(), each managing its own
 follow-up commit for the TicketNotification row(s) it adds."""
 from sqlalchemy.orm import Session
 
-from . import app_settings, mailer
+from . import app_settings, mailer, slack_notifications
 from .models import SupportTicket, TicketNotification, User
 from .permissions import has_permission_any_scope
 from .support_tickets import status_label
@@ -61,6 +61,7 @@ def _notify_user(db: Session, ticket: SupportTicket, kind: str, message: str, *,
 
 def ticket_created(db: Session, ticket: SupportTicket) -> None:
     _notify_admins(db, ticket, "ticket_created", f"New ticket #{ticket.id}: {ticket.subject}")
+    slack_notifications.notify(db, "ticket_created", f":ticket: New ticket #{ticket.id}: {ticket.subject} (category: {ticket.category}, priority: {ticket.priority})")
     if ticket.priority == "critical":
         ticket_marked_critical(db, ticket)
 
@@ -69,12 +70,28 @@ def ticket_marked_critical(db: Session, ticket: SupportTicket) -> None:
     _notify_admins(db, ticket, "ticket_critical", f"Critical priority ticket #{ticket.id}: {ticket.subject}")
 
 
+def ticket_assigned(db: Session, ticket: SupportTicket) -> None:
+    """New event -- fired when routes/tickets.py's PATCH endpoint sets/
+    changes assigned_admin_id (the existing "claim"/reassignment
+    mechanism, see that router's own docstring). Notifies the newly-
+    assigned admin specifically (not every admin, unlike ticket_created)
+    since they're the one who now owns follow-up."""
+    if ticket.assigned_admin is None:
+        return
+    admin = ticket.assigned_admin
+    db.add(TicketNotification(user_id=admin.id, ticket_id=ticket.id, kind="ticket_assigned",
+                               message=f"Ticket #{ticket.id} assigned to you: {ticket.subject}"))
+    db.commit()
+    slack_notifications.notify(db, "ticket_assigned", f":inbox_tray: Ticket #{ticket.id} assigned to {admin.username}: {ticket.subject}")
+
+
 def user_replied(db: Session, ticket: SupportTicket) -> None:
     _notify_admins(db, ticket, "ticket_reply", f"New reply on ticket #{ticket.id}: {ticket.subject}")
 
 
 def ticket_reopened(db: Session, ticket: SupportTicket) -> None:
     _notify_admins(db, ticket, "ticket_reopened", f"Ticket #{ticket.id} reopened: {ticket.subject}")
+    slack_notifications.notify(db, "ticket_reopened", f":repeat: Ticket #{ticket.id} reopened: {ticket.subject}")
 
 
 def admin_replied(db: Session, ticket: SupportTicket) -> None:
@@ -91,3 +108,11 @@ def status_changed(db: Session, ticket: SupportTicket, old_status: str, new_stat
         email_headline=f"Your ticket status changed to {status_label(new_status)}",
         email_body=f"Previous status: {status_label(old_status)}",
     )
+    if new_status in ("resolved", "completed"):
+        slack_notifications.notify(db, "ticket_resolved", f":white_check_mark: Ticket #{ticket.id} resolved: {ticket.subject}")
+        if new_status == "completed":
+            slack_notifications.notify(db, "upgrade_completed", f":white_check_mark: Upgrade ticket #{ticket.id} completed: {ticket.subject}")
+    elif new_status == "failed":
+        slack_notifications.notify(db, "upgrade_failed", f":x: Upgrade ticket #{ticket.id} failed: {ticket.subject}")
+    else:
+        slack_notifications.notify(db, "ticket_updated", f":memo: Ticket #{ticket.id} status changed to {status_label(new_status)}: {ticket.subject}")

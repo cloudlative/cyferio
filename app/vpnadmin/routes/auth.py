@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from .. import app_settings, captcha, geoip, mailer
+from .. import app_settings, captcha, geoip, mailer, slack_notifications
 from .. import mfa as mfa_module
 from ..app_settings import apply_settings_globals
 from ..audit import log_action
@@ -211,6 +211,21 @@ async def login_submit(
                 detail += f"; account locked for {app_settings.runtime.account_lockout_minutes} minute(s)"
             log_action(db, user, "login_failed", target=user.username, detail=detail, success=False)
         db.commit()
+        if locked_now:
+            slack_notifications.notify(
+                db, "account_lockout",
+                f":lock: Account '{user.username}' locked out after {user.failed_login_attempts} failed login attempts "
+                f"(IP {client_ip or 'unknown'}), locked for {app_settings.runtime.account_lockout_minutes} minute(s).",
+            )
+        elif user.failed_login_attempts == 3:
+            # "Multiple failed login attempts" -- fired once the streak
+            # first crosses 3 (not on every subsequent attempt below the
+            # lockout threshold, which would spam a channel for an account
+            # with no lockout configured at all) and again on lockout above.
+            slack_notifications.notify(
+                db, "failed_login_attempts",
+                f":warning: {user.failed_login_attempts} failed login attempts for account '{user.username}' (IP {client_ip or 'unknown'}).",
+            )
         return generic_error
 
     # Successful password check -- clear any lockout state so the next

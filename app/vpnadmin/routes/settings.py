@@ -59,6 +59,12 @@ class UpdateSettingsRequest(BaseModel):
     mfa_remember_device_days: int | None = None
     notify_admin_on_mfa_disabled: bool | None = None
 
+    # Release Availability Indicator/Popup -- see release_check.py.
+    release_check_enabled: bool | None = None
+    release_check_interval_minutes: int | None = None
+    release_check_critical_major_bump: bool | None = None
+    github_repo: str | None = None
+
     admin_notification_email: str | None = None
     notify_admin_on_user_created: bool | None = None
     notify_admin_on_client_revoked: bool | None = None
@@ -267,6 +273,24 @@ class UpdateSettingsRequest(BaseModel):
                 raise ValueError(f"MFA requirement for role '{slug}' must be one of: {', '.join(VALID_POLICY_OVERRIDES)}.")
         return v
 
+    @field_validator("release_check_interval_minutes")
+    @classmethod
+    def _release_check_interval(cls, v):
+        # Lower bound guards against an admin accidentally hammering
+        # GitHub's unauthenticated 60-req/hour rate limit; upper bound is
+        # a sanity cap, not a real design limit.
+        if v is not None and not (5 <= v <= 1440):
+            raise ValueError("Release check interval must be between 5 and 1440 minutes.")
+        return v
+
+    @field_validator("github_repo")
+    @classmethod
+    def _github_repo_format(cls, v: str | None) -> str | None:
+        v = (v or "").strip() or None
+        if v and not re.match(r"^[\w.-]+/[\w.-]+$", v):
+            raise ValueError("GitHub repo must be in 'owner/repo' format.")
+        return v
+
     @field_validator("mfa_remember_device_days")
     @classmethod
     def _mfa_remember_device_days_range(cls, v):
@@ -388,6 +412,10 @@ def _serialize() -> dict:
         "mfa_role_requirements": json.loads(s.mfa_role_requirements) if s.mfa_role_requirements else {},
         "mfa_remember_device_days": s.mfa_remember_device_days,
         "notify_admin_on_mfa_disabled": bool(s.notify_admin_on_mfa_disabled),
+        "release_check_enabled": bool(s.release_check_enabled),
+        "release_check_interval_minutes": s.release_check_interval_minutes,
+        "release_check_critical_major_bump": bool(s.release_check_critical_major_bump),
+        "github_repo": s.github_repo,
         "reports_default_range_days": s.reports_default_range_days,
         "db_snapshot_retention_days": s.db_snapshot_retention_days,
         "maintenance_mode": s.maintenance_mode,
@@ -463,6 +491,8 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                    "support_ticket_rate_limit_count", "support_ticket_rate_limit_window_minutes",
                    "support_max_attachment_size_mb", "support_max_attachments_per_message", "notify_admin_on_ticket_created",
                    "mfa_mode", "mfa_remember_device_days", "notify_admin_on_mfa_disabled",
+                   "release_check_enabled", "release_check_interval_minutes",
+                   "release_check_critical_major_bump", "github_repo",
                    "reports_default_range_days", "db_snapshot_retention_days", "maintenance_mode", "maintenance_message",
                    "notification_duration_ms", "login_theme", "timezone", "time_format",
                    "geoip_enabled"):
@@ -732,3 +762,150 @@ def test_captcha(body: TestCaptchaRequest, _: User = Depends(require_admin)):
 # The single-SMTP-block /api/settings/smtp/test endpoint that used to live
 # here is gone; its equivalent is now /api/email-providers/{id}/test,
 # scoped to one profile among potentially several.
+
+
+# --- Slack Integration for Notifications ------------------------------------
+# Reuses the SAME "settings" object/"manage" action RBAC gate as the rest of
+# this router (require_admin above) -- Slack config is exactly as sensitive
+# as SMTP/CAPTCHA/GeoIP configuration already gated the same way here, so a
+# dedicated "slack_settings" OBJECTS entry (permissions.py) would be a
+# distinction without a difference; see this feature's own "don't invent a
+# new admin-action framework" instruction.
+from .. import slack_notifications  # noqa: E402
+from ..models import SlackWorkspace  # noqa: E402
+
+
+class UpdateSlackRequest(BaseModel):
+    """Admin-only, same partial-update convention as UpdateSettingsRequest.
+    Manages the ONE SlackWorkspace row (slack_notifications.
+    get_or_create_default_workspace) -- see that helper's own docstring for
+    why this app's Settings page only ever surfaces a single workspace even
+    though the underlying table/fan-out module supports several."""
+    webhook_url: str | None = None
+    channel_override: str | None = None
+    is_enabled: bool | None = None
+    notify_types: dict[str, bool] | None = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def _webhook_format(cls, v: str | None) -> str | None:
+        v = (v or "").strip() or None
+        if v and not slack_notifications.is_valid_webhook_url(v):
+            raise ValueError("Doesn't look like a valid Slack incoming webhook URL (expected https://hooks.slack.com/services/...).")
+        return v
+
+    @field_validator("channel_override")
+    @classmethod
+    def _channel_strip(cls, v: str | None) -> str | None:
+        return (v or "").strip() or None
+
+    @field_validator("notify_types")
+    @classmethod
+    def _notify_types_keys(cls, v: dict[str, bool] | None) -> dict[str, bool] | None:
+        if v is None:
+            return v
+        unknown = set(v) - set(slack_notifications.EVENT_TYPES)
+        if unknown:
+            raise ValueError(f"Unknown Slack notification type(s): {', '.join(sorted(unknown))}.")
+        return v
+
+
+def _serialize_slack_workspace(ws: SlackWorkspace) -> dict:
+    return {
+        "webhook_url": SECRET_PLACEHOLDER if ws.webhook_url else None,
+        "channel_override": ws.channel_override,
+        "is_enabled": ws.is_enabled,
+        "notify_types": slack_notifications.effective_notify_types(ws),
+        "event_groups": slack_notifications.event_groups_for_form(),
+    }
+
+
+@router.get("/slack")
+def get_slack_settings(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    ws = slack_notifications.get_or_create_default_workspace(db)
+    return _serialize_slack_workspace(ws)
+
+
+@router.patch("/slack")
+def update_slack_settings(body: UpdateSlackRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    ws = slack_notifications.get_or_create_default_workspace(db)
+    fields_set = body.model_fields_set
+    changes: list[str] = []
+
+    if "webhook_url" in fields_set:
+        # Same placeholder-means-unchanged convention as every other
+        # secret field on this page (see SECRET_PLACEHOLDER's own
+        # docstring in app_settings.py).
+        if body.webhook_url != SECRET_PLACEHOLDER and body.webhook_url != ws.webhook_url:
+            if not body.webhook_url:
+                raise HTTPException(status_code=400, detail="A Slack webhook URL is required.")
+            ws.webhook_url = body.webhook_url
+            changes.append("webhook_url")
+    if "channel_override" in fields_set and body.channel_override != ws.channel_override:
+        ws.channel_override = body.channel_override
+        changes.append("channel_override")
+    if "is_enabled" in fields_set and bool(body.is_enabled) != bool(ws.is_enabled):
+        if body.is_enabled and not ws.webhook_url:
+            raise HTTPException(status_code=400, detail="Set a webhook URL before enabling Slack notifications.")
+        ws.is_enabled = bool(body.is_enabled)
+        changes.append("is_enabled")
+    if "notify_types" in fields_set:
+        current = slack_notifications.effective_notify_types(ws)
+        merged = {**current, **body.notify_types}
+        if merged != current:
+            ws.notify_types = json.dumps(merged)
+            changes.append("notify_types")
+
+    if changes:
+        ws.updated_by = admin.username
+        db.commit()
+        log_action(db, admin, "update_slack_settings", detail="; ".join(changes))
+    return _serialize_slack_workspace(ws)
+
+
+class TestSlackRequest(BaseModel):
+    """Tests the GIVEN webhook_url/channel_override (typically the
+    Settings form's current, possibly-unsaved values) -- same "test what
+    was actually passed in" convention as mailer.send_test_email_via_config/
+    routes/settings.py's own test_captcha above. `webhook_url` of None or
+    the mask placeholder falls back to whatever's already saved."""
+    webhook_url: str | None = None
+    channel_override: str | None = None
+
+
+@router.post("/slack/test")
+def test_slack_notification(body: TestSlackRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    webhook_url = body.webhook_url
+    if not webhook_url or webhook_url == SECRET_PLACEHOLDER:
+        ws = slack_notifications.get_or_create_default_workspace(db)
+        webhook_url = ws.webhook_url
+        channel_override = body.channel_override if body.channel_override is not None else ws.channel_override
+    else:
+        channel_override = body.channel_override
+    if not webhook_url:
+        raise HTTPException(status_code=400, detail="No Slack webhook URL to test -- enter one first.")
+    if not slack_notifications.is_valid_webhook_url(webhook_url):
+        raise HTTPException(status_code=400, detail="Doesn't look like a valid Slack incoming webhook URL.")
+    success, detail = slack_notifications.send_test_notification(db, webhook_url, channel_override)
+    log_action(db, admin, "slack_test_notification", detail=detail, success=success)
+    if not success:
+        raise HTTPException(status_code=502, detail=f"Slack test notification failed: {detail}")
+    return {"success": True, "message": detail}
+
+
+@router.get("/slack/delivery-log")
+def get_slack_delivery_log(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Recent Slack delivery attempts (success and failure) -- see
+    models.SlackDeliveryLog's own docstring for why this is diagnosable
+    from the Settings page rather than just swallowed."""
+    from ..models import SlackDeliveryLog
+
+    rows = db.query(SlackDeliveryLog).order_by(SlackDeliveryLog.created_at.desc()).limit(100).all()
+    return {"deliveries": [
+        {
+            "id": r.id, "event_type": r.event_type, "message_preview": r.message_preview,
+            "success": r.success, "error_detail": r.error_detail,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]}

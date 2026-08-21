@@ -654,6 +654,27 @@ class AppSettings(Base):
     # service or admin action) for a privileged account (mfa.is_privileged).
     notify_admin_on_mfa_disabled = Column(Boolean, nullable=True)
 
+    # Release Availability Indicator/Popup -- see release_check.py. NULL
+    # falls back to release_check.py's own defaults (app_settings.py's
+    # refresh_runtime_cache). release_check_critical_major_bump toggles
+    # WHICH of the two classification signals release_check.classify()
+    # applies (a semver major-version bump is always treated as critical
+    # regardless of this flag; this only controls whether that heuristic
+    # is EXTENDED with the major-bump check versus relying solely on the
+    # release body/name mentioning "security"/"critical") -- see that
+    # module's own docstring for the documented classification rule.
+    release_check_enabled = Column(Boolean, nullable=True)
+    release_check_interval_minutes = Column(Integer, nullable=True)
+    release_check_critical_major_bump = Column(Boolean, nullable=True)
+    github_repo = Column(String(128), nullable=True)  # "owner/repo", NULL falls back to config.RELEASE_CHECK_REPO
+    # Internal bookkeeping, not admin-editable (not in _serialize()) --
+    # which release tag the background loop already auto-filed an upgrade
+    # ticket for, so it never files a duplicate on every subsequent check
+    # tick until an admin (or a completed upgrade) moves past it. Same
+    # "persisted marker, not a re-derivable fact" reasoning as
+    # restrictions_decoupled_at above.
+    last_release_notified_tag = Column(String(64), nullable=True)
+
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
 
@@ -1083,6 +1104,66 @@ class MfaRecoveryCode(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     user = relationship("User")
+
+
+# --- Slack Integration for Notifications ------------------------------------
+# See slack_notifications.py for the fan-out module these back, and
+# routes/settings.py's Slack section for the admin-facing CRUD. Deliberately
+# its own table (not columns bolted onto AppSettings, unlike most other
+# integrations in this app) specifically so "which workspace(s) get this
+# notification" is a real query over real rows from day one, not a single
+# hardcoded webhook threaded through every call site -- a thin, single-row
+# deployment today (routes/settings.py currently only ever creates/edits ONE
+# row) is a natural, no-code-change starting point for a future "add a
+# second Slack workspace" UI, rather than a retrofit.
+
+class SlackWorkspace(Base):
+    """One configured Slack incoming-webhook target. `notify_types` is a
+    JSON object ({event_type: bool}, keys from slack_notifications.
+    EVENT_TYPES) -- a JSON blob rather than one boolean column per event
+    type, same reasoning as SupportTicket/AppSettings' other JSON-text
+    columns (mfa_role_requirements, EmailProvider.config): the event-type
+    registry can grow without a schema migration every time. A type not
+    present in the dict defaults to OFF (opt-in per type, matching this
+    app's every other notify_admin_on_* toggle's default-off stance)."""
+    __tablename__ = "slack_workspaces"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False, default="Default Workspace")
+    webhook_url = Column(String(512), nullable=False)
+    # Optional Slack channel override ("#ops-alerts") -- Slack's incoming
+    # webhooks are already bound to one fixed channel at creation time on
+    # Slack's side; this lets an admin redirect to a DIFFERENT channel the
+    # same webhook app is permitted to post into, purely optional.
+    channel_override = Column(String(128), nullable=True)
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    notify_types = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+    updated_by = Column(String(64), nullable=True)
+
+
+class SlackDeliveryLog(Base):
+    """One row per Slack webhook delivery ATTEMPT (success or failure) --
+    so a silently-failing webhook (revoked, rate-limited, wrong channel) is
+    diagnosable from the Settings page rather than swallowed. Deliberately
+    NOT rolled into AuditLog: this is delivery telemetry for an outbound
+    integration (same category as email would be, if this app tracked
+    individual SMTP send attempts, which it doesn't), not an
+    accountability record of an admin/user action."""
+    __tablename__ = "slack_delivery_log"
+
+    id = Column(Integer, primary_key=True)
+    # Nullable: a "Send Test Notification" against a webhook URL typed into
+    # the form but not yet saved has no workspace row to point at yet.
+    workspace_id = Column(Integer, ForeignKey("slack_workspaces.id", ondelete="CASCADE"), nullable=True)
+    event_type = Column(String(64), nullable=False)  # a slack_notifications.EVENT_TYPES key, or "test"
+    message_preview = Column(String(512), nullable=True)
+    success = Column(Boolean, nullable=False, default=True)
+    error_detail = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+
+    workspace = relationship("SlackWorkspace")
 
 
 class MfaTrustedDevice(Base):

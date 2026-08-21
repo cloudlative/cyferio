@@ -171,6 +171,7 @@ def update_ticket(
     old_status = ticket.status
     status_changed_to: str | None = None
     became_critical = False
+    newly_assigned = False
 
     if "status" in fields_set:
         if body.status not in STATUSES:
@@ -205,6 +206,18 @@ def update_ticket(
             changes.append(f"assigned_admin {prev}->none")
             ticket.assigned_admin_id = None
     elif "assigned_admin_id" in fields_set and body.assigned_admin_id is not None:
+        # Reassignment: any admin with any-scope support_tickets update/
+        # manage (this endpoint's own _require_ticket_manager dependency)
+        # can set assigned_admin_id to ANY account, including reassigning a
+        # ticket someone else already claimed -- there's no extra "only the
+        # current owner or a super_admin can reassign" check here, since
+        # can_manage is a strict superset of can_update (see permissions.
+        # _has_permission) and this app's RBAC design already treats
+        # "update" on this object as sufficient for the whole admin-console
+        # lifecycle (status/priority/assignment alike), not just a subset
+        # of it. Confirmed: already fully audited below via the generic
+        # "ticket_updated" log_action line, same as every other field this
+        # endpoint touches.
         new_admin = db.query(User).filter(User.id == body.assigned_admin_id).one_or_none()
         if new_admin is None:
             raise HTTPException(status_code=400, detail="No such admin account.")
@@ -212,6 +225,19 @@ def update_ticket(
             prev = ticket.assigned_admin.username if ticket.assigned_admin else "none"
             changes.append(f"assigned_admin {prev}->{new_admin.username}")
             ticket.assigned_admin_id = new_admin.id
+            newly_assigned = True
+            # "Claim" for a System Maintenance ticket (Upgrade Assignment
+            # Workflow) -- assigning it while still "new"/"open" advances
+            # status to "assigned" automatically, so the status column
+            # reflects the claim without the admin having to make two
+            # separate PATCH calls. Only auto-advances out of the two
+            # earliest, pre-work statuses -- never overrides a status an
+            # admin/the system already moved further along (e.g.
+            # reassigning a ticket that's already "in_progress" leaves it
+            # there).
+            if ticket.category.startswith("sysmaint_") and ticket.status in ("new", "open") and "status" not in fields_set:
+                changes.append(f"status {status_label(ticket.status)}->{status_label('assigned')}")
+                ticket.status = "assigned"
 
     if changes:
         ticket.updated_at = datetime.now(timezone.utc)
@@ -221,6 +247,8 @@ def update_ticket(
             ticket_notifications.status_changed(db, ticket, old_status, status_changed_to)
         if became_critical:
             ticket_notifications.ticket_marked_critical(db, ticket)
+        if newly_assigned:
+            ticket_notifications.ticket_assigned(db, ticket)
     return _serialize_ticket_detail(ticket, is_admin_view=True)
 
 

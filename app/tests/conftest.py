@@ -71,6 +71,14 @@ def _reset_runtime_settings():
         r.support_max_attachment_size_mb = 10
         r.support_max_attachments_per_message = 5
         r.notify_admin_on_ticket_created = False
+        # Release Availability Indicator/Popup -- same leak risk (test_
+        # release_check.py/test_settings.py save these via the real PATCH
+        # endpoint or by mutating the row directly).
+        r.release_check_enabled = True
+        r.release_check_interval_minutes = 60
+        r.release_check_critical_major_bump = True
+        r.github_repo = env_settings.RELEASE_CHECK_REPO
+        r.last_release_notified_tag = None
 
     _reset()
     yield
@@ -90,6 +98,19 @@ def _clear_cli_wrapper_cache():
     cli_wrapper._cache.clear()
     yield
     cli_wrapper._cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_release_check_cache():
+    """release_check.py's in-process `_cache` dict (see that module's own
+    docstring) would otherwise leak between tests the same way
+    cli_wrapper's cache would -- e.g. a test asserting a "critical_update"
+    classification followed by one expecting a fresh "never checked" state
+    could see the first test's cached result instead of a real recheck."""
+    from vpnadmin import release_check
+    release_check.reset_cache()
+    yield
+    release_check.reset_cache()
 
 
 @pytest.fixture()

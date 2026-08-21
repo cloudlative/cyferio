@@ -172,6 +172,15 @@ class Settings:
     # drop-in change to this one default, nothing downstream needs to change.
     APP_VERSION: str = os.environ.get("APP_VERSION", "v1.0.9")
 
+    # --- Release Availability Indicator/Popup ----------------------------
+    # "owner/repo" checked against the GitHub Releases API to compare
+    # APP_VERSION above against the latest published release -- see
+    # release_check.py. Defaults to this repo's own origin remote (see
+    # HANDOFF_RBAC_VPN_IDENTITY.md-adjacent history); Settings ->
+    # System Maintenance can override per-deployment (AppSettings.github_repo),
+    # same env-default/DB-override layering as everything else in this file.
+    RELEASE_CHECK_REPO: str = os.environ.get("RELEASE_CHECK_REPO", "cloudlative/cyferio")
+
     # CAPTCHA on /login, /forgot-password, /reset-password (see captcha.py
     # and routes/auth.py) -- provider-agnostic on purpose: this is a
     # self-hosted, open-source app (see README's "nothing here hardcodes

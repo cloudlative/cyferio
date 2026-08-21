@@ -15,27 +15,50 @@ checks rather than just changing a threshold.
 """
 
 # Ordered for display (e.g. a status <select>) -- not alphabetical.
+# "assigned"/"completed"/"failed"/"cancelled" were added for the Upgrade
+# Assignment Workflow (System Maintenance category, see CATEGORIES below)
+# -- deliberately NEW statuses rather than overloading the pre-existing
+# ones: "in_progress" already existed and is reused as-is for "an admin is
+# actively working an upgrade" (same meaning either way -- "someone's on
+# it right now"), but "resolved"/"closed" mean something subtly different
+# for a normal support conversation (the submitter's issue is settled) than
+# a maintenance/upgrade action's own outcome ("completed" = the upgrade ran
+# successfully; "failed" = it didn't; "cancelled" = it was called off
+# without running) -- conflating them would make every status-based report/
+# filter ambiguous about which kind of ticket it's summarizing. "assigned"
+# fills the gap between "new" and "in_progress": an admin has claimed the
+# ticket (assigned_admin_id is set, via the existing PATCH endpoint) but
+# hasn't started the actual maintenance work yet.
 STATUSES: tuple[str, ...] = (
-    "new", "open", "in_progress", "waiting_for_user", "waiting_for_admin",
-    "resolved", "closed", "reopened",
+    "new", "open", "assigned", "in_progress", "waiting_for_user", "waiting_for_admin",
+    "resolved", "closed", "reopened", "completed", "failed", "cancelled",
 )
 
 STATUS_LABELS: dict[str, str] = {
     "new": "New",
     "open": "Open",
+    "assigned": "Assigned",
     "in_progress": "In Progress",
     "waiting_for_user": "Waiting for User",
     "waiting_for_admin": "Waiting for Admin",
     "resolved": "Resolved",
     "closed": "Closed",
     "reopened": "Reopened",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
 }
 
 # Statuses a self-service reply is blocked from -- must be reopened first
 # (POST /{id}/reopen) per the confirmed lifecycle: "Reopen allowed, but no
 # replies until reopened." Admin replies are never blocked by this -- an
-# admin can always add a note/reply regardless of status.
-TERMINAL_STATUSES: frozenset[str] = frozenset({"resolved", "closed"})
+# admin can always add a note/reply regardless of status. "completed"/
+# "failed"/"cancelled" are terminal in the same sense as "resolved"/
+# "closed" (no further self-service reply expected) -- these are
+# system-generated maintenance tickets, so this mostly matters for
+# routes/tickets.py's own "moving OUT of a terminal status clears the
+# terminal timestamps" handling treating them consistently.
+TERMINAL_STATUSES: frozenset[str] = frozenset({"resolved", "closed", "completed", "failed", "cancelled"})
 
 PRIORITIES: tuple[str, ...] = ("low", "medium", "high", "critical")
 PRIORITY_LABELS: dict[str, str] = {"low": "Low", "medium": "Medium", "high": "High", "critical": "Critical"}
@@ -88,6 +111,25 @@ CATEGORIES: dict[str, list[tuple[str, str, str]]] = {
     "Other": [
         ("other_general_inquiry", "General inquiry", "Tell us what you need help with."),
         ("other_other", "Other", "Describe your issue."),
+    ],
+    # Upgrade Assignment Workflow -- system-generated tickets only
+    # (release_check.py's file_upgrade_ticket, auto-created when a new
+    # Cyferio release is detected), not offered on the self-service "New
+    # Ticket" form (see CONTEXT_SUGGESTED_GROUPS below, and
+    # me_tickets.py's category validation, which only checks
+    # is_valid_category -- an admin/system creating one of these is fine,
+    # a user picking "Application Upgrade" for their own VPN issue isn't
+    # meaningful, but nothing here technically forbids it since this app
+    # has no separate "system-only category" flag; the guidance text makes
+    # that clear if a user ever does encounter it via the API).
+    "System Maintenance": [
+        ("sysmaint_application_upgrade", "Application Upgrade",
+         "System-generated when a new Cyferio release is detected. Claim this ticket (assign it to "
+         "yourself) to track your work through the upgrade."),
+        ("sysmaint_security_update", "Security Update",
+         "A security-relevant release is available -- treat this with priority per your maintenance policy."),
+        ("sysmaint_emergency_patch", "Emergency Patch", "An urgent, out-of-band fix that shouldn't wait for the next regular maintenance window."),
+        ("sysmaint_infrastructure_maintenance", "Infrastructure Maintenance", "Host/infrastructure-level maintenance unrelated to an application release."),
     ],
 }
 

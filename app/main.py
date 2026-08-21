@@ -30,10 +30,10 @@ from vpnadmin.app_settings import migrate_decouple_portal_and_vpn_restrictions, 
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_admin
-from vpnadmin import geo_lists, mailer
+from vpnadmin import geo_lists, mailer, slack_notifications
 from vpnadmin import app_settings
 from vpnadmin.models import QuotaNotification
-from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, host_ingest, me_connection_issues, me_tickets, me_vpn, mfa as mfa_routes, notifications, pages, reports, roles, settings as settings_routes, status, teams, tickets, users
+from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, host_ingest, me_connection_issues, me_tickets, me_vpn, mfa as mfa_routes, notifications, pages, release as release_routes, reports, roles, settings as settings_routes, status, teams, tickets, users
 from vpnadmin.routes.reports import _load_rows
 
 logger = logging.getLogger(__name__)
@@ -164,6 +164,11 @@ def _check_quota_notifications(db) -> None:
                     body=f"{row['username']}'s VPN client '{row['vpn_client_name']}' has used "
                          f"{pct_used}% of its {row['quota_gb']}GB monthly quota.",
                 )
+            slack_notifications.notify(
+                db, "quota_warning",
+                f":bar_chart: {row['username']}'s VPN client '{row['vpn_client_name']}' crossed the {level} "
+                f"threshold: {pct_used}% of its {row['quota_gb']}GB monthly quota.",
+            )
 
 
 async def _quota_notification_loop():
@@ -179,6 +184,19 @@ async def _quota_notification_loop():
         except Exception:
             logger.exception("Quota notification check failed; will retry next tick")
         await asyncio.sleep(QUOTA_NOTIFICATION_INTERVAL_SECONDS)
+
+# Note: the Release Availability check (release_check.py) is deliberately
+# NOT run on its own background loop like the tasks above -- unlike a
+# subprocess spawn (cli_wrapper) or a local DB query (health_data/
+# QuotaNotification), it's a real outbound network call to GitHub's API on
+# every check, and this app has no test-vs-production signal to skip that
+# safely on a fixed timer the way it can for a same-process check. It's
+# checked LAZILY instead -- see routes/settings.py's GET /api/release/status,
+# called by the header indicator's own poll (static/app.js) -- which is both
+# an explicitly permitted design per this feature's spec ("a background/lazy
+# mechanism") and what keeps GitHub calls scoped to actual admin page loads
+# rather than firing unconditionally on every process's uptime, including
+# every test run's.
 
 
 @asynccontextmanager
@@ -298,6 +316,7 @@ app.include_router(me_tickets.router)
 app.include_router(tickets.router)
 app.include_router(email_providers.router)
 app.include_router(mfa_routes.router)
+app.include_router(release_routes.router)
 
 
 @app.get("/healthz")

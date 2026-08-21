@@ -25,7 +25,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from .. import app_settings, mailer
+from .. import app_settings, mailer, slack_notifications
 from .. import mfa as mfa_module
 from ..app_settings import apply_settings_globals
 from ..audit import log_action
@@ -253,6 +253,7 @@ def disable_my_mfa(body: MfaStepUpRequest, user: User = Depends(require_user), d
             db=db, subject="MFA disabled for a privileged account",
             body=f"{user.username} ({user.display_name}) just disabled multi-factor authentication on their own account.",
         )
+    slack_notifications.notify(db, "mfa_disabled", f":unlock: MFA disabled for account {user.username}.")
     _mfa_security_notice(db, user, "Multi-factor authentication was disabled on your account.")
     return {"message": "MFA disabled."}
 

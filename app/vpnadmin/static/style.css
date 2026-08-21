@@ -515,6 +515,44 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 .notif-item-level.info { background: var(--surface-alt); color: var(--text-muted); }
 .notif-item-time { color: var(--text-muted); font-size: 0.75rem; margin-top: 4px; }
 
+/* Release Availability Indicator/Popup -- same anchored-panel shape as
+   .notif-bell above (relative wrapper, absolutely-positioned panel toggled
+   via JS' plain display:block/none, closed on outside click). Deliberately
+   its own set of classes, not reusing .notif-bell-* -- this isn't a list of
+   items, it's a single status dot + one detail panel. */
+.release-indicator { position: relative; }
+.release-indicator-toggle { display: inline-flex; align-items: center; gap: 7px; }
+.release-indicator-dot {
+	width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+	background: var(--success-strong, #2e9e5b);
+}
+.release-indicator-dot.update_available { background: var(--warning-strong, #d69e2e); }
+.release-indicator-dot.critical_update { background: var(--danger-strong, #d64545); }
+.release-indicator-panel {
+	display: none;
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 0;
+	z-index: 50;
+	width: 380px;
+	max-height: 480px;
+	overflow-y: auto;
+	background: var(--surface);
+	border: 1.5px solid var(--border-light);
+	border-radius: 9px;
+	box-shadow: var(--shadow-lg);
+}
+.release-indicator-panel-head {
+	display: flex; align-items: center; justify-content: space-between;
+	padding: 12px 14px;
+	border-bottom: 1px solid var(--border-light);
+	font-weight: 700; font-size: 0.85rem;
+	position: sticky; top: 0; background: var(--surface);
+}
+.release-indicator-body { padding: 14px; font-size: 0.85rem; }
+.release-indicator-body pre { white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; background: var(--surface-alt); padding: 8px; border-radius: 6px; }
+.release-indicator-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
 .theme-quick-switch { position: relative; }
 #theme-quick-toggle { display: inline-flex; align-items: center; gap: 8px; }
 /* A small colored dot -- on the toggle button itself this deliberately has

@@ -2097,6 +2097,78 @@ document.addEventListener("click", (e) => {
 })();
 
 /**
+ * Release Availability Indicator/Popup (header, admin-only -- see
+ * base.html's own comment on why this element only renders for admins).
+ * GET /api/release/status is itself lazy/cached server-side (see
+ * release_check.py) -- polling it here every few minutes just decides WHEN
+ * to ask, the server decides whether that actually triggers a fresh GitHub
+ * call. Same anchored-panel toggle shape as initNotificationBell above.
+ */
+(function initReleaseIndicator() {
+	const root = document.getElementById("release-indicator");
+	if (!root) return;
+	const toggle = document.getElementById("release-indicator-toggle");
+	const panel = document.getElementById("release-indicator-panel");
+	const dot = document.getElementById("release-indicator-dot");
+	const label = document.getElementById("release-indicator-label");
+	const body = document.getElementById("release-indicator-body");
+	let last = null;
+
+	function renderBody() {
+		if (!last) { body.innerHTML = '<p class="muted" style="padding:14px">Checking…</p>'; return; }
+		const notes = last.release_notes ? `<h4 style="margin:10px 0 4px">Release notes</h4><pre>${escapeHtml(last.release_notes).slice(0, 4000)}</pre>` : "";
+		const link = last.release_url ? `<p><a href="${escapeHtml(last.release_url)}" target="_blank" rel="noopener noreferrer">View release on GitHub</a></p>` : "";
+		const upToDate = last.status === "up_to_date";
+		body.innerHTML = `
+			<div class="release-indicator-body">
+				<p><strong>Installed version:</strong> <code>${escapeHtml(last.installed_version || "unknown")}</code></p>
+				${upToDate ? "<p>You're up to date.</p>" : `
+					<p><strong>Available version:</strong> <code>${escapeHtml(last.latest_version || "unknown")}</code></p>
+					${last.published_at ? `<p><strong>Published:</strong> ${fmtTimestamp(last.published_at)}</p>` : ""}
+					${notes}
+					${link}
+					<h4 style="margin:12px 0 4px">To upgrade</h4>
+					<pre>cd /opt/cyferio && ./upgrade.sh</pre>
+					<p class="muted">A System Maintenance ticket has been filed for this release -- assign it to yourself in Support Center to track your work.</p>
+				`}
+				${last.error ? `<p class="muted">Last check error: ${escapeHtml(last.error)}</p>` : ""}
+			</div>`;
+	}
+
+	async function refresh() {
+		try {
+			const data = await apiFetch("/api/release/status");
+			last = data;
+			root.style.display = "";
+			dot.className = `release-indicator-dot ${data.status}`;
+			label.textContent = data.status === "critical_update" ? "Critical update available"
+				: data.status === "update_available" ? "Update available" : "Up to date";
+			if (panel.style.display === "block") renderBody();
+		} catch (e) { /* non-fatal -- indicator just stays hidden/at its last-known state */ }
+	}
+
+	toggle.addEventListener("click", () => {
+		const willOpen = panel.style.display !== "block";
+		panel.style.display = willOpen ? "block" : "none";
+		toggle.setAttribute("aria-expanded", String(willOpen));
+		if (willOpen) renderBody();
+	});
+	document.getElementById("release-indicator-close").addEventListener("click", () => {
+		panel.style.display = "none";
+		toggle.setAttribute("aria-expanded", "false");
+	});
+	document.addEventListener("click", (ev) => {
+		if (!root.contains(ev.target)) {
+			panel.style.display = "none";
+			toggle.setAttribute("aria-expanded", "false");
+		}
+	});
+
+	refresh();
+	setInterval(refresh, 5 * 60000);
+})();
+
+/**
  * Show/hide toggle for every password field app-wide -- login, forgot/reset
  * password, change-password, profile, and every password input in the Users
  * page's Add/Edit/Reset-Password dialogs. One pass over

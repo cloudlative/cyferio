@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from services.openvpn.exceptions import ValidationError as MacFormatError
 from services.openvpn.validator import normalize_mac
 
-from .. import app_settings, geo_lists, mailer, policy_store, vpn_identity_sync
+from .. import app_settings, geo_lists, mailer, policy_store, slack_notifications, vpn_identity_sync
 from .. import cli_wrapper as cli
 from ..audit import log_action
 from ..auth import hash_password, require_user, verify_password
@@ -1352,13 +1352,14 @@ def _get_mfa_target(user_id: int, db: Session) -> User:
     return target
 
 
-def _mfa_admin_notice_and_email(admin: User, target: User, db: Session, event_description: str) -> None:
+def _mfa_admin_notice_and_email(admin: User, target: User, db: Session, event_description: str, *, slack_event: str = "mfa_disabled") -> None:
     from .. import mfa as mfa_module
     if mfa_module.is_privileged(target, db) and app_settings.runtime.notify_admin_on_mfa_disabled:
         mailer.send_admin_notification(
             db=db, subject="MFA disabled for a privileged account",
             body=f"{admin.username} disabled multi-factor authentication for {target.username} ({target.display_name}).",
         )
+    slack_notifications.notify(db, slack_event, f":unlock: {admin.username} {'reset' if slack_event == 'mfa_reset' else 'disabled'} MFA for account {target.username}.")
     if target.email:
         mailer.send_mfa_security_notice(db=db, to_address=target.email, username=target.username, event_description=event_description)
 
@@ -1379,7 +1380,7 @@ def reset_user_mfa(user_id: int, admin: User = Depends(require_admin), db: Sessi
     db.query(MfaRecoveryCode).filter(MfaRecoveryCode.user_id == target.id).delete()
     db.commit()
     log_action(db, admin, "mfa_reset_by_admin", target=target.username, success=True)
-    _mfa_admin_notice_and_email(admin, target, db, "An administrator reset multi-factor authentication on your account -- you'll be asked to set it up again at your next login.")
+    _mfa_admin_notice_and_email(admin, target, db, "An administrator reset multi-factor authentication on your account -- you'll be asked to set it up again at your next login.", slack_event="mfa_reset")
     return {"message": f"MFA reset for '{target.username}' -- they'll be asked to re-enroll at next login."}
 
 

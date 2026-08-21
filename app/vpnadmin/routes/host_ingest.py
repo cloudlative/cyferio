@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from .. import slack_notifications
 from ..config import settings
 from ..db import get_db
 from ..models import ConnectionRejectionLog
@@ -69,4 +70,16 @@ def ingest_connection_rejection(body: ConnectionRejectionIn, db: Session = Depen
     )
     db.add(row)
     db.commit()
+    # Every reason this endpoint ever receives IS a VPN Access Restriction
+    # violation (mac_mismatch, os_not_allowed, country/city/asn/ip_not_
+    # allowed) -- host-scripts/openvpn-mac-addr-check.py's reject() is the
+    # ONLY caller, and it only calls this for a rejected connect attempt.
+    # Best-effort, same fail-soft posture as every other best-effort call
+    # in this app -- a Slack hiccup must never affect the 201 this
+    # unprivileged host-side script is waiting on.
+    slack_notifications.notify(
+        db, "access_restriction_violation",
+        f":no_entry: VPN access restriction violation: '{row.vpn_client_name}' rejected ({row.reason})"
+        + (f" from {row.source_ip}" if row.source_ip else "") + ".",
+    )
     return {"id": row.id}
