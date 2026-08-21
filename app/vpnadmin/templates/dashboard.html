@@ -3,11 +3,25 @@
 {% block content %}
 <div class="toolbar" style="margin-bottom:6px">
 	<div class="toolbar-title"><h1 style="margin:0">Dashboard</h1></div>
-	{% if is_admin %}
-	<a href="/users" class="btn-secondary">Go to Users</a>
-	{% endif %}
 </div>
 <p class="page-subtitle" style="margin-top:-10px">Live overview of who's connected to the VPN right now.</p>
+
+{% if is_admin %}
+{# Dashboard is this app's default landing page (see pages.py's root()
+   route) -- this banner is the first thing an admin sees on login, so
+   it's the one deliberately prominent nudge toward Users (add/edit
+   accounts, roles, VPN profiles) rather than a plain toolbar button
+   easily lost next to the page title. VPN Clients' own "Manage Users"
+   link stays a normal toolbar button -- it's a secondary page, not the
+   landing one, so it doesn't need the same visual weight. #}
+<div class="welcome-banner">
+	<div class="welcome-banner-text">
+		<h2>Need to manage accounts?</h2>
+		<p>Add, edit, or remove portal users, assign roles, and attach VPN profiles -- all from Users.</p>
+	</div>
+	<a href="/users" class="btn-primary">Manage Users →</a>
+</div>
+{% endif %}
 
 <div class="stat-grid" id="stat-grid">
 	<a class="stat-card accent-online" href="/clients?online=1">

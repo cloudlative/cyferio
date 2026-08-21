@@ -716,6 +716,37 @@ h2 { font-size: 1.08rem; font-weight: 700; margin: 0 0 14px; color: var(--text);
 	box-shadow: var(--shadow);
 }
 
+/* Dashboard's admin-only "Manage Users" nudge -- the one deliberately
+   prominent callout on this app's default landing page, distinct from a
+   plain .card (accent top stripe + glow, same visual language as
+   .stat-card's own accent stripe and every .btn-primary's glow) so it
+   reads as "start here" rather than blending into the page. */
+.welcome-banner {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 20px;
+	flex-wrap: wrap;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	padding: 20px 26px;
+	margin-bottom: 24px;
+	box-shadow: var(--accent-glow);
+	overflow: hidden;
+}
+.welcome-banner::before {
+	content: "";
+	position: absolute;
+	top: 0; left: 0; right: 0;
+	height: 3px;
+	background: var(--accent-gradient);
+}
+.welcome-banner-text h2 { margin: 0 0 4px; font-size: 1.1rem; }
+.welcome-banner-text p { margin: 0; color: var(--text-muted); font-size: 0.88rem; }
+.welcome-banner .btn-primary { flex: none; white-space: nowrap; }
+
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 18px; margin-bottom: 28px; }
 a.stat-card, button.stat-card, .stat-card {
 	position: relative;
