@@ -1280,6 +1280,21 @@ input[type="radio"]:disabled { opacity: 0.5; cursor: not-allowed; }
    instead of a scannable list. Same gap as .checkbox-row, just stacked. */
 .checkbox-col { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
 
+/* Slack Integration's per-event-type groups (Support Center/Security
+   Events/System Events/Operational Events, each a .checkbox-col above) --
+   stacked one-under-another was taking up most of the Settings page's
+   vertical space (reported live 2026-08-21). A responsive grid instead:
+   auto-fit naturally lands on 3-4 columns at a normal desktop width (each
+   group needs ~220px to read comfortably) and gracefully collapses to
+   fewer/1 column on a narrower viewport, rather than a fixed column count
+   that would either overflow or leave awkward empty space. */
+.notify-groups-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 18px 28px;
+	align-items: start;
+}
+
 /* --- Phone input (dial-code <select> + local-number field), see app.js's
    createPhoneInput -- used anywhere a User.phone is entered/edited.
    Previous pass widened the OUTER .field wrapper but left
