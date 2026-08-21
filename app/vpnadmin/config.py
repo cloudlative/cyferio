@@ -157,6 +157,21 @@ class Settings:
     # shape as every other SMTP/system setting in this app.
     APP_DOMAIN: str = os.environ.get("APP_DOMAIN", "")
 
+    # --- Version display -----------------------------------------------------
+    # Shown in the header (base.html) next to the notification bell, so an
+    # admin/user can tell which release is actually deployed and support can
+    # verify a report is against the right build. Static for now -- a plain
+    # env var, defaulted to the latest tag at the time this was added (see
+    # HANDOFF_RBAC_VPN_IDENTITY.md's tag history) -- deliberately NOT wired
+    # to git/CI metadata yet (that would mean baking .git into the Docker
+    # image or a build-time ARG/label, neither of which exists in this repo's
+    # build.yml today). Bumping this on each release is a one-line change to
+    # .env (or docker-compose.yml's environment:) with no redeploy of code,
+    # which is exactly the "easily configurable" bar this was asked to meet;
+    # switching it to auto-derive from a git tag / CI variable later is a
+    # drop-in change to this one default, nothing downstream needs to change.
+    APP_VERSION: str = os.environ.get("APP_VERSION", "v1.0.9")
+
     # CAPTCHA on /login, /forgot-password, /reset-password (see captcha.py
     # and routes/auth.py) -- provider-agnostic on purpose: this is a
     # self-hosted, open-source app (see README's "nothing here hardcodes

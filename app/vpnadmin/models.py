@@ -1057,6 +1057,12 @@ class TicketNotification(Base):
     read_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User")
+    # Read by routes/notifications.py's _ticket_link_url() to tell a
+    # notification's own recipient apart from the ticket's creator (so an
+    # admin's notification links to the admin console page, not the
+    # self-service one) -- no backref needed, SupportTicket doesn't need to
+    # walk back to its notifications.
+    ticket = relationship("SupportTicket")
 
 
 class MfaRecoveryCode(Base):

@@ -457,6 +457,19 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 .content-header .link-button { color: var(--text-muted); font-size: 0.85rem; }
 .content-header .link-button:hover { color: var(--text); }
 
+/* Deployed app version indicator -- see base.html/app_settings.py.
+   Deliberately quiet/muted styling (same tone as .content-footer text),
+   not a colored pill -- this is a reference detail, not a status signal. */
+.app-version-badge {
+	font-size: 0.78rem;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	color: var(--text-muted);
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	padding: 3px 10px;
+	white-space: nowrap;
+}
+
 /* Notification bell -- same anchored-panel shape as .theme-quick-switch
    below (relative wrapper, absolutely-positioned panel toggled via JS'
    plain display:block/none, closed on outside click), not a centered

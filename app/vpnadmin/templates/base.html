@@ -142,6 +142,14 @@
 				</button>
 			</div>
 			<div class="content-header-right">
+				{# Static build/version indicator -- see config.py's APP_VERSION
+				   and app_settings.py's runtime.app_version for why this is a
+				   plain env-sourced value, not Settings-page-backed. Placed
+				   first in the header-right cluster (before the bell) so it
+				   stays visible on every page, for both admins and regular
+				   users, without competing for space with the notif badge or
+				   theme switch. #}
+				<span class="app-version-badge" title="Deployed application version">{{ app_settings.app_version }}</span>
 				<div class="notif-bell" id="notif-bell">
 					<button type="button" class="btn-secondary btn-sm notif-bell-toggle" id="notif-bell-toggle" aria-haspopup="true" aria-expanded="false">
 						<span aria-hidden="true">&#128276;</span>

@@ -110,7 +110,13 @@ class TestMergedNotificationBell:
         login(app_client, "admin", "adminpass123")
         r = app_client.get("/api/notifications")
         assert r.status_code == 200
-        matches = [n for n in r.json()["notifications"] if n["link_url"] == f"/support/{ticket_id}"]
+        # The admin is not this ticket's creator, so their own copy of the
+        # notification must link to the admin console page -- see
+        # routes/notifications.py's _ticket_link_url(). Landing an admin on
+        # /support/<id> (the self-service page) 404s "Ticket not found"
+        # there, since GET /api/me/tickets/<id> only ever resolves the
+        # caller's own tickets.
+        matches = [n for n in r.json()["notifications"] if n["link_url"] == f"/support-center/{ticket_id}"]
         assert len(matches) == 1
         notif_id = matches[0]["id"]
         assert notif_id.startswith("ticket:")
@@ -118,6 +124,24 @@ class TestMergedNotificationBell:
         r = app_client.post(f"/api/notifications/{notif_id}/read")
         assert r.status_code == 200
         assert r.json()["read_at"] is not None
+
+    def test_ticket_creators_own_notification_links_to_the_self_service_page(self, app_client, db_session):
+        """The flip side of the admin-routing test above: when the
+        notified user IS the ticket's own creator (e.g. an admin-side reply
+        notifying the creator back), the link must stay on the self-service
+        page, not the admin console one -- see _ticket_link_url()."""
+        _make_self_service_user(db_session, "alice")
+        login(app_client, "alice", "somepass123")
+        ticket_id = _create_ticket(app_client).json()["id"]
+
+        login(app_client, "admin", "adminpass123")
+        app_client.post(f"/api/tickets/{ticket_id}/replies", data={"body": "Looking into it."})
+
+        login(app_client, "alice", "somepass123")
+        r = app_client.get("/api/notifications")
+        assert r.status_code == 200
+        matches = [n for n in r.json()["notifications"] if n["link_url"] == f"/support/{ticket_id}"]
+        assert len(matches) == 1
 
     def test_unknown_prefixed_id_404s_cleanly(self, app_client, db_session):
         login(app_client, "admin", "adminpass123")

@@ -44,13 +44,43 @@ def _serialize_quota(n: QuotaNotification) -> dict:
     }
 
 
+def _ticket_link_url(n: TicketNotification) -> str | None:
+    """Which page this notification's ticket actually opens in.
+
+    Used to hardcode "/support/<id>" (the self-service page) unconditionally
+    -- fine for a ticket's own creator, but wrong for every admin recipient
+    of a ticket someone else filed: /support/<id> talks to GET /api/me/
+    tickets/<id>, which 404s "Ticket not found" for anyone but the ticket's
+    creator (routes/me_tickets.py's _require_own_ticket is deliberately
+    "own tickets only" -- see that module's docstring), so an admin clicking
+    their own "New ticket" bell notification landed on a page stuck showing
+    that 404 with no way forward. Route each recipient to the page whose API
+    will actually resolve their ticket: the notified user's own ticket goes
+    to the self-service page, everyone else (i.e. every admin recipient --
+    see ticket_notifications._notify_admins, the only caller that ever
+    writes a TicketNotification for someone other than the ticket's
+    creator) goes to the admin console page instead.
+
+    n.ticket can be None if the row survived a ticket delete somehow (it
+    shouldn't -- ticket_id has ondelete=CASCADE -- but a notification row
+    must never crash the whole notifications list over one bad reference);
+    the frontend already renders a missing link_url as a plain unclickable
+    row (see app.js's notif-bell rendering), same as a quota notification's
+    permanent link_url=None."""
+    if n.ticket is None:
+        return None
+    if n.user_id == n.ticket.created_by_user_id:
+        return f"/support/{n.ticket_id}"
+    return f"/support-center/{n.ticket_id}"
+
+
 def _serialize_ticket(n: TicketNotification) -> dict:
     return {
         "id": f"ticket:{n.id}",
         "kind": n.kind,
         "level": "info",  # neutral styling -- ticket events aren't a warning/critical severity scale
         "message": n.message,
-        "link_url": f"/support/{n.ticket_id}",
+        "link_url": _ticket_link_url(n),
         "created_at": n.created_at.isoformat() if n.created_at else None,
         "read_at": n.read_at.isoformat() if n.read_at else None,
     }

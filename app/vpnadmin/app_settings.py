@@ -154,6 +154,12 @@ class _RuntimeSettings:
         # module-level constant purely so templates/mailer.py don't need to
         # change: they already read `app_settings.app_name` everywhere.
         self.app_name = "Cyferio"
+        # Static, env-sourced (config.py's APP_VERSION) -- see that
+        # attribute's own comment for why this isn't DB/Settings-page-backed
+        # like the rest of this class: it's a per-release deploy value, not
+        # an admin preference, so there's nothing for refresh_runtime_cache()
+        # to ever reload here.
+        self.app_version = env_settings.APP_VERSION
         self.portal_url = f"https://{env_settings.APP_DOMAIN}" if env_settings.APP_DOMAIN else None
         self.smtp_host = env_settings.SMTP_HOST
         self.smtp_port = env_settings.SMTP_PORT

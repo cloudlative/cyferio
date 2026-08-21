@@ -238,6 +238,19 @@ if (IS_ADMIN_VIEW) {
 	try {
 		await loadTicket();
 	} catch (err) {
+		// Never leave the page reading "Loading..." forever on a bad/missing
+		// ticket id (deleted ticket, wrong permission scope, stale
+		// notification link, etc) -- surface the real error in the page
+		// itself, not just a toast that can be missed/dismissed. See
+		// routes/notifications.py's _ticket_link_url() for the routing fix
+		// that prevents the most common cause of this (an admin's own
+		// ticket-created notification pointing at the self-service page);
+		// this is the remaining defense-in-depth for every other way a
+		// ticket id can fail to resolve.
+		document.getElementById("td-subject").textContent = "Ticket not found";
+		document.getElementById("td-badges").innerHTML = "";
+		document.getElementById("td-thread").innerHTML = `<p class="muted">${escapeHtml(err.message || "This ticket could not be loaded -- it may have been deleted, or you may not have access to it.")}</p>`;
+		document.querySelectorAll(".content-grid > div:last-child .card").forEach((el) => (el.style.display = "none"));
 		toast(err.message, "error");
 		return;
 	}

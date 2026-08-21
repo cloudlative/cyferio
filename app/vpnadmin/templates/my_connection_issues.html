@@ -79,14 +79,33 @@ function renderRowDetail(row, data) {
 	if (row.detected_asn) parts.push(`<div><label>Detected ASN</label><div class="mono">${escapeHtml(row.detected_asn)}${row.detected_asn_name ? " — " + escapeHtml(row.detected_asn_name) : ""}</div></div>`);
 	if (row.source_ip) parts.push(`<div><label>Source IP</label><div class="mono">${escapeHtml(row.source_ip)}</div></div>`);
 
+	// Two different kinds of restriction here, and they get two different
+	// actions -- not the same "always offer a ticket" treatment:
+	//   - MAC (when self-service is enabled) and Country are both fields
+	//     the user's own profile already lets them change themselves
+	//     (POST /api/me/vpn-profile/macs, PATCH /api/users/me's
+	//     login_country -- see this router's own docstring). That's the
+	//     user's own decision, not an administrator's, so these just
+	//     redirect into My VPN Profile -- no ticket needed, nothing for an
+	//     admin to review.
+	//   - Every other restriction (device/OS, city, ASN, IP, bandwidth, and
+	//     MAC when self-service is turned off) is administrator-controlled
+	//     with no self-service escape hatch at all -- the user cannot fix
+	//     it themselves no matter what, so "Request Access Review" (a real
+	//     ticket an admin decides on, routes/me_connection_issues.py's
+	//     REASON_TO_TICKET_CATEGORY) is the only path forward and is shown
+	//     for all of them, including any future reason code that falls
+	//     through to the catch-all branch below.
 	let actionHtml = "";
+	let showReviewButton = false;
 	if (row.recommended_action === "whitelist_mac") {
 		if (data.mac_self_service_enabled) {
 			actionHtml = `
 				<button class="btn-secondary btn-sm" data-copy-mac="${escapeHtml(row.detected_mac || "")}">Copy MAC Address</button>
 				<button class="btn-primary btn-sm" data-whitelist-mac="${escapeHtml(row.detected_mac || "")}">Add to My Allowed MAC Addresses</button>`;
 		} else {
-			actionHtml = `<p class="muted" style="margin:0">Your device MAC address is not currently allowed. Please contact your administrator to update your profile.</p>`;
+			actionHtml = `<p class="muted" style="margin:0">Your device MAC address is not currently allowed, and self-service MAC changes are turned off for your account. Request a review below so an administrator can add it.</p>`;
+			showReviewButton = true;
 		}
 	} else if (row.recommended_action === "update_country") {
 		actionHtml = `
@@ -95,20 +114,26 @@ function renderRowDetail(row, data) {
 	} else if (row.reason === "os_not_allowed") {
 		actionHtml = `<p class="muted" style="margin:0">Your connection was rejected because your device's OS${row.detected_os ? ` (<strong>${escapeHtml(row.detected_os)}</strong>)` : ""} is not permitted by administrator-defined access policies.
 			${(data.allowed_os && data.allowed_os.length) ? ` Your profile currently allows: <strong>${data.allowed_os.map(escapeHtml).join(", ")}</strong>.` : ""}
-			Please contact your administrator if this device should be allowed.</p>
-			<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`;
+			Please contact your administrator if this device should be allowed.</p>`;
+		showReviewButton = true;
 	} else if (row.category === "city") {
-		actionHtml = `<p class="muted" style="margin:0">Your connection was rejected because your current city is not permitted by administrator-defined access policies. Please contact your administrator if this location should be allowed.</p>
-			<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`;
+		actionHtml = `<p class="muted" style="margin:0">Your connection was rejected because your current city is not permitted by administrator-defined access policies. Please contact your administrator if this location should be allowed.</p>`;
+		showReviewButton = true;
 	} else if (row.category === "asn") {
-		actionHtml = `<p class="muted" style="margin:0">Your connection was rejected because your network provider (ASN) is not permitted by administrator-defined access policies. Please contact your administrator to request access.</p>
-			<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`;
+		actionHtml = `<p class="muted" style="margin:0">Your connection was rejected because your network provider (ASN) is not permitted by administrator-defined access policies. Please contact your administrator to request access.</p>`;
+		showReviewButton = true;
+	} else if (row.reason === "ip_not_allowed") {
+		actionHtml = `<p class="muted" style="margin:0">Your connection was rejected because your IP address is not permitted by administrator-defined access policies. Please contact your administrator to request access.</p>`;
+		showReviewButton = true;
 	} else {
-		actionHtml = `<p class="muted" style="margin:0">Contact your administrator about this restriction.</p>
-			<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`;
+		actionHtml = `<p class="muted" style="margin:0">Contact your administrator about this restriction.</p>`;
+		showReviewButton = true;
 	}
 
-	return `<div class="form-grid" style="margin-bottom:10px">${parts.join("")}</div>${actionHtml}`;
+	const reviewButtonHtml = showReviewButton
+		? `<button class="btn-secondary btn-sm" data-request-review="${escapeHtml(row.timestamp)}" style="margin-top:8px">Request Access Review</button>`
+		: "";
+	return `<div class="form-grid" style="margin-bottom:10px">${parts.join("")}</div>${actionHtml}${reviewButtonHtml}`;
 }
 
 function wireRowActions(container, row) {
