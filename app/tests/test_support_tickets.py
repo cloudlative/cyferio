@@ -205,6 +205,25 @@ class TestAdminConsole:
         r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "not-a-real-status"})
         assert r.status_code == 400
 
+    def test_assignable_admins_is_not_shadowed_by_ticket_id_route(self, app_client, db_session):
+        """Regression test: GET /assignable-admins was declared AFTER GET
+        /{ticket_id} in routes/tickets.py -- FastAPI/Starlette matches
+        routes in registration order, so /{ticket_id} (a catch-all for any
+        single path segment) matched first, tried to bind the literal
+        string "assignable-admins" to `ticket_id: int`, and 422'd. Found
+        live 2026-08-21: ticket_detail.html's admin-view init() awaits this
+        endpoint with no try/catch, so the 422 silently aborted the whole
+        init() before loadTicket() ever ran -- the ticket detail page
+        (/support-center/{id}) was stuck on "Loading..." forever with no
+        visible error. This asserts the real 200/expected-shape response,
+        not just "not 422", so a future re-introduction of the same
+        ordering mistake fails loudly here instead of only in production."""
+        login(app_client, "admin", "adminpass123")
+        r = app_client.get("/api/tickets/assignable-admins")
+        assert r.status_code == 200
+        admins = r.json()["admins"]
+        assert any(a["username"] == "admin" for a in admins)
+
 
 class TestCreateValidation:
     def test_unknown_category_rejected(self, app_client, db_session):

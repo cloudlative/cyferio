@@ -211,18 +211,36 @@ if (IS_ADMIN_VIEW) {
 }
 
 (async function init() {
+	// The admin-only setup calls (status/priority option lists, assignee
+	// dropdown) are wrapped separately from loadTicket() below and never
+	// allowed to abort it -- an unhandled rejection from either used to
+	// silently stop this whole IIFE before loadTicket() ever ran, leaving
+	// the page on "Loading..." forever with no visible error (found live
+	// 2026-08-21 via a routing bug that made GET /api/tickets/
+	// assignable-admins 422; see routes/tickets.py's own comment on that
+	// fix). The actual ticket content is the page's one essential job, so
+	// it must load regardless of whether this secondary setup succeeds.
 	if (IS_ADMIN_VIEW) {
-		const catData = await apiFetch("/api/tickets/categories");
-		document.getElementById("td-status-select").innerHTML = catData.statuses.map((s) => `<option value="${s.value}">${s.label}</option>`).join("");
-		document.getElementById("td-priority-select").innerHTML = catData.priorities.map((p) => `<option value="${p.value}">${p.label}</option>`).join("");
-		const admins = await apiFetch("/api/tickets/assignable-admins");
-		for (const a of admins.admins) {
-			const o = document.createElement("option");
-			o.value = a.id; o.textContent = a.display_name;
-			document.getElementById("td-assignee-select").appendChild(o);
+		try {
+			const catData = await apiFetch("/api/tickets/categories");
+			document.getElementById("td-status-select").innerHTML = catData.statuses.map((s) => `<option value="${s.value}">${s.label}</option>`).join("");
+			document.getElementById("td-priority-select").innerHTML = catData.priorities.map((p) => `<option value="${p.value}">${p.label}</option>`).join("");
+			const admins = await apiFetch("/api/tickets/assignable-admins");
+			for (const a of admins.admins) {
+				const o = document.createElement("option");
+				o.value = a.id; o.textContent = a.display_name;
+				document.getElementById("td-assignee-select").appendChild(o);
+			}
+		} catch (err) {
+			toast(err.message, "error");
 		}
 	}
-	await loadTicket();
+	try {
+		await loadTicket();
+	} catch (err) {
+		toast(err.message, "error");
+		return;
+	}
 	if (IS_ADMIN_VIEW && currentTicket.assigned_admin) {
 		const sel = document.getElementById("td-assignee-select");
 		const match = [...sel.options].find((o) => o.textContent === currentTicket.assigned_admin);

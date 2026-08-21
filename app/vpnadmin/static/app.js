@@ -184,7 +184,7 @@ function passwordConfirmDialog(message, { confirmLabel = "Confirm" } = {}) {
 			</div>`;
 		document.body.appendChild(dlg);
 		const input = dlg.querySelector("#password-confirm-input");
-		addPasswordToggle(input);
+		window.addPasswordToggle(input); // window.-qualified: assigned by a later IIFE in this file (initPasswordToggles), already run by the time a caller actually opens this dialog, but a bare reference here would trip eslint's no-undef (it doesn't track cross-IIFE global assignment)
 
 		let confirmed = false;
 		const submit = () => { confirmed = true; dlg.close(); };

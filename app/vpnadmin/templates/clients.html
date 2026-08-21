@@ -3,9 +3,6 @@
 {% block content %}
 <div class="toolbar" style="margin-bottom:6px">
 	<div class="toolbar-title"><h1 style="margin:0">VPN Clients</h1></div>
-	{% if is_admin %}
-	<a href="/users" class="btn-cta">Manage Users →</a>
-	{% endif %}
 </div>
 <p class="page-subtitle" style="margin-top:-10px">Everyone with a valid VPN certificate.</p>
 
@@ -24,7 +21,10 @@
 			<h2 style="margin:0">All Clients</h2>
 			<span class="count-badge" id="client-count">— clients</span>
 		</div>
-		<div style="display:flex;gap:8px">
+		<div style="display:flex;gap:8px;align-items:center">
+			{% if is_admin %}
+			<a href="/users" class="btn-cta">Manage Users →</a>
+			{% endif %}
 			{% if can_manage_clients %}
 			<button class="btn-danger btn-sm" id="disconnect-all-btn" disabled>Disconnect All Sessions</button>
 			{% endif %}

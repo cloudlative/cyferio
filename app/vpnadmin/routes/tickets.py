@@ -52,6 +52,36 @@ def get_ticket_categories(_: User = Depends(_require_ticket_viewer)):
             "statuses": [{"value": s, "label": status_label(s)} for s in STATUSES]}
 
 
+@router.get("/assignable-admins")
+def list_assignable_admins(_: User = Depends(_require_ticket_viewer), db: Session = Depends(get_db)):
+    """Every account whose role grants any-scope support_tickets update/
+    manage -- the admin-console assignment dropdown's candidate list.
+    Computed live from role grants rather than a stored subscription
+    list, same reasoning as the ticket-notification fan-out in routes/
+    notifications.py.
+
+    Must be declared before GET /{ticket_id} below -- FastAPI/Starlette
+    matches routes in registration order, and /{ticket_id} is a catch-all
+    for any single path segment. Declared after it (its original
+    position, further down this file) meant GET /assignable-admins
+    matched /{ticket_id} FIRST, tried to bind "assignable-admins" to
+    ticket_id: int, and 422'd -- which ticket_detail.html's admin-view
+    init() awaited with no try/catch, so that one failed request silently
+    aborted the rest of init() including the loadTicket() call right
+    after it, and the whole ticket detail page was left on its
+    "Loading..." placeholder. Found live 2026-08-21 via
+    /support-center/{id} reportedly "not loading the content of the
+    ticket" -- server logs showed GET /api/tickets/assignable-admins
+    returning 422 and GET /api/tickets/{id} never even being requested."""
+    from ..permissions import has_permission_any_scope
+
+    candidates = [
+        u for u in db.query(User).filter(User.is_active.is_(True), User.deleted.is_(False)).all()
+        if has_permission_any_scope(db, u, "support_tickets", "update")
+    ]
+    return {"admins": [{"id": u.id, "username": u.username, "display_name": u.display_name} for u in candidates]}
+
+
 @router.get("/{ticket_id}")
 def get_ticket(ticket_id: int, _: User = Depends(_require_ticket_viewer), db: Session = Depends(get_db)):
     ticket = _get_ticket_or_404(db, ticket_id)
@@ -192,22 +222,6 @@ def update_ticket(
         if became_critical:
             ticket_notifications.ticket_marked_critical(db, ticket)
     return _serialize_ticket_detail(ticket, is_admin_view=True)
-
-
-@router.get("/assignable-admins")
-def list_assignable_admins(_: User = Depends(_require_ticket_viewer), db: Session = Depends(get_db)):
-    """Every account whose role grants any-scope support_tickets update/
-    manage -- the admin-console assignment dropdown's candidate list.
-    Computed live from role grants rather than a stored subscription
-    list, same reasoning as the ticket-notification fan-out in routes/
-    notifications.py."""
-    from ..permissions import has_permission_any_scope
-
-    candidates = [
-        u for u in db.query(User).filter(User.is_active.is_(True), User.deleted.is_(False)).all()
-        if has_permission_any_scope(db, u, "support_tickets", "update")
-    ]
-    return {"admins": [{"id": u.id, "username": u.username, "display_name": u.display_name} for u in candidates]}
 
 
 @router.get("/{ticket_id}/attachments/{attachment_id}")
