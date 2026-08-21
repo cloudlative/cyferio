@@ -1147,6 +1147,15 @@ button, .btn {
 	font-weight: 700;
 	font-size: 0.87rem;
 	cursor: pointer;
+	/* A crowded toolbar (e.g. system_audit.html's export controls) can run
+	   a flex row out of width -- without this, the browser wraps a
+	   button's own label onto multiple lines instead of shrinking the row,
+	   and the 999px pill radius turns that multi-line label into a
+	   near-circular blob. flex-shrink:0 keeps a button from being squeezed
+	   in the first place; its container should flex-wrap onto a new line
+	   instead (see .toolbar, and system_audit.html's own control row). */
+	white-space: nowrap;
+	flex-shrink: 0;
 	transition: transform 0.1s ease, box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 }
 .btn-primary { background: var(--accent-gradient); color: white; box-shadow: var(--accent-glow); }
