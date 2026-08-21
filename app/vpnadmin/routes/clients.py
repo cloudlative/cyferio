@@ -1,4 +1,6 @@
+import json
 import re
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
@@ -659,3 +661,162 @@ def update_client_policy(name: str, body: PolicyRequest, user: User = Depends(_r
         detail_bits.append(f"quota_enforcement_policy={body.quota_enforcement_policy or 'default'}")
     log_action(db, user, "update_client_policy", target=name, detail="; ".join(detail_bits) or "no changes", success=True)
     return {"policy": result}
+
+
+# --- VPN Device Availability Monitoring -------------------------------------
+# Folded into this router (not a standalone CRUD module) since it's edited
+# from the exact same "select a client, open a dialog" flow as Manage
+# Restrictions above -- see device_monitoring.py's module docstring for the
+# full feature design. Admin/editor only (_require_client_manager), same
+# gate as every other client-mutating endpoint in this file; a viewer can
+# see status via the dashboard widget/report but not configure monitoring.
+
+class MonitoringConfigRequest(BaseModel):
+    """Same partial-update-by-field-presence convention as PolicyRequest
+    above -- every field optional, an omitted field is left untouched. The
+    Manage Monitoring dialog always sends the full form at once, same as
+    Manage Restrictions."""
+    monitoring_enabled: bool | None = None
+    monitoring_name: str | None = None
+    expected_connectivity: str | None = None
+    offline_threshold_minutes: int | None = None
+    notify_email_enabled: bool | None = None
+    notify_slack_enabled: bool | None = None
+    notify_assigned_user: bool | None = None
+    notify_admin_user_ids: list[int] | None = None
+    notify_additional_emails: list[str] | None = None
+    notify_on_recovery: bool | None = None
+    alert_cooldown_mode: str | None = None
+    alert_cooldown_repeat_minutes: int | None = None
+
+    @field_validator("expected_connectivity")
+    @classmethod
+    def _connectivity(cls, v: str | None) -> str | None:
+        from .. import device_monitoring
+        if v is not None and v not in device_monitoring.EXPECTED_CONNECTIVITY_CHOICES:
+            raise ValueError(f"Expected Connectivity must be one of: {', '.join(device_monitoring.EXPECTED_CONNECTIVITY_CHOICES)}.")
+        return v
+
+    @field_validator("offline_threshold_minutes")
+    @classmethod
+    def _threshold(cls, v: int | None) -> int | None:
+        from .. import device_monitoring
+        if v is not None and v not in device_monitoring.OFFLINE_THRESHOLD_CHOICES_MINUTES:
+            raise ValueError(f"Offline Detection Threshold must be one of: {device_monitoring.OFFLINE_THRESHOLD_CHOICES_MINUTES} minutes.")
+        return v
+
+    @field_validator("alert_cooldown_mode")
+    @classmethod
+    def _cooldown_mode(cls, v: str | None) -> str | None:
+        from .. import device_monitoring
+        if v is not None and v not in device_monitoring.ALERT_COOLDOWN_MODES:
+            raise ValueError(f"Alert cooldown mode must be one of: {', '.join(device_monitoring.ALERT_COOLDOWN_MODES)}.")
+        return v
+
+    @field_validator("notify_additional_emails")
+    @classmethod
+    def _additional_emails(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        cleaned = [addr.strip() for addr in v if addr.strip()]
+        for addr in cleaned:
+            if not mailer.is_valid_email(addr):
+                raise ValueError(f"'{addr}' isn't a valid email address.")
+        return cleaned
+
+
+class MaintenanceModeRequest(BaseModel):
+    enabled: bool
+    note: str | None = None
+    until: str | None = None  # ISO 8601, optional auto-expiry
+
+
+def _get_link_or_404(db: Session, name: str) -> VpnProfileLink:
+    link = db.query(VpnProfileLink).filter_by(vpn_client_name=name).first()
+    if link is None:
+        raise HTTPException(status_code=404, detail=f"'{name}' has no linked portal user -- VPN Device Monitoring requires a linked profile (Users -> Edit User -> attach a VPN profile).")
+    return link
+
+
+@router.get("/{name}/monitoring")
+def get_client_monitoring(name: str, _: User = Depends(_require_client_viewer), db: Session = Depends(get_db)):
+    if not NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid client name.")
+    from .. import device_monitoring
+    link = _get_link_or_404(db, name)
+    return {"config": device_monitoring.serialize_config(link), "status": device_monitoring.serialize_status(db, link)}
+
+
+@router.put("/{name}/monitoring")
+def update_client_monitoring(name: str, body: MonitoringConfigRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
+    if not NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid client name.")
+    from .. import device_monitoring
+    link = _get_link_or_404(db, name)
+    fields_set = body.model_fields_set
+    was_enabled = link.monitoring_enabled
+
+    if "monitoring_enabled" in fields_set:
+        link.monitoring_enabled = bool(body.monitoring_enabled)
+    if "monitoring_name" in fields_set:
+        link.monitoring_name = (body.monitoring_name or "").strip() or None
+    if "expected_connectivity" in fields_set and body.expected_connectivity:
+        link.expected_connectivity = body.expected_connectivity
+    if "offline_threshold_minutes" in fields_set and body.offline_threshold_minutes:
+        link.offline_threshold_minutes = body.offline_threshold_minutes
+    if "notify_email_enabled" in fields_set:
+        link.notify_email_enabled = bool(body.notify_email_enabled)
+    if "notify_slack_enabled" in fields_set:
+        link.notify_slack_enabled = bool(body.notify_slack_enabled)
+    if "notify_assigned_user" in fields_set:
+        link.notify_assigned_user = bool(body.notify_assigned_user)
+    if "notify_admin_user_ids" in fields_set:
+        link.notify_admin_user_ids = json.dumps(body.notify_admin_user_ids or [])
+    if "notify_additional_emails" in fields_set:
+        link.notify_additional_emails = json.dumps(body.notify_additional_emails or [])
+    if "notify_on_recovery" in fields_set:
+        link.notify_on_recovery = bool(body.notify_on_recovery)
+    if "alert_cooldown_mode" in fields_set and body.alert_cooldown_mode:
+        link.alert_cooldown_mode = body.alert_cooldown_mode
+    if "alert_cooldown_repeat_minutes" in fields_set:
+        link.alert_cooldown_repeat_minutes = body.alert_cooldown_repeat_minutes
+
+    db.commit()
+
+    if "monitoring_enabled" in fields_set and body.monitoring_enabled != was_enabled:
+        action = "device_monitoring_enabled" if body.monitoring_enabled else "device_monitoring_disabled"
+        log_action(db, user, action, target=name, detail=f"threshold_minutes={link.offline_threshold_minutes}")
+    else:
+        log_action(db, user, "device_monitoring_config_updated", target=name, detail="; ".join(sorted(fields_set)) or "no changes")
+
+    return {"config": device_monitoring.serialize_config(link)}
+
+
+@router.post("/{name}/monitoring/maintenance")
+def set_client_monitoring_maintenance(name: str, body: MaintenanceModeRequest, user: User = Depends(_require_client_manager), db: Session = Depends(get_db)):
+    """Maintenance Mode toggle -- suppresses offline/recovery ALERTS for
+    this device without touching monitoring_enabled itself (status/outage
+    history keep being tracked, see device_monitoring.run_offline_check's
+    own comment). `until`, if given, is an optional auto-expiry the
+    offline-check tick enforces so a forgotten maintenance window doesn't
+    silently suppress alerts forever."""
+    if not NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid client name.")
+    from .. import device_monitoring
+    link = _get_link_or_404(db, name)
+
+    until = None
+    if body.until:
+        try:
+            until = datetime.fromisoformat(body.until.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="'until' must be a valid ISO 8601 timestamp.")
+
+    link.maintenance_mode = bool(body.enabled)
+    link.maintenance_mode_note = (body.note or "").strip() or None if body.enabled else None
+    link.maintenance_mode_until = until if body.enabled else None
+    db.commit()
+
+    action = "device_monitoring_maintenance_enabled" if body.enabled else "device_monitoring_maintenance_disabled"
+    log_action(db, user, action, target=name, detail=body.note or "")
+    return {"config": device_monitoring.serialize_config(link)}

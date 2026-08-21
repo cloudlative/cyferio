@@ -66,6 +66,14 @@ class UpdateSettingsRequest(BaseModel):
     release_check_critical_major_bump: bool | None = None
     github_repo: str | None = None
 
+    # VPN Device Availability Monitoring & Offline Alert Notifications --
+    # global defaults only, see device_monitoring.py / models.AppSettings'
+    # own columns. Per-device values always win once set.
+    device_monitoring_check_interval_minutes: int | None = None
+    device_monitoring_default_offline_threshold_minutes: int | None = None
+    device_monitoring_default_cooldown_minutes: int | None = None
+    device_monitoring_default_recovery_notify: bool | None = None
+
     admin_notification_email: str | None = None
     notify_admin_on_user_created: bool | None = None
     notify_admin_on_client_revoked: bool | None = None
@@ -427,6 +435,10 @@ def _serialize() -> dict:
         "release_check_interval_minutes": s.release_check_interval_minutes,
         "release_check_critical_major_bump": bool(s.release_check_critical_major_bump),
         "github_repo": s.github_repo,
+        "device_monitoring_check_interval_minutes": s.device_monitoring_check_interval_minutes,
+        "device_monitoring_default_offline_threshold_minutes": s.device_monitoring_default_offline_threshold_minutes,
+        "device_monitoring_default_cooldown_minutes": s.device_monitoring_default_cooldown_minutes,
+        "device_monitoring_default_recovery_notify": bool(s.device_monitoring_default_recovery_notify),
         "reports_default_range_days": s.reports_default_range_days,
         "db_snapshot_retention_days": s.db_snapshot_retention_days,
         "maintenance_mode": s.maintenance_mode,
@@ -505,6 +517,8 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                    "mfa_mode", "mfa_remember_device_days", "notify_admin_on_mfa_disabled",
                    "release_check_enabled", "release_check_interval_minutes",
                    "release_check_critical_major_bump", "github_repo",
+                   "device_monitoring_check_interval_minutes", "device_monitoring_default_offline_threshold_minutes",
+                   "device_monitoring_default_cooldown_minutes", "device_monitoring_default_recovery_notify",
                    "reports_default_range_days", "db_snapshot_retention_days", "maintenance_mode", "maintenance_message",
                    "notification_duration_ms", "login_theme", "timezone", "time_format",
                    "geoip_enabled"):

@@ -132,6 +132,19 @@ def get_dashboard(_: User = Depends(_require_dashboard_viewer)):
         raise HTTPException(status_code=502, detail=e.message)
 
 
+@dashboard_router.get("/dashboard/critical-devices")
+def get_critical_devices_widget(_: User = Depends(_require_dashboard_viewer), db: Session = Depends(get_db)):
+    """VPN Device Availability Monitoring's "Critical VPN Devices" widget --
+    Online/Offline/Warning counts plus a table of every monitored device,
+    read from device_monitoring.widget_snapshot() (VpnDeviceStatus rows,
+    at most one background-check-interval stale -- same trade-off as the
+    rest of this dashboard). Same viewer gate as GET /api/dashboard itself
+    -- anyone who can see the dashboard can see this widget; configuring
+    monitoring still requires vpn_profiles execute (routes/clients.py)."""
+    from .. import device_monitoring
+    return device_monitoring.widget_snapshot(db)
+
+
 def _health_status_summary() -> dict:
     """Rolls up the 4 independent health.py checks into one ok/degraded
     signal for the Dashboard's System Insights card -- no aggregate

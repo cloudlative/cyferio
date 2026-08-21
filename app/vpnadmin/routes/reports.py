@@ -637,3 +637,22 @@ def get_database_report(
         .all()
     )
     return {"available": True, "reason": None, "current": current, "history": _history_with_deltas(rows)}
+
+
+@router.get("/device-availability")
+def get_device_availability_report(
+    days: int = Query(30, ge=1, le=365),
+    _: User = Depends(require_reports_view),
+    db: Session = Depends(get_db),
+):
+    """VPN Device Availability Monitoring's Device Availability report --
+    uptime %, downtime %, outage count, and average outage duration per
+    monitored device over the trailing `days`, sorted worst-availability-
+    first (doubles as the "Most Unstable Devices" view -- see
+    device_monitoring.availability_report's own docstring for why no
+    separate query is needed for that). Same "reports" gate as every other
+    report on this page."""
+    from .. import device_monitoring
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    return {"days": days, "devices": device_monitoring.availability_report(db, start, end)}

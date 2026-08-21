@@ -16,6 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from vpnadmin import cli_wrapper
 from vpnadmin import client_mac_mirror
+from vpnadmin import device_monitoring
 # Aliased to health_data -- routes/health.py (the API router module,
 # imported below via `from vpnadmin.routes import ... health ...`) and
 # vpnadmin/health.py (this data-gathering module) share the bare name
@@ -185,6 +186,31 @@ async def _quota_notification_loop():
             logger.exception("Quota notification check failed; will retry next tick")
         await asyncio.sleep(QUOTA_NOTIFICATION_INTERVAL_SECONDS)
 
+
+async def _device_monitoring_loop():
+    """VPN Device Availability Monitoring's periodic offline-check tick --
+    see device_monitoring.run_offline_check's own docstring for why this
+    is an eager background loop (unlike release_check.py's lazy,
+    request-triggered check) and models.VpnDeviceStatus/VpnDeviceOutage
+    for what it writes. Unlike every other loop above, the sleep interval
+    is read FRESH from app_settings.runtime on every tick (not a fixed
+    module-level constant) -- it's the one interval in this feature the
+    admin can tune (Settings -> Device Monitoring), same "admin-
+    configurable interval" precedent as release_check.py's own
+    runtime.release_check_interval_minutes, just applied to a loop
+    instead of a lazy check's staleness test."""
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                await asyncio.to_thread(device_monitoring.run_offline_check, db)
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("VPN device offline check failed; will retry next tick")
+        interval_minutes = app_settings.runtime.device_monitoring_check_interval_minutes or 5
+        await asyncio.sleep(max(60, interval_minutes * 60))
+
 # Note: the Release Availability check (release_check.py) is deliberately
 # NOT run on its own background loop like the tasks above -- unlike a
 # subprocess spawn (cli_wrapper) or a local DB query (health_data/
@@ -255,13 +281,15 @@ async def lifespan(_app: FastAPI):
     refresh_task = asyncio.create_task(_dashboard_refresh_loop())
     db_snapshot_task = asyncio.create_task(_db_snapshot_loop())
     quota_notification_task = asyncio.create_task(_quota_notification_loop())
+    device_monitoring_task = asyncio.create_task(_device_monitoring_loop())
     try:
         yield
     finally:
         refresh_task.cancel()
         db_snapshot_task.cancel()
         quota_notification_task.cancel()
-        for task in (refresh_task, db_snapshot_task, quota_notification_task):
+        device_monitoring_task.cancel()
+        for task in (refresh_task, db_snapshot_task, quota_notification_task, device_monitoring_task):
             try:
                 # Bounded, not a bare `await task`: each loop's current
                 # tick runs its blocking work via asyncio.to_thread(), and
