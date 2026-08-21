@@ -1231,6 +1231,19 @@ class SlackWorkspace(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False, default="Default Workspace")
+    # NOT NULL, but "no webhook configured yet" is a real, common state
+    # (get_or_create_default_workspace's first-ever row, before an admin
+    # has entered one) -- represented as "" (empty string), never a true
+    # SQL NULL. routes/settings.py's Pydantic layer treats this field as
+    # `str | None` (None = "not configured", matching every OTHER optional
+    # secret field's convention on this page) and converts at the
+    # boundary; nothing in this module or routes/settings.py should ever
+    # assign Python `None` directly to this column -- doing so 500s with a
+    # NotNullViolation instead of the empty-string sentinel this table
+    # actually expects (confirmed hitting this live 2026-08-21 while
+    # manually clearing a test row -- not reachable through any real user-
+    # facing code path today, but worth knowing before adding one, e.g. a
+    # future "disconnect Slack" action).
     webhook_url = Column(String(512), nullable=False)
     # Optional Slack channel override ("#ops-alerts") -- Slack's incoming
     # webhooks are already bound to one fixed channel at creation time on
@@ -1238,6 +1251,8 @@ class SlackWorkspace(Base):
     # same webhook app is permitted to post into, purely optional.
     channel_override = Column(String(128), nullable=True)
     is_enabled = Column(Boolean, nullable=False, default=True)
+    # NOT NULL, same "" / "{}" -not- None sentinel convention as
+    # webhook_url above -- see that column's own comment.
     notify_types = Column(Text, nullable=False, default="{}")
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)

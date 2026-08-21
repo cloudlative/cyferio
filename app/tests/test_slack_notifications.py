@@ -24,6 +24,17 @@ class TestWebhookValidation:
         assert not slack_notifications.is_valid_webhook_url("")
         assert not slack_notifications.is_valid_webhook_url(None)
 
+    def test_workflow_builder_webhook_accepted(self):
+        """Regression: the regex used to be anchored to "/services/" (the
+        classic Incoming Webhooks app's URL shape) and rejected every
+        genuinely valid Slack webhook that isn't that exact shape -- e.g. a
+        Workflow Builder webhook trigger, which has no "/services/" segment
+        at all. Found live 2026-08-21 via a real admin's "trying to save
+        slack webhook but getting error" report."""
+        assert slack_notifications.is_valid_webhook_url(
+            "https://hooks.slack.com/triggers/T00000000/000000000000/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        )
+
 
 class TestNotifyFanOut:
     def test_notify_skips_disabled_workspace(self, db_session, monkeypatch):
@@ -119,6 +130,24 @@ class TestSettingsRoutes:
         assert body["notify_types"]["ticket_resolved"] is False
         # Secret masking, same convention as every other secret field.
         assert body["webhook_url"] == "••••••••"
+
+    def test_resaving_the_masked_placeholder_does_not_422(self, app_client, monkeypatch):
+        """Regression: the Settings page always round-trips the masked
+        "••••••••" placeholder back into the webhook_url field once a
+        webhook is already saved (see _serialize_slack_workspace) -- ANY
+        subsequent save that doesn't touch that field (toggling Enable,
+        editing the channel, checking a notify-type box) resubmits that
+        placeholder, which used to 422 before the placeholder-is-a-no-op
+        check was moved ahead of the format validator. Found live
+        2026-08-21 alongside the webhook-format bug above."""
+        login(app_client, "admin", "adminpass123")
+        first = app_client.patch("/api/settings/slack", json={"webhook_url": VALID_WEBHOOK, "is_enabled": True})
+        assert first.status_code == 200
+        assert first.json()["webhook_url"] == "••••••••"
+
+        second = app_client.patch("/api/settings/slack", json={"webhook_url": "••••••••", "channel_override": "#ops"})
+        assert second.status_code == 200
+        assert second.json()["channel_override"] == "#ops"
 
     def test_invalid_webhook_url_rejected(self, app_client):
         login(app_client, "admin", "adminpass123")

@@ -796,6 +796,20 @@ class UpdateSlackRequest(BaseModel):
     @classmethod
     def _webhook_format(cls, v: str | None) -> str | None:
         v = (v or "").strip() or None
+        # Same "unchanged" sentinel as _maxmind_key_format above -- MUST be
+        # checked before the format regex below, not after: the Settings
+        # page always round-trips SECRET_PLACEHOLDER back in this field
+        # once a webhook is already saved (see _serialize_slack_workspace),
+        # so ANY save that doesn't touch the webhook field (toggling
+        # Enable, editing the channel override, checking a notify-type box)
+        # resubmits "••••••••" here -- which obviously doesn't match the
+        # real-URL regex. Without this early return, every one of those
+        # saves 422'd with "Doesn't look like a valid Slack incoming
+        # webhook URL", even though the webhook itself was never touched.
+        # update_slack_settings() below already handles this exact sentinel
+        # correctly; this validator was just never letting it get there.
+        if v == SECRET_PLACEHOLDER:
+            return v
         if v and not slack_notifications.is_valid_webhook_url(v):
             raise ValueError("Doesn't look like a valid Slack incoming webhook URL (expected https://hooks.slack.com/services/...).")
         return v

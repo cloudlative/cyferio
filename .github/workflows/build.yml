@@ -172,6 +172,17 @@ jobs:
       # somewhere to attach, per this PR's brief. `--generate-notes`
       # gives a real changelog from commits since the last tag instead of
       # an empty release body.
+      #
+      # Deliberately NOT passing --notes-start-tag: it used to be set to
+      # "${{ github.ref_name }}" -- the tag THIS release IS, not the
+      # previous one to diff from -- so every generated changelog compared
+      # a tag to itself (an empty range) and printed a useless "Full
+      # Changelog: vX.Y.Z...vX.Y.Z" line with no commits, no matter how
+      # much actually changed. Found live 2026-08-21 via a real "is this
+      # link correct?" report on the Release Availability popup, which
+      # surfaces this same generated body. Omitting the flag lets `gh`
+      # auto-detect the previous published release as the start point --
+      # exactly what --generate-notes already does by default.
       - name: Create/update GitHub Release and attach SBOM
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -179,7 +190,6 @@ jobs:
           gh release create "${{ github.ref_name }}" sbom.cdx.json \
             --title "${{ github.ref_name }}" \
             --generate-notes \
-            --notes-start-tag "${{ github.ref_name }}" \
             || gh release upload "${{ github.ref_name }}" sbom.cdx.json --clobber
 
   sign-and-provenance:

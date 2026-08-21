@@ -29,7 +29,18 @@ from sqlalchemy.orm import Session
 
 from .models import SlackDeliveryLog, SlackWorkspace
 
-_WEBHOOK_RE = re.compile(r"^https://hooks\.slack\.com/services/\S+$")
+# Deliberately just the host + "has a real path", not a specific path
+# shape -- was previously anchored to "/services/\S+" (the classic
+# Incoming Webhooks app's URL shape) and rejected every genuinely valid
+# Slack webhook that ISN'T that exact shape, e.g. a Workflow Builder
+# webhook trigger (https://hooks.slack.com/triggers/<team>/<id>/<token>,
+# no "/services/" segment at all) -- found live 2026-08-21 via a real
+# admin's "trying to save slack webhook but getting error" report; a
+# forced round-trip through the actual validator/route confirmed
+# _post_webhook() itself has no dependency on the path shape either (it
+# just POSTs JSON to whatever URL this accepts), so there was never a
+# reason to constrain it this tightly in the first place.
+_WEBHOOK_RE = re.compile(r"^https://hooks\.slack\.com/\S+$")
 
 # group label -> [(event_type key, label), ...] -- mirrors support_tickets.
 # CATEGORIES' shape so routes/settings.py/templates/settings.html can reuse
