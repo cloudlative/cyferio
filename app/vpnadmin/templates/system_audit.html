@@ -3,20 +3,24 @@
 {% block content %}
 <div class="toolbar" style="margin-bottom:6px">
 	<div class="toolbar-title"><h1 style="margin:0">System Audit</h1></div>
-	<div style="display:flex;gap:8px;align-items:center">
+	<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
 		{% if can_run_audit %}
-		<button class="btn-primary" id="run-audit-btn">Run Audit Now</button>
+		<button class="btn-primary" id="run-audit-btn" style="flex-shrink:0">Run Audit Now</button>
 		{% endif %}
-		<button class="btn-secondary" id="refresh-btn">Refresh</button>
-		<button class="btn-secondary" id="export-csv-btn" disabled>Export CSV</button>
-		<select id="export-pdf-report" title="Report type">
+		<button class="btn-secondary" id="refresh-btn" style="flex-shrink:0">Refresh</button>
+		<button class="btn-secondary" id="export-csv-btn" style="flex-shrink:0" disabled>Export CSV</button>
+		<!-- select/input default to width:100% globally (style.css) -- fine
+		     inside a form column, but inside this button row it would
+		     swallow all the remaining space and squeeze every button down
+		     to near-zero width, wrapping their pill shape into a blob. -->
+		<select id="export-pdf-report" title="Report type" style="width:auto;flex-shrink:0">
 			<option value="full">Full Report</option>
 			<option value="summary">Security Summary</option>
 			<option value="firewall">Firewall Report</option>
 			<option value="ssh">SSH Report</option>
 			<option value="system">System Config Report</option>
 		</select>
-		<button class="btn-secondary" id="export-pdf-btn" disabled>Export PDF</button>
+		<button class="btn-secondary" id="export-pdf-btn" style="flex-shrink:0" disabled>Export PDF</button>
 	</div>
 </div>
 <p class="page-subtitle" style="margin-top:-10px">Server hardening and security posture -- system configuration, SSH, and firewall checks.</p>
