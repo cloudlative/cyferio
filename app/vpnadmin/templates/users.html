@@ -129,6 +129,61 @@
 			</fieldset>
 
 			<fieldset style="margin-top:16px">
+				<legend>Device Monitoring <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<p class="muted" style="margin-top:0">VPN Device Availability Monitoring -- for a device expected to keep a continuous VPN connection (a branch gateway, an always-on server, a kiosk). If it drops offline for longer than the threshold below, an alert is sent through the channels you enable. Same feature as Manage Monitoring on the Clients page -- enabling it here just skips the extra trip for a device that's meant to be monitored from day one. Leave unchecked to set this up later instead.</p>
+				<div class="checkbox-row">
+					<label class="checkbox-label"><input type="checkbox" id="u-monitoring-enabled"> Enable monitoring for this device</label>
+				</div>
+				<div class="field-stack" id="u-monitoring-fields" style="opacity:0.5;margin-top:12px">
+					<div class="field">
+						<label for="u-monitoring-name">Monitoring Name <span class="muted">(optional friendly label, e.g. "Head Office Gateway")</span></label>
+						<input type="text" id="u-monitoring-name" maxlength="128" placeholder="Defaults to the VPN profile name">
+					</div>
+					<div class="field">
+						<label for="u-monitoring-connectivity">Expected Connectivity</label>
+						<select id="u-monitoring-connectivity">
+							<option value="always">Always Connected (24x7)</option>
+							<option value="business_hours">Business Hours Only</option>
+							<option value="custom">Custom Schedule</option>
+						</select>
+					</div>
+					<div class="field">
+						<label for="u-monitoring-threshold">Offline Detection Threshold <span class="muted">(alert if not connected for longer than this)</span></label>
+						<select id="u-monitoring-threshold">
+							<option value="1">1 minute</option>
+							<option value="5">5 minutes</option>
+							<option value="10">10 minutes</option>
+							<option value="15" selected>15 minutes</option>
+							<option value="30">30 minutes</option>
+							<option value="60">60 minutes</option>
+						</select>
+					</div>
+					<fieldset>
+						<legend>Notifications</legend>
+						<div class="checkbox-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-email" checked> Email alert</label>
+							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-slack" checked> Slack alert <span class="muted">(to the workspace configured in Settings -> Integrations)</span></label>
+							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-assigned-user" checked> Email the assigned portal user</label>
+							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-recovery" checked> Also notify when the device comes back online</label>
+						</div>
+						<div class="field" style="margin-top:10px">
+							<label for="u-monitoring-additional-emails">Additional Recipients <span class="muted">(one email per line, optional)</span></label>
+							<textarea id="u-monitoring-additional-emails" rows="2" class="mono" placeholder="ops@example.com"></textarea>
+						</div>
+					</fieldset>
+					<fieldset>
+						<legend>Alert Cooldown</legend>
+						<div class="checkbox-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+							<label class="checkbox-label"><input type="radio" name="u-monitoring-cooldown-mode" value="once" checked> Send one alert, then stay silent until it reconnects</label>
+							<label class="checkbox-label"><input type="radio" name="u-monitoring-cooldown-mode" value="repeat"> Repeat while still offline, every
+								<input type="text" id="u-monitoring-cooldown-minutes" inputmode="numeric" style="width:70px;display:inline-block;margin:0 6px" placeholder="60"> minutes
+							</label>
+						</div>
+					</fieldset>
+				</div>
+			</fieldset>
+
+			<fieldset style="margin-top:16px">
 				<legend>Portal Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
 				{% if features.geoip %}
 				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees. These affect signing in to this web portal only -- they have no effect on VPN connections. To restrict VPN access instead, use VPN Access Restrictions below.</p>
@@ -597,7 +652,18 @@ function resetAddUserForm() {
 	// applyDefaultRoleToAddUserForm's own docstring for why the reset would
 	// otherwise silently win and leave Role on whatever option sorts first.
 	applyDefaultRoleToAddUserForm();
+	// Native .reset() already unchecks u-monitoring-enabled -- this just
+	// re-syncs the fields' dimmed/enabled look to match, same reasoning as
+	// setAddUserVpnMode above.
+	toggleUMonitoringFields();
 }
+// Device Monitoring section (Add User dialog) -- same dim-when-off idea
+// as clients.html's Manage Monitoring dialog (toggleMonitoringFields),
+// just page-local here since this form only exists on this one page.
+function toggleUMonitoringFields() {
+	document.getElementById("u-monitoring-fields").style.opacity = document.getElementById("u-monitoring-enabled").checked ? "1" : "0.5";
+}
+document.getElementById("u-monitoring-enabled").addEventListener("change", toggleUMonitoringFields);
 // Toggles between "Device MAC Address" (create a fresh VPN profile) and
 // "Unassigned VPN Profiles" (link an existing standalone one) -- mirrors
 // CreateUserRequest's own mutually-exclusive mac/link_existing_vpn_profile
@@ -1346,6 +1412,26 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				allowed_os: [...document.querySelectorAll(".u-os-check:checked")].map(cb => cb.value),
 				bandwidth_monthly_gb: (() => {
 					const raw = document.getElementById("u-bandwidth").value.trim();
+					return raw ? Number(raw) : null;
+				})(),
+				// Device Monitoring -- see CreateUserRequest's own docstring
+				// (routes/users.py) for why these are monitoring_-prefixed.
+				// Sent unconditionally (not gated on the checkbox client-side)
+				// since the backend only ever applies them when
+				// monitoring_enabled is true -- same "always send, server
+				// decides relevance" approach as every restriction block below.
+				monitoring_enabled: document.getElementById("u-monitoring-enabled").checked,
+				monitoring_name: document.getElementById("u-monitoring-name").value.trim() || null,
+				monitoring_expected_connectivity: document.getElementById("u-monitoring-connectivity").value,
+				monitoring_offline_threshold_minutes: Number(document.getElementById("u-monitoring-threshold").value),
+				monitoring_notify_email: document.getElementById("u-monitoring-notify-email").checked,
+				monitoring_notify_slack: document.getElementById("u-monitoring-notify-slack").checked,
+				monitoring_notify_assigned_user: document.getElementById("u-monitoring-notify-assigned-user").checked,
+				monitoring_notify_on_recovery: document.getElementById("u-monitoring-notify-recovery").checked,
+				monitoring_notify_additional_emails: parseLineList(document.getElementById("u-monitoring-additional-emails").value),
+				monitoring_alert_cooldown_mode: document.querySelector('input[name="u-monitoring-cooldown-mode"]:checked')?.value || "once",
+				monitoring_alert_cooldown_repeat_minutes: (() => {
+					const raw = document.getElementById("u-monitoring-cooldown-minutes").value.trim();
 					return raw ? Number(raw) : null;
 				})(),
 				// VPN Access Restrictions -- separate fields, separate storage

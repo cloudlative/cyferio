@@ -368,6 +368,63 @@ class CreateUserRequest(BaseModel):
     def _bandwidth(cls, v: float | None) -> float | None:
         return _valid_bandwidth_gb(v)
 
+    # VPN Device Availability Monitoring -- same fields/validation as
+    # clients.py's MonitoringConfigRequest (the Manage Monitoring dialog),
+    # applied to the just-created VpnProfileLink during creation (see
+    # create_user() below) instead of requiring a second trip to the
+    # Clients page for a device that's meant to be monitored from day
+    # one (a branch gateway, an always-on server, a kiosk). Off unless
+    # explicitly enabled, same as the dialog's own default -- every other
+    # field here is only meaningful once monitoring_enabled is checked.
+    # `monitoring_` prefixed (not the dialog's bare names) since this
+    # model already has vpn_-prefixed VPN Access Restriction fields living
+    # alongside plain-named Portal ones -- same "prefix distinguishes the
+    # feature area" convention.
+    monitoring_enabled: bool = False
+    monitoring_name: str | None = None
+    monitoring_expected_connectivity: str = "always"
+    monitoring_offline_threshold_minutes: int = 15
+    monitoring_notify_email: bool = True
+    monitoring_notify_slack: bool = True
+    monitoring_notify_assigned_user: bool = True
+    monitoring_notify_on_recovery: bool = True
+    monitoring_notify_additional_emails: list[str] = []
+    monitoring_alert_cooldown_mode: str = "once"
+    monitoring_alert_cooldown_repeat_minutes: int | None = None
+
+    @field_validator("monitoring_expected_connectivity")
+    @classmethod
+    def _monitoring_connectivity(cls, v: str) -> str:
+        from .. import device_monitoring
+        if v not in device_monitoring.EXPECTED_CONNECTIVITY_CHOICES:
+            raise ValueError(f"Expected Connectivity must be one of: {', '.join(device_monitoring.EXPECTED_CONNECTIVITY_CHOICES)}.")
+        return v
+
+    @field_validator("monitoring_offline_threshold_minutes")
+    @classmethod
+    def _monitoring_threshold(cls, v: int) -> int:
+        from .. import device_monitoring
+        if v not in device_monitoring.OFFLINE_THRESHOLD_CHOICES_MINUTES:
+            raise ValueError(f"Offline Detection Threshold must be one of: {device_monitoring.OFFLINE_THRESHOLD_CHOICES_MINUTES} minutes.")
+        return v
+
+    @field_validator("monitoring_alert_cooldown_mode")
+    @classmethod
+    def _monitoring_cooldown_mode(cls, v: str) -> str:
+        from .. import device_monitoring
+        if v not in device_monitoring.ALERT_COOLDOWN_MODES:
+            raise ValueError(f"Alert cooldown mode must be one of: {', '.join(device_monitoring.ALERT_COOLDOWN_MODES)}.")
+        return v
+
+    @field_validator("monitoring_notify_additional_emails")
+    @classmethod
+    def _monitoring_additional_emails(cls, v: list[str]) -> list[str]:
+        cleaned = [addr.strip() for addr in v if addr.strip()]
+        for addr in cleaned:
+            if not mailer.is_valid_email(addr):
+                raise ValueError(f"'{addr}' isn't a valid email address.")
+        return cleaned
+
     @field_validator("mac")
     @classmethod
     def _valid_mac(cls, v: str | None) -> str | None:
@@ -1002,7 +1059,27 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     try:
         db.add(user)
         db.flush()
-        db.add(VpnProfileLink(user_id=user.id, vpn_client_name=effective_client_name, link_source=link_source, linked_by=linked_by))
+        link = VpnProfileLink(user_id=user.id, vpn_client_name=effective_client_name, link_source=link_source, linked_by=linked_by)
+        # Device Monitoring, set on the link before it's added -- same
+        # one-transaction-with-the-user-row reasoning as the link itself.
+        # Only touches the row's monitoring_* columns when actually
+        # enabled; left at VpnProfileLink's own column defaults
+        # (monitoring_enabled=False, notify_*=True, etc.) otherwise, so an
+        # unfilled section here behaves identically to never having opened
+        # Manage Monitoring at all.
+        if body.monitoring_enabled:
+            link.monitoring_enabled = True
+            link.monitoring_name = (body.monitoring_name or "").strip() or None
+            link.expected_connectivity = body.monitoring_expected_connectivity
+            link.offline_threshold_minutes = body.monitoring_offline_threshold_minutes
+            link.notify_email_enabled = body.monitoring_notify_email
+            link.notify_slack_enabled = body.monitoring_notify_slack
+            link.notify_assigned_user = body.monitoring_notify_assigned_user
+            link.notify_on_recovery = body.monitoring_notify_on_recovery
+            link.notify_additional_emails = json.dumps(body.monitoring_notify_additional_emails or [])
+            link.alert_cooldown_mode = body.monitoring_alert_cooldown_mode
+            link.alert_cooldown_repeat_minutes = body.monitoring_alert_cooldown_repeat_minutes
+        db.add(link)
         db.commit()
     except Exception:
         db.rollback()
@@ -1032,6 +1109,9 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
                    f"to an account manually.",
         )
     log_action(db, admin, "create_user", target=body.username, detail=f"role={role_def.slug}")
+    if body.monitoring_enabled:
+        log_action(db, admin, "device_monitoring_enabled", target=effective_client_name,
+                   detail=f"threshold_minutes={body.monitoring_offline_threshold_minutes} (set at user creation)")
 
     # Sync VPN-profile-level OS/bandwidth/Access Restrictions onto the
     # just-created client, same write path as Manage Restrictions on the
