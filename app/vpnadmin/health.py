@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import platform
+import re
 import time
 import urllib.error
 import urllib.request
@@ -351,19 +352,130 @@ def _traefik_get(path: str, timeout: float = 3.0):
         return json.loads(resp.read())
 
 
+def _traefik_get_text(path: str, timeout: float = 3.0) -> str:
+    req = urllib.request.Request(f"{settings.TRAEFIK_API_URL}{path}", headers={"Accept": "text/plain"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+# Bare-bones Prometheus text-exposition-format parser -- deliberately not a
+# real dependency (prometheus_client has no *parsing* helper anyway; the
+# real client for that is a separate package) for a handful of counters/
+# histograms we already know the shape of. Handles the two line shapes
+# Traefik actually emits: `name value` and `name{label="val",...} value`.
+# Not a general-purpose parser (doesn't handle every exposition-format edge
+# case like multi-line HELP/TYPE continuation) -- good enough for scraping
+# our own known Traefik metric names.
+_METRIC_LINE_RE = re.compile(r'^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{(?P<labels>[^}]*)\})?\s+(?P<value>\S+)$')
+_LABEL_RE = re.compile(r'(\w+)="((?:[^"\\]|\\.)*)"')
+
+
+def _parse_prometheus_text(text: str) -> dict:
+    """Returns {metric_name: [(labels_dict, float_value), ...]}."""
+    out: dict[str, list] = {}
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        m = _METRIC_LINE_RE.match(line)
+        if not m:
+            continue
+        name = m.group(1)
+        labels = dict(_LABEL_RE.findall(m.group("labels") or ""))
+        try:
+            value = float(m.group("value"))
+        except ValueError:
+            continue
+        out.setdefault(name, []).append((labels, value))
+    return out
+
+
+def _summarize_traefik_metrics(text: str) -> dict:
+    """Reduces the raw Prometheus scrape down to what the Health page
+    actually shows: per-service and per-entrypoint request totals broken
+    down by status-code class, plus average latency. Average, not p50/p99
+    -- Traefik's histograms use fixed buckets, so an exact percentile needs
+    interpolation across them; sum/count (which Traefik always emits
+    alongside the buckets) gives a real, exact average with no
+    approximation, which is the honester number to show here."""
+    metrics = _parse_prometheus_text(text)
+
+    def _bucket(rows: list, key_label: str) -> dict:
+        buckets: dict[str, dict] = {}
+        for labels, value in rows:
+            key = labels.get(key_label)
+            if not key:
+                continue
+            b = buckets.setdefault(key, {"total": 0, "by_code": {}})
+            code = labels.get("code", "?")
+            n = int(value)
+            b["total"] += n
+            b["by_code"][code] = b["by_code"].get(code, 0) + n
+        return buckets
+
+    services = _bucket(metrics.get("traefik_service_requests_total", []), "service")
+    entrypoints = _bucket(metrics.get("traefik_entrypoint_requests_total", []), "entrypoint")
+
+    def _attach_latency(buckets: dict, sum_rows: list, count_rows: list, key_label: str):
+        sums: dict[str, float] = {}
+        for labels, value in sum_rows:
+            key = labels.get(key_label)
+            if key:
+                sums[key] = sums.get(key, 0.0) + value
+        counts: dict[str, float] = {}
+        for labels, value in count_rows:
+            key = labels.get(key_label)
+            if key:
+                counts[key] = counts.get(key, 0.0) + value
+        for key, b in buckets.items():
+            total_count = counts.get(key, 0)
+            b["avg_latency_ms"] = round((sums.get(key, 0.0) / total_count) * 1000, 1) if total_count else None
+
+    _attach_latency(
+        services,
+        metrics.get("traefik_service_request_duration_seconds_sum", []),
+        metrics.get("traefik_service_request_duration_seconds_count", []),
+        "service",
+    )
+    _attach_latency(
+        entrypoints,
+        metrics.get("traefik_entrypoint_request_duration_seconds_sum", []),
+        metrics.get("traefik_entrypoint_request_duration_seconds_count", []),
+        "entrypoint",
+    )
+
+    return {
+        "services": [{"name": k, **v} for k, v in sorted(services.items())],
+        "entrypoints": [{"name": k, **v} for k, v in sorted(entrypoints.items())],
+    }
+
+
 def get_traefik_health() -> dict:
     """Pings Traefik's own internal API (see config.py's TRAEFIK_API_URL --
     reachable only from other containers on the same compose network, see
-    docker-compose.yml) for router/service status. available=False (not
-    an error) if the API is simply unreachable, e.g. local dev with no
-    traefik container running at all."""
+    docker-compose.yml) for router/service/entrypoint/middleware status,
+    plus a summarized scrape of its Prometheus metrics endpoint for actual
+    request counts and latency (the JSON API alone never reports traffic,
+    only current config + up/down state -- see docker-compose.yml's
+    --metrics.prometheus=* comment). available=False (not an error) if the
+    API is simply unreachable, e.g. local dev with no traefik container
+    running at all."""
     try:
         urllib.request.urlopen(f"{settings.TRAEFIK_API_URL}/ping", timeout=2.0)
         ping_ok = True
     except (urllib.error.URLError, OSError, TimeoutError):
         return {"available": False, "reason": "Traefik's internal API is unreachable from this container."}
 
-    result: dict = {"available": True, "ping_ok": ping_ok, "error": None, "routers": [], "services": []}
+    result: dict = {
+        "available": True,
+        "ping_ok": ping_ok,
+        "error": None,
+        "routers": [],
+        "services": [],
+        "entrypoints": [],
+        "middlewares": [],
+        "metrics": None,
+        "metrics_error": None,
+    }
     try:
         routers = _traefik_get("/api/http/routers")
         result["routers"] = [
@@ -372,6 +484,7 @@ def get_traefik_health() -> dict:
                 "rule": r.get("rule"),
                 "status": r.get("status"),
                 "provider": r.get("provider"),
+                "middlewares": r.get("middlewares") or [],
                 "errors": r.get("error") or [],
             }
             for r in routers
@@ -387,6 +500,10 @@ def get_traefik_health() -> dict:
                 "name": s.get("name"),
                 "status": s.get("status"),
                 "provider": s.get("provider"),
+                # Per-backend UP/DOWN -- e.g. {"http://app-blue:8000": "UP",
+                # "http://app-green:8000": "DOWN"} -- this is the actual
+                # blue/green cutover signal, straight from Traefik's own
+                # active health check.
                 "server_status": s.get("serverStatus") or {},
             }
             for s in services
@@ -395,5 +512,34 @@ def get_traefik_health() -> dict:
     except Exception as e:
         if not result["error"]:
             result["error"] = f"Could not read service list: {e}"
+
+    try:
+        entrypoints = _traefik_get("/api/entrypoints")
+        result["entrypoints"] = [
+            {"name": e.get("name"), "address": e.get("address")} for e in entrypoints
+        ]
+    except Exception as e:
+        if not result["error"]:
+            result["error"] = f"Could not read entrypoint list: {e}"
+
+    try:
+        middlewares = _traefik_get("/api/http/middlewares")
+        result["middlewares"] = [
+            {"name": m.get("name"), "type": m.get("type"), "provider": m.get("provider")}
+            for m in middlewares
+            if m.get("provider") != "internal"
+        ]
+    except Exception as e:
+        if not result["error"]:
+            result["error"] = f"Could not read middleware list: {e}"
+
+    try:
+        result["metrics"] = _summarize_traefik_metrics(_traefik_get_text("/metrics"))
+    except Exception as e:
+        # Not folded into the top-level "error" field -- an unreachable
+        # /metrics (e.g. an older running Traefik container from before
+        # --metrics.prometheus=true was added, mid-rollout) shouldn't mark
+        # the whole card unhealthy when routers/services above read fine.
+        result["metrics_error"] = f"Could not read request metrics: {e}"
 
     return result

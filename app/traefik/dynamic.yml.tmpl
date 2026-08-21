@@ -85,6 +85,24 @@ http:
       tls:
         certResolver: letsencrypt
 
+    # VPN-internal ingestion path (host-scripts/openvpn-mac-addr-check.py's
+    # report_rejection()) -- used to hit the app container directly on a
+    # host-IP-bound port (see docker-compose.yml's "Zero-downtime rollout"
+    # comment for why that moved here instead). No Host()/PathPrefix rule
+    # needed: this entrypoint is only reachable via VPN_TUNNEL_IP in the
+    # first place (see docker-compose.yml's traefik service `ports:`),
+    # never from the public internet, so there's nothing else on it to
+    # discriminate between -- catch-all is the correct rule, same posture
+    # the app container's own direct port bind had before. Same `cyferio`
+    # service/backend list as the public router above -- one set of
+    # servers/health checks either way, just reached over a second
+    # entrypoint.
+    cyferio-vpninternal:
+      rule: "PathPrefix(`/`)"
+      entryPoints:
+        - vpninternal
+      service: cyferio
+
     # Traefik's own internal API + ping (see docker-compose.yml's
     # --api=true, --ping=true, and --entrypoints.traefik.address=:8080) --
     # both bound only to the "traefik" entrypoint, which is never
@@ -106,11 +124,50 @@ http:
         - traefik
       service: ping@internal
 
+    # Prometheus-format request metrics (see docker-compose.yml's
+    # --metrics.prometheus=* flags) -- same "traefik" entrypoint, same
+    # never-published-publicly posture as the two routers above. prometheus@
+    # internal is the metrics registry's own internal service name, exactly
+    # like api@internal/ping@internal.
+    traefik-internal-metrics:
+      rule: "PathPrefix(`/metrics`)"
+      entryPoints:
+        - traefik
+      service: prometheus@internal
+
   services:
+    # Zero-downtime rollout (see docker-compose.yml's app-blue/app-green
+    # comment for the full design): BOTH slots are listed here permanently
+    # -- nothing about this file needs to change during a rollout. Exactly
+    # one of the two is normally actually running (docker-compose.yml's
+    # `profiles:`); the other's hostname simply fails to resolve (no
+    # container = no DNS entry on the compose network), which this
+    # loadBalancer's own healthCheck below treats the same as any other
+    # backend failure -- quietly excluded from rotation, not an error.
+    # During the brief window upgrade.sh runs both at once, Traefik
+    # health-checks each independently and only ever sends live traffic to
+    # whichever ones are actually passing -- this IS the mechanism that
+    # makes the rollout zero-downtime: the moment the new slot's /healthz
+    # starts passing, Traefik starts routing to it -- no explicit "cutover"
+    # step, no re-templating this file, no Traefik restart/reload.
     cyferio:
       loadBalancer:
         servers:
-          # "app" resolves via Docker Compose's built-in DNS to the `app`
-          # service on the shared compose network -- no service discovery
-          # needed.
-          - url: "http://app:8000"
+          - url: "http://app-blue:8000"
+          - url: "http://app-green:8000"
+        # 1s/1s, not the more typical 5s/3s -- this interval directly
+        # bounds how long Traefik can keep sending requests to a
+        # container that just stopped (upgrade.sh's old-slot teardown)
+        # before noticing and evicting it. Measured locally 2026-08-21
+        # against the real app image: 5s/3s let ~2-3% of requests hit a
+        # 502/timeout during that transition under a 10 req/s synthetic
+        # hammer; 1s/1s brought that down to ~0.7% (1 of 150) under the
+        # same test -- about as good as a passive-health-check load
+        # balancer gets without the file provider supporting an explicit
+        # "drain this backend first" signal. Cheap either way: this is
+        # just an unauthenticated GET to a two-container list, not a
+        # meaningful load on the app itself.
+        healthCheck:
+          path: /healthz
+          interval: "1s"
+          timeout: "1s"

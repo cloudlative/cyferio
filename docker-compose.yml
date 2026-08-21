@@ -98,18 +98,84 @@ services:
       # entrypoint is defined in app/traefik/dynamic.yml (this file's
       # File provider needs it explicit -- see that file's own comment).
       - --entrypoints.traefik.address=:8080
+      # VPN-internal ingestion path (host-scripts/openvpn-mac-addr-check.py's
+      # report_rejection(), see the app-blue/app-green comment below for why
+      # this moved here from a direct container port bind) -- plain HTTP, no
+      # TLS/cert needed, same as when the app container bound this directly:
+      # this traffic never leaves the VPN tunnel/host, and the calling
+      # script's target address (VPN_TUNNEL_IP:8000) doesn't change at all,
+      # it's just Traefik answering there now instead of the app container.
+      - --entrypoints.vpninternal.address=:8000
       - --api=true
       - --ping=true
+      # Request-level metrics (counts by status code, latency histograms)
+      # for the Health page -- --api=true alone does NOT provide this; the
+      # router/service JSON endpoints only ever report static config +
+      # current up/down state, never traffic. Prometheus is the mechanism
+      # Traefik actually uses to emit that, exposed as a text-format
+      # /metrics endpoint. No separate entrypoint needed: it defaults to
+      # the same "traefik" entrypoint as the JSON API above (8080, never
+      # published -- see `ports:` below), so this adds no new public
+      # surface. The add*Labels flags break counters down per
+      # entrypoint/service/router (e.g. app-blue vs app-green) instead of
+      # one undifferentiated total -- the whole point, given this app's
+      # blue/green setup. Scraped by health.py's get_traefik_health(), not
+      # an external Prometheus server -- no extra service to run.
+      - --metrics.prometheus=true
+      - --metrics.prometheus.addEntryPointsLabels=true
+      - --metrics.prometheus.addServicesLabels=true
+      - --metrics.prometheus.addRoutersLabels=true
       - --log.level=INFO
     ports:
       - "80:80"
       - "443:443"
+      - "${VPN_TUNNEL_IP:-10.8.0.1}:8000:8000"
     volumes:
       - traefik-acme:/letsencrypt
       - traefik-dynamic-config:/etc/traefik/dynamic:ro
     env_file: .env
 
-  app:
+  # --- Zero-downtime rollout: blue/green pair, not a single `app` service ---
+  #
+  # A plain `docker compose up -d` always stops the old container before
+  # starting the new one for a service whose image/config changed -- there's
+  # no "start new, wait until healthy, THEN stop old" in vanilla Compose
+  # (that's a Swarm-only `deploy.update_config` feature, ignored outside
+  # Swarm mode). Reported live 2026-08-21: "the app goes down for a few
+  # seconds" on every rollout.
+  #
+  # Traefik's Docker-socket provider (the usual auto-discovery mechanism
+  # that would make scaling to N replicas "just work") is NOT an option here
+  # -- see dynamic.yml.tmpl's own comment: this host's Docker Engine rejects
+  # the old API version (1.24) Traefik's bundled client hardcodes, confirmed
+  # still true against a current Traefik v3.5.6 build 2026-08-21 (reproduced
+  # live: "client version 1.24 is too old. Minimum supported API version is
+  # 1.40"), not a stale workaround from an older Traefik release.
+  #
+  # So instead: two permanently-defined, identical services (app-blue/
+  # app-green, sharing every setting via the &app-common anchor below except
+  # container_name/profiles) -- dynamic.yml.tmpl's backend list already
+  # names BOTH of them with a Traefik-side healthCheck, so Traefik simply
+  # stops routing to whichever one isn't currently running/healthy; nothing
+  # needs re-templating during a rollout. `profiles:` keeps a plain
+  # `docker compose up -d` behaving exactly as before (only the ACTIVE_SLOT
+  # from .env actually starts) -- upgrade.sh's Phase 4 is what explicitly
+  # brings up the OTHER slot for a rollout, waits for its healthcheck, then
+  # tears down the old one and flips ACTIVE_SLOT for next time. See
+  # upgrade.sh's own Phase 4 comment for the full sequence.
+  #
+  # Trade-off, deliberately not hidden: for the short overlap window while
+  # both slots are healthy, Traefik load-balances across BOTH -- meaning
+  # some requests briefly hit the old version and some the new one (normal
+  # for any zero-downtime rolling deploy, but not appropriate for a release
+  # with a breaking DB schema change -- fall back to the old single-service
+  # stop-start approach for those). The app's in-process background loops
+  # (dashboard refresh/device-offline checks/quota notifications, see
+  # main.py's lifespan) also briefly run in both containers during that
+  # same window -- low risk of a duplicate notification, not eliminated by
+  # this design (would need leader-election or a separate always-single-
+  # instance worker to close entirely).
+  app-blue: &app-common
     # Pulled from GHCR (public image, built by .github/workflows/build.yml on
     # every push to master) rather than built locally -- production just
     # does `docker compose pull && docker compose up -d`. Pin IMAGE_TAG in
@@ -117,7 +183,12 @@ services:
     # version instead of always tracking latest; unset it and it defaults to
     # latest.
     image: ghcr.io/cloudlative/cyferio-app:${IMAGE_TAG:-latest}
-    container_name: cyferio-app
+    container_name: cyferio-app-blue
+    # Only brought up by a plain `docker compose up -d` when ACTIVE_SLOT=blue
+    # in .env (upgrade.sh writes `COMPOSE_PROFILES=${ACTIVE_SLOT}` into the
+    # environment before calling compose) -- see this block's own comment
+    # above. app-green below overrides this to ["green"].
+    profiles: ["blue"]
     restart: unless-stopped
     # Runs Docker's built-in tini as PID 1 instead of uvicorn directly.
     # Belt-and-suspenders zombie reaper: uvicorn/Python never calls wait()
@@ -129,30 +200,33 @@ services:
     # on 2026-08-10. tini reaps anything reparented to PID 1 automatically.
     init: true
     env_file: .env
-    # No PUBLIC host port: Traefik (above) is the only public entrypoint.
-    # This one binding to the VPN-internal tun0 interface is intentional
-    # and load-bearing, not just a debugging convenience --
-    # host-scripts/openvpn-mac-addr-check.py's report_rejection() (running
-    # on the bare host, "My Connection Issues" ingestion) calls the app
-    # over THIS address rather than the public HTTPS domain, because a
-    # Cloudflare-proxied domain silently 403s that request at the edge
-    # (Bot Fight Mode/WAF flagging Python's urllib signature -- found live
-    # 2026-08-20, confirmed by the app's own logs showing zero record of
-    # the request ever arriving). This interface is reachable from the
-    # host itself and from connected VPN clients over the tunnel, never
-    # from the public internet, so this carries none of the
-    # "unauthenticated bypass" risk a public/0.0.0.0 binding alongside
-    # Traefik would -- never widen this beyond that one interface.
+    # Docker-level healthcheck -- what upgrade.sh polls (`docker inspect
+    # --format='{{.State.Health.Status}}'`) to know when a freshly-started
+    # slot is actually ready, and the same /healthz endpoint Traefik's OWN
+    # active healthcheck (dynamic.yml.tmpl) polls independently to decide
+    # whether to route real traffic here. Plain stdlib urllib, not curl/wget
+    # -- neither is installed in the python:3.14-alpine base image, and
+    # adding one just for this is unnecessary. start_period covers ordinary
+    # lifespan startup (DB init/migrations) -- NOT geo_lists.ensure_fresh()'s
+    # up-to-115s City/ASN pick-list build, which runs in its own background
+    # thread and never blocks /healthz (see main.py's lifespan comment).
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://localhost:8000/healthz',timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+    # No host port bind at all -- Traefik (above) is the only entrypoint for
+    # ALL traffic now, including host-scripts/openvpn-mac-addr-check.py's
+    # VPN-internal ingestion path (report_rejection(), "My Connection
+    # Issues"), which used to bind directly to this container instead. That
+    # single fixed host-port bind was itself a hard blocker for ever running
+    # two of these containers at once (Docker can't have two containers
+    # claim the same host IP:port) -- see --entrypoints.vpninternal.address
+    # on the traefik service above for where that path lives now. The
+    # calling script's target address (VPN_TUNNEL_IP:8000) is UNCHANGED --
+    # it's just Traefik answering there instead of this container directly.
     #
-    # VPN_TUNNEL_IP (default 10.8.0.1, matching openvpn-install.sh's own
-    # unconditional `server 10.8.0.0 255.255.255.0` today) is NOT a fixed
-    # constant -- it's this install's actual tun0 gateway, computed by
-    # setup.sh's Phase 3.5 from the running server.conf and written to
-    # .env, so a community fork using a different VPN subnet still gets
-    # the right address here automatically instead of silently pointing
-    # at the wrong interface.
-    ports:
-      - "${VPN_TUNNEL_IP:-10.8.0.1}:8000:8000"
     # Routing (Host rule, TLS, backend port) is defined in
     # app/traefik/dynamic.yml rather than labels here -- see that file's
     # comment for why.
@@ -246,6 +320,16 @@ services:
     # escalation is needed once already running as root.
     depends_on:
       - traefik
+
+  # Identical to app-blue in every way except container_name/profiles --
+  # see app-blue's own top comment for the full zero-downtime design this
+  # pair exists for. YAML merge (`<<: *app-common`) inherits everything
+  # from app-blue's anchor; the two keys below are the only ones that
+  # actually need to differ between the two.
+  app-green:
+    <<: *app-common
+    container_name: cyferio-app-green
+    profiles: ["green"]
 
   # Set DATABASE_URL in .env to a postgresql:// URL pointing at this service
   # to use it instead of the default SQLite file (see .env.example).

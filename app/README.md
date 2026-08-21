@@ -343,9 +343,12 @@ CLI script (not a web page -- this only ever needs to run once, so it
 doesn't earn a permanent page/nav item):
 
 ```bash
-docker compose exec app python migrate_vpn_profiles.py preview   # read-only, changes nothing
-docker compose exec app python migrate_vpn_profiles.py run       # asks for confirmation, then applies it
-docker compose exec app python migrate_vpn_profiles.py last-report
+# Substitute app-blue or app-green for whichever is currently active --
+# check COMPOSE_PROFILES in .env, or `docker compose ps` (see docker-
+# compose.yml's "Zero-downtime rollout" comment for why there are two).
+docker compose exec app-blue python migrate_vpn_profiles.py preview   # read-only, changes nothing
+docker compose exec app-blue python migrate_vpn_profiles.py run       # asks for confirmation, then applies it
+docker compose exec app-blue python migrate_vpn_profiles.py last-report
 ```
 
 `run` never revokes, restores, or purges any VPN certificate -- it only
@@ -366,8 +369,10 @@ them. Safe to skip indefinitely -- these columns being present but unused
 breaks nothing.
 
 ```bash
-docker compose exec app python drop_legacy_branding_columns.py preview  # read-only, changes nothing
-docker compose exec app python drop_legacy_branding_columns.py run      # asks for confirmation, then applies it
+# Substitute app-blue or app-green for whichever is currently active --
+# see the note above migrate_vpn_profiles.py's own commands.
+docker compose exec app-blue python drop_legacy_branding_columns.py preview  # read-only, changes nothing
+docker compose exec app-blue python drop_legacy_branding_columns.py run      # asks for confirmation, then applies it
 ```
 
 ### Guardrails

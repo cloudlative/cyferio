@@ -582,6 +582,12 @@ CLIENT_IP_TRUST_MIDDLEWARE=$CLIENT_IP_TRUST_MIDDLEWARE
 
 IMAGE_TAG=$IMAGE_TAG
 
+# Which of docker-compose.yml's app-blue/app-green a plain `docker compose
+# up -d` actually starts -- see that file's "Zero-downtime rollout"
+# comment. A fresh install always starts on blue; upgrade.sh's Phase 4 is
+# the only thing that ever flips this afterward.
+COMPOSE_PROFILES=blue
+
 POSTGRES_USER=vpnadmin
 POSTGRES_PASSWORD=$pg_password
 POSTGRES_DB=vpnadmin
@@ -785,8 +791,15 @@ enable_deploy_key_mount() {
 	# call. Re-run setup-new-machine.sh to regenerate if this ever goes
 	# missing; safe to hand-edit otherwise (this script only writes it if the
 	# mount isn't already enabled here).
+	#
+	# Applied to BOTH app-blue and app-green, not a single `app` service --
+	# see docker-compose.yml's "Zero-downtime rollout" comment for why
+	# there are two; either can be the active slot at any given time.
 	services:
-	  app:
+	  app-blue:
+	    volumes:
+	      - ${HOST_SSH_KEY_SOURCE_PATH:-./secrets/cyferio-deploy-key}:/run/secrets/cyferio-deploy-key:ro
+	  app-green:
 	    volumes:
 	      - ${HOST_SSH_KEY_SOURCE_PATH:-./secrets/cyferio-deploy-key}:/run/secrets/cyferio-deploy-key:ro
 	EOF
