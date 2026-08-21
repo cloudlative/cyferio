@@ -1277,11 +1277,21 @@ document.getElementById("slack-save-btn").addEventListener("click", async () => 
 		document.querySelectorAll(".slack-notify-type").forEach((el) => { notify_types[el.dataset.key] = el.checked; });
 		await apiFetch("/api/settings/slack", {
 			method: "PATCH",
-			body: JSON.stringify({
+			// NOT JSON.stringify()'d here -- apiFetch (app.js) already
+			// stringifies any non-string body itself and sets the
+			// Content-Type: application/json header to match. Pre-
+			// stringifying it here made apiFetch see a STRING body, skip
+			// both of those, and send the JSON-encoded text with no
+			// Content-Type header at all -- FastAPI then can't parse it as
+			// the expected UpdateSlackRequest object and 422's on every
+			// single save, unconditionally. Found live 2026-08-21:
+			// "trying to save slack webhook but getting error" /
+			// "settings module... not allowing to save anything".
+			body: {
 				..._slackFormValues(),
 				is_enabled: document.getElementById("slack-enabled").checked,
 				notify_types,
-			}),
+			},
 		});
 		toast("Slack settings saved.");
 		loadSlackSettings();
@@ -1294,7 +1304,9 @@ document.getElementById("slack-test-btn").addEventListener("click", async () => 
 	const btn = document.getElementById("slack-test-btn");
 	btn.disabled = true;
 	try {
-		const result = await apiFetch("/api/settings/slack/test", { method: "POST", body: JSON.stringify(_slackFormValues()) });
+		// See the Save handler's comment above -- same double-stringify bug,
+		// same fix (apiFetch already serializes a non-string body itself).
+		const result = await apiFetch("/api/settings/slack/test", { method: "POST", body: _slackFormValues() });
 		toast(result.message || "Test notification sent.");
 	} catch (e) {
 		toast(e.message, "error");

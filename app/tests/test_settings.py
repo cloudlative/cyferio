@@ -411,3 +411,59 @@ class TestCaptchaTestEndpoint:
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/settings/captcha/test", json={"provider": "bogus", "secret_key": "x"})
         assert r.status_code == 422
+
+
+class TestReleaseCheckIntervalClamp:
+    """db._clamp_release_check_interval() -- see that function's own
+    docstring. Reported live 2026-08-21: an install with
+    release_check_interval_minutes saved below the (later-raised) 60
+    floor had EVERY general Settings save 422 forever, since the page
+    always resubmits every field's current value in one combined PATCH
+    body. This is the startup migration that un-poisons an already-stuck
+    install."""
+
+    def _run_clamp_against(self, db_session):
+        # Same "point SessionLocal at the fixture's own StaticPool-pinned
+        # connection" pattern as test_teams_metadata.py's slug-backfill
+        # tests -- _clamp_release_check_interval() opens its own
+        # SessionLocal() rather than taking a session param, since it's a
+        # startup migration step (db.init_db()), not a request-scoped
+        # route handler.
+        from sqlalchemy.orm import sessionmaker
+
+        from vpnadmin import db as db_mod
+        original_session_local = db_mod.SessionLocal
+        db_mod.SessionLocal = sessionmaker(bind=db_session.get_bind())
+        try:
+            db_mod._clamp_release_check_interval()
+        finally:
+            db_mod.SessionLocal = original_session_local
+
+    def test_below_floor_value_is_raised_to_60(self, db_session):
+        from vpnadmin.models import AppSettings
+
+        row = AppSettings(release_check_interval_minutes=5)
+        db_session.add(row)
+        db_session.commit()
+
+        self._run_clamp_against(db_session)
+
+        db_session.refresh(row)
+        assert row.release_check_interval_minutes == 60
+
+    def test_value_already_at_or_above_floor_is_untouched(self, db_session):
+        from vpnadmin.models import AppSettings
+
+        row = AppSettings(release_check_interval_minutes=120)
+        db_session.add(row)
+        db_session.commit()
+
+        self._run_clamp_against(db_session)
+
+        db_session.refresh(row)
+        assert row.release_check_interval_minutes == 120
+
+    def test_no_settings_row_is_a_noop(self, db_session):
+        # Nothing to clamp -- must not raise (init_db() calls this
+        # unconditionally on every boot, including a fresh install).
+        self._run_clamp_against(db_session)

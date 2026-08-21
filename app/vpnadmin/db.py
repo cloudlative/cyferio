@@ -71,6 +71,7 @@ def init_db():
     _sync_enum_values()
     _seed_rbac()
     _backfill_team_slugs()
+    _clamp_release_check_interval()
 
 
 def _seed_rbac():
@@ -153,6 +154,33 @@ def _backfill_team_slugs():
             team.slug = slug
             existing_slugs.add(slug)
         db.commit()
+    finally:
+        db.close()
+
+
+def _clamp_release_check_interval():
+    """One-time upgrade fix: routes/settings.py's release_check_interval_
+    minutes floor was raised from 5 to 60 (GitHub's unauthenticated rate
+    limit headroom -- see that validator's own comment), but an install
+    that already had a value below 60 saved from before that change keeps
+    it forever otherwise -- PATCH /api/settings validates on every save,
+    and the Settings page's general form always resubmits every field's
+    CURRENT value in one combined body (see settings.html's save handler),
+    so that one stale out-of-range field silently 422's every single
+    general-settings save from then on, not just a save that actually
+    touches Release Availability. Reported live 2026-08-21 as "settings
+    module... not allowing to save anything" -- root-caused to exactly
+    this (release_check_interval_minutes was still 5, saved before the
+    floor-raise). Idempotent: only touches a value that's actually below
+    the current floor, so it's a no-op on every run after the first."""
+    from .models import AppSettings
+
+    db = SessionLocal()
+    try:
+        row = db.query(AppSettings).first()
+        if row is not None and row.release_check_interval_minutes is not None and row.release_check_interval_minutes < 60:
+            row.release_check_interval_minutes = 60
+            db.commit()
     finally:
         db.close()
 
