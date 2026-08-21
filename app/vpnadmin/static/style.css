@@ -361,21 +361,75 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	opacity: 0.75;
 }
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
-/* Groups the sidebar into labeled sections (My Account / VPN Management /
-   Monitoring / Administration) -- see base.html's own comment on why. Not
-   a link, so it's excluded from :hover/.active styling and keyboard tab
-   order by construction. The extra top margin (beyond the nav's own 2px
-   gap) is what actually reads as "new group" at a glance -- the label
-   text is the confirmation, the whitespace is the real signal. */
+/* Groups the sidebar into labeled, individually collapsible sections (My
+   Account / VPN Management / Monitoring / Administration) -- see base.html's
+   own comment on why the grouping exists, and its Expand/Collapse comment
+   for why each one now toggles (reported live 2026-08-21: "the left panel
+   of the app is grown so much"). .nav-section-label is a real <button> now
+   (was a plain non-interactive <div>) -- reset to look identical to the
+   old label, plus a caret, full-width and keyboard-focusable so the toggle
+   is a real control, not a div with a click handler bolted on. */
 .sidebar nav .nav-section-label {
-	margin: 14px 14px 4px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	width: 100%;
+	margin-top: 14px;
+	/* Vertical padding (was 0, relying only on the 0.7rem text's own line
+	   height) is what actually gives this a real button-sized tap target
+	   instead of a cramped-looking sliver -- reported live 2026-08-21
+	   ("fonts and size of collapse section is not good"). */
+	padding: 8px 14px;
+	background: none;
+	border: none;
+	font-family: inherit;
+	cursor: pointer;
 	font-size: 0.7rem;
 	font-weight: 700;
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
 	color: var(--text-muted);
 	opacity: 0.6;
+	border-radius: 8px;
+	transition: opacity 0.15s ease, background 0.15s ease;
 }
+.sidebar nav .nav-section-label:hover { opacity: 0.9; background: var(--surface); }
+.sidebar nav .nav-section-label:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
+}
+/* A pure-CSS triangle (border trick), not a Unicode glyph -- "▾" rendered
+   inconsistently (too heavy/chunky, or the wrong size relative to the
+   0.7rem label text next to it) depending on the system font actually
+   backing that codepoint, different per OS/browser. A CSS-drawn triangle
+   renders pixel-identical everywhere, and its size is a real, tunable
+   number instead of "whatever that glyph happens to look like". */
+.sidebar nav .nav-section-caret {
+	flex: none;
+	width: 0;
+	height: 0;
+	border-left: 3.5px solid transparent;
+	border-right: 3.5px solid transparent;
+	border-top: 4.5px solid currentColor;
+	transition: transform 0.22s ease;
+}
+.nav-section.collapsed .nav-section-caret { transform: rotate(-90deg); }
+/* The actual expand/collapse animation -- a CSS grid-rows trick (1fr <->
+   0fr) rather than max-height or JS-measured scrollHeight: those either
+   need an arbitrary max-height guess (breaks if a section's link count
+   changes) or a resize-observer to stay correct, where this animates the
+   TRUE content height with nothing hardcoded, using only two rules.
+   .nav-section-body is the grid (one implicit row); .nav-section-links is
+   that row's one grid item, so 0fr genuinely animates it to zero height
+   (not just clipped) while `overflow:hidden` keeps the links invisible
+   and untabbable mid-collapse rather than reflowing/wrapping oddly. */
+.nav-section-body {
+	display: grid;
+	grid-template-rows: 1fr;
+	transition: grid-template-rows 0.22s ease;
+}
+.nav-section-links { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.nav-section.collapsed .nav-section-body { grid-template-rows: 0fr; }
 .sidebar nav a {
 	display: flex;
 	align-items: center;

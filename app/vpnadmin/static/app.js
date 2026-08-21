@@ -2004,6 +2004,59 @@ const THEME_QUICK_LABELS = {
 })();
 
 /**
+ * Per-section expand/collapse for the sidebar nav (My Account/VPN
+ * Management/Monitoring/Administration) -- reported live 2026-08-21: "the
+ * left panel of the app is grown so much". Each .nav-section-label click
+ * toggles its own .nav-section's `collapsed` class (the CSS grid-rows
+ * animation lives in style.css); state persists per-viewer in
+ * localStorage, same `localStorage.getItem/setItem` convention
+ * chartTypeSelector() above already uses, keyed by base.html's
+ * data-nav-section slug.
+ *
+ * Default is COLLAPSED (confirmed live 2026-08-21: "keep section
+ * closed... by default") -- base.html already renders every section
+ * collapsed server-side UNLESS it contains the current page's active
+ * link (computed there via the same request.url.path checks each link's
+ * own `active` class already uses), so there's no flash-of-expanded-
+ * content on first paint; this script's only job on load is to layer an
+ * explicit stored preference on top of that -- if a viewer previously
+ * expanded a section by hand, it stays expanded on a later visit even to
+ * an unrelated page, exactly like a real collapsed-by-default sidebar
+ * (VS Code's explorer sections, GitHub's PR file tree, etc.). A section
+ * holding the active page always wins over a stored "collapsed"
+ * preference, though -- collapsing is an "I don't need this right now"
+ * signal, never "hide where I actually am" -- and that override is
+ * visual-only, never written back to localStorage.
+ */
+(function initSidebarSections() {
+	document.querySelectorAll(".nav-section").forEach((section) => {
+		const btn = section.querySelector(".nav-section-label");
+		if (!btn) return;
+		const key = `sidebarSectionCollapsed:${btn.dataset.navSection}`;
+		const hasActiveLink = !!section.querySelector(".nav-section-links a.active");
+
+		const apply = (isCollapsed) => {
+			section.classList.toggle("collapsed", isCollapsed);
+			btn.setAttribute("aria-expanded", String(!isCollapsed));
+		};
+
+		if (hasActiveLink) {
+			apply(false);
+		} else {
+			let stored = null;
+			try { stored = localStorage.getItem(key); } catch (e) { /* localStorage unavailable (private mode etc.) -- keep the server-rendered default */ }
+			if (stored !== null) apply(stored === "1");
+		}
+
+		btn.addEventListener("click", () => {
+			const next = !section.classList.contains("collapsed");
+			apply(next);
+			try { localStorage.setItem(key, next ? "1" : "0"); } catch (e) { /* best-effort persistence only */ }
+		});
+	});
+})();
+
+/**
  * Shared app-wide "(i)" info tooltip (see .info-tip in style.css) -- the
  * hover/keyboard-focus display is pure CSS (:hover/:focus-visible), so
  * this handler only exists for the tap case: touch devices don't fire
