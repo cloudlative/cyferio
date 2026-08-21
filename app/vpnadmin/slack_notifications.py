@@ -83,6 +83,16 @@ EVENT_GROUPS: dict[str, list[tuple[str, str]]] = {
         ("vpn_device_offline", "VPN device offline"),
         ("vpn_device_online", "VPN device reconnected"),
     ],
+    # System Audit -- its own group (not folded into "Security Events")
+    # since these are about the SERVER's own hardening posture (SSH/
+    # firewall/system config findings), not account-level security events
+    # like the failed-login/lockout entries above.
+    "System Audit": [
+        ("audit_critical_finding", "New Critical finding"),
+        ("audit_high_finding", "New High finding"),
+        ("audit_score_dropped", "Security score dropped"),
+        ("audit_finding_regressed", "Previously resolved finding returned"),
+    ],
 }
 
 # Flattened key -> label, built once at import time (same "don't re-flatten

@@ -35,3 +35,16 @@
 # detect --source . -v` -- the only fingerprint it reports against this
 # exact state of master, not a guess.
 12f4cb6298e36196affd9fc15107143c88db7004:app/tests/test_slack_notifications.py:slack-webhook-url:35
+
+# Same situation again: system_audit/ssh_checks.py's SSH directive check
+# catalog used a list of dict(directive="...", ..., bad_values={"yes"})
+# calls in this one commit -- the repeated adjacent-quoted-assignment
+# shape tripped the same generic-api-key heuristic, caught live on this
+# feature's own PR CI run -- before being converted to a dataclass (no
+# key="quotedstring" textual pattern at all) in the very next commit. The
+# old commit itself never changes, so it re-flags on every full-history
+# scan otherwise. Verified via a local `gitleaks detect --source . -v` --
+# the only two fingerprints it reports against this exact state, not a
+# guess.
+965a96dd1c68e65636f05e6087ea4591fd5add67:app/vpnadmin/system_audit/ssh_checks.py:generic-api-key:85
+965a96dd1c68e65636f05e6087ea4591fd5add67:app/vpnadmin/system_audit/ssh_checks.py:generic-api-key:92

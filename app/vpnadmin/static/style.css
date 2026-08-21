@@ -1059,6 +1059,64 @@ tr.clickable-row:hover td { background: var(--surface-alt); }
 .priority-high { background: var(--danger-bg); color: var(--danger-text); }
 .priority-critical { background: var(--danger-bg); color: var(--danger-text); border: 1px solid var(--danger-strong); }
 
+/* System Audit's 6 severity tiers (system_audit/__init__.py's Finding) --
+   own set of pills rather than reusing .priority-* above: the ticket
+   scale deliberately groups low+medium as one neutral tier, but the
+   audit spec explicitly wants all 6 levels (Critical/High/Medium/Low/
+   Info/Passed) visually distinct from each other, since the whole point
+   of the severity-count summary is scanning which buckets have numbers
+   in them. */
+.status-sev-critical { background: var(--danger-bg); color: var(--danger-text); border: 1px solid var(--danger-strong); }
+.status-sev-critical::before { background: var(--danger-strong); box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.2); }
+.status-sev-high { background: var(--danger-bg); color: var(--danger-text); }
+.status-sev-high::before { background: var(--danger-strong); }
+.status-sev-medium { background: var(--warning-bg, #fef3c7); color: var(--warning-text, #92400e); }
+.status-sev-medium::before { background: #d97706; }
+.status-sev-low { background: var(--surface-alt); color: var(--text); border: 1px solid var(--border-light); }
+.status-sev-low::before { background: var(--text-muted); }
+.status-sev-info { background: var(--surface-alt); color: var(--text-muted); border: 1px solid var(--border-light); }
+.status-sev-info::before { background: var(--accent-2); }
+.status-sev-passed { background: var(--success-bg); color: var(--success-text); }
+.status-sev-passed::before { background: var(--success-strong); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2); }
+
+/* Security score -- a large single number, colored by how good it is
+   (same danger/warning/success palette as the severity pills above, just
+   applied to plain text at a big size rather than a pill) so the overall
+   posture reads at a glance before anyone reads a single finding. */
+.audit-score { font-size: 3.2rem; font-weight: 800; line-height: 1; }
+.audit-score-good { color: var(--success-text); }
+.audit-score-fair { color: var(--warning-text, #fcd34d); }
+.audit-score-poor { color: var(--danger-text); }
+
+/* Severity-count summary strip (spec's "Critical 2, High 5, ..." example)
+   -- one clickable stat per severity, filters the findings table below
+   when clicked (see system_audit.html's applyFindingsFilter()). */
+.audit-severity-strip { display: flex; flex-wrap: wrap; gap: 10px; }
+.audit-severity-stat {
+	flex: 1 1 100px;
+	min-width: 100px;
+	padding: 12px 14px;
+	border-radius: var(--radius);
+	border: 1.5px solid var(--border-light);
+	background: var(--surface-alt);
+	cursor: pointer;
+	text-align: center;
+	transition: border-color 0.15s ease, transform 0.1s ease;
+}
+.audit-severity-stat:hover { transform: translateY(-1px); }
+.audit-severity-stat.active { border-color: var(--accent-2); box-shadow: 0 0 0 1px var(--accent-2); }
+.audit-severity-stat .count { display: block; font-size: 1.6rem; font-weight: 800; }
+.audit-severity-stat .label { display: block; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 2px; }
+
+.audit-finding-row { cursor: pointer; }
+.audit-finding-row:hover { background: var(--surface-hover); }
+.audit-finding-detail dt { color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; margin-top: 12px; }
+.audit-finding-detail dt:first-child { margin-top: 0; }
+.audit-finding-detail dd { margin: 4px 0 0; white-space: pre-wrap; }
+.audit-finding-detail dd.evidence-block { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85rem; background: var(--surface-alt); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-light); }
+.audit-badge-new { background: var(--accent-gradient); color: white; font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 999px; margin-left: 6px; }
+.audit-badge-resolved { background: var(--success-bg); color: var(--success-text); font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 999px; margin-left: 6px; }
+
 /* Dashboard Recent Activity table (see dashboard.html) -- a pill for the
    humanized action label (same visual weight/shape as .role-badge, just
    neutral-colored since there's no admin/viewer-style semantic to color

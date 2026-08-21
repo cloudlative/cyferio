@@ -27,6 +27,7 @@ from vpnadmin import device_monitoring
 # (which has no such attribute) instead of this one, crashing the
 # snapshot loop's very first tick on every startup.
 from vpnadmin import health as health_data
+from vpnadmin import system_audit
 from vpnadmin.app_settings import migrate_decouple_portal_and_vpn_restrictions, migrate_legacy_smtp_provider, prune_audit_log, prune_connection_rejections, prune_db_stat_snapshots, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
@@ -34,7 +35,7 @@ from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_
 from vpnadmin import geo_lists, mailer, slack_notifications
 from vpnadmin import app_settings
 from vpnadmin.models import QuotaNotification
-from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, host_ingest, me_connection_issues, me_tickets, me_vpn, mfa as mfa_routes, notifications, pages, release as release_routes, reports, roles, settings as settings_routes, status, teams, tickets, users
+from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, host_ingest, me_connection_issues, me_tickets, me_vpn, mfa as mfa_routes, notifications, pages, release as release_routes, reports, roles, settings as settings_routes, status, system_audit as system_audit_routes, teams, tickets, users
 from vpnadmin.routes.reports import _load_rows
 
 logger = logging.getLogger(__name__)
@@ -211,6 +212,32 @@ async def _device_monitoring_loop():
         interval_minutes = app_settings.runtime.device_monitoring_check_interval_minutes or 5
         await asyncio.sleep(max(60, interval_minutes * 60))
 
+
+async def _system_audit_loop():
+    """Scheduled Auditing (spec section 13). Same shape as
+    _device_monitoring_loop above -- interval read fresh from
+    app_settings.runtime every tick (admin-tunable via Settings), so a
+    change takes effect on the loop's next wake rather than needing a
+    restart. audit_schedule_enabled defaults False (see app_settings.py)
+    -- a brand-new deployment doesn't start silently auditing itself on
+    a timer until an admin opts in via Settings -> System Audit, unlike
+    device monitoring (which is opt-in per-device, not globally). When
+    disabled, this loop still wakes on the same interval just to re-check
+    the toggle, rather than needing a separate restart-the-loop mechanism
+    for enabling it later."""
+    while True:
+        interval_hours = app_settings.runtime.audit_schedule_interval_hours or 168  # weekly default
+        if app_settings.runtime.audit_schedule_enabled:
+            try:
+                db = SessionLocal()
+                try:
+                    await asyncio.to_thread(system_audit.run_audit, db, trigger="scheduled")
+                finally:
+                    db.close()
+            except Exception:
+                logger.exception("Scheduled System Audit run failed; will retry next tick")
+        await asyncio.sleep(max(3600, interval_hours * 3600))
+
 # Note: the Release Availability check (release_check.py) is deliberately
 # NOT run on its own background loop like the tasks above -- unlike a
 # subprocess spawn (cli_wrapper) or a local DB query (health_data/
@@ -282,6 +309,7 @@ async def lifespan(_app: FastAPI):
     db_snapshot_task = asyncio.create_task(_db_snapshot_loop())
     quota_notification_task = asyncio.create_task(_quota_notification_loop())
     device_monitoring_task = asyncio.create_task(_device_monitoring_loop())
+    system_audit_task = asyncio.create_task(_system_audit_loop())
     try:
         yield
     finally:
@@ -289,7 +317,8 @@ async def lifespan(_app: FastAPI):
         db_snapshot_task.cancel()
         quota_notification_task.cancel()
         device_monitoring_task.cancel()
-        for task in (refresh_task, db_snapshot_task, quota_notification_task, device_monitoring_task):
+        system_audit_task.cancel()
+        for task in (refresh_task, db_snapshot_task, quota_notification_task, device_monitoring_task, system_audit_task):
             try:
                 # Bounded, not a bare `await task`: each loop's current
                 # tick runs its blocking work via asyncio.to_thread(), and
@@ -345,6 +374,7 @@ app.include_router(tickets.router)
 app.include_router(email_providers.router)
 app.include_router(mfa_routes.router)
 app.include_router(release_routes.router)
+app.include_router(system_audit_routes.router)
 
 
 @app.get("/healthz")
