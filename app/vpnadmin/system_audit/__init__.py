@@ -48,6 +48,7 @@ exposing a single `run(host_root: str) -> list[Finding]`. Adding a new
 category later (NetworkChecks, PackageChecks, VPNChecks, per the spec's
 own catalog) means adding one more module with that same shape and one
 line in _CHECK_MODULES below -- no other file needs to change."""
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -97,6 +98,20 @@ class Finding:
     expected_state: str | None = None
     evidence: str | None = None
     remediation: str | None = None
+    # Machine-actionable remediation, distinct from `remediation` above
+    # (that's always just human-readable instructions). Phase 3 (added
+    # 2026-08-22): {"type": "chmod", "path": "<abs host path>", "mode":
+    # "<3-4 digit octal string>"} for the handful of file-permission
+    # checks that support "Fix Automatically" -- see remediation.py's
+    # module docstring for the FULL safety story (strict path allowlist,
+    # confirmation, audit logging, undo). None means no automated
+    # remediation is available for this finding -- the overwhelming
+    # majority of checks (every SSH directive check, every firewall
+    # check) have no entry here at all, deliberately: this repo's own
+    # task spec is explicit that SSH/firewall/auth changes need heavier
+    # safeguards (backup+validate+rollback+explicit lockout warning) than
+    # a single atomic chmod, and that machinery isn't built yet.
+    remediation_action: dict | None = None
 
     def __post_init__(self):
         if self.severity not in AUDIT_SEVERITIES:
@@ -249,7 +264,15 @@ def run_audit(db: Session, *, trigger: str, triggered_by_user: User | None = Non
                 title=f.title, description=f.description, why_it_matters=f.why_it_matters,
                 current_state=f.current_state, expected_state=f.expected_state,
                 evidence=f.evidence, remediation=f.remediation,
-                automated_remediation_available=False, status=row_status,
+                # Only ever True for a non-passed finding that actually
+                # carries a remediation_action -- a "passed" finding has
+                # nothing to fix, and remediation.py's own apply endpoint
+                # independently re-validates this before touching
+                # anything, so this flag is purely a UI hint, not itself
+                # a trust boundary.
+                remediation_action=json.dumps(f.remediation_action) if f.remediation_action else None,
+                automated_remediation_available=bool(f.remediation_action) and f.severity != "passed",
+                status=row_status,
             ))
 
         # A check_id is "resolved" if it was non-passed last run and is NOT
