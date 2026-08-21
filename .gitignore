@@ -19,6 +19,11 @@ __pycache__/
 *.pyc
 .venv/
 
+# Node -- branding/assets/ is the only npm package in this repo (regenerates
+# png/ from the source SVGs, see its own README.md); package-lock.json IS
+# committed for reproducible renders, node_modules/ never is.
+node_modules/
+
 # Local runs of the CI tooling introduced in .github/workflows/ci.yml
 # (ruff/mypy/pytest-cov) -- never checked in, same as any other tool cache.
 .coverage

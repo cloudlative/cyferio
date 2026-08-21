@@ -26,6 +26,11 @@ for (const size of sizes) {
 renderPng(`${ASSETS}/mark-tile-light.svg`, `${OUT}/mark-tile-light-512.png`, 512);
 renderPng(`${ASSETS}/mark-tile-light.svg`, `${OUT}/mark-tile-light-180.png`, 180); // apple-touch-icon size
 
+// Slack app icon -- Slack requires a square PNG between 512x512 and
+// 2000x2000; 1024 is comfortably inside that range and matches this repo's
+// other "largest working size" raster exports.
+renderPng(`${ASSETS}/slack-app-icon.svg`, `${OUT}/slack-app-icon-1024.png`, 1024);
+
 // OG social preview
 renderPng(`${ASSETS}/og-image.svg`, `${OUT}/og-image.png`, 1200);
 

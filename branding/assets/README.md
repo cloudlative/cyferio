@@ -12,13 +12,14 @@ Concept A, "Cipher Signal" — two concentric broken rings (cyan `#23D6C4` outer
 | `logo-horizontal-dark-bg.svg` / `-light-bg.svg` | Mark + wordmark side by side |
 | `logo-stacked-dark-bg.svg` / `-light-bg.svg` | Mark above wordmark, centered |
 | `og-image.svg` | 1200×630 social preview card (mark + wordmark + tagline + one-line description) |
+| `slack-app-icon.svg` | Slack app icon — full-bleed square (no pre-rounded corners; Slack applies its own), same mark as `mark-tile-dark.svg` scaled 2x onto a 1024 canvas |
 | `png/` | Rasterized exports of the above (see below) — generated, not hand-edited |
 
 Dark variants are the primary/default (matches the brand's dark-mode-native direction); light variants exist for placement on white/light surfaces (print, light-themed embeds).
 
 ## Rasterized exports (`png/`)
 
-Generated via `@resvg/resvg-js` + `png-to-ico` — see the render script noted in the branding proposal if these ever need regenerating after an SVG edit. Sizes: `mark-tile-dark-{16,32,48,64,128,256,512}.png`, `mark-tile-light-{180,512}.png`, `favicon.ico` (multi-size, from the dark tile), `og-image.png` (1200×630), and both horizontal lockups at 680px wide.
+Generated via `@resvg/resvg-js` + `png-to-ico` — see the render script noted in the branding proposal if these ever need regenerating after an SVG edit. Sizes: `mark-tile-dark-{16,32,48,64,128,256,512}.png`, `mark-tile-light-{180,512}.png`, `favicon.ico` (multi-size, from the dark tile), `og-image.png` (1200×630), `slack-app-icon-1024.png` (Slack's required square, 512–2000px range), and both horizontal lockups at 680px wide.
 
 ## Important caveat — the wordmark is not yet outlined
 

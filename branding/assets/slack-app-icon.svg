@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+  <!-- Slack app icon: full-bleed square, NOT pre-rounded (Slack applies
+       its own corner treatment across surfaces: square in some contexts,
+       circle-masked in others), so the mark below sits with enough margin
+       from the edge to survive a circular crop. Same "Cipher Signal" mark
+       as mark-tile-dark.svg (see that file / README.md), scaled 2x from
+       its 512 canvas onto this 1024 one: identical proportions, just
+       more working pixels for Slack's largest displayed size. -->
+  <rect width="1024" height="1024" fill="#0B1220"/>
+  <circle cx="512" cy="512" r="352" stroke="#23D6C4" stroke-width="48" stroke-dasharray="1880 332" stroke-linecap="round" transform="rotate(-90 512 512)"/>
+  <circle cx="512" cy="512" r="232" stroke="#F2A93B" stroke-width="40" stroke-dasharray="1238 220" stroke-linecap="round" transform="rotate(60 512 512)"/>
+  <circle cx="512" cy="512" r="68" fill="#23D6C4"/>
+</svg>
