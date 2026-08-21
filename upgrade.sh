@@ -166,7 +166,14 @@ log "  OK -- docker reachable, .env writable, repo checkout looks right."
 # --- Phase 2: resolve target tag ------------------------------------------
 log "Phase 2: resolving target release"
 if [[ "$GIT_AVAILABLE" -eq 1 ]]; then
-	git fetch origin --tags --quiet || log "  (git fetch failed -- continuing with whatever tags/refs are already local)"
+	# Explicitly names BOTH master and --tags -- a plain `git fetch origin
+	# --tags` already pulls master too under this repo's normal clone
+	# refspec, but naming it here removes any doubt this actually fetches
+	# the latest code (not just tag pointers) regardless of how a given
+	# checkout's remote.origin.fetch happens to be configured (e.g. a
+	# sparse/single-branch clone that only tracks something other than
+	# master by default).
+	git fetch origin master --tags --quiet || log "  (git fetch failed -- continuing with whatever tags/refs are already local)"
 fi
 
 if [[ -z "$TAG" ]]; then
