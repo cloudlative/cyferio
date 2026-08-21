@@ -75,6 +75,14 @@ EVENT_GROUPS: dict[str, list[tuple[str, str]]] = {
         ("database_issue", "Database issues"),
         ("vpn_service_issue", "VPN service issues"),
     ],
+    # VPN Device Availability Monitoring & Offline Alert Notifications --
+    # its own group (not folded into "Operational Events") since these are
+    # per-device, admin-opted-in alerts an admin may want to enable/disable
+    # independently of the always-on system-health events above.
+    "VPN Device Monitoring": [
+        ("vpn_device_offline", "VPN device offline"),
+        ("vpn_device_online", "VPN device reconnected"),
+    ],
 }
 
 # Flattened key -> label, built once at import time (same "don't re-flatten

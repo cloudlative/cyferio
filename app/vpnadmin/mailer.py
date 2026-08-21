@@ -383,3 +383,39 @@ def send_admin_notification(*, db: Session, subject: str, body: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def send_device_monitoring_alert(*, db: Session, to_addresses: list[str], subject: str, body: str) -> int:
+    """VPN Device Availability Monitoring -- offline/recovery alert fan-out
+    to a per-device, per-alert recipient list (assigned user + selected
+    admins + free-form additional addresses, all resolved by
+    device_monitoring.py before this is called). Unlike every other send_*
+    function here, the recipient set isn't a single fixed address (welcome/
+    reset/ticket emails) or the one admin_notification_email (send_admin_
+    notification) -- it's per-device config, so this takes a plain list and
+    sends one OutboundMessage per address rather than trying to force a
+    multi-recipient concept into OutboundMessage/the provider abstraction
+    (which was never built for a real "to" list -- see email_providers.py).
+
+    Deduplicates (case-insensitive) before sending so a user who is BOTH
+    the assigned owner and separately picked as a notified admin only gets
+    one copy, not two. Best-effort per address: one bad/unreachable address
+    must never block delivery to the rest -- returns the count that
+    actually succeeded (0 is a legitimate, non-raising outcome, e.g. no
+    provider configured), same "count/bool return, no exception" contract
+    as slack_notifications.notify's own fail-soft posture."""
+    seen: set[str] = set()
+    sent = 0
+    for addr in to_addresses:
+        addr = (addr or "").strip()
+        key = addr.lower()
+        if not addr or key in seen or not is_valid_email(addr):
+            continue
+        seen.add(key)
+        message = OutboundMessage(to_address=addr, subject=f"[{app_settings.runtime.app_name}] {subject}", text_body=body)
+        try:
+            _send(db, message)
+            sent += 1
+        except Exception:
+            continue
+    return sent
