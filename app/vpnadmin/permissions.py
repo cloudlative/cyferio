@@ -43,6 +43,13 @@ OBJECTS: dict[str, str] = {
     # already has) -- admin/super_admin only, by default.
     "db_reporting": "Database Reporting",
     "support_tickets": "Support Tickets",
+    # Server-level security/hardening posture (SSH config, firewall state,
+    # OS/package/filesystem findings) -- excluded from viewer's blanket
+    # grant below, same reasoning as db_reporting: a finding's evidence
+    # (raw sshd_config lines, file permission bits, listening ports) is
+    # more operationally sensitive than anything else "viewer" currently
+    # sees, admin/super_admin only by default.
+    "system_audit": "System Audit",
 }
 
 ACTIONS = ("view", "create", "update", "delete", "execute", "manage")
@@ -102,7 +109,7 @@ _SYSTEM_ROLES: dict[str, dict] = {
         "Matches the pre-RBAC 'viewer' role exactly.",
         "permissions": {
             obj: {"view": True} for obj in OBJECTS
-            if obj not in ("settings", "roles", "db_reporting")
+            if obj not in ("settings", "roles", "db_reporting", "system_audit")
         },
         "scopes": {},
     },

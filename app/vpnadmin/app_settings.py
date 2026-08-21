@@ -257,6 +257,15 @@ class _RuntimeSettings:
         self.device_monitoring_default_cooldown_minutes = 60
         self.device_monitoring_default_recovery_notify = True
 
+        # System Audit -- see system_audit/__init__.py and main.py's
+        # _system_audit_loop. Disabled by default (unlike device
+        # monitoring, which is opt-in per-device but the check loop
+        # itself always runs) -- a brand-new deployment shouldn't start
+        # auditing itself on a timer until an admin opts in.
+        self.audit_schedule_enabled = False
+        self.audit_schedule_interval_hours = 168  # weekly
+        self.notify_admin_on_audit_finding = False
+
 
 runtime = _RuntimeSettings()
 
@@ -374,6 +383,12 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.device_monitoring_default_recovery_notify = (
         row.device_monitoring_default_recovery_notify if row.device_monitoring_default_recovery_notify is not None else True
     )
+
+    runtime.audit_schedule_enabled = bool(row.audit_schedule_enabled)
+    runtime.audit_schedule_interval_hours = (
+        row.audit_schedule_interval_hours if row.audit_schedule_interval_hours is not None else 168
+    )
+    runtime.notify_admin_on_audit_finding = bool(row.notify_admin_on_audit_finding)
 
     # Mirrors the one setting host-scripts/quota_enforcer.py needs but has
     # no DB access to read directly -- see policy_store.write_global_defaults

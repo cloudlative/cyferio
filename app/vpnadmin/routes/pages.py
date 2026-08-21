@@ -65,6 +65,7 @@ def _ctx(user: User, db: Session, **extra) -> dict:
         "can_view_dashboard": has_permission_any_scope(db, user, "dashboard", "view"),
         "can_view_clients": has_permission_any_scope(db, user, "vpn_profiles", "view"),
         "can_view_health": has_permission_any_scope(db, user, "health", "view"),
+        "can_view_system_audit": has_permission_any_scope(db, user, "system_audit", "view"),
         "can_view_reports": has_permission_any_scope(db, user, "reports", "view"),
         # Support Center nav visibility -- an "own"-scoped account (the
         # "User" self-service role) has view/create/update on
@@ -182,6 +183,19 @@ def health_page(request: Request, user: User | None = Depends(get_current_user),
     if not has_permission_any_scope(db, user, "health", "view"):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "health.html", _ctx(user, db))
+
+
+@router.get("/system-audit")
+def system_audit_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    redirect = _password_reset_redirect(user, request)
+    if redirect is not None:
+        return redirect
+    if not has_permission_any_scope(db, user, "system_audit", "view"):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "system_audit.html",
+                                       _ctx(user, db, can_run_audit=has_permission_any_scope(db, user, "system_audit", "execute")))
 
 
 @router.get("/reports")

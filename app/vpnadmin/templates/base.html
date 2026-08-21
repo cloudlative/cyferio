@@ -162,8 +162,8 @@
 			</div>
 			{% endif %}
 
-			{% if can_view_health or can_view_reports or is_admin %}
-			{% set monitoring_has_active = request.url.path in ['/diagnostics', '/health', '/reports', '/users/activity'] %}
+			{% if can_view_health or can_view_reports or can_view_system_audit or is_admin %}
+			{% set monitoring_has_active = request.url.path in ['/diagnostics', '/health', '/system-audit', '/reports', '/users/activity'] %}
 			<div class="nav-section {{ '' if (not nav_sections_collapsible or monitoring_has_active) else 'collapsed' }}">
 				{% if nav_sections_collapsible %}
 				<button type="button" class="nav-section-label" data-nav-section="monitoring" aria-expanded="{{ 'true' if monitoring_has_active else 'false' }}">Monitoring<span class="nav-section-caret"></span></button>
@@ -175,6 +175,9 @@
 				{% if can_view_health %}
 				<a href="/diagnostics" class="{{ 'active' if request.url.path == '/diagnostics' }}"><span class="nav-icon">⚙</span>Diagnostics</a>
 				<a href="/health" class="{{ 'active' if request.url.path == '/health' }}"><span class="nav-icon">♥</span>Health</a>
+				{% endif %}
+				{% if can_view_system_audit %}
+				<a href="/system-audit" class="{{ 'active' if request.url.path == '/system-audit' }}"><span class="nav-icon">⛨</span>System Audit</a>
 				{% endif %}
 				{% if can_view_reports %}
 				<a href="/reports" class="{{ 'active' if request.url.path == '/reports' }}"><span class="nav-icon">▥</span>Reports</a>

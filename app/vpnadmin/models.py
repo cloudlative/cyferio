@@ -694,6 +694,12 @@ class AppSettings(Base):
     device_monitoring_default_cooldown_minutes = Column(Integer, nullable=True)  # pre-filled "repeat" cooldown value
     device_monitoring_default_recovery_notify = Column(Boolean, nullable=True)  # pre-filled "notify on recovery" toggle
 
+    # System Audit -- see system_audit/__init__.py and main.py's
+    # _system_audit_loop.
+    audit_schedule_enabled = Column(Boolean, nullable=True)
+    audit_schedule_interval_hours = Column(Integer, nullable=True)  # 24=daily, 168=weekly, 720=monthly
+    notify_admin_on_audit_finding = Column(Boolean, nullable=True)
+
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(64), nullable=True)  # username snapshot, not a FK -- see AuditLog for the same pattern
 
@@ -1465,3 +1471,151 @@ class MfaTrustedDevice(Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User")
+
+
+class AuditRun(Base):
+    """One row per System Audit execution (manual "Run Audit Now" or the
+    scheduled loop, see main.py's _system_audit_loop) -- the parent of a
+    batch of AuditFinding rows below. Same "one row per periodic sample"
+    shape as DbStatSnapshot, just triggered by an audit tick instead of a
+    fixed timer, and with child rows instead of flat columns (a run's
+    finding count varies check-to-check, unlike DbStatSnapshot's fixed set
+    of stat columns).
+
+    `node_hostname` exists from day one even though this deployment is
+    single-server (see system_audit/__init__.py's module docstring) --
+    keeping every row server-labeled now means a future multi-node rollup
+    is a filter/group-by on data already being collected, not a schema
+    migration.
+
+    status: "running" (in progress -- set at insert, before any check has
+    executed) | "completed" | "failed" (the run itself errored out, not
+    "found findings" -- a clean audit with zero findings is still
+    "completed"). score is NULL while running, and can also be NULL after
+    "failed" if the run didn't get far enough to compute one.
+
+    The severity/status count columns are denormalized (also derivable by
+    counting this run's AuditFinding rows) purely so the audit list page
+    doesn't need a GROUP BY query per row just to render its summary --
+    same reasoning as User.display_name-style denormalization elsewhere in
+    this app. Written once, when the run finishes (see run_audit())."""
+    __tablename__ = "audit_runs"
+
+    id = Column(Integer, primary_key=True)
+    started_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    trigger = Column(String(16), nullable=False)  # "manual" | "scheduled"
+    triggered_by = Column(String(64), nullable=True)  # username, NULL for "scheduled"
+    status = Column(String(16), nullable=False, default="running")  # "running" | "completed" | "failed"
+    error_detail = Column(Text, nullable=True)  # set only when status == "failed"
+    node_hostname = Column(String(255), nullable=True)
+
+    score = Column(Integer, nullable=True)  # 0-100, see system_audit/__init__.py's compute_score()
+    total_findings = Column(Integer, nullable=False, default=0)
+    critical_count = Column(Integer, nullable=False, default=0)
+    high_count = Column(Integer, nullable=False, default=0)
+    medium_count = Column(Integer, nullable=False, default=0)
+    low_count = Column(Integer, nullable=False, default=0)
+    info_count = Column(Integer, nullable=False, default=0)
+    passed_count = Column(Integer, nullable=False, default=0)
+    # How this run's non-passed findings compare to the immediately
+    # preceding completed run -- "new" (didn't exist last run) vs.
+    # "resolved" (existed last run, gone/now-passed this run). Computed by
+    # diffing check_id sets, see run_audit()'s own comment.
+    new_findings_count = Column(Integer, nullable=False, default=0)
+    resolved_findings_count = Column(Integer, nullable=False, default=0)
+
+    findings = relationship("AuditFinding", back_populates="run", cascade="all, delete-orphan",
+                             order_by="AuditFinding.id")
+
+
+# Stable ordering for severity comparisons (score weighting, "worse than"
+# checks) -- higher index = more severe. Kept next to the model since both
+# AuditFinding (severity column comment) and system_audit/__init__.py
+# (compute_score, notification thresholds) reference it.
+AUDIT_SEVERITIES = ("passed", "info", "low", "medium", "high", "critical")
+
+
+class AuditFinding(Base):
+    """One row per individual check result within one AuditRun. Every
+    check runs on every audit (there's no "skip this check" concept) and
+    always produces exactly one row, including a "passed" one -- this is
+    what makes the Critical/High/.../Passed dashboard counts (spec's
+    example: "Critical 2, High 5, ..., Passed 74") a plain GROUP BY over
+    this table's severity column rather than something inferred from
+    absence.
+
+    `check_id` is the check catalog's stable identifier (e.g.
+    "ssh.permit_root_login", see system_audit/ssh_checks.py) -- NOT the
+    row id, and NOT unique within a run (each check_id appears once per
+    run, but across runs it's what lets run_audit() diff "does this
+    check_id's non-passed status persist from the previous run" to
+    classify new vs. resolved. Renaming a check_id effectively starts its
+    history over -- acceptable, matches this catalog being new.
+
+    Every text field here is operator-facing, host-derived evidence (a
+    config line, a file permission octal, a package version) -- see
+    system_audit/__init__.py's Finding dataclass docstring for the redaction
+    stance (never a secret/token/key material, by construction of what the
+    checks read)."""
+    __tablename__ = "audit_findings"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, ForeignKey("audit_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    check_id = Column(String(128), nullable=False, index=True)
+    category = Column(String(32), nullable=False)  # "system" | "ssh" | "firewall"
+    severity = Column(String(16), nullable=False)  # one of AUDIT_SEVERITIES above
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    why_it_matters = Column(Text, nullable=True)
+    current_state = Column(Text, nullable=True)
+    expected_state = Column(Text, nullable=True)
+    evidence = Column(Text, nullable=True)
+    remediation = Column(Text, nullable=True)
+    # Phase 1 is read-only/advisory only -- see system_audit/__init__.py's
+    # module docstring for why automated remediation is deliberately not
+    # implemented yet. Column exists now so the finding schema doesn't need
+    # a migration when it is: every row from this phase will just have
+    # False here.
+    automated_remediation_available = Column(Boolean, nullable=False, default=False)
+    # "new" | "existing" | "resolved" -- computed by run_audit() relative
+    # to the previous completed run, NOT set by the individual check
+    # itself (a check has no notion of history). "resolved" rows are
+    # written on the run where the issue went away (i.e. this row's own
+    # severity is "passed" but the check_id was non-passed last run) --
+    # kept as a real row (not just implied by absence) so the finding
+    # HISTORY (spec section 9's "Resolved findings" count) has something
+    # concrete to point at.
+    status = Column(String(16), nullable=False, default="existing")
+
+    run = relationship("AuditRun", back_populates="findings")
+
+
+class AuditNotification(Base):
+    """One row per (admin user, audit run, alert reason) -- backs the
+    in-app notification bell for System Audit alerts (new Critical/High
+    findings, a security-score drop, a previously-resolved finding
+    returning -- see system_audit/__init__.py's run_audit() for exactly
+    when these get written). A separate table from QuotaNotification/
+    TicketNotification, not a third case folded into notifications.py's
+    existing two -- same "genuinely different shape, don't force a
+    polymorphic table" reasoning as that router's own docstring (this one
+    has a run_id, not a ticket_id or a quota period).
+
+    Broadcast to every admin/super_admin account (a loop at write time
+    over has_permission(..., "system_audit", "view") users, mirroring
+    admin_notification_email's single-recipient email being sent once per
+    triggering event) -- there's no "own scope" for a system-wide security
+    posture the way a personal quota notification has an owning user."""
+    __tablename__ = "audit_notifications"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id = Column(Integer, ForeignKey("audit_runs.id", ondelete="CASCADE"), nullable=False)
+    reason = Column(String(32), nullable=False)  # "new_critical" | "new_high" | "score_dropped" | "finding_regressed"
+    message = Column(String(512), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User")
+    run = relationship("AuditRun")

@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+{% block title %}System Audit — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">System Audit</h1></div>
+	<div style="display:flex;gap:8px;align-items:center">
+		{% if can_run_audit %}
+		<button class="btn-primary" id="run-audit-btn">Run Audit Now</button>
+		{% endif %}
+		<button class="btn-secondary" id="refresh-btn">Refresh</button>
+		<button class="btn-secondary" id="export-csv-btn" disabled>Export CSV</button>
+	</div>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Server hardening and security posture -- system configuration, SSH, and firewall checks.</p>
+
+<div class="card" id="no-run-card" style="display:none">
+	<p class="muted">No audit has run yet{% if can_run_audit %}. Click "Run Audit Now" above to run the first one.{% else %}.{% endif %}</p>
+</div>
+
+<div id="audit-content" style="display:none">
+	<div class="card">
+		<div class="toolbar" style="margin-bottom:14px">
+			<div class="toolbar-title">
+				<h2 style="margin:0">Security Score</h2>
+				<span class="muted" style="font-size:0.85rem" id="audit-run-meta"></span>
+			</div>
+		</div>
+		<div style="display:flex;gap:32px;align-items:center;flex-wrap:wrap">
+			<div>
+				<span class="audit-score" id="audit-score">—</span><span class="muted" style="font-size:1.1rem">/100</span>
+			</div>
+			<div style="flex:1;min-width:280px">
+				<p class="note" style="margin:0">
+					<strong>How this is calculated:</strong> starts at 100, then -25 per Critical finding, -10 per High,
+					-4 per Medium, -1 per Low (Informational/Passed findings don't affect the score). Not a percentage
+					of checks passed -- a single Critical finding drops the score sharply on purpose.
+				</p>
+			</div>
+		</div>
+		<div class="audit-severity-strip" style="margin-top:18px" id="audit-severity-strip"></div>
+		<p class="muted" style="font-size:0.85rem;margin:12px 0 0" id="audit-delta-summary"></p>
+	</div>
+
+	<div class="card">
+		<div class="toolbar" style="margin-bottom:10px">
+			<div class="toolbar-title"><h2 style="margin:0">Findings</h2><span class="count-badge" id="findings-count">— findings</span></div>
+		</div>
+		<div class="filter-bar" id="category-filter-bar">
+			<button class="filter-chip active" data-category="all">All Categories</button>
+			<button class="filter-chip" data-category="system">System</button>
+			<button class="filter-chip" data-category="ssh">SSH</button>
+			<button class="filter-chip" data-category="firewall">Firewall</button>
+		</div>
+		<div id="findings-table"><p class="muted">Loading…</p></div>
+	</div>
+
+	<div class="card">
+		<div class="toolbar" style="margin-bottom:10px">
+			<h2 style="margin:0">Audit History</h2>
+		</div>
+		<p class="note" style="margin-top:0">Click a row to view that run's full findings above.</p>
+		<div id="history-table"><p class="muted">Loading…</p></div>
+	</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let latestRun = null;
+let selectedSeverity = null;  // null = all
+let selectedCategory = "all";
+let viewingRun = null;  // the run currently shown in Findings -- defaults to latest, can switch via History
+
+const SEVERITY_ORDER = ["critical", "high", "medium", "low", "info", "passed"];
+const SEVERITY_LABELS = { critical: "Critical", high: "High", medium: "Medium", low: "Low", info: "Informational", passed: "Passed" };
+
+function fmtTimestamp(iso) {
+	if (!iso) return "—";
+	const d = new Date(iso);
+	return isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+function severityPill(sev) {
+	return `<span class="status-pill status-sev-${sev}">${SEVERITY_LABELS[sev] || sev}</span>`;
+}
+
+function scoreClass(score) {
+	if (score >= 80) return "audit-score-good";
+	if (score >= 50) return "audit-score-fair";
+	return "audit-score-poor";
+}
+
+function renderScoreCard(run) {
+	document.getElementById("audit-score").textContent = run.score != null ? run.score : "—";
+	document.getElementById("audit-score").className = "audit-score " + (run.score != null ? scoreClass(run.score) : "");
+	document.getElementById("audit-run-meta").textContent =
+		`Run #${run.id} — ${fmtTimestamp(run.started_at)} (${run.trigger}${run.triggered_by ? " by " + run.triggered_by : ""})`;
+
+	const counts = {
+		critical: run.critical_count, high: run.high_count, medium: run.medium_count,
+		low: run.low_count, info: run.info_count, passed: run.passed_count,
+	};
+	document.getElementById("audit-severity-strip").innerHTML = SEVERITY_ORDER.map(sev => `
+		<div class="audit-severity-stat status-sev-${sev} ${selectedSeverity === sev ? 'active' : ''}" data-severity="${sev}">
+			<span class="count">${counts[sev]}</span>
+			<span class="label">${SEVERITY_LABELS[sev]}</span>
+		</div>`).join("");
+	document.querySelectorAll(".audit-severity-stat").forEach(el => {
+		el.addEventListener("click", () => {
+			const sev = el.dataset.severity;
+			selectedSeverity = selectedSeverity === sev ? null : sev;
+			renderScoreCard(run);
+			renderFindings();
+		});
+	});
+
+	const deltaBits = [];
+	if (run.new_findings_count) deltaBits.push(`<strong style="color:var(--danger-text)">${run.new_findings_count} new</strong> since the previous run`);
+	if (run.resolved_findings_count) deltaBits.push(`<strong style="color:var(--success-text)">${run.resolved_findings_count} resolved</strong> since the previous run`);
+	document.getElementById("audit-delta-summary").innerHTML = deltaBits.length ? deltaBits.join(" · ") : "No change in findings since the previous run.";
+}
+
+function renderFindings() {
+	const el = document.getElementById("findings-table");
+	if (!viewingRun) { el.innerHTML = '<p class="muted">Loading…</p>'; return; }
+	let findings = viewingRun.findings || [];
+	if (selectedCategory !== "all") findings = findings.filter(f => f.category === selectedCategory);
+	if (selectedSeverity) findings = findings.filter(f => f.severity === selectedSeverity);
+	// Worst severity first, so Critical/High are never scrolled past.
+	findings = [...findings].sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
+
+	document.getElementById("findings-count").textContent = `${findings.length} finding${findings.length === 1 ? "" : "s"}`;
+
+	if (findings.length === 0) {
+		el.innerHTML = '<div class="empty-state">No findings match this filter.</div>';
+		return;
+	}
+	el.innerHTML = `<div class="table-scroll"><table>
+		<thead><tr><th></th><th>Severity</th><th>Category</th><th>Title</th><th></th></tr></thead>
+		<tbody>${findings.map((f, i) => `
+			<tr class="audit-finding-row" data-row-idx="${i}">
+				<td>${f.status === "new" ? '<span class="audit-badge-new">NEW</span>' : f.status === "resolved" ? '<span class="audit-badge-resolved">RESOLVED</span>' : ""}</td>
+				<td>${severityPill(f.severity)}</td>
+				<td class="muted" style="text-transform:capitalize">${escapeHtml(f.category)}</td>
+				<td>${escapeHtml(f.title)}</td>
+				<td style="text-align:right"><span class="muted">Details ▾</span></td>
+			</tr>
+			<tr class="audit-finding-detail-row" data-detail-idx="${i}" style="display:none"><td colspan="5"></td></tr>
+		`).join("")}</tbody>
+	</table></div>`;
+
+	el.querySelectorAll("tr[data-row-idx]").forEach(tr => {
+		tr.addEventListener("click", () => {
+			const idx = tr.dataset.rowIdx;
+			const detailRow = el.querySelector(`tr[data-detail-idx="${idx}"]`);
+			const cell = detailRow.querySelector("td");
+			const alreadyOpen = detailRow.style.display !== "none";
+			el.querySelectorAll(".audit-finding-detail-row").forEach(r => (r.style.display = "none"));
+			if (alreadyOpen) return;
+			cell.innerHTML = `<div style="padding:12px 4px">${renderFindingDetail(findings[idx])}</div>`;
+			detailRow.style.display = "";
+		});
+	});
+}
+
+function renderFindingDetail(f) {
+	const rows = [
+		["Description", f.description],
+		["Why It Matters", f.why_it_matters],
+		["Current State", f.current_state, true],
+		["Expected / Recommended State", f.expected_state],
+		["Evidence", f.evidence, true],
+		["Remediation", f.remediation],
+	].filter(([, v]) => v);
+	return `<dl class="audit-finding-detail">${rows.map(([label, value, isEvidence]) =>
+		`<dt>${escapeHtml(label)}</dt><dd class="${isEvidence ? 'evidence-block' : ''}">${escapeHtml(value)}</dd>`
+	).join("")}</dl>` +
+	(f.automated_remediation_available
+		? '<p class="muted" style="margin-top:12px">Automated remediation is not available for this finding.</p>'
+		: '<p class="muted" style="margin-top:12px;font-size:0.82rem">Automated "Fix Automatically" remediation is not available in this release -- apply the remediation above manually.</p>');
+}
+
+document.getElementById("category-filter-bar").querySelectorAll(".filter-chip").forEach(chip => {
+	chip.addEventListener("click", () => {
+		selectedCategory = chip.dataset.category;
+		document.querySelectorAll("#category-filter-bar .filter-chip").forEach(c => c.classList.toggle("active", c === chip));
+		renderFindings();
+	});
+});
+
+async function loadLatest() {
+	try {
+		const data = await apiFetch("/api/system-audit/runs/latest");
+		if (!data.run) {
+			document.getElementById("no-run-card").style.display = "";
+			document.getElementById("audit-content").style.display = "none";
+			return;
+		}
+		document.getElementById("no-run-card").style.display = "none";
+		document.getElementById("audit-content").style.display = "";
+		latestRun = data.run;
+		viewingRun = data.run;
+		document.getElementById("export-csv-btn").disabled = false;
+		renderScoreCard(latestRun);
+		renderFindings();
+		loadHistory();
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+async function loadHistory() {
+	const el = document.getElementById("history-table");
+	try {
+		const data = await apiFetch("/api/system-audit/runs?limit=20");
+		const runs = data.runs || [];
+		if (runs.length === 0) {
+			el.innerHTML = '<p class="muted">No audit history yet.</p>';
+			return;
+		}
+		el.innerHTML = `<div class="table-scroll"><table>
+			<thead><tr><th>Date &amp; Time</th><th>Trigger</th><th>Status</th><th>Score</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>New</th><th>Resolved</th></tr></thead>
+			<tbody>${runs.map(r => `
+				<tr data-run-id="${r.id}" style="cursor:pointer" class="${viewingRun && viewingRun.id === r.id ? 'row-selected' : ''}">
+					<td class="mono">${fmtTimestamp(r.started_at)}</td>
+					<td class="muted">${escapeHtml(r.trigger)}${r.triggered_by ? " (" + escapeHtml(r.triggered_by) + ")" : ""}</td>
+					<td>${r.status === "completed"
+						? '<span class="status-pill status-online">completed</span>'
+						: r.status === "failed" ? '<span class="status-pill status-revoked">failed</span>' : '<span class="status-pill status-offline">running</span>'}</td>
+					<td>${r.score != null ? r.score : "—"}</td>
+					<td>${r.critical_count}</td><td>${r.high_count}</td><td>${r.medium_count}</td><td>${r.low_count}</td>
+					<td>${r.new_findings_count}</td><td>${r.resolved_findings_count}</td>
+				</tr>`).join("")}</tbody>
+		</table></div>`;
+		el.querySelectorAll("tr[data-run-id]").forEach(tr => {
+			tr.addEventListener("click", () => viewRun(Number(tr.dataset.runId)));
+		});
+	} catch (e) {
+		el.innerHTML = `<p style="color:var(--danger-text)">${escapeHtml(e.message)}</p>`;
+	}
+}
+
+async function viewRun(runId) {
+	try {
+		const data = await apiFetch(`/api/system-audit/runs/${runId}`);
+		viewingRun = data.run;
+		selectedSeverity = null;
+		renderScoreCard(viewingRun);
+		renderFindings();
+		loadHistory();  // re-render to move the row-selected highlight
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+document.getElementById("refresh-btn").addEventListener("click", loadLatest);
+
+const runAuditBtn = document.getElementById("run-audit-btn");
+if (runAuditBtn) {
+	runAuditBtn.addEventListener("click", async () => {
+		runAuditBtn.disabled = true;
+		const originalLabel = runAuditBtn.textContent;
+		runAuditBtn.textContent = "Running…";
+		try {
+			await apiFetch("/api/system-audit/run", { method: "POST" });
+			toast("Audit complete.", "success");
+			await loadLatest();
+		} catch (e) {
+			toast(e.message, "error");
+		} finally {
+			runAuditBtn.disabled = false;
+			runAuditBtn.textContent = originalLabel;
+		}
+	});
+}
+
+document.getElementById("export-csv-btn").addEventListener("click", async () => {
+	if (!viewingRun) return;
+	try {
+		const data = await apiFetch(`/api/system-audit/runs/${viewingRun.id}/export.csv`);
+		// Same "build the Blob client-side from a JSON {csv, filename} field"
+		// pattern as support-center.html's ticket export -- no file-download
+		// response type exists anywhere else in this app.
+		const blob = new Blob([data.csv], { type: "text/csv" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = data.filename;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(url);
+	} catch (e) {
+		toast(e.message, "error");
+	}
+});
+
+loadLatest();
+</script>
+{% endblock %}

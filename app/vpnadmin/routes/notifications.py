@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_user
 from ..db import get_db
-from ..models import QuotaNotification, TicketNotification, User
+from ..models import AuditNotification, QuotaNotification, TicketNotification, User
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
@@ -86,6 +86,22 @@ def _serialize_ticket(n: TicketNotification) -> dict:
     }
 
 
+def _serialize_audit(n: AuditNotification) -> dict:
+    # "critical"/"high" severity styling for the two finding-count reasons
+    # (matches quota's "critical"/"warning" level convention); the other
+    # two reasons are informational rather than a specific severity.
+    level = {"new_critical": "critical", "new_high": "warning"}.get(n.reason, "info")
+    return {
+        "id": f"audit:{n.id}",
+        "kind": f"audit_{n.reason}",
+        "level": level,
+        "message": n.message,
+        "link_url": "/system-audit",
+        "created_at": n.created_at.isoformat() if n.created_at else None,
+        "read_at": n.read_at.isoformat() if n.read_at else None,
+    }
+
+
 @router.get("")
 def list_my_notifications(user: User = Depends(require_user), db: Session = Depends(get_db)):
     quota_rows = (
@@ -96,13 +112,19 @@ def list_my_notifications(user: User = Depends(require_user), db: Session = Depe
         db.query(TicketNotification).filter(TicketNotification.user_id == user.id)
         .order_by(TicketNotification.created_at.desc()).limit(30).all()
     )
+    audit_rows = (
+        db.query(AuditNotification).filter(AuditNotification.user_id == user.id)
+        .order_by(AuditNotification.created_at.desc()).limit(30).all()
+    )
     merged = sorted(
-        [_serialize_quota(n) for n in quota_rows] + [_serialize_ticket(n) for n in ticket_rows],
+        [_serialize_quota(n) for n in quota_rows] + [_serialize_ticket(n) for n in ticket_rows]
+        + [_serialize_audit(n) for n in audit_rows],
         key=lambda n: n["created_at"] or "", reverse=True,
     )[:30]
     unread_count = (
         db.query(QuotaNotification).filter(QuotaNotification.user_id == user.id, QuotaNotification.read_at.is_(None)).count()
         + db.query(TicketNotification).filter(TicketNotification.user_id == user.id, TicketNotification.read_at.is_(None)).count()
+        + db.query(AuditNotification).filter(AuditNotification.user_id == user.id, AuditNotification.read_at.is_(None)).count()
     )
     return {"notifications": merged, "unread_count": unread_count}
 
@@ -120,7 +142,7 @@ def _split_prefixed_id(notification_id: str) -> tuple[str, int]:
 @router.post("/{notification_id}/read")
 def mark_read(notification_id: str, user: User = Depends(require_user), db: Session = Depends(get_db)):
     source, raw_id = _split_prefixed_id(notification_id)
-    model = {"quota": QuotaNotification, "ticket": TicketNotification}.get(source)
+    model = {"quota": QuotaNotification, "ticket": TicketNotification, "audit": AuditNotification}.get(source)
     if model is None:
         raise HTTPException(status_code=404, detail="Notification not found.")
     n = db.query(model).filter_by(id=raw_id, user_id=user.id).one_or_none()
@@ -132,7 +154,8 @@ def mark_read(notification_id: str, user: User = Depends(require_user), db: Sess
     if n.read_at is None:
         n.read_at = datetime.now(timezone.utc)
         db.commit()
-    return _serialize_quota(n) if source == "quota" else _serialize_ticket(n)
+    serializers = {"quota": _serialize_quota, "ticket": _serialize_ticket, "audit": _serialize_audit}
+    return serializers[source](n)
 
 
 @router.post("/read-all")
@@ -144,6 +167,10 @@ def mark_all_read(user: User = Depends(require_user), db: Session = Depends(get_
     )
     updated += (
         db.query(TicketNotification).filter(TicketNotification.user_id == user.id, TicketNotification.read_at.is_(None))
+        .update({"read_at": now}, synchronize_session=False)
+    )
+    updated += (
+        db.query(AuditNotification).filter(AuditNotification.user_id == user.id, AuditNotification.read_at.is_(None))
         .update({"read_at": now}, synchronize_session=False)
     )
     db.commit()

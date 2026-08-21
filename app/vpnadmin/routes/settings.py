@@ -74,6 +74,12 @@ class UpdateSettingsRequest(BaseModel):
     device_monitoring_default_cooldown_minutes: int | None = None
     device_monitoring_default_recovery_notify: bool | None = None
 
+    # System Audit -- see system_audit/__init__.py and main.py's
+    # _system_audit_loop.
+    audit_schedule_enabled: bool | None = None
+    audit_schedule_interval_hours: int | None = None
+    notify_admin_on_audit_finding: bool | None = None
+
     admin_notification_email: str | None = None
     notify_admin_on_user_created: bool | None = None
     notify_admin_on_client_revoked: bool | None = None
@@ -439,6 +445,9 @@ def _serialize() -> dict:
         "device_monitoring_default_offline_threshold_minutes": s.device_monitoring_default_offline_threshold_minutes,
         "device_monitoring_default_cooldown_minutes": s.device_monitoring_default_cooldown_minutes,
         "device_monitoring_default_recovery_notify": bool(s.device_monitoring_default_recovery_notify),
+        "audit_schedule_enabled": bool(s.audit_schedule_enabled),
+        "audit_schedule_interval_hours": s.audit_schedule_interval_hours,
+        "notify_admin_on_audit_finding": bool(s.notify_admin_on_audit_finding),
         "reports_default_range_days": s.reports_default_range_days,
         "db_snapshot_retention_days": s.db_snapshot_retention_days,
         "maintenance_mode": s.maintenance_mode,
@@ -519,6 +528,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
                    "release_check_critical_major_bump", "github_repo",
                    "device_monitoring_check_interval_minutes", "device_monitoring_default_offline_threshold_minutes",
                    "device_monitoring_default_cooldown_minutes", "device_monitoring_default_recovery_notify",
+                   "audit_schedule_enabled", "audit_schedule_interval_hours", "notify_admin_on_audit_finding",
                    "reports_default_range_days", "db_snapshot_retention_days", "maintenance_mode", "maintenance_message",
                    "notification_duration_ms", "login_theme", "timezone", "time_format",
                    "geoip_enabled"):

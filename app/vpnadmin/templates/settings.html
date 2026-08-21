@@ -307,6 +307,27 @@
 			<label class="checkbox-label"><input type="checkbox" id="s-devmon-default-recovery"> Notify on recovery by default <span class="muted">(pre-fills a newly-monitored device's "notify when back online" toggle)</span></label>
 		</div>
 	</div>
+
+	<div class="card">
+		<h2>System Audit</h2>
+		<p class="muted" style="margin-top:0">Server hardening/security-assessment checks (System Audit page). Scheduled runs are off by default -- a manual "Run Audit Now" always works regardless of this setting.</p>
+		<div class="checkbox-row">
+			<label class="checkbox-label"><input type="checkbox" id="s-audit-schedule-enabled"> Run audits on a schedule</label>
+		</div>
+		<div class="form-grid" style="margin-top:12px">
+			<div class="field">
+				<label for="s-audit-schedule-interval">Schedule</label>
+				<select id="s-audit-schedule-interval">
+					<option value="24">Daily</option>
+					<option value="168">Weekly</option>
+					<option value="720">Monthly</option>
+				</select>
+			</div>
+		</div>
+		<div class="checkbox-row" style="margin-top:12px">
+			<label class="checkbox-label"><input type="checkbox" id="s-audit-notify-admin"> Email admin_notification_email on a new Critical/High finding</label>
+		</div>
+	</div>
 	</div>
 
 	<div class="settings-group" id="sg-auth-alerts">
@@ -667,6 +688,9 @@ async function loadSettings() {
 		document.getElementById("s-devmon-default-threshold").value = String(s.device_monitoring_default_offline_threshold_minutes != null ? s.device_monitoring_default_offline_threshold_minutes : 15);
 		setVal("s-devmon-default-cooldown", s.device_monitoring_default_cooldown_minutes != null ? s.device_monitoring_default_cooldown_minutes : 60);
 		document.getElementById("s-devmon-default-recovery").checked = s.device_monitoring_default_recovery_notify !== false;
+		document.getElementById("s-audit-schedule-enabled").checked = !!s.audit_schedule_enabled;
+		document.getElementById("s-audit-schedule-interval").value = String(s.audit_schedule_interval_hours != null ? s.audit_schedule_interval_hours : 168);
+		document.getElementById("s-audit-notify-admin").checked = !!s.notify_admin_on_audit_finding;
 		document.getElementById("s-mfa-mode").value = s.mfa_mode || "optional";
 		const rememberDays = s.mfa_remember_device_days || 0;
 		const rememberSelect = document.getElementById("s-mfa-remember-device");
@@ -969,6 +993,9 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		device_monitoring_default_offline_threshold_minutes: intOrNull(document.getElementById("s-devmon-default-threshold").value),
 		device_monitoring_default_cooldown_minutes: intOrNull(val("s-devmon-default-cooldown")),
 		device_monitoring_default_recovery_notify: document.getElementById("s-devmon-default-recovery").checked,
+		audit_schedule_enabled: document.getElementById("s-audit-schedule-enabled").checked,
+		audit_schedule_interval_hours: intOrNull(document.getElementById("s-audit-schedule-interval").value),
+		notify_admin_on_audit_finding: document.getElementById("s-audit-notify-admin").checked,
 		mfa_mode: document.getElementById("s-mfa-mode").value,
 		mfa_remember_device_days: (() => {
 			const sel = document.getElementById("s-mfa-remember-device").value;
