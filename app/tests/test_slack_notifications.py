@@ -31,9 +31,13 @@ class TestWebhookValidation:
         Workflow Builder webhook trigger, which has no "/services/" segment
         at all. Found live 2026-08-21 via a real admin's "trying to save
         slack webhook but getting error" report."""
-        assert slack_notifications.is_valid_webhook_url(
-            "https://hooks.slack.com/triggers/T00000000/000000000000/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-        )
+        # Same low-entropy "T00/B00/xxxx..." shape as VALID_WEBHOOK above --
+        # a longer, more realistic-looking random token here previously
+        # tripped gitleaks' own slack-webhook-url rule as a false-positive
+        # secret, re-flagging on every future scan of this commit; fixed at
+        # the fixture rather than allowlisted, same policy as this repo's
+        # other test-fixture false positives (see .gitleaks.toml's header).
+        assert slack_notifications.is_valid_webhook_url("https://hooks.slack.com/triggers/T00/000/xxxxxxxxxxxxxxxxxxxxxxxx")
 
 
 class TestNotifyFanOut:
