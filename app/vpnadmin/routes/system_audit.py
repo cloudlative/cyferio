@@ -5,20 +5,23 @@ intent). This router is thin by design: every real check/scoring/history-
 diff/notification decision lives in system_audit/run_audit(); routes here
 are just auth + (de)serialization + the CSV export format.
 
-Remediation (Phase 3, added 2026-08-22) is the one exception to "thin
-router" -- POST .../remediate below owns the confirmation-adjacent
-validation (finding must actually offer automated remediation, action
-type must be one this router knows how to dispatch) since that's
-request-shaped, not audit-engine logic; the actual privileged operation
-still lives entirely in services/system/audit_remediate.py, run on the
-HOST via the SSH channel, never in this container."""
+Remediation (Phase 3 chmod, Phase 4 ssh_directive/firewall, both added
+2026-08-22) is the one exception to "thin router" -- POST .../remediate
+below owns the confirmation-adjacent validation (finding must actually
+offer automated remediation, action type must be one this router knows
+how to dispatch) since that's request-shaped, not audit-engine logic; the
+actual privileged operation still lives entirely in services/system/
+audit_remediate.py, run on the HOST via the SSH channel, never in this
+container. PDF export (Phase 4) lives in system_audit/report_pdf.py for
+the same reason CSV export's formatting doesn't live here either -- it's
+report-shaped, not routing logic."""
 import asyncio
 import csv
 import io
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from .. import system_audit
@@ -26,6 +29,7 @@ from ..audit import log_action
 from ..db import get_db
 from ..models import AuditFinding, AuditRun, User
 from ..permissions import require_permission_any_scope
+from ..system_audit import report_pdf
 
 router = APIRouter(prefix="/api/system-audit", tags=["system-audit"])
 
@@ -82,6 +86,8 @@ def _serialize_finding(f: AuditFinding) -> dict:
         "expected_state": f.expected_state,
         "evidence": f.evidence,
         "remediation": f.remediation,
+        "remediation_risk": f.remediation_risk,
+        "remediation_action": json.loads(f.remediation_action) if f.remediation_action else None,
         "automated_remediation_available": f.automated_remediation_available,
         "status": f.status,
         "remediated_at": f.remediated_at.isoformat() if f.remediated_at else None,
@@ -200,6 +206,30 @@ def export_run_csv(run_id: int, _: User = Depends(_require_viewer), db: Session 
     return {"csv": buf.getvalue(), "filename": filename, "count": len(run.findings)}
 
 
+@router.get("/runs/{run_id}/export.pdf")
+def export_run_pdf(run_id: int, report: str = "full", _: User = Depends(_require_viewer), db: Session = Depends(get_db)):
+    """PDF export (spec section 18): `report` selects "full" (default),
+    "summary", "firewall", "ssh", or "system" -- see report_pdf.py's
+    REPORT_TITLES/build_run_pdf() for what each contains. Unlike CSV
+    export's "build text, return as a JSON field, let the frontend make a
+    Blob" pattern (no native binary-download mechanism existed elsewhere
+    in this app before now), a PDF is real binary content -- returned
+    directly as an application/pdf Response with Content-Disposition, so
+    the browser's own download handling takes it from here."""
+    run = db.get(AuditRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Audit run not found.")
+    if report not in report_pdf.REPORT_TITLES:
+        raise HTTPException(status_code=400, detail=f"Unknown report type: {report!r}.")
+    pdf_bytes = report_pdf.build_run_pdf(run, report)
+    filename = f"system-audit-run-{run.id}-{report}-" \
+               f"{(run.started_at.date().isoformat() if run.started_at else 'unknown')}.pdf"
+    return Response(
+        content=pdf_bytes, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 def _host_executor_config():
     """Same construction/fail-closed shape as routes/clients.py's own
     _host_executor_config() (not imported from there directly -- that
@@ -226,51 +256,74 @@ def _host_executor_config():
 
 @router.post("/findings/{finding_id}/remediate")
 async def remediate_finding(finding_id: int, user: User = Depends(_require_runner), db: Session = Depends(get_db)):
-    """"Fix Automatically" (spec section 7). Phase 3 scope: file-
-    permission chmod fixes ONLY -- see services/system/audit_remediate.py's
-    module docstring for exactly why SSH/firewall remediation isn't here
-    yet. The frontend is expected to show its own confirmation dialog
-    (exact path + target mode, from this finding's own expected_state/
-    remediation text, already in hand before this endpoint is ever
-    called) -- this endpoint itself doesn't re-confirm, matching every
-    other state-changing POST in this app (Revoke, Disconnect, ...),
-    which also rely on the frontend's confirmDialog() rather than a
-    second server-side confirmation step.
+    """"Fix Automatically" (spec section 7). Dispatches by remediation_action's
+    "type" -- "chmod" (Phase 3), or "ssh_directive"/"firewall" (Phase 4, see
+    services/system/audit_remediate.py's module docstring for the backup/
+    validate/rollback story each of those two gets). The frontend is
+    expected to show its own confirmation dialog (including the finding's
+    own remediation_risk text for ssh_directive/firewall actions) -- this
+    endpoint itself doesn't re-confirm, matching every other state-changing
+    POST in this app (Revoke, Disconnect, ...), which also rely on the
+    frontend's confirmDialog() rather than a second server-side
+    confirmation step.
 
     Re-validates independently of the frontend's own display logic: looks
     up the finding fresh, requires remediation_action to actually be
     present (not just automated_remediation_available -- belt and
-    suspenders, though in practice these should never disagree), and only
-    ever dispatches a "chmod" action. The remote script re-validates the
-    path against its OWN allowlist regardless (see audit_remediate.py) --
-    this endpoint's checks are a fast-fail/clear-error convenience, not
-    the actual trust boundary."""
+    suspenders, though in practice these should never disagree). The
+    remote script re-validates every value against its OWN allowlist
+    regardless (see audit_remediate.py) -- this endpoint's checks are a
+    fast-fail/clear-error convenience, not the actual trust boundary."""
     finding = db.get(AuditFinding, finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="Finding not found.")
     if not finding.remediation_action:
         raise HTTPException(status_code=400, detail="This finding has no automated remediation available.")
     action = json.loads(finding.remediation_action)
-    if action.get("type") != "chmod":
-        raise HTTPException(status_code=400, detail=f"Unknown remediation action type: {action.get('type')!r}.")
-    path = action.get("path")
-    if not path:
-        raise HTTPException(status_code=400, detail="Remediation action is missing a target path.")
+    action_type = action.get("type")
+
+    if action_type == "chmod":
+        path = action.get("path")
+        if not path:
+            raise HTTPException(status_code=400, detail="Remediation action is missing a target path.")
+        host_action, host_args, detail_of = "remediate-chmod-permissions", [path], \
+            lambda r: f"path={path} {r.get('previous_mode')} -> {r.get('new_mode')} verified={r.get('verified')}"
+    elif action_type == "ssh_directive":
+        directive = action.get("directive")
+        if not directive:
+            raise HTTPException(status_code=400, detail="Remediation action is missing a target directive.")
+        host_action, host_args, detail_of = "remediate-ssh-directive", [directive], \
+            lambda r: (f"directive={directive} applied={r.get('applied')} rolled_back={r.get('rolled_back')} "
+                       f"new_value={r.get('new_value')}")
+    elif action_type == "firewall":
+        fw_action = action.get("action")
+        if not fw_action:
+            raise HTTPException(status_code=400, detail="Remediation action is missing a target firewall action.")
+        host_action, host_args, detail_of = "remediate-firewall", [fw_action], \
+            lambda r: f"action={fw_action} applied={r.get('applied')}"
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown remediation action type: {action_type!r}.")
 
     config = _host_executor_config()
     from services.openvpn.exceptions import OpenVPNError
     from services.system.host_executor import run_host_command
     try:
-        result = await asyncio.to_thread(run_host_command, config, "remediate-chmod-permissions", path)
+        result = await asyncio.to_thread(run_host_command, config, host_action, *host_args)
     except OpenVPNError as e:
-        log_action(db, user, "remediate_finding", target=finding.check_id, detail=f"path={path}: {e.detail}", success=False)
+        log_action(db, user, "remediate_finding", target=finding.check_id, detail=f"{host_action}: {e.detail}", success=False)
         raise HTTPException(status_code=502, detail=e.detail)
 
-    finding.remediated_at = datetime.now(timezone.utc)
-    finding.remediated_by = user.username
+    # Only mark the finding as actually fixed if the host confirmed it
+    # applied the change -- chmod/firewall actions always either apply or
+    # raise, but remediate_ssh_directive can return applied=False (config
+    # validated as invalid, rolled back, nothing changed) WITHOUT raising,
+    # since that's an expected, handled outcome, not a transport failure.
+    # A rolled-back attempt must never show as "Fixed by <admin> on <date>".
+    applied = result.get("applied", True) if isinstance(result, dict) else True
+    if applied:
+        finding.remediated_at = datetime.now(timezone.utc)
+        finding.remediated_by = user.username
     finding.remediation_result = json.dumps(result)
     db.commit()
-    log_action(db, user, "remediate_finding", target=finding.check_id,
-               detail=f"path={path} {result.get('previous_mode')} -> {result.get('new_mode')} "
-                      f"verified={result.get('verified')}")
+    log_action(db, user, "remediate_finding", target=finding.check_id, detail=detail_of(result), success=applied)
     return {"finding": _serialize_finding(finding)}

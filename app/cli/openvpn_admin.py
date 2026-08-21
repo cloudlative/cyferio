@@ -291,6 +291,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("path", help="Must be one of the paths services/system/audit_remediate.py allowlists.")
 
+    p = sub.add_parser(
+        "remediate-ssh-directive",
+        help="System Audit Phase 4: sets one sshd_config directive to its one hardcoded safe value -- "
+        "backs up the config, applies the change, validates with `sshd -t`, and rolls back "
+        "automatically if invalid. Only reloads sshd (never restarts) after a successful validation. "
+        "See services/system/audit_remediate.py's remediate_ssh_directive().",
+    )
+    p.add_argument("directive", help="Must be one of the directives services/system/audit_remediate.py allowlists.")
+
+    p = sub.add_parser(
+        "remediate-firewall",
+        help="System Audit Phase 4: runs one allowlisted, pre-checked firewall remediation sequence "
+        "(e.g. allow SSH THEN enable ufw). See services/system/audit_remediate.py's "
+        "remediate_firewall() for the exact fixed set of actions -- there is no generic "
+        "'run this firewall command' path.",
+    )
+    # dest="firewall_action", not "action" -- argparse's own subcommand
+    # selector is already stored at args.action (see `dest="action"` on
+    # add_subparsers above); a same-named positional here would silently
+    # overwrite it.
+    p.add_argument("firewall_action", help="Must be one of the actions services/system/audit_remediate.py allowlists.")
+
     return parser
 
 
@@ -386,6 +408,10 @@ def main(argv: list[str] | None = None) -> int:
             return _ok(audit_probe.probe_firewall())
         elif args.action == "remediate-chmod-permissions":
             return _ok(audit_remediate.remediate_chmod(args.path))
+        elif args.action == "remediate-ssh-directive":
+            return _ok(audit_remediate.remediate_ssh_directive(args.directive))
+        elif args.action == "remediate-firewall":
+            return _ok(audit_remediate.remediate_firewall(args.firewall_action))
         else:  # pragma: no cover - argparse `required=True` already prevents this
             parser.error(f"Unknown action: {args.action}")
             return 2

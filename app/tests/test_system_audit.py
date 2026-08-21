@@ -469,3 +469,412 @@ class TestRemediateApi:
         login(app_client, "viewer", "viewerpass123")
         r = app_client.post(f"/api/system-audit/findings/{finding_id}/remediate")
         assert r.status_code == 403
+
+    def _configure_host_executor(self, monkeypatch):
+        from vpnadmin.config import settings as vp_settings
+        monkeypatch.setattr(vp_settings, "HOST_SSH_TARGET", "deploy@host")
+        monkeypatch.setattr(vp_settings, "HOST_SSH_KEY_PATH", "/tmp/fake-key-for-tests")
+
+    def test_ssh_directive_remediation_dispatches_and_marks_fixed(self, app_client, monkeypatch):
+        """Confirms the router dispatches an ssh_directive action to the
+        RIGHT CLI action name with the RIGHT (and only the right) argument,
+        and that an "applied": True result marks the finding fixed."""
+        finding = Finding(check_id="ssh.permit_root_login", category="ssh", severity="critical",
+                           title="T", description="d",
+                           remediation_action={"type": "ssh_directive", "directive": "permitrootlogin"})
+        _mock_checks(monkeypatch, system=[], ssh=[finding])
+        login(app_client, "admin", "adminpass123")
+        finding_id = app_client.post("/api/system-audit/run").json()["run"]["findings"][0]["id"]
+
+        self._configure_host_executor(monkeypatch)
+        from services.system import host_executor
+        calls = []
+
+        def fake_run_host_command(config, action, *args):
+            calls.append((action, args))
+            return {"directive": "permitrootlogin", "applied": True, "rolled_back": False,
+                     "new_value": "prohibit-password", "previous_line": "PermitRootLogin yes"}
+        monkeypatch.setattr(host_executor, "run_host_command", fake_run_host_command)
+
+        r = app_client.post(f"/api/system-audit/findings/{finding_id}/remediate")
+        assert r.status_code == 200
+        assert calls == [("remediate-ssh-directive", ("permitrootlogin",))]
+        body = r.json()["finding"]
+        assert body["remediated_at"] is not None
+        assert body["remediation_result"]["new_value"] == "prohibit-password"
+
+    def test_ssh_directive_rollback_does_not_mark_fixed(self, app_client, monkeypatch):
+        """The host script can return applied=False WITHOUT raising (a
+        validated-as-invalid config that was rolled back, see
+        audit_remediate.remediate_ssh_directive) -- that must never show
+        as "Fixed by <admin>", even though the HTTP request itself
+        succeeded."""
+        finding = Finding(check_id="ssh.password_authentication", category="ssh", severity="high",
+                           title="T", description="d",
+                           remediation_action={"type": "ssh_directive", "directive": "passwordauthentication"})
+        _mock_checks(monkeypatch, system=[], ssh=[finding])
+        login(app_client, "admin", "adminpass123")
+        finding_id = app_client.post("/api/system-audit/run").json()["run"]["findings"][0]["id"]
+
+        self._configure_host_executor(monkeypatch)
+        from services.system import host_executor
+        monkeypatch.setattr(host_executor, "run_host_command", lambda config, action, *args: {
+            "directive": "passwordauthentication", "applied": False, "rolled_back": True,
+            "validation_error": "/etc/ssh/sshd_config line 42: Bad configuration option",
+        })
+
+        r = app_client.post(f"/api/system-audit/findings/{finding_id}/remediate")
+        assert r.status_code == 200
+        body = r.json()["finding"]
+        assert body["remediated_at"] is None
+        assert body["remediation_result"]["rolled_back"] is True
+
+    def test_firewall_remediation_dispatches_correct_action(self, app_client, monkeypatch):
+        finding = Finding(check_id="firewall.ufw_enabled", category="firewall", severity="high",
+                           title="T", description="d",
+                           remediation_action={"type": "firewall", "action": "ufw_allow_ssh_and_enable"})
+        _mock_checks(monkeypatch, system=[], firewall=[finding])
+        login(app_client, "admin", "adminpass123")
+        finding_id = app_client.post("/api/system-audit/run").json()["run"]["findings"][0]["id"]
+
+        self._configure_host_executor(monkeypatch)
+        from services.system import host_executor
+        calls = []
+
+        def fake_run_host_command(config, action, *args):
+            calls.append((action, args))
+            return {"action": "ufw_allow_ssh_and_enable", "applied": True, "ssh_port_allowed": 22}
+        monkeypatch.setattr(host_executor, "run_host_command", fake_run_host_command)
+
+        r = app_client.post(f"/api/system-audit/findings/{finding_id}/remediate")
+        assert r.status_code == 200
+        assert calls == [("remediate-firewall", ("ufw_allow_ssh_and_enable",))]
+        assert r.json()["finding"]["remediated_at"] is not None
+
+    def test_unknown_remediation_action_type_400s(self, app_client, monkeypatch):
+        finding = Finding(check_id="s.weird", category="system", severity="high", title="T", description="d",
+                           remediation_action={"type": "reboot_the_host"})
+        _mock_checks(monkeypatch, system=[finding])
+        login(app_client, "admin", "adminpass123")
+        finding_id = app_client.post("/api/system-audit/run").json()["run"]["findings"][0]["id"]
+        r = app_client.post(f"/api/system-audit/findings/{finding_id}/remediate")
+        assert r.status_code == 400
+
+
+class TestSshDirectiveRemediate:
+    """services/system/audit_remediate.py's remediate_ssh_directive() --
+    exercised directly against real temp files (never a real sshd_config),
+    with subprocess.run monkeypatched so no real `sshd`/`systemctl` binary
+    is required in the test environment. Focuses on the three properties
+    that matter most for a remediation that can affect remote access: the
+    caller can never supply a target value, an invalid resulting config is
+    NEVER left in place, and sshd is only ever reloaded after a config
+    that's confirmed to validate."""
+
+    class _Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def test_rejects_directive_outside_allowlist(self):
+        from services.openvpn.exceptions import ValidationError
+        from services.system import audit_remediate
+        with pytest.raises(ValidationError):
+            audit_remediate.remediate_ssh_directive("banner")
+
+    def test_appends_directive_when_absent_and_reloads_on_valid_config(self, tmp_path, monkeypatch):
+        from services.system import audit_remediate
+        config = tmp_path / "sshd_config"
+        config.write_text("Port 22\n")
+        monkeypatch.setattr(audit_remediate, "_SSHD_CONFIG_MAIN", str(config))
+        monkeypatch.setattr(audit_remediate, "_SSHD_CONFIG_DROPIN_DIR", str(tmp_path / "no-such-dropins"))
+
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            if args[:2] == ["sshd", "-t"]:
+                return self._Result(returncode=0)
+            if args[:2] == ["systemctl", "reload"]:
+                return self._Result(returncode=0)
+            return self._Result(returncode=1)
+        monkeypatch.setattr(audit_remediate.subprocess, "run", fake_run)
+
+        result = audit_remediate.remediate_ssh_directive("permitrootlogin")
+        assert result["applied"] is True
+        assert result["rolled_back"] is False
+        assert result["new_value"] == "prohibit-password"
+        assert "permitrootlogin prohibit-password" in config.read_text().lower()
+        assert ["sshd", "-t"] in calls
+        assert ["systemctl", "reload", "ssh"] in calls
+
+    def test_rewrites_existing_directive_in_place(self, tmp_path, monkeypatch):
+        from services.system import audit_remediate
+        config = tmp_path / "sshd_config"
+        config.write_text("Port 22\nPasswordAuthentication yes\nX11Forwarding no\n")
+        monkeypatch.setattr(audit_remediate, "_SSHD_CONFIG_MAIN", str(config))
+        monkeypatch.setattr(audit_remediate, "_SSHD_CONFIG_DROPIN_DIR", str(tmp_path / "no-such-dropins"))
+        monkeypatch.setattr(audit_remediate.subprocess, "run", lambda args, **kw: self._Result(returncode=0))
+
+        result = audit_remediate.remediate_ssh_directive("passwordauthentication")
+        assert result["applied"] is True
+        assert result["previous_line"] == "PasswordAuthentication yes"
+        lines = config.read_text().splitlines()
+        assert "passwordauthentication no" in lines
+        # The unrelated directive must be untouched.
+        assert "X11Forwarding no" in lines
+
+    def test_invalid_config_is_rolled_back_and_never_reloaded(self, tmp_path, monkeypatch):
+        from services.system import audit_remediate
+        original_text = "Port 22\n"
+        config = tmp_path / "sshd_config"
+        config.write_text(original_text)
+        monkeypatch.setattr(audit_remediate, "_SSHD_CONFIG_MAIN", str(config))
+        monkeypatch.setattr(audit_remediate, "_SSHD_CONFIG_DROPIN_DIR", str(tmp_path / "no-such-dropins"))
+
+        reload_called = []
+
+        def fake_run(args, **kwargs):
+            if args[:2] == ["sshd", "-t"]:
+                return self._Result(returncode=1, stderr="sshd: syntax error")
+            if args[:2] == ["systemctl", "reload"]:
+                reload_called.append(args)
+                return self._Result(returncode=0)
+            return self._Result(returncode=1)
+        monkeypatch.setattr(audit_remediate.subprocess, "run", fake_run)
+
+        result = audit_remediate.remediate_ssh_directive("permitrootlogin")
+        assert result["applied"] is False
+        assert result["rolled_back"] is True
+        assert "syntax error" in result["validation_error"]
+        # The live config must be byte-for-byte what it was before -- a
+        # config that fails validation must never reach a running sshd.
+        assert config.read_text() == original_text
+        assert reload_called == []
+
+    def test_reload_failure_after_valid_config_rolls_back_and_raises(self, tmp_path, monkeypatch):
+        """sshd -t passes but neither service name reloads -- must not
+        report success for a change that was never actually applied."""
+        from services.openvpn.exceptions import ServiceManagementError
+        from services.system import audit_remediate
+        original_text = "Port 22\n"
+        config = tmp_path / "sshd_config"
+        config.write_text(original_text)
+        monkeypatch.setattr(audit_remediate, "_SSHD_CONFIG_MAIN", str(config))
+        monkeypatch.setattr(audit_remediate, "_SSHD_CONFIG_DROPIN_DIR", str(tmp_path / "no-such-dropins"))
+
+        def fake_run(args, **kwargs):
+            if args[:2] == ["sshd", "-t"]:
+                return self._Result(returncode=0)
+            return self._Result(returncode=1)  # every reload attempt fails
+        monkeypatch.setattr(audit_remediate.subprocess, "run", fake_run)
+
+        with pytest.raises(ServiceManagementError):
+            audit_remediate.remediate_ssh_directive("permitrootlogin")
+        assert config.read_text() == original_text
+
+
+class TestFirewallRemediate:
+    """services/system/audit_remediate.py's remediate_firewall() -- each
+    action is its own fixed sequence; these tests confirm the ORDER
+    (allow SSH before enabling ufw, never after) and that a failure at
+    any step raises rather than silently continuing."""
+
+    class _Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def test_rejects_action_outside_allowlist(self):
+        from services.openvpn.exceptions import ValidationError
+        from services.system import audit_remediate
+        with pytest.raises(ValidationError):
+            audit_remediate.remediate_firewall("disable_everything")
+
+    def test_ufw_allows_ssh_before_enabling(self, tmp_path, monkeypatch):
+        from services.system import audit_remediate
+        sshd_config = tmp_path / "sshd_config"
+        sshd_config.write_text("Port 2222\n")
+        monkeypatch.setattr(audit_remediate, "_SSHD_CONFIG_MAIN", str(sshd_config))
+
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return self._Result(returncode=0, stdout="Status: active")
+        monkeypatch.setattr(audit_remediate.subprocess, "run", fake_run)
+
+        result = audit_remediate.remediate_firewall("ufw_allow_ssh_and_enable")
+        assert result["applied"] is True
+        assert result["ssh_port_allowed"] == 2222
+        # The allow rule must be issued strictly BEFORE the enable command.
+        allow_idx = calls.index(["ufw", "allow", "2222/tcp"])
+        enable_idx = calls.index(["ufw", "--force", "enable"])
+        assert allow_idx < enable_idx
+
+    def test_ufw_enable_failure_raises_after_allow_still_succeeded(self, tmp_path, monkeypatch):
+        from services.openvpn.exceptions import FirewallConfigError
+        from services.system import audit_remediate
+        monkeypatch.setattr(audit_remediate, "_SSHD_CONFIG_MAIN", str(tmp_path / "missing"))
+
+        def fake_run(args, **kwargs):
+            if args[:2] == ["ufw", "allow"]:
+                return self._Result(returncode=0)
+            return self._Result(returncode=1, stderr="ufw: enable failed")
+        monkeypatch.setattr(audit_remediate.subprocess, "run", fake_run)
+
+        with pytest.raises(FirewallConfigError):
+            audit_remediate.remediate_firewall("ufw_allow_ssh_and_enable")
+
+    def test_ufw_allow_failure_never_attempts_enable(self, monkeypatch):
+        from services.openvpn.exceptions import FirewallConfigError
+        from services.system import audit_remediate
+
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return self._Result(returncode=1, stderr="ufw: command not found")
+        monkeypatch.setattr(audit_remediate.subprocess, "run", fake_run)
+
+        with pytest.raises(FirewallConfigError):
+            audit_remediate.remediate_firewall("ufw_allow_ssh_and_enable")
+        assert not any(c[:2] == ["ufw", "enable"] or "--force" in c for c in calls)
+
+    def test_enable_openvpn_iptables_unit(self, monkeypatch):
+        from services.system import audit_remediate
+        calls = []
+        monkeypatch.setattr(audit_remediate.subprocess, "run", lambda args, **kw: calls.append(args) or self._Result(returncode=0))
+        result = audit_remediate.remediate_firewall("enable_openvpn_iptables_unit")
+        assert result["applied"] is True
+        assert calls == [["systemctl", "enable", "--now", "openvpn-iptables.service"]]
+
+    def test_firewalld_allow_ssh_before_starting(self, monkeypatch):
+        from services.system import audit_remediate
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return self._Result(returncode=0)
+        monkeypatch.setattr(audit_remediate.subprocess, "run", fake_run)
+
+        result = audit_remediate.remediate_firewall("firewalld_allow_ssh_and_enable")
+        assert result["applied"] is True
+        add_idx = calls.index(["firewall-cmd", "--permanent", "--add-service=ssh"])
+        start_idx = calls.index(["systemctl", "enable", "--now", "firewalld"])
+        assert add_idx < start_idx
+
+
+class TestSshAndFirewallChecksSetRemediation:
+    """ssh_checks.py/firewall_checks.py -- confirms the checks that DO
+    offer automated remediation actually attach remediation_action AND a
+    non-empty remediation_risk (every ssh_directive/firewall action must
+    disclose risk -- unlike chmod, none of these are risk-free)."""
+
+    def test_ssh_directive_finding_carries_action_and_risk(self):
+        from vpnadmin.system_audit import ssh_checks
+        directives = {"permitrootlogin": "yes"}
+        findings = ssh_checks._check_directives("/fake-host-root", directives)
+        finding = next(f for f in findings if f.check_id == "ssh.permit_root_login")
+        assert finding.remediation_action == {"type": "ssh_directive", "directive": "permitrootlogin"}
+        assert finding.remediation_risk and "lock" in finding.remediation_risk.lower()
+
+    def test_passed_directive_has_no_remediation_action(self):
+        from vpnadmin.system_audit import ssh_checks
+        directives = {"permitrootlogin": "no"}
+        findings = ssh_checks._check_directives("/fake-host-root", directives)
+        finding = next(f for f in findings if f.check_id == "ssh.permit_root_login")
+        assert finding.severity == "passed"
+        assert finding.remediation_action is None
+
+    def test_ufw_disabled_finding_carries_action_and_risk(self, tmp_path):
+        from vpnadmin.system_audit import firewall_checks
+        etc_ufw = tmp_path / "etc" / "ufw"
+        etc_ufw.mkdir(parents=True)
+        (etc_ufw / "ufw.conf").write_text("ENABLED=no\n")
+        findings = firewall_checks._check_ufw(str(tmp_path))
+        finding = next(f for f in findings if f.check_id == "firewall.ufw_enabled")
+        assert finding.remediation_action == {"type": "firewall", "action": "ufw_allow_ssh_and_enable"}
+        assert finding.remediation_risk
+
+    def test_openvpn_iptables_unit_disabled_carries_action(self, tmp_path):
+        from vpnadmin.system_audit import firewall_checks
+        unit_dir = tmp_path / "lib" / "systemd" / "system"
+        unit_dir.mkdir(parents=True)
+        (unit_dir / "openvpn-iptables.service").write_text("[Unit]\n")
+        findings = firewall_checks._check_project_iptables_unit(str(tmp_path))
+        finding = next(f for f in findings if f.check_id == "firewall.openvpn_iptables_unit")
+        assert finding.remediation_action == {"type": "firewall", "action": "enable_openvpn_iptables_unit"}
+        assert finding.remediation_risk
+
+
+class TestReportPdf:
+    """system_audit/report_pdf.py -- confirms every report type renders
+    valid PDF bytes and that host-derived text (which can contain
+    characters like '<'/'>' that would otherwise be mistaken for
+    reportlab's own mini-XML markup, e.g. firewall remediation text like
+    "'-s <ip/cidr>'") never breaks generation."""
+
+    @staticmethod
+    def _fake_run(**overrides):
+        from datetime import datetime, timezone
+        defaults = dict(
+            id=1, score=72, started_at=datetime.now(timezone.utc), node_hostname="test-host",
+            trigger="manual", triggered_by="admin", critical_count=1, high_count=1, medium_count=0,
+            low_count=0, info_count=0, passed_count=5, new_findings_count=1, resolved_findings_count=0,
+        )
+        defaults.update(overrides)
+        run = type("FakeRun", (), defaults)()
+        run.findings = [
+            Finding(check_id="ssh.permit_root_login", category="ssh", severity="critical",
+                    title="SSH Root Login Enabled", description="PermitRootLogin is yes",
+                    why_it_matters="<script>&nasty</script>", current_state="yes",
+                    remediation="Add a rule: '-s <ip/cidr>' then restart").__dict__,
+        ]
+        # Finding is a dataclass without the ORM's extra columns
+        # (remediated_at/remediated_by) report_pdf.py reads -- wrap in a
+        # tiny shim object rather than reusing Finding directly.
+        finding_obj = type("FakeFinding", (), {
+            **run.findings[0], "remediated_at": None, "remediated_by": None,
+        })()
+        run.findings = [finding_obj]
+        return run
+
+    @pytest.mark.parametrize("report", ["full", "summary", "firewall", "ssh", "system"])
+    def test_renders_valid_pdf_for_every_report_type(self, report):
+        from vpnadmin.system_audit import report_pdf
+        pdf_bytes = report_pdf.build_run_pdf(self._fake_run(), report)
+        assert pdf_bytes[:4] == b"%PDF"
+
+    def test_unknown_report_type_falls_back_to_full(self):
+        from vpnadmin.system_audit import report_pdf
+        pdf_bytes = report_pdf.build_run_pdf(self._fake_run(), "not-a-real-report")
+        assert pdf_bytes[:4] == b"%PDF"
+
+
+class TestExportPdfApi:
+    def test_export_pdf_returns_binary_with_content_disposition(self, app_client, monkeypatch):
+        _mock_checks(monkeypatch, system=[Finding(check_id="s.one", category="system", severity="low",
+                                                    title="L", description="d")])
+        login(app_client, "admin", "adminpass123")
+        run_id = app_client.post("/api/system-audit/run").json()["run"]["id"]
+        r = app_client.get(f"/api/system-audit/runs/{run_id}/export.pdf?report=summary")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/pdf"
+        assert "attachment" in r.headers["content-disposition"]
+        assert r.content[:4] == b"%PDF"
+
+    def test_export_pdf_unknown_report_400s(self, app_client, monkeypatch):
+        _mock_checks(monkeypatch, system=[Finding(check_id="s.one", category="system", severity="low",
+                                                    title="L", description="d")])
+        login(app_client, "admin", "adminpass123")
+        run_id = app_client.post("/api/system-audit/run").json()["run"]["id"]
+        r = app_client.get(f"/api/system-audit/runs/{run_id}/export.pdf?report=not-real")
+        assert r.status_code == 400
+
+    def test_export_pdf_nonexistent_run_404s(self, app_client, monkeypatch):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.get("/api/system-audit/runs/9999/export.pdf")
+        assert r.status_code == 404
