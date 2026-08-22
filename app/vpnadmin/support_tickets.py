@@ -48,17 +48,17 @@ from .models import SupportTicket
 # ticket (assigned_admin_id is set, via the existing PATCH endpoint) but
 # hasn't started the actual maintenance work yet.
 STATUSES: tuple[str, ...] = (
-    "open", "in_progress", "resolved", "waiting_for_user", "closed",
-    "assigned", "completed", "failed", "cancelled",
+    "open", "assigned", "in_progress", "resolved", "waiting_for_user", "closed",
+    "completed", "failed", "cancelled",
 )
 
 STATUS_LABELS: dict[str, str] = {
     "open": "Open",
+    "assigned": "Assigned",
     "in_progress": "In Progress",
     "resolved": "Resolved",
-    "waiting_for_user": "Waiting on Customer",
+    "waiting_for_user": "Waiting on User",
     "closed": "Closed",
-    "assigned": "Assigned",
     "completed": "Completed",
     "failed": "Failed",
     "cancelled": "Cancelled",
