@@ -1189,10 +1189,32 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
    every row now gets its own copy of this menu instead of one shared
    toolbar-level menu acting on whichever row was radio-selected. */
 .client-actions-menu { position: relative; display: inline-block; }
+.client-actions-toggle .dropdown-caret {
+	display: inline-block;
+	margin-left: 7px;
+	width: 0;
+	height: 0;
+	border-left: 3.5px solid transparent;
+	border-right: 3.5px solid transparent;
+	border-top: 4.5px solid currentColor;
+	vertical-align: middle;
+	opacity: 0.7;
+	transition: transform 0.18s ease;
+}
+/* Points up while the panel is open -- same rotate-on-expand idea as the
+   sidebar's .nav-section-caret, driven off the button's own aria-expanded
+   rather than a separate class, so it can never drift out of sync with
+   the actual open/closed state. */
+.client-actions-toggle[aria-expanded="true"] .dropdown-caret { transform: rotate(180deg); }
+/* Anchored to the RIGHT edge of the toggle (not left, like base.html's
+   #notif-bell/#theme-quick-switch) -- the toggle now sits at the far
+   right of the Actions column, itself the rightmost column in the table
+   (see renderClients() below), so a left-anchored panel would open off
+   the edge of .table-scroll/the viewport instead of over the table. */
 .client-actions-panel {
 	position: absolute;
 	top: calc(100% + 6px);
-	left: 0;
+	right: 0;
 	z-index: 50;
 	min-width: 200px;
 	padding: 6px;
@@ -1221,17 +1243,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .client-actions-item:hover { background: var(--surface-hover); }
 .client-actions-item:disabled { opacity: 0.45; cursor: not-allowed; background: none; }
 .client-actions-item .btn-icon { margin-right: 9px; }
-/* Colorful per-action-type icon tint (see .btn-row-action's own comment
-   below for why these are fixed hex, not theme accent variables) -- a
-   lighter touch than the row buttons' full gradient fill, since these
-   are stacked list items in a plain menu, not standalone pill buttons;
-   a full-color background on each would be far too busy shoulder to
-   shoulder like this. Just the icon glyph picks up the color; the label
-   stays the menu's normal text color. */
-.client-actions-item.c-indigo .btn-icon { color: #6366f1; }
-.client-actions-item.c-purple .btn-icon { color: #a855f7; }
-.client-actions-item.c-blue .btn-icon { color: #0ea5e9; }
-.client-actions-item.c-amber .btn-icon { color: #f59e0b; }
 /* Disconnect/Revoke -- the two genuinely destructive actions in this
    menu -- get danger-tinted text (not a full red button background,
    which would look jarring stacked in a plain white/dark menu list) plus
@@ -1242,38 +1253,15 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .client-actions-divider { height: 1px; margin: 5px 4px; background: var(--border-light); }
 
 /* Per-row action buttons (Manage MACs/Manage Restrictions/View-Copy
-   .ovpn/the "More" toggle/viewer-only Details) -- small colorful circular
-   icon buttons, one set generated fresh per row by renderClients(). Fixed
-   hex gradients rather than var(--accent-*) on purpose: those variables
-   are the SAME color for every button on a themed page (deliberately --
-   see the CSS custom properties block at the top of this file), but the
-   whole point here is that each action reads as its own distinct color at
-   a glance across a table of many rows, independent of whatever accent
-   theme is active. */
-.row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
-.btn-row-action {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 30px;
-	height: 30px;
-	padding: 0;
-	border-radius: 50%;
-	border: none;
-	font-size: 0.92rem;
-	line-height: 1;
-	color: white;
-	cursor: pointer;
-	flex-shrink: 0;
-	transition: transform 0.1s ease, box-shadow 0.15s ease;
-}
-.btn-row-action:hover { transform: translateY(-1px) scale(1.06); }
-.btn-row-action:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-.btn-row-action.c-teal { background: linear-gradient(135deg, #0d9488, #14b8a6); box-shadow: 0 2px 8px rgba(20,184,166,0.35); }
-.btn-row-action.c-amber { background: linear-gradient(135deg, #d97706, #f59e0b); box-shadow: 0 2px 8px rgba(245,158,11,0.35); }
-.btn-row-action.c-sky { background: linear-gradient(135deg, #0284c7, #0ea5e9); box-shadow: 0 2px 8px rgba(14,165,233,0.35); }
-.btn-row-action.c-violet { background: linear-gradient(135deg, #7c3aed, #a855f7); box-shadow: 0 2px 8px rgba(168,85,247,0.35); }
-.btn-row-action.c-indigo { background: linear-gradient(135deg, #4f46e5, #6366f1); box-shadow: 0 2px 8px rgba(99,102,241,0.35); }
+   .ovpn/the "More" toggle/viewer-only Details) -- plain capsule buttons
+   with text labels, same .btn-secondary/.btn-sm pill style as every other
+   secondary action in this app, one set generated fresh per row by
+   renderClients(). Deliberately NOT color-coded per action (an earlier
+   pass gave each its own fixed hue) -- with a whole row of them per
+   client, distinct colors read as noisy rather than informative; a
+   consistent capsule with a legible label scans faster across many rows
+   than memorizing which color means what. */
+.row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; justify-content: flex-end; }
 
 /* Key/value list for the drawer's field set (OS, Source IP, Connected
    Since, ...) -- label left, value right, one pair per row. Tried
