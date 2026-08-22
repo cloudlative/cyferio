@@ -149,6 +149,27 @@ class TestBulkActions:
             r = app_client.get(f"/api/tickets/{tid}")
             assert r.json()["status"] == "closed"
 
+    def test_bulk_resolve_skips_an_already_closed_ticket(self, app_client, db_session):
+        """A closed ticket can't jump straight to resolved without being
+        reopened first -- same Status Workflow Rules the single-ticket
+        PATCH endpoint and bulk_close_tickets already enforce. Bulk
+        resolve is expected to silently skip it (not error the whole
+        batch), same "skip, don't fail" posture as every other guard in
+        these bulk endpoints."""
+        _make_self_service_user(db_session, "liam")
+        login(app_client, "liam", "somepass123")
+        ids = [_create_ticket(app_client, subject=f"U{i}") for i in range(2)]
+
+        login(app_client, "admin", "adminpass123")
+        app_client.post("/api/tickets/bulk/close", json={"ticket_ids": [ids[0]]})
+
+        r = app_client.post("/api/tickets/bulk/resolve", json={"ticket_ids": ids})
+        assert r.status_code == 200
+        assert r.json()["resolved"] == [ids[1]]
+        assert ids[0] in r.json()["skipped"]
+        assert app_client.get(f"/api/tickets/{ids[0]}").json()["status"] == "closed"
+        assert app_client.get(f"/api/tickets/{ids[1]}").json()["status"] == "resolved"
+
     def test_bulk_assign(self, app_client, db_session):
         _make_self_service_user(db_session, "kim")
         login(app_client, "kim", "somepass123")
