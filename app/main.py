@@ -28,7 +28,7 @@ from vpnadmin import device_monitoring
 # snapshot loop's very first tick on every startup.
 from vpnadmin import health as health_data
 from vpnadmin import system_audit
-from vpnadmin.app_settings import migrate_decouple_portal_and_vpn_restrictions, migrate_legacy_smtp_provider, prune_audit_log, prune_connection_rejections, prune_db_stat_snapshots, refresh_runtime_cache
+from vpnadmin.app_settings import migrate_decouple_portal_and_vpn_restrictions, migrate_legacy_smtp_provider, migrate_ticket_email_notify_types, prune_audit_log, prune_connection_rejections, prune_db_stat_snapshots, refresh_runtime_cache
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_admin
@@ -286,6 +286,13 @@ async def lifespan(_app: FastAPI):
         # that function's own docstring. No-op once any EmailProvider row
         # exists, so safe on every startup, not just the first.
         migrate_legacy_smtp_provider(db)
+        # One-time backfill: subdivides the legacy notify_admin_on_
+        # ticket_created toggle into the 4 per-event ticket admin-email
+        # keys (notification_prefs.TICKET_EMAIL_EVENTS), seeded from that
+        # toggle's current value so upgrading doesn't change anyone's
+        # admin email behavior -- see that function's own docstring.
+        # No-op once ticket_email_notify_types is already set.
+        migrate_ticket_email_notify_types(db)
         # One-time backfill: copies each user's already-effective Portal
         # Login Restrictions into their linked VPN profile's policy before
         # the Portal->VPN auto-sync (routes/users.py) is removed for good --

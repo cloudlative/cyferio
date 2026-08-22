@@ -13,6 +13,19 @@ notify_admin_on_* toggle in this app -- there's no per-admin-address
 infra to fan an email out to each individually; the in-app bell is what
 gives every admin account its own notification regardless.
 
+Admin email is gated per-event via notification_prefs.py (see
+_notify_admins below) rather than the one all-or-nothing
+notify_admin_on_ticket_created toggle this replaced (that column is now
+inert legacy data, read exactly once by app_settings.
+migrate_ticket_email_notify_types to seed the new per-event settings on
+upgrade). The TicketNotification row itself is ALWAYS written regardless
+of this or any bell preference -- notification_prefs' bell_notify_types
+setting is enforced at READ time instead (routes/notifications.py's GET
+filters what's actually surfaced/counted), not by skipping the write --
+see _notify_admins' own comment for why (a producer with its own
+"already notified this" dedup-by-row-existence check, like main.py's
+quota loop, would otherwise re-fire on every tick while muted).
+
 User-side email is never gated by an admin toggle (see mailer.
 send_ticket_notification_email's own docstring) -- these are
 transactional to the ticket's own creator.
@@ -24,7 +37,7 @@ routes/tickets.py AFTER the triggering db.commit(), each managing its own
 follow-up commit for the TicketNotification row(s) it adds."""
 from sqlalchemy.orm import Session
 
-from . import app_settings, mailer, slack_notifications
+from . import app_settings, mailer, notification_prefs, slack_notifications
 from .models import SupportTicket, TicketNotification, User
 from .permissions import has_permission_any_scope
 from .support_tickets import status_label
@@ -39,16 +52,30 @@ def _admin_recipients(db: Session) -> list[User]:
 
 def _notify_admins(db: Session, ticket: SupportTicket, kind: str, message: str) -> None:
     recipients = [ticket.assigned_admin] if ticket.assigned_admin_id else _admin_recipients(db)
+    # The TicketNotification row itself is ALWAYS written, regardless of
+    # bell_notify_types -- that setting controls what routes/notifications.
+    # py's GET surfaces to the user, not what gets recorded (see that
+    # router's own filtering, added alongside notification_prefs.py).
+    # Writing it unconditionally here keeps this module simple and, more
+    # importantly, matches main.py's quota loop: THAT producer's own
+    # "already notified this threshold" dedup check queries for a prior
+    # QuotaNotification row's existence, so gating the write itself (an
+    # earlier draft of this change did exactly that) would have made a
+    # muted bell category re-fire its email every single loop tick
+    # instead of just once per threshold-crossing -- read-time filtering
+    # avoids that class of bug entirely, uniformly, for every producer.
     for admin in recipients:
         if admin is None:
             continue
         db.add(TicketNotification(user_id=admin.id, ticket_id=ticket.id, kind=kind, message=message))
     db.commit()
-    if app_settings.runtime.notify_admin_on_ticket_created:
+    if notification_prefs.ticket_email_enabled(app_settings.runtime.ticket_email_notify_types, kind):
         mailer.send_admin_notification(db=db, subject=f"{message}", body=f"Ticket #{ticket.id}: {ticket.subject}\nCategory: {ticket.category}\nPriority: {ticket.priority}")
 
 
 def _notify_user(db: Session, ticket: SupportTicket, kind: str, message: str, *, email_headline: str, email_body: str | None = None) -> None:
+    # Always written -- see _notify_admins' comment above on why bell
+    # filtering happens at read time (routes/notifications.py), not here.
     db.add(TicketNotification(user_id=ticket.created_by_user_id, ticket_id=ticket.id, kind=kind, message=message))
     db.commit()
     creator = ticket.created_by
@@ -75,7 +102,12 @@ def ticket_assigned(db: Session, ticket: SupportTicket) -> None:
     changes assigned_admin_id (the existing "claim"/reassignment
     mechanism, see that router's own docstring). Notifies the newly-
     assigned admin specifically (not every admin, unlike ticket_created)
-    since they're the one who now owns follow-up."""
+    since they're the one who now owns follow-up. Bell-only, no email --
+    unchanged from before notification_prefs.py existed; "ticket_assigned"
+    is a real bell event key but was never one of the 4 events
+    TICKET_EMAIL_EVENTS covers, so there's no email toggle for it. Always
+    written -- see _notify_admins' comment on why bell filtering happens
+    at read time, not here."""
     if ticket.assigned_admin is None:
         return
     admin = ticket.assigned_admin
