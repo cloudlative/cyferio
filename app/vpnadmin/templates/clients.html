@@ -441,13 +441,13 @@ function renderClients() {
 	}
 
 	// Actions live in their own rightmost column, plain capsule buttons with
-	// text labels per row (Manage MACs/Manage Restrictions/View-Copy .ovpn
-	// plus a "More" dropdown for the rest) -- see initClientRowActions()
-	// above for the single delegated click handler every one of these
-	// buttons runs through. Everything else trimmed from this row (OS,
-	// Source IP, Connected Since, Duration, In MAC DB, Last Seen, the MAC
-	// list itself) lives in the Details dialog instead (openDetailsDialog()),
-	// one of the "More" items below.
+	// text labels per row (Manage MACs/Manage Restrictions plus a "More"
+	// dropdown for the rest, including View/Copy .ovpn) -- see
+	// initClientRowActions() above for the single delegated click handler
+	// every one of these buttons runs through. Everything else trimmed
+	// from this row (OS, Source IP, Connected Since, Duration, In MAC DB,
+	// Last Seen, the MAC list itself) lives in the Details dialog instead
+	// (openDetailsDialog()), one of the "More" items below.
 	el.innerHTML = `<div class="table-scroll"><table>
 		<thead><tr>
 			<th>Name</th><th>Status</th><th>Portal User</th>
@@ -470,11 +470,11 @@ function renderClients() {
 					<button type="button" class="btn-secondary btn-sm" data-action="macs" data-name="${n}"><span class="btn-icon">◇</span>Manage MACs</button>
 					${isAdmin ? `
 					<button type="button" class="btn-secondary btn-sm" data-action="policy" data-name="${n}"><span class="btn-icon">⛨</span>Manage Restrictions</button>
-					<button type="button" class="btn-secondary btn-sm" data-action="ovpn" data-name="${n}"><span class="btn-icon">⭳</span>View / Copy .ovpn</button>
 					<div class="client-actions-menu">
 						<button type="button" class="btn-secondary btn-sm client-actions-toggle" data-name="${n}" aria-haspopup="true" aria-expanded="false">More<span class="dropdown-caret"></span></button>
 						<div class="client-actions-panel" style="display:none">
 							<button type="button" class="client-actions-item" data-action="details" data-name="${n}"><span class="btn-icon">ℹ</span>Details</button>
+							<button type="button" class="client-actions-item" data-action="ovpn" data-name="${n}"><span class="btn-icon">⭳</span>View / Copy .ovpn</button>
 							<button type="button" class="client-actions-item" data-action="monitoring" data-name="${n}"><span class="btn-icon">◉</span>Manage Monitoring</button>
 							<button type="button" class="client-actions-item" data-action="email" data-name="${n}"><span class="btn-icon">✉</span>Email Profile</button>
 							<button type="button" class="client-actions-item" data-action="reset-usage" data-name="${n}"><span class="btn-icon">↺</span>Reset Usage</button>
