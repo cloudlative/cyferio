@@ -13,7 +13,7 @@
 	<div class="stat-card accent-rejected"><div class="stat-value" id="stat-unassigned-count">—</div><div class="stat-label">Unassigned Users</div></div>
 </div>
 
-{% if is_admin %}
+{% if can_manage_teams %}
 <div class="card">
 	<h2>Create a Team</h2>
 	<form id="create-team-form">
@@ -57,14 +57,14 @@
 	<div class="toolbar">
 		<div class="toolbar-title"><h2 style="margin:0" id="team-detail-title">Team</h2><span class="count-badge" id="team-detail-count">— members</span></div>
 		<div>
-			{% if is_admin %}
+			{% if can_manage_teams %}
 			<button class="btn-secondary btn-sm" id="team-edit-toggle-btn">Edit Details</button>
 			<button class="btn-danger btn-sm" id="team-delete-btn">Delete Team</button>
 			{% endif %}
 		</div>
 	</div>
 	<div id="team-detail-meta" style="margin-bottom:14px"></div>
-	{% if is_admin %}
+	{% if can_manage_teams %}
 	<div class="form-row" id="team-edit-panel" style="display:none;margin-bottom:16px">
 		<div class="field">
 			<label for="edit-team-name">Team Name</label>
@@ -85,7 +85,7 @@
 		<button class="btn-primary" id="team-edit-save-btn" disabled>Save Details</button>
 	</div>
 	{% endif %}
-	{% if is_admin %}
+	{% if can_manage_teams %}
 	<form id="add-member-form" class="form-row" style="margin-bottom:16px">
 		<div class="field" style="flex:2">
 			<label for="add-member-select">Add a member</label>
@@ -100,12 +100,21 @@
 
 {% block scripts %}
 <script>
-const isAdmin = {{ "true" if is_admin else "false" }};
+// Two distinct permission checks, not one: every /api/teams write (create/
+// edit/delete a team, add/remove a member) is gated on teams:manage (see
+// routes/teams.py), so that's what drives every write control below. The
+// member-picker dropdown is the one exception -- it needs GET /api/users,
+// which is gated on users:manage (a separate object) -- so a role with
+// teams:manage but not users:manage can still reach every button here, it
+// just won't be able to populate "Add a member" (falls back to "No other
+// users available", handled below) until it's also granted users:manage.
+const canManageTeams = {{ "true" if can_manage_teams else "false" }};
+const canManageUsers = {{ "true" if is_admin else "false" }};
 let lastTeams = [];
 let allUsers = [];
 let currentTeamId = "unassigned";
 let teamDetailOpen = false; // tracks whether the detail card is actually showing, so clicking the already-open team's row again toggles it closed
-let teamEditDirty; // assigned below, admin-only -- the edit panel doesn't exist in the DOM for non-admins
+let teamEditDirty; // assigned below, only when canManageTeams -- the edit panel doesn't exist in the DOM otherwise
 
 // Mirrors routes/teams.py's _valid_slug (lowercase letters/numbers/hyphens
 // only, no leading/trailing/doubled hyphens) -- used both to auto-fill the
@@ -130,10 +139,10 @@ async function loadTeams() {
 	const grid = document.getElementById("team-grid");
 	try {
 		const requests = [apiFetch("/api/teams")];
-		if (isAdmin) requests.push(apiFetch("/api/users"));
+		if (canManageUsers) requests.push(apiFetch("/api/users"));
 		const [teams, users] = await Promise.all(requests);
 		lastTeams = teams;
-		if (isAdmin) allUsers = users;
+		if (canManageUsers) allUsers = users;
 		renderSummary();
 		if (lastTeams.length === 0) {
 			grid.innerHTML = '<div class="empty-state">No teams yet.</div>';
@@ -256,16 +265,16 @@ function showTeam(id) {
 		el.innerHTML = '<div class="empty-state">No members in this team.</div>';
 	} else {
 		el.innerHTML = `<table>
-			<thead><tr><th>User</th><th>Role</th><th>Status</th>${isAdmin && isRealTeam ? "<th></th>" : ""}</tr></thead>
+			<thead><tr><th>User</th><th>Role</th><th>Status</th>${canManageTeams && isRealTeam ? "<th></th>" : ""}</tr></thead>
 			<tbody>${team.members.map(m => `
 				<tr data-user-id="${m.id}">
 					<td>${escapeHtml(m.display_name)} <span class="muted" style="font-size:0.82em">(${escapeHtml(m.username)})</span></td>
 					<td><span class="role-badge role-${m.role}">${m.role}</span></td>
 					<td>${m.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
-					${isAdmin && isRealTeam ? `<td class="text-right"><button class="btn-secondary btn-sm remove-member-btn">Remove from Team</button></td>` : ""}
+					${canManageTeams && isRealTeam ? `<td class="text-right"><button class="btn-secondary btn-sm remove-member-btn">Remove from Team</button></td>` : ""}
 				</tr>`).join("")}</tbody>
 		</table>`;
-		if (isAdmin && isRealTeam) {
+		if (canManageTeams && isRealTeam) {
 			el.querySelectorAll(".remove-member-btn").forEach(btn => {
 				btn.addEventListener("click", async () => {
 					const userId = btn.closest("tr").dataset.userId;
@@ -284,7 +293,7 @@ function showTeam(id) {
 	document.getElementById("team-detail-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-if (isAdmin) {
+if (canManageTeams) {
 	// Auto-fills the slug from the name as the admin types (slugify), but
 	// only until the slug field is edited by hand -- same "suggest, don't
 	// force" pattern as e.g. GitHub's repo-name -> URL-slug field.

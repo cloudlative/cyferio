@@ -162,7 +162,7 @@
 			</div>
 			{% endif %}
 
-			{% if can_view_health or can_view_reports or can_view_system_audit or is_admin %}
+			{% if can_view_health or can_view_reports or can_view_system_audit or can_view_users_activity %}
 			{% set monitoring_has_active = request.url.path in ['/diagnostics', '/health', '/system-audit', '/reports', '/users/activity'] %}
 			<div class="nav-section {{ '' if (not nav_sections_collapsible or monitoring_has_active) else 'collapsed' }}">
 				{% if nav_sections_collapsible %}
@@ -182,7 +182,7 @@
 				{% if can_view_reports %}
 				<a href="/reports" class="{{ 'active' if request.url.path == '/reports' }}"><span class="nav-icon">▥</span>Reports</a>
 				{% endif %}
-				{% if is_admin %}
+				{% if can_view_users_activity %}
 				<a href="/users/activity" class="{{ 'active' if request.url.path == '/users/activity' }}"><span class="nav-icon">☰</span>Users Activity</a>
 				{% endif %}
 					</div>
@@ -190,7 +190,7 @@
 			</div>
 			{% endif %}
 
-			{% if is_admin or can_manage_roles or can_manage_support %}
+			{% if is_admin or can_manage_roles or can_manage_support or can_manage_teams or can_manage_settings %}
 			{% set administration_has_active = request.url.path in ['/users', '/teams', '/roles', '/settings'] or request.url.path.startswith('/support-center') %}
 			<div class="nav-section {{ '' if (not nav_sections_collapsible or administration_has_active) else 'collapsed' }}">
 				{% if nav_sections_collapsible %}
@@ -202,6 +202,8 @@
 					<div class="nav-section-links">
 				{% if is_admin %}
 				<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
+				{% endif %}
+				{% if can_manage_teams %}
 				<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
 				{% endif %}
 				{% if can_manage_roles %}
@@ -210,7 +212,7 @@
 				{% if can_manage_support %}
 				<a href="/support-center" class="{{ 'active' if request.url.path.startswith('/support-center') }}"><span class="nav-icon">☎</span>Support Center</a>
 				{% endif %}
-				{% if is_admin %}
+				{% if can_manage_settings %}
 				<a href="/settings" class="{{ 'active' if request.url.path == '/settings' }}"><span class="nav-icon">⛭</span>Settings</a>
 				{% endif %}
 					</div>
@@ -284,7 +286,7 @@
 						<div id="notif-bell-list"><p class="muted" style="padding:14px">No notifications.</p></div>
 					</div>
 				</div>
-				{% if is_admin %}
+				{% if can_manage_settings %}
 				<div class="theme-quick-switch" id="theme-quick-switch">
 					<button type="button" class="btn-secondary btn-sm" id="theme-quick-toggle" aria-haspopup="true" aria-expanded="false">
 						<span class="theme-swatch-dot" id="theme-quick-swatch"></span>
