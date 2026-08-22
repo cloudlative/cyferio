@@ -40,6 +40,7 @@ from vpnadmin.permissions import (
 from vpnadmin import geo_lists, mailer, slack_notifications
 from vpnadmin import app_settings
 from vpnadmin.models import QuotaNotification
+from vpnadmin.support_tickets import migrate_legacy_ticket_statuses
 from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, host_ingest, me_connection_issues, me_tickets, me_vpn, mfa as mfa_routes, notifications, pages, release as release_routes, reports, roles, settings as settings_routes, status, system_audit as system_audit_routes, groups, tickets, users
 from vpnadmin.routes.reports import _load_rows
 
@@ -305,6 +306,13 @@ async def lifespan(_app: FastAPI):
         # admin email behavior -- see that function's own docstring.
         # No-op once ticket_email_notify_types is already set.
         migrate_ticket_email_notify_types(db)
+        # One-time backfill: remaps any existing ticket still sitting on a
+        # status retired by the 2026-08-23 status simplification ("new",
+        # "waiting_for_admin", "reopened", plus a regular ticket ever
+        # having ended up on the sysmaint-only "assigned") to its
+        # replacement -- see support_tickets.py's own docstring for the
+        # full mapping. No-op once no row matches any of those statuses.
+        migrate_legacy_ticket_statuses(db)
         # One-time backfill: copies each user's already-effective Portal
         # Login Restrictions into their linked VPN profile's policy before
         # the Portal->VPN auto-sync (routes/users.py) is removed for good --

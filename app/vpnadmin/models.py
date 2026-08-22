@@ -1305,7 +1305,7 @@ class SupportTicket(Base):
     # Own scope (routes/me_tickets.py) always filters on created_by_user_id
     # -- same "structural ownership, no separate scope check" pattern as
     # VpnProfileLink/me_vpn.py. Any scope (routes/tickets.py) sees every row.
-    status = Column(String(32), nullable=False, default="new", index=True)
+    status = Column(String(32), nullable=False, default="open", index=True)
     assigned_admin_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     # Optional -- set from the auto-attached diagnostic context (see
     # context_snapshot below) when the category is VPN-related and the

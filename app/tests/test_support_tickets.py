@@ -47,7 +47,7 @@ class TestSelfServiceLifecycle:
         r = _create_ticket(app_client)
         assert r.status_code == 201
         ticket = r.json()
-        assert ticket["status"] == "new"
+        assert ticket["status"] == "open"
         ticket_id = ticket["id"]
 
         r = app_client.get(f"/api/me/tickets/{ticket_id}")
@@ -56,7 +56,7 @@ class TestSelfServiceLifecycle:
 
         r = app_client.post(f"/api/me/tickets/{ticket_id}/replies", data={"body": "Any update?"})
         assert r.status_code == 201
-        assert r.json()["status"] == "waiting_for_admin"
+        assert r.json()["status"] == "in_progress"
 
         # An admin resolves it (via the admin router).
         login(app_client, "admin", "adminpass123")
@@ -71,7 +71,7 @@ class TestSelfServiceLifecycle:
 
         r = app_client.post(f"/api/me/tickets/{ticket_id}/reopen")
         assert r.status_code == 200
-        assert r.json()["status"] == "reopened"
+        assert r.json()["status"] == "open"
         assert r.json()["resolved_at"] is None
 
         r = app_client.post(f"/api/me/tickets/{ticket_id}/replies", data={"body": "Still broken."})
@@ -239,7 +239,7 @@ class TestStatusWorkflowRules:
     (including jumping straight to a terminal one), matching how a real
     collaboration tool's workflow engine is actually configured."""
 
-    def test_closed_cannot_jump_straight_to_new(self, app_client, db_session):
+    def test_closed_cannot_jump_straight_to_in_progress(self, app_client, db_session):
         _make_self_service_user(db_session, "frank")
         login(app_client, "frank", "somepass123")
         ticket_id = _create_ticket(app_client).json()["id"]
@@ -248,10 +248,12 @@ class TestStatusWorkflowRules:
         r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "closed"})
         assert r.status_code == 200
 
-        # The exact bug report: Closed -> New directly.
-        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "new"})
+        # The exact bug report (adapted -- "new" no longer exists as a
+        # status, "open" IS the reopen target now): Closed -> a working
+        # status directly, skipping the required Reopen step.
+        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "in_progress"})
         assert r.status_code == 409
-        assert "reopened" in r.json()["detail"].lower()
+        assert "open" in r.json()["detail"].lower()
         # The ticket's actual status is untouched by the rejected attempt.
         assert app_client.get(f"/api/tickets/{ticket_id}").json()["status"] == "closed"
 
@@ -262,9 +264,9 @@ class TestStatusWorkflowRules:
 
         login(app_client, "admin", "adminpass123")
         app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "closed"})
-        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "reopened"})
+        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "open"})
         assert r.status_code == 200
-        assert r.json()["status"] == "reopened"
+        assert r.json()["status"] == "open"
 
     def test_resolved_cannot_jump_to_a_different_terminal_status(self, app_client, db_session):
         """Resolved -> Cancelled directly is blocked too -- not just the
@@ -298,8 +300,8 @@ class TestStatusWorkflowRules:
         ticket_id = _create_ticket(app_client).json()["id"]
 
         login(app_client, "admin", "adminpass123")
-        # new -> in_progress directly, skipping "open" -- common in
-        # practice (an admin picks up a fresh ticket and starts working).
+        # open -> in_progress directly -- common in practice (an admin
+        # picks up a fresh ticket and starts working).
         r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "in_progress"})
         assert r.status_code == 200
         r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "waiting_for_user"})
@@ -327,7 +329,7 @@ class TestStatusWorkflowRules:
         login(app_client, "admin", "adminpass123")
         app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "closed"})
         detail = app_client.get(f"/api/tickets/{ticket_id}").json()
-        assert detail["allowed_next_statuses"] == [{"value": "reopened", "label": "Reopened"}]
+        assert detail["allowed_next_statuses"] == [{"value": "open", "label": "Open"}]
 
         # Self-service detail never exposes this (no generic status picker there).
         login(app_client, "liam", "somepass123")

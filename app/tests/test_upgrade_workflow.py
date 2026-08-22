@@ -23,7 +23,7 @@ def _make_second_admin(db_session, username="admin2", password="somepass123"):
     return user
 
 
-def _make_sysmaint_ticket(db_session, admin, *, category="sysmaint_application_upgrade", status="new"):
+def _make_sysmaint_ticket(db_session, admin, *, category="sysmaint_application_upgrade", status="open"):
     ticket = SupportTicket(
         created_by_user_id=admin.id, subject="Upgrade Cyferio from v1.0.0 to v1.1.0",
         category=category, priority="medium", status=status,
@@ -145,7 +145,7 @@ class TestStatusTransitions:
 
     def test_cancelled_status_accepted(self, app_client, db_session):
         admin = db_session.query(User).filter_by(username="admin").one()
-        ticket = _make_sysmaint_ticket(db_session, admin, status="new")
+        ticket = _make_sysmaint_ticket(db_session, admin, status="open")
         login(app_client, "admin", "adminpass123")
 
         r = app_client.patch(f"/api/tickets/{ticket.id}", json={"status": "cancelled"})

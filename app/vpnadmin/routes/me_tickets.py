@@ -184,7 +184,7 @@ def _serialize_ticket_detail(t: SupportTicket, *, is_admin_view: bool) -> dict:
         # generic status picker (only the dedicated POST .../reopen
         # action), so it gets an empty list rather than exposing this.
         "allowed_next_statuses": (
-            [{"value": s, "label": status_label(s)} for s in sorted(allowed_next_statuses(t.status))]
+            [{"value": s, "label": status_label(s)} for s in sorted(allowed_next_statuses(t.status, t.category))]
             if is_admin_view else []
         ),
         "locked_at": t.locked_at.isoformat() if t.locked_at else None,
@@ -350,7 +350,7 @@ def reply_to_my_ticket(
     db.add(message)
     db.flush()  # need message.id for attachment rows below
     _attach_validated_files(db, message, ticket.id, user.id, validated_attachments)
-    ticket.status = "waiting_for_admin"
+    ticket.status = "in_progress"
     ticket.updated_at = datetime.now(timezone.utc)
     db.commit()
 
@@ -371,13 +371,13 @@ def reopen_my_ticket(ticket_id: int, user: User = Depends(require_permission("su
                    f"please continue the conversation there instead.",
         )
     old_status = ticket.status
-    ticket.status = "reopened"
+    ticket.status = "open"
     ticket.resolved_at = None
     ticket.closed_at = None
     ticket.updated_at = datetime.now(timezone.utc)
     db.commit()
 
-    log_action(db, user, "self_ticket_reopen", target=f"TCK-{ticket.id}", detail=f"status {old_status}->reopened")
+    log_action(db, user, "self_ticket_reopen", target=f"TCK-{ticket.id}", detail=f"status {old_status}->open")
     ticket_notifications.ticket_reopened(db, ticket)
     return _serialize_ticket_detail(ticket, is_admin_view=False)
 
