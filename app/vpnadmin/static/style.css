@@ -2052,11 +2052,19 @@ tr.group-row.group-row-selected td { background: var(--surface-alt); box-shadow:
 /* Vertical rule between "By service" and "By entrypoint" -- requested
    specifically for this pair, not Entrypoints/Middlewares below it (same
    grid class, deliberately left untouched), so this lives on its own
-   modifier rather than .traefik-subsection-grid-2col itself. Sits on the
-   first child's own edge, inside the existing 24px gap, rather than
-   adding extra padding that would need compensating for elsewhere. */
-.traefik-metrics-grid > div:first-child { border-right: 1px solid var(--border-light); }
-@media (max-width: 560px) { .traefik-metrics-grid > div:first-child { border-right: none; } }
+   modifier rather than .traefik-subsection-grid-2col itself.
+   .health-kv-value (the "N req" figure) is text-align:right against the
+   full width of this column -- with no padding, the border sat flush
+   against that text, reading as cut off/hidden behind the rule.
+   padding-right pulls the line away from it. min-height guarantees the
+   rule still reads as a real divider (not a token sliver) even when one
+   or both sides only have a couple of entries. */
+.traefik-metrics-grid > div:first-child { border-right: 1px solid var(--border-light); padding-right: 16px; min-height: 90px; }
+.traefik-metrics-grid > div:last-child { padding-left: 16px; min-height: 90px; }
+@media (max-width: 560px) {
+	.traefik-metrics-grid > div:first-child { border-right: none; padding-right: 0; min-height: 0; }
+	.traefik-metrics-grid > div:last-child { padding-left: 0; min-height: 0; }
+}
 /* Only this one pair overrides the grid's own align-items: start (see
    .traefik-subsection-grid's comment on why that's the default) --
    without it, the border-right above only runs as tall as "By service"'s
