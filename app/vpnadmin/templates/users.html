@@ -191,14 +191,20 @@
 				<div class="field-stack">
 					{% if features.geoip %}
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="u-restrict-country"> Restrict by country
-							<button type="button" class="info-tip" data-tip="Sign-in is only allowed from the countries you select below. Leave the list empty to allow any country." aria-label="More info on Restrict by country">i</button>
-						</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="u-restrict-country"> Restrict by country
+								<button type="button" class="info-tip" data-tip="Sign-in is only allowed from the countries you select below. Leave the list empty to allow any country." aria-label="More info on Restrict by country">i</button>
+							</label>
+							<button type="button" class="link-button" id="u-country-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Empty list = any country.</p>
 						<div id="u-countries-ms"></div>
 					</div>
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="u-restrict-city"> Restrict by city</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="u-restrict-city"> Restrict by city</label>
+							<button type="button" class="link-button" id="u-city-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Pick a country, then select any number of cities. Empty list = any city.</p>
 						<p class="field-hint" id="u-cities-building" style="display:none">City list is still building -- try again shortly.</p>
 						<div class="geo-picker-row">
@@ -207,7 +213,10 @@
 						</div>
 					</div>
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="u-restrict-asn"> Restrict by network (ASN)</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="u-restrict-asn"> Restrict by network (ASN)</label>
+							<button type="button" class="link-button" id="u-asn-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Identifies the connecting ISP/network. Empty list = any network.</p>
 						<p class="field-hint" id="u-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
 						<div class="geo-picker-row">
@@ -234,12 +243,18 @@
 				<div class="field-stack">
 					{% if features.geoip %}
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-country"> Restrict by country</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-country"> Restrict by country</label>
+							<button type="button" class="link-button" id="u-vpn-country-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Empty list = any country.</p>
 						<div id="u-vpn-countries-ms"></div>
 					</div>
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-city"> Restrict by city</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-city"> Restrict by city</label>
+							<button type="button" class="link-button" id="u-vpn-city-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Pick a country, then select any number of cities. Empty list = any city.</p>
 						<p class="field-hint" id="u-vpn-cities-building" style="display:none">City list is still building -- try again shortly.</p>
 						<div class="geo-picker-row">
@@ -248,7 +263,10 @@
 						</div>
 					</div>
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-asn"> Restrict by network (ASN)</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="u-vpn-restrict-asn"> Restrict by network (ASN)</label>
+							<button type="button" class="link-button" id="u-vpn-asn-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Identifies the connecting ISP/network. Empty list = any network.</p>
 						<p class="field-hint" id="u-vpn-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
 						<div class="geo-picker-row">
@@ -406,12 +424,18 @@
 				<div class="field-stack">
 					{% if features.geoip %}
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="e-restrict-country"> Restrict by country</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="e-restrict-country"> Restrict by country</label>
+							<button type="button" class="link-button" id="e-country-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Empty list = any country.</p>
 						<div id="e-countries-ms"></div>
 					</div>
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="e-restrict-city"> Restrict by city</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="e-restrict-city"> Restrict by city</label>
+							<button type="button" class="link-button" id="e-city-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Pick a country, then select any number of cities. Empty list = any city.</p>
 						<p class="field-hint" id="e-cities-building" style="display:none">City list is still building -- try again shortly.</p>
 						<div class="geo-picker-row">
@@ -420,7 +444,10 @@
 						</div>
 					</div>
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="e-restrict-asn"> Restrict by network (ASN)</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="e-restrict-asn"> Restrict by network (ASN)</label>
+							<button type="button" class="link-button" id="e-asn-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Identifies the connecting ISP/network. Empty list = any network.</p>
 						<p class="field-hint" id="e-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
 						<div class="geo-picker-row">
@@ -445,12 +472,18 @@
 				<div class="field-stack" id="e-vpn-restrictions-fields">
 					{% if features.geoip %}
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-country"> Restrict by country</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-country"> Restrict by country</label>
+							<button type="button" class="link-button" id="e-vpn-country-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Empty list = any country.</p>
 						<div id="e-vpn-countries-ms"></div>
 					</div>
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-city"> Restrict by city</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-city"> Restrict by city</label>
+							<button type="button" class="link-button" id="e-vpn-city-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Pick a country, then select any number of cities. Empty list = any city.</p>
 						<p class="field-hint" id="e-vpn-cities-building" style="display:none">City list is still building -- try again shortly.</p>
 						<div class="geo-picker-row">
@@ -459,7 +492,10 @@
 						</div>
 					</div>
 					<div class="field">
-						<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-asn"> Restrict by network (ASN)</label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="e-vpn-restrict-asn"> Restrict by network (ASN)</label>
+							<button type="button" class="link-button" id="e-vpn-asn-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint">Identifies the connecting ISP/network. Empty list = any network.</p>
 						<p class="field-hint" id="e-vpn-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
 						<div class="geo-picker-row">
@@ -566,6 +602,24 @@ const addVpnCitiesMs = createGeoPicker({ mountEl: document.getElementById("u-vpn
 const editVpnCitiesMs = createGeoPicker({ mountEl: document.getElementById("e-vpn-cities-ms"), countrySelectEl: document.getElementById("e-vpn-city-country"), kind: "cities", buildingEl: document.getElementById("e-vpn-cities-building"), pickerOpts: CITY_PICKER_OPTS });
 const addVpnAsnsMs = createGeoPicker({ mountEl: document.getElementById("u-vpn-asns-ms"), countrySelectEl: document.getElementById("u-vpn-asn-country"), kind: "asns", buildingEl: document.getElementById("u-vpn-asns-building"), pickerOpts: ASN_PICKER_OPTS });
 const editVpnAsnsMs = createGeoPicker({ mountEl: document.getElementById("e-vpn-asns-ms"), countrySelectEl: document.getElementById("e-vpn-asn-country"), kind: "asns", buildingEl: document.getElementById("e-vpn-asns-building"), pickerOpts: ASN_PICKER_OPTS });
+
+// Small "Reset" button next to each restriction picker's label -- clears
+// the picker AND unchecks its "Restrict by X" checkbox in one click (see
+// wireRestrictionReset's own docstring in app.js), for both Portal Login
+// Restrictions ("user") and VPN Access Restrictions ("vpn profile"), in
+// both the Add and Edit User dialogs.
+wireRestrictionReset("u-country-reset", addCountriesMs, document.getElementById("u-countries-ms"), { checkboxEl: document.getElementById("u-restrict-country") });
+wireRestrictionReset("u-city-reset", addCitiesMs, document.getElementById("u-cities-ms"), { countrySelectEl: document.getElementById("u-city-country"), checkboxEl: document.getElementById("u-restrict-city") });
+wireRestrictionReset("u-asn-reset", addAsnsMs, document.getElementById("u-asns-ms"), { countrySelectEl: document.getElementById("u-asn-country"), checkboxEl: document.getElementById("u-restrict-asn") });
+wireRestrictionReset("e-country-reset", editCountriesMs, document.getElementById("e-countries-ms"), { checkboxEl: document.getElementById("e-restrict-country") });
+wireRestrictionReset("e-city-reset", editCitiesMs, document.getElementById("e-cities-ms"), { countrySelectEl: document.getElementById("e-city-country"), checkboxEl: document.getElementById("e-restrict-city") });
+wireRestrictionReset("e-asn-reset", editAsnsMs, document.getElementById("e-asns-ms"), { countrySelectEl: document.getElementById("e-asn-country"), checkboxEl: document.getElementById("e-restrict-asn") });
+wireRestrictionReset("u-vpn-country-reset", addVpnCountriesMs, document.getElementById("u-vpn-countries-ms"), { checkboxEl: document.getElementById("u-vpn-restrict-country") });
+wireRestrictionReset("u-vpn-city-reset", addVpnCitiesMs, document.getElementById("u-vpn-cities-ms"), { countrySelectEl: document.getElementById("u-vpn-city-country"), checkboxEl: document.getElementById("u-vpn-restrict-city") });
+wireRestrictionReset("u-vpn-asn-reset", addVpnAsnsMs, document.getElementById("u-vpn-asns-ms"), { countrySelectEl: document.getElementById("u-vpn-asn-country"), checkboxEl: document.getElementById("u-vpn-restrict-asn") });
+wireRestrictionReset("e-vpn-country-reset", editVpnCountriesMs, document.getElementById("e-vpn-countries-ms"), { checkboxEl: document.getElementById("e-vpn-restrict-country") });
+wireRestrictionReset("e-vpn-city-reset", editVpnCitiesMs, document.getElementById("e-vpn-cities-ms"), { countrySelectEl: document.getElementById("e-vpn-city-country"), checkboxEl: document.getElementById("e-vpn-restrict-city") });
+wireRestrictionReset("e-vpn-asn-reset", editVpnAsnsMs, document.getElementById("e-vpn-asns-ms"), { countrySelectEl: document.getElementById("e-vpn-asn-country"), checkboxEl: document.getElementById("e-vpn-restrict-asn") });
 
 const addPhone = createPhoneInput(document.getElementById("u-phone-mount"));
 const editPhone = createPhoneInput(document.getElementById("e-phone-mount"));

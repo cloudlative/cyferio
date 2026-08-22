@@ -1084,6 +1084,45 @@ function createGeoPicker({ mountEl, countrySelectEl, kind, buildingEl, pickerOpt
 	return ms;
 }
 
+/**
+ * Wires a small "Reset" button next to a restriction picker's label to
+ * clear it back to "no restriction" in one click -- added because
+ * un-selecting several already-checked countries/cities/networks one at a
+ * time inside the dropdown panel was real, reported friction (clients.html's
+ * VPN Access Restrictions and users.html's Portal Login/VPN Access
+ * Restrictions fieldsets all share this same pattern).
+ *
+ * `ms` is any createMultiselectDropdown()/createGeoPicker() instance;
+ * `mountEl` is the same element it was created on (the id passed as
+ * createMultiselectDropdown's `root`) -- needed to dispatch a synthetic
+ * "change" event after reset(), since some callers (clients.html's Manage
+ * Restrictions dialog) listen for "change" directly on that element to
+ * recompute an on-screen summary ("This client will be restricted to:
+ * ..."), and reset() -- unlike an actual checkbox click -- doesn't fire
+ * one on its own; without this, Reset would visually clear the picker but
+ * leave a stale summary behind.
+ * `countrySelectEl` (geo pickers only) is reset to "" too, since a picker
+ * scoped to "Pakistan" with zero cities selected still LOOKS like a
+ * restriction is set if the country dropdown is left showing "Pakistan" --
+ * resetting only the picker and leaving the country choice behind would be
+ * a half-reset. `checkboxEl` (users.html only -- clients.html's policy
+ * pickers have no separate "Restrict by X" checkbox) is unchecked too, so
+ * Reset actually returns the field to "not restricting", not just "an
+ * enabled restriction with an empty list" (a checked-but-empty state this
+ * app doesn't otherwise have a UI path to, and isn't the same thing).
+ */
+function wireRestrictionReset(btnId, ms, mountEl, { countrySelectEl = null, checkboxEl = null } = {}) {
+	const btn = document.getElementById(btnId);
+	if (!btn) return;
+	btn.addEventListener("click", () => {
+		ms.reset();
+		if (countrySelectEl) countrySelectEl.value = "";
+		if (checkboxEl) checkboxEl.checked = false;
+		ms.refresh();  // every createMultiselectDropdown() instance has this; no-op for non-searchable (plain country) pickers
+		mountEl.dispatchEvent(new Event("change", { bubbles: true }));
+	});
+}
+
 // Default { placeholder, unitLabel, emptyLabel, searchPlaceholder } sets
 // for createGeoPicker's `pickerOpts` -- shared verbatim between
 // users.html's two Login Restrictions panels (Add/Edit) and clients.html's
