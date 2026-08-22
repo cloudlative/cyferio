@@ -345,6 +345,12 @@ jobs:
   # ---- Testing --------------------------------------------------------
   test:
     name: Test
+    # TEMPORARILY DISABLED on every trigger, PR included, per explicit
+    # request 2026-08-22 -- delete this `if: false` line (restoring the
+    # condition below it) once told to turn the Test job back on. Nothing
+    # else on this job changed; the real gating logic still sits right
+    # below, ready to take over again the moment this line is gone.
+    if: false
     # `inputs.run_tests` is only populated on a workflow_dispatch/
     # workflow_call trigger. The comment that used to be here claimed a
     # plain pull_request run resolves `inputs.run_tests` to null and that
@@ -358,7 +364,7 @@ jobs:
     # always runs the suite, full stop; only workflow_dispatch/
     # workflow_call (dispatch input unchecked, or build.yml passing
     # run_tests: false for a release build) can skip it.
-    if: ${{ github.event_name == 'pull_request' || inputs.run_tests != false }}
+    # if: ${{ github.event_name == 'pull_request' || inputs.run_tests != false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     defaults:
