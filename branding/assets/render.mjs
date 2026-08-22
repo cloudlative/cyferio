@@ -31,6 +31,11 @@ renderPng(`${ASSETS}/mark-tile-light.svg`, `${OUT}/mark-tile-light-180.png`, 180
 // other "largest working size" raster exports.
 renderPng(`${ASSETS}/slack-app-icon.svg`, `${OUT}/slack-app-icon-1024.png`, 1024);
 
+// GitHub org/repo avatar -- GitHub accepts up to 1000x1000 for org
+// avatars/1MB; 1024 matches this repo's other square exports and still
+// gets downscaled cleanly by GitHub's own upload pipeline.
+renderPng(`${ASSETS}/github-avatar.svg`, `${OUT}/github-avatar-1024.png`, 1024);
+
 // OG social preview
 renderPng(`${ASSETS}/og-image.svg`, `${OUT}/og-image.png`, 1200);
 
