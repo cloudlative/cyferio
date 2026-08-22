@@ -2254,7 +2254,7 @@ document.addEventListener("click", (e) => {
 			root.style.display = "";
 			dot.className = `release-indicator-dot ${data.status}`;
 			label.textContent = data.status === "critical_update" ? "Critical update available"
-				: data.status === "update_available" ? "Update available" : "Up to date";
+				: data.status === "update_available" ? "Update available" : "Updated";
 			if (panel.style.display === "block") renderBody();
 		} catch (e) { /* non-fatal -- indicator just stays hidden/at its last-known state */ }
 	}
