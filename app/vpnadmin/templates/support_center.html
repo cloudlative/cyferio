@@ -93,7 +93,7 @@ let selectedIds = new Set();
 
 function statusPillClass(status) {
 	if (status === "resolved" || status === "closed") return "status-offline";
-	if (status === "new" || status === "reopened" || status === "waiting_for_admin") return "status-revoked";
+	if (status === "open") return "status-revoked";
 	return "status-online";
 }
 

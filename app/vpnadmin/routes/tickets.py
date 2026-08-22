@@ -243,7 +243,7 @@ def bulk_close_tickets(body: BulkTicketIdsRequest, admin: User = Depends(_requir
         # support_tickets.py's TRANSITIONS). Skipped rather than erroring
         # the whole batch, same posture as the pre-existing "already
         # closed" skip below.
-        if is_duplicate_locked(t) or t.locked or t.status == "closed" or "closed" not in allowed_next_statuses(t.status):
+        if is_duplicate_locked(t) or t.locked or t.status == "closed" or "closed" not in allowed_next_statuses(t.status, t.category):
             continue
         old_status = t.status
         t.status = "closed"
@@ -424,7 +424,7 @@ def reply_to_ticket(
     _attach_validated_files(db, message, ticket.id, admin.id, validated_attachments)
     # An admin's real (non-internal) reply is what a user is actually
     # waiting on -- flips status to reflect that, same as a user's own
-    # reply flips it to waiting_for_admin (routes/me_tickets.py). An
+    # reply flips it back to in_progress (routes/me_tickets.py). An
     # internal note changes nothing status-wise; it's admin-only chatter,
     # not visible to (or actionable by) the ticket's owner.
     if not is_internal_note and ticket.status not in ("resolved", "closed"):
@@ -485,7 +485,7 @@ def update_ticket(
             # docstring for the full design. Same-status "changes" (a no-op
             # save) skip this check entirely, same as every other write
             # below only acting on an actual delta.
-            allowed = allowed_next_statuses(ticket.status)
+            allowed = allowed_next_statuses(ticket.status, ticket.category)
             if body.status not in allowed:
                 allowed_desc = ", ".join(status_label(s) for s in sorted(allowed)) if allowed else "nothing (terminal)"
                 raise HTTPException(
@@ -543,15 +543,14 @@ def update_ticket(
             ticket.assigned_admin_id = new_admin.id
             newly_assigned = True
             # "Claim" for a System Maintenance ticket (Upgrade Assignment
-            # Workflow) -- assigning it while still "new"/"open" advances
-            # status to "assigned" automatically, so the status column
-            # reflects the claim without the admin having to make two
-            # separate PATCH calls. Only auto-advances out of the two
-            # earliest, pre-work statuses -- never overrides a status an
-            # admin/the system already moved further along (e.g.
-            # reassigning a ticket that's already "in_progress" leaves it
-            # there).
-            if ticket.category.startswith("sysmaint_") and ticket.status in ("new", "open") and "status" not in fields_set:
+            # Workflow) -- assigning it while still "open" advances status
+            # to "assigned" automatically, so the status column reflects
+            # the claim without the admin having to make two separate PATCH
+            # calls. Only auto-advances out of that one earliest, pre-work
+            # status -- never overrides a status an admin/the system
+            # already moved further along (e.g. reassigning a ticket
+            # that's already "in_progress" leaves it there).
+            if ticket.category.startswith("sysmaint_") and ticket.status == "open" and "status" not in fields_set:
                 changes.append(f"status {status_label(ticket.status)}->{status_label('assigned')}")
                 ticket.status = "assigned"
 
