@@ -360,6 +360,40 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	color: var(--text-muted);
 	opacity: 0.75;
 }
+/* Wraps brand-version + the admin-only release indicator so they sit on
+   one line together -- see base.html's own comment on why the release
+   indicator moved here (next to the version it's actually reporting on)
+   instead of its previous spot in the content-header. */
+.brand-version-row { display: flex; align-items: center; gap: 8px; }
+/* Sidebar-specific skin for .release-indicator-toggle (style.css's shared
+   button styling further down is meant for the light content-header
+   background, wrong colors entirely against this dark gradient) -- same
+   font treatment as .brand-version right next to it, just a real <button>
+   underneath for the click/keyboard-focus behavior static/app.js's
+   initReleaseIndicator() already wires up. */
+.sidebar-release-indicator-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	background: none;
+	border: none;
+	padding: 0;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 0.72rem;
+	font-weight: 500;
+	color: var(--text-muted);
+	opacity: 0.75;
+	cursor: pointer;
+}
+.sidebar-release-indicator-toggle:hover { opacity: 1; }
+.sidebar-release-indicator-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The shared .release-indicator-panel is anchored `right: 0` (correct for
+   its old spot near the content-header's own right edge) -- from this
+   narrow, left-of-screen sidebar position that would push most of the
+   380px panel off the left edge of the viewport. Anchoring from the left
+   instead opens it rightward, over the main content area, which actually
+   stays fully on-screen. */
+.sidebar-release-indicator .release-indicator-panel { left: 0; right: auto; }
 /* min-height: 0 overrides flexbox's default "never shrink below content
    size" for a flex child -- without it, a nav with every section expanded
    grows taller than the sidebar's fixed 100vh and pushes its own bottom
