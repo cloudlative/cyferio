@@ -57,7 +57,10 @@
 	<div class="card groups-list-card">
 		<div class="toolbar"><h2 style="margin:0">All Groups</h2></div>
 		<div class="field" style="margin-bottom:12px">
-			<input type="text" id="group-search" placeholder="Search groups…">
+			<div class="search-input-clearable">
+				<input type="text" id="group-search" placeholder="Search groups…">
+				<button type="button" class="search-clear-btn" id="group-search-clear" aria-label="Clear search" style="display:none">&times;</button>
+			</div>
 		</div>
 		<div id="group-grid"><p class="muted">Loading…</p></div>
 	</div>
@@ -100,20 +103,6 @@
 		</div>
 		{% endif %}
 
-		<div class="groups-detail-section">
-			<h3 style="margin:0 0 4px">Members</h3>
-			{% if can_manage_groups %}
-			<form id="add-member-form" class="form-row" style="margin:10px 0 14px">
-				<div class="field" style="flex:2">
-					<label for="add-member-select">Add a member</label>
-					<select id="add-member-select"></select>
-				</div>
-				<button type="submit" class="btn-secondary">Add to Group</button>
-			</form>
-			{% endif %}
-			<div id="group-detail-table"></div>
-		</div>
-
 		{% if can_manage_groups %}
 		<div class="groups-detail-section" id="group-roles-panel">
 			<h3 style="margin:0 0 4px">Assigned Roles</h3>
@@ -128,6 +117,20 @@
 			</form>
 		</div>
 		{% endif %}
+
+		<div class="groups-detail-section">
+			<h3 style="margin:0 0 4px">Members</h3>
+			{% if can_manage_groups %}
+			<form id="add-member-form" class="form-row" style="margin:10px 0 14px">
+				<div class="field" style="flex:2">
+					<label for="add-member-select">Add a member</label>
+					<select id="add-member-select"></select>
+				</div>
+				<button type="submit" class="btn-secondary">Add to Group</button>
+			</form>
+			{% endif %}
+			<div id="group-detail-table"></div>
+		</div>
 	</div>
 	</div>
 </div>
@@ -321,8 +324,13 @@ function showGroup(id) {
 			const memberIds = new Set(group.members.map(m => m.id));
 			const candidates = allUsers.filter(u => !memberIds.has(u.id));
 			const select = document.getElementById("add-member-select");
+			// No user pre-selected by default -- a bare <select> otherwise
+			// defaults to its first real option, which made it easy to add
+			// the wrong (alphabetically/insertion-order first) user by
+			// mistake if the admin didn't look closely before submitting.
 			select.innerHTML = candidates.length
-				? candidates.map(u => `<option value="${u.id}">${escapeHtml(u.display_name)} (${escapeHtml(u.username)})</option>`).join("")
+				? `<option value="" selected disabled>Select a user…</option>` +
+					candidates.map(u => `<option value="${u.id}">${escapeHtml(u.display_name)} (${escapeHtml(u.username)})</option>`).join("")
 				: '<option value="">No other users available</option>';
 			select.disabled = candidates.length === 0;
 			addForm.querySelector("button[type=submit]").disabled = candidates.length === 0;
@@ -396,19 +404,41 @@ function renderGroupRoles(group) {
 	// itself (see routes/groups.py -- that account's access never depends
 	// on group membership), so nothing to filter out here.
 	const assignedIds = new Set(group.roles.map(r => r.id));
-	const candidates = allRoles.filter(r => !assignedIds.has(r.id));
+	// "User" (the least-privileged, self-service role) is sorted to the
+	// end of the list rather than left in its alphabetical spot -- every
+	// other role stays in the server's alphabetical order, "User" just
+	// drops to last so it doesn't visually blend in among roles that
+	// grant real admin-side access.
+	const candidates = allRoles.filter(r => !assignedIds.has(r.id))
+		.sort((a, b) => (a.slug === "user") - (b.slug === "user"));
 	const select = document.getElementById("add-group-role-select");
 	select.innerHTML = candidates.length
 		? candidates.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join("")
 		: '<option value="">No other roles available</option>';
+	// Defaults to the least-privileged "User" role, not whatever sorts
+	// first (which is usually "Admin") -- a brand new group's Assign Role
+	// dropdown should never make it one accidental click away from
+	// granting full admin access.
+	const defaultRole = candidates.find(r => r.slug === "user");
+	if (defaultRole) select.value = String(defaultRole.id);
 	select.disabled = candidates.length === 0;
 	const form = document.getElementById("add-group-role-form");
 	form.querySelector("button[type=submit]").disabled = candidates.length === 0;
 }
 
-document.getElementById("group-search").addEventListener("input", (ev) => {
+const groupSearchInput = document.getElementById("group-search");
+const groupSearchClearBtn = document.getElementById("group-search-clear");
+groupSearchInput.addEventListener("input", (ev) => {
 	groupSearchTerm = ev.target.value.trim().toLowerCase();
+	groupSearchClearBtn.style.display = ev.target.value ? "" : "none";
 	renderGroupList();
+});
+groupSearchClearBtn.addEventListener("click", () => {
+	groupSearchInput.value = "";
+	groupSearchTerm = "";
+	groupSearchClearBtn.style.display = "none";
+	renderGroupList();
+	groupSearchInput.focus();
 });
 
 if (canManageGroups) {
@@ -477,7 +507,8 @@ if (canManageGroups) {
 		ev.preventDefault();
 		const group = lastGroups.find(t => String(t.id) === String(currentGroupId));
 		const userId = document.getElementById("add-member-select").value;
-		if (!group || !userId) return;
+		if (!group) return;
+		if (!userId) { toast("Select a user to add first.", "error"); return; }
 		try {
 			await apiFetch(`/api/groups/${group.id}/members`, { method: "POST", body: { user_id: Number(userId) } });
 			toast("Member added to group.");

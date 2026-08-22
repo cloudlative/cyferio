@@ -173,22 +173,43 @@ function serverStatusPill(state) {
 	return `<span class="status-pill ${up ? "status-online" : "status-revoked"}">${escapeHtml(state || "unknown")}</span>`;
 }
 
+// Simple key(left)/value(right) row list -- for short lookup-style data
+// (an entrypoint's address, a middleware's type) a table header row and
+// column grid is more structure than the content needs; a plain aligned
+// list reads faster at a glance and is what "Name -> Address" or
+// "Name -> Type" actually is: a lookup, not tabular data with several
+// independent fields per row.
+function kvList(rows) {
+	return `<div class="health-kv-list">${rows.map(([k, v]) => `
+		<div class="health-kv-row"><span class="health-kv-key mono">${escapeHtml(k)}</span><span class="health-kv-value mono">${v}</span></div>`).join("")}</div>`;
+}
+
 function traefikReqTotals(entries) {
 	// entries: [{name, total, by_code, avg_latency_ms}]
 	if (!entries || !entries.length) return '<p class="muted">No requests recorded yet.</p>';
-	return `<div class="table-scroll"><table class="traefik-router-table" style="margin-top:4px"><thead><tr><th>Name</th><th>Requests</th><th>By status</th><th>Avg latency</th></tr></thead><tbody>${entries.map(e => {
+	// Two-line row per entry instead of a 4-column table: the name and
+	// its total request count are the one number anyone actually scans
+	// this for (key left, value right, same as Entrypoints/Middlewares
+	// above); the status-code breakdown and average latency are
+	// secondary detail, shown smaller underneath rather than crammed
+	// into their own table columns where a busy status breakdown made
+	// the whole row hard to read (and unreadable once copied as plain
+	// text -- no separators between a name, a count, several status
+	// pills, and a latency value all sharing one table row).
+	return `<div class="health-kv-list">${entries.map(e => {
 		const codes = Object.entries(e.by_code || {}).sort((a, b) => a[0].localeCompare(b[0]))
 			.map(([code, n]) => {
 				const cls = code.startsWith("5") ? "status-revoked" : code.startsWith("4") ? "status-offline" : "status-online";
 				return `<span class="status-pill ${cls}" style="margin-right:4px">${escapeHtml(code)}: ${n}</span>`;
 			}).join("");
-		return `<tr>
-			<td class="mono">${escapeHtml(e.name)}</td>
-			<td>${e.total}</td>
-			<td>${codes || "—"}</td>
-			<td>${e.avg_latency_ms != null ? e.avg_latency_ms + " ms" : "—"}</td>
-		</tr>`;
-	}).join("")}</tbody></table></div>`;
+		return `<div class="traefik-req-row">
+			<div class="health-kv-row">
+				<span class="health-kv-key mono">${escapeHtml(e.name)}</span>
+				<span class="health-kv-value mono">${e.total} req</span>
+			</div>
+			<div class="traefik-req-detail">${codes || '<span class="muted">no responses recorded</span>'}${e.avg_latency_ms != null ? ` <span class="muted">· avg ${e.avg_latency_ms} ms</span>` : ""}</div>
+		</div>`;
+	}).join("")}</div>`;
 }
 
 async function loadTraefikHealth() {
@@ -216,8 +237,8 @@ async function loadTraefikHealth() {
 		if (d.metrics) {
 			html += '<p class="note" style="margin:0 0 6px"><strong>Note:</strong> cumulative totals since Traefik last started, not a live rate.</p>';
 			html += `<div class="traefik-subsection-grid traefik-subsection-grid-2col">
-				<div><p class="muted" style="font-size:0.85rem;margin:6px 0 2px">By service</p>${traefikReqTotals(d.metrics.services)}</div>
-				<div><p class="muted" style="font-size:0.85rem;margin:6px 0 2px">By entrypoint</p>${traefikReqTotals(d.metrics.entrypoints)}</div>
+				<div><p class="traefik-subsection-label">By service:</p>${traefikReqTotals(d.metrics.services)}</div>
+				<div><p class="traefik-subsection-label">By entrypoint:</p>${traefikReqTotals(d.metrics.entrypoints)}</div>
 			</div>`;
 		} else if (d.metrics_error) {
 			html += `<p class="muted">${escapeHtml(d.metrics_error)}</p>`;
@@ -225,17 +246,15 @@ async function loadTraefikHealth() {
 			html += '<p class="muted">No metrics reported.</p>';
 		}
 
-		let entrypointsHtml = '<h3 style="margin:14px 0 4px">Entrypoints</h3>';
+		let entrypointsHtml = '<p class="traefik-subsection-label" style="margin-top:14px">Entrypoints:</p>';
 		if (d.entrypoints.length) {
-			entrypointsHtml += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Name</th><th>Address</th></tr></thead><tbody>${d.entrypoints.map(e => `
-				<tr><td>${escapeHtml(e.name || "—")}</td><td class="mono">${escapeHtml(e.address || "—")}</td></tr>`).join("")}</tbody></table></div>`;
+			entrypointsHtml += kvList(d.entrypoints.map(e => [e.name || "—", escapeHtml(e.address || "—")]));
 		} else {
 			entrypointsHtml += '<p class="muted">No entrypoints reported.</p>';
 		}
-		let middlewaresHtml = '<h3 style="margin:14px 0 4px">Middlewares</h3>';
+		let middlewaresHtml = '<p class="traefik-subsection-label" style="margin-top:14px">Middlewares:</p>';
 		if (d.middlewares.length) {
-			middlewaresHtml += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Name</th><th>Type</th></tr></thead><tbody>${d.middlewares.map(m => `
-				<tr><td class="mono">${escapeHtml(m.name || "—")}</td><td>${escapeHtml(m.type || "—")}</td></tr>`).join("")}</tbody></table></div>`;
+			middlewaresHtml += kvList(d.middlewares.map(m => [m.name || "—", escapeHtml(m.type || "—")]));
 		} else {
 			middlewaresHtml += '<p class="muted">No middlewares reported.</p>';
 		}

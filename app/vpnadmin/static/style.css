@@ -1918,6 +1918,24 @@ dialog { border: none; border-radius: var(--radius-lg); box-shadow: var(--shadow
    Restrictions section with the same City/ASN geo-picker-row fields as
    Edit User -- same widening rationale as #edit-dialog above. */
 #policy-dialog { max-width: 780px; width: 94%; }
+/* Duplicate Cleanup (support_center.html) -- was widened via
+   `min-width:520px` on the inner .dialog-body instead of the <dialog>
+   element itself, which stays capped at the base rule's 460px max-width
+   regardless -- an inner min-width the outer box can never actually
+   satisfy just overflows/clips inside the frame. Same widening rationale
+   as #edit-dialog above (each cluster's own ticket list + action button
+   need real room), applied to the right element this time. */
+#sc-cluster-dialog { max-width: 640px; width: 94%; }
+/* Per-cluster block inside that dialog -- was a full .card (page-level
+   border + box-shadow + 24px padding), which nested inside an
+   already-elevated dialog frame looked heavy and redundant (a shadowed
+   box inside a shadowed box). Same lighter, borderless-shadow treatment
+   as .ua-chart-card elsewhere in the app for "a labeled sub-block inside
+   one card/dialog", not "a page-level section" in its own right. */
+.sc-cluster-card { background: var(--surface-alt); border: 1px solid var(--border-light); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 12px; }
+.sc-cluster-card:last-child { margin-bottom: 0; }
+.sc-cluster-ticket-list { display: flex; flex-direction: column; gap: 6px; }
+.sc-cluster-ticket-row { align-items: flex-start; gap: 8px; }
 dialog::backdrop { background: rgba(8, 10, 16, 0.72); backdrop-filter: blur(2px); }
 dialog .dialog-body { padding: 28px; }
 dialog .dialog-body h2 { background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; display: inline-block; }
@@ -1970,6 +1988,22 @@ tr.group-row.group-row-selected td { background: var(--surface-alt); box-shadow:
 .groups-detail-col { min-width: 0; }
 .groups-list-card, .groups-detail-placeholder, .groups-detail-card { margin-bottom: 0; min-width: 0; }
 .groups-detail-placeholder .empty-state { margin: 0; }
+
+/* Small "x" clear button inside a search input (Groups page's group
+   search) -- generic enough (no page-specific class names beyond the
+   wrapper) to reuse anywhere else in the app that wants the same. The
+   button is absolutely positioned over the input's own right padding
+   rather than sitting beside it, so the field's width doesn't change
+   when the button appears/disappears as text is typed/cleared. */
+.search-input-clearable { position: relative; }
+.search-input-clearable input { padding-right: 28px; }
+.search-clear-btn {
+	position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+	width: 20px; height: 20px; border: none; background: none; cursor: pointer;
+	color: var(--text-faint); font-size: 1.1rem; line-height: 1; border-radius: 4px;
+	display: flex; align-items: center; justify-content: center;
+}
+.search-clear-btn:hover { color: var(--text); background: var(--surface-alt); }
 @media (max-width: 900px) { .groups-layout { grid-template-columns: 1fr; } }
 /* Members and Assigned Roles as two visually distinct sub-sections within
    the detail card, rather than a border-top rule as the only separator --
@@ -2002,6 +2036,40 @@ tr.group-row.group-row-selected td { background: var(--surface-alt); box-shadow:
    squeezed unreadably narrow on a small viewport. */
 .traefik-subsection-grid-2col { grid-template-columns: 1fr 1fr; }
 @media (max-width: 560px) { .traefik-subsection-grid-2col { grid-template-columns: 1fr; } }
+/* Small label ("Entrypoints:", "Middlewares:", "By service:", "By
+   entrypoint:") sitting directly above its own kv-list -- one consistent
+   style for all four instead of two of them being full <h3> headings and
+   the other two being ad-hoc inline-styled <p> tags. */
+.traefik-subsection-label { margin: 0 0 6px; font-size: 0.85rem; font-weight: 700; color: var(--text-muted); }
+
+/* Simple key(left)/value(right) row list -- Health page's Traefik
+   Entrypoints/Middlewares and Requests subsections (see health.html's
+   kvList()/traefikReqTotals()). A plain aligned list instead of a table
+   for data that's really just name->value lookups: a table header row
+   and grid of columns is more structure than a single value per row
+   needs, and reads slower at a glance than key left/value right. Also
+   fixes a real readability problem the table version had for the
+   Requests rows specifically -- several independent values (count,
+   per-status breakdown, latency) packed into one table row with no
+   visual separation between them, which was unreadable once selected
+   and copied as plain text. */
+.health-kv-list { display: flex; flex-direction: column; }
+.health-kv-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 6px 0; }
+.health-kv-key { color: var(--text-muted); overflow-wrap: anywhere; }
+.health-kv-value { color: var(--text); font-weight: 600; text-align: right; flex-shrink: 0; }
+/* A plain Entrypoints/Middlewares row (no wrapper -- see kvList()) gets
+   its own separator; a Requests entry wraps its key/value row + detail
+   line in .traefik-req-row instead (see traefikReqTotals()) so the pair
+   shares one separator below the detail line, not two. */
+.health-kv-list > .health-kv-row { border-bottom: 1px solid var(--border-light); }
+.health-kv-list > .health-kv-row:last-child { border-bottom: none; }
+.traefik-req-row { border-bottom: 1px solid var(--border-light); padding-bottom: 6px; }
+.traefik-req-row .health-kv-row { padding-bottom: 0; }
+.traefik-req-row:last-child { border-bottom: none; }
+/* Secondary detail line under a Requests row (status-code breakdown +
+   avg latency) -- smaller and muted since the row's own key/value pair
+   above (name -> request count) is the number anyone scans this for. */
+.traefik-req-detail { padding-top: 2px; font-size: 0.82rem; }
 
 /* --- Reports' Analytics section (see reports.html; moved here from the
    Dashboard) -- one tile per chart, same responsive-grid-of-cards shape as
