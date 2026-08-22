@@ -7,8 +7,12 @@
    talks to, rather than maintaining two near-identical conversation UIs.
    See the Support Ticketing System plan. #}
 <div class="toolbar">
-	<div class="toolbar-title">
-		<a href="{{ '/support-center' if is_admin_view else '/support' }}" class="link-button">&larr; Back</a>
+	{# align-items:center overrides .toolbar-title's own baseline default --
+	   fine for two text elements, but a padded capsule button next to a
+	   large heading reads as floating above the heading's actual text
+	   baseline instead of sitting level with it. #}
+	<div class="toolbar-title" style="align-items:center">
+		<a href="{{ '/support-center' if is_admin_view else '/support' }}" class="btn btn-secondary btn-sm">&larr; Back</a>
 		<h1 style="margin:0" id="td-subject">Loading...</h1>
 	</div>
 	<div style="display:flex;align-items:center;gap:10px">
