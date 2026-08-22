@@ -3,9 +3,12 @@
 {% block content %}
 <div class="toolbar" style="margin-bottom:6px">
 	<div class="toolbar-title"><h1 style="margin:0">Groups</h1></div>
-	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+	<div class="form-row" style="gap:10px">
+		{% if can_manage_groups %}<button class="btn-primary" id="add-group-btn">Add Group</button>{% endif %}
+		<button class="btn-secondary" id="refresh-btn">Refresh</button>
+	</div>
 </div>
-<p class="page-subtitle" style="margin-top:-10px">Portal users grouped by group — a user can belong to several groups at once. Click a group to see and manage its members.</p>
+<p class="page-subtitle" style="margin-top:-10px">Permissions come exclusively from the roles assigned to a group -- a user's access is the union of every group they belong to. Select a group below to manage its members and roles.</p>
 
 <div class="stat-grid" id="summary-grid" style="margin-bottom:24px">
 	<div class="stat-card accent-total"><div class="stat-value" id="stat-group-count">—</div><div class="stat-label">Groups</div></div>
@@ -14,101 +17,119 @@
 </div>
 
 {% if can_manage_groups %}
-<div class="card">
-	<h2>Create a Group</h2>
-	<form id="create-group-form">
-		<div class="form-row">
-			<div class="field">
-				<label for="new-group-name">Group Name</label>
-				<input type="text" id="new-group-name" required maxlength="64" placeholder="e.g. Infrastructure">
+<dialog id="create-group-dialog">
+	<div class="dialog-body">
+		<h2>Add a Group</h2>
+		<form id="create-group-form">
+			<div class="form-row">
+				<div class="field">
+					<label for="new-group-name">Group Name</label>
+					<input type="text" id="new-group-name" required maxlength="64" placeholder="e.g. Infrastructure">
+				</div>
+				<div class="field">
+					<label for="new-group-slug">Slug <span class="muted">(auto-filled, editable — permanent)</span>
+						<button type="button" class="info-tip" data-tip="Used to identify this group in future reporting views. Auto-fills from the group name and can be edited now, but can't be changed once the group is created -- pick it carefully." aria-label="More info on Slug">i</button>
+					</label>
+					<input type="text" id="new-group-slug" maxlength="64" placeholder="e.g. infrastructure">
+				</div>
 			</div>
-			<div class="field">
-				<label for="new-group-slug">Slug <span class="muted">(auto-filled, editable — permanent)</span>
-					<button type="button" class="info-tip" data-tip="Used to identify this group in future reporting views. Auto-fills from the group name and can be edited now, but can't be changed once the group is created -- pick it carefully." aria-label="More info on Slug">i</button>
-				</label>
-				<input type="text" id="new-group-slug" maxlength="64" placeholder="e.g. infrastructure">
+			<div class="form-row" style="margin-top:14px">
+				<div class="field" style="flex:2">
+					<label for="new-group-description">Description <span class="muted">(optional)</span></label>
+					<input type="text" id="new-group-description" maxlength="512" placeholder="e.g. Networking, servers, and cloud infra">
+				</div>
+				<div class="field">
+					<label for="new-group-tags">Tags <span class="muted">(optional, comma-separated)</span></label>
+					<input type="text" id="new-group-tags" placeholder="e.g. infra, on-call">
+				</div>
 			</div>
-		</div>
-		<div class="form-row" style="margin-top:14px">
-			<div class="field" style="flex:2">
-				<label for="new-group-description">Description <span class="muted">(optional)</span></label>
-				<input type="text" id="new-group-description" maxlength="512" placeholder="e.g. Networking, servers, and cloud infra">
+			<p class="muted" style="margin:8px 0 0;font-size:0.82rem">Slug/description/tags are stored now for future reporting (bandwidth, active users, connection stats by group) -- no reporting views use them yet.</p>
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" id="create-group-cancel">Cancel</button>
+				<button type="submit" class="btn-primary">Create Group</button>
 			</div>
-			<div class="field">
-				<label for="new-group-tags">Tags <span class="muted">(optional, comma-separated)</span></label>
-				<input type="text" id="new-group-tags" placeholder="e.g. infra, on-call">
-			</div>
-		</div>
-		<p class="muted" style="margin:8px 0 0;font-size:0.82rem">Slug/description/tags are stored now for future reporting (bandwidth, active users, connection stats by group) -- no reporting views use them yet.</p>
-		<div class="form-row" style="margin-top:14px">
-			<button type="submit" class="btn-primary">Create Group</button>
-			<button type="button" class="btn-secondary" id="create-group-clear">Clear</button>
-		</div>
-	</form>
-</div>
-{% endif %}
-
-<div class="card">
-	<div class="toolbar"><h2 style="margin:0">All Groups</h2></div>
-	<div id="group-grid"><p class="muted">Loading…</p></div>
-</div>
-
-<div class="card" id="group-detail-card" style="display:none">
-	<div class="toolbar">
-		<div class="toolbar-title"><h2 style="margin:0" id="group-detail-title">Group</h2><span class="count-badge" id="group-detail-count">— members</span></div>
-		<div>
-			{% if can_manage_groups %}
-			<button class="btn-secondary btn-sm" id="group-edit-toggle-btn">Edit Details</button>
-			<button class="btn-danger btn-sm" id="group-delete-btn">Delete Group</button>
-			{% endif %}
-		</div>
-	</div>
-	<div id="group-detail-meta" style="margin-bottom:14px"></div>
-	{% if can_manage_groups %}
-	<div class="form-row" id="group-edit-panel" style="display:none;margin-bottom:16px">
-		<div class="field">
-			<label for="edit-group-name">Group Name</label>
-			<input type="text" id="edit-group-name" maxlength="64">
-		</div>
-		<div class="field">
-			<label for="edit-group-slug">Slug</label>
-			<input type="text" id="edit-group-slug" maxlength="64">
-		</div>
-		<div class="field" style="flex:2">
-			<label for="edit-group-description">Description</label>
-			<input type="text" id="edit-group-description" maxlength="512">
-		</div>
-		<div class="field">
-			<label for="edit-group-tags">Tags <span class="muted">(comma-separated)</span></label>
-			<input type="text" id="edit-group-tags">
-		</div>
-		<button class="btn-primary" id="group-edit-save-btn" disabled>Save Details</button>
-	</div>
-	{% endif %}
-	{% if can_manage_groups %}
-	<form id="add-member-form" class="form-row" style="margin-bottom:16px">
-		<div class="field" style="flex:2">
-			<label for="add-member-select">Add a member</label>
-			<select id="add-member-select"></select>
-		</div>
-		<button type="submit" class="btn-secondary">Add to Group</button>
-	</form>
-	{% endif %}
-	<div id="group-detail-table"></div>
-	{% if can_manage_groups %}
-	<div id="group-roles-panel" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
-		<h3 style="margin:0 0 4px">Assigned Roles</h3>
-		<p class="muted" style="margin:0 0 12px;font-size:0.82rem">Groups are the only source of permissions -- every role assigned here is inherited by every current member of this group. A member of no group, or of group(s) with no role assigned, has no access.</p>
-		<div id="group-roles-chips" style="margin-bottom:12px"></div>
-		<form id="add-group-role-form" class="form-row">
-			<div class="field" style="flex:2">
-				<label for="add-group-role-select">Assign a role</label>
-				<select id="add-group-role-select"></select>
-			</div>
-			<button type="submit" class="btn-secondary">Assign Role</button>
 		</form>
 	</div>
-	{% endif %}
+</dialog>
+{% endif %}
+
+<div class="groups-layout">
+	<div class="card groups-list-card">
+		<div class="toolbar"><h2 style="margin:0">All Groups</h2></div>
+		<div class="field" style="margin-bottom:12px">
+			<input type="text" id="group-search" placeholder="Search groups…">
+		</div>
+		<div id="group-grid"><p class="muted">Loading…</p></div>
+	</div>
+
+	<div class="groups-detail-col">
+	<div class="card groups-detail-placeholder" id="group-detail-placeholder">
+		<div class="empty-state">Select a group from the list to view and manage its members and roles.</div>
+	</div>
+
+	<div class="card groups-detail-card" id="group-detail-card" style="display:none">
+		<div class="toolbar">
+			<div class="toolbar-title"><h2 style="margin:0" id="group-detail-title">Group</h2><span class="count-badge" id="group-detail-count">— members</span></div>
+			<div>
+				{% if can_manage_groups %}
+				<button class="btn-secondary btn-sm" id="group-edit-toggle-btn">Edit Details</button>
+				<button class="btn-danger btn-sm" id="group-delete-btn">Delete Group</button>
+				{% endif %}
+			</div>
+		</div>
+		<div id="group-detail-meta" style="margin-bottom:14px"></div>
+		{% if can_manage_groups %}
+		<div class="form-row" id="group-edit-panel" style="display:none;margin-bottom:16px">
+			<div class="field">
+				<label for="edit-group-name">Group Name</label>
+				<input type="text" id="edit-group-name" maxlength="64">
+			</div>
+			<div class="field">
+				<label for="edit-group-slug">Slug</label>
+				<input type="text" id="edit-group-slug" maxlength="64">
+			</div>
+			<div class="field" style="flex:2">
+				<label for="edit-group-description">Description</label>
+				<input type="text" id="edit-group-description" maxlength="512">
+			</div>
+			<div class="field">
+				<label for="edit-group-tags">Tags <span class="muted">(comma-separated)</span></label>
+				<input type="text" id="edit-group-tags">
+			</div>
+			<button class="btn-primary" id="group-edit-save-btn" disabled>Save Details</button>
+		</div>
+		{% endif %}
+
+		<div class="groups-detail-section">
+			<h3 style="margin:0 0 4px">Members</h3>
+			{% if can_manage_groups %}
+			<form id="add-member-form" class="form-row" style="margin:10px 0 14px">
+				<div class="field" style="flex:2">
+					<label for="add-member-select">Add a member</label>
+					<select id="add-member-select"></select>
+				</div>
+				<button type="submit" class="btn-secondary">Add to Group</button>
+			</form>
+			{% endif %}
+			<div id="group-detail-table"></div>
+		</div>
+
+		{% if can_manage_groups %}
+		<div class="groups-detail-section" id="group-roles-panel">
+			<h3 style="margin:0 0 4px">Assigned Roles</h3>
+			<p class="muted" style="margin:0 0 12px;font-size:0.82rem">Groups are the only source of permissions -- every role assigned here is inherited by every current member of this group. A member of no group, or of group(s) with no role assigned, has no access.</p>
+			<div id="group-roles-chips" style="margin-bottom:12px"></div>
+			<form id="add-group-role-form" class="form-row">
+				<div class="field" style="flex:2">
+					<label for="add-group-role-select">Assign a role</label>
+					<select id="add-group-role-select"></select>
+				</div>
+				<button type="submit" class="btn-secondary">Assign Role</button>
+			</form>
+		</div>
+		{% endif %}
+	</div>
+	</div>
 </div>
 {% endblock %}
 
@@ -130,6 +151,7 @@ let allRoles = []; // populated only when canManageGroups -- GET /api/groups/ava
 let currentGroupId = "unassigned";
 let groupDetailOpen = false; // tracks whether the detail card is actually showing, so clicking the already-open group's row again toggles it closed
 let groupEditDirty; // assigned below, only when canManageGroups -- the edit panel doesn't exist in the DOM otherwise
+let groupSearchTerm = "";
 
 // Mirrors routes/groups.py's _valid_slug (lowercase letters/numbers/hyphens
 // only, no leading/trailing/doubled hyphens) -- used both to auto-fill the
@@ -150,6 +172,12 @@ function renderSummary() {
 	document.getElementById("stat-unassigned-count").textContent = unassigned ? unassigned.count : 0;
 }
 
+function matchesGroupSearch(t) {
+	if (!groupSearchTerm) return true;
+	const haystack = `${t.group} ${t.slug || ""} ${t.description || ""} ${(t.tags || []).join(" ")}`.toLowerCase();
+	return haystack.includes(groupSearchTerm);
+}
+
 async function loadGroups() {
 	const grid = document.getElementById("group-grid");
 	try {
@@ -165,59 +193,11 @@ async function loadGroups() {
 		// through, group membership -- it shouldn't appear as an "add to
 		// this group" candidate at all.
 		if (canManageUsers) allUsers = users.filter(u => !u.is_bootstrap_admin);
+		// available-roles already excludes super_admin server-side (same
+		// exemption, see routes/groups.py) -- nothing to filter here.
 		if (canManageGroups) allRoles = roles;
 		renderSummary();
-		if (lastGroups.length === 0) {
-			grid.innerHTML = '<div class="empty-state">No groups yet.</div>';
-			return;
-		}
-		// A plain table, not a KPI-card grid: group names vary a lot in
-		// length (unlike a fixed short number), so a card grid sized by
-		// auto-fit ended up with uneven row widths and long names either
-		// truncating or colliding with the hover hint. A table keeps every
-		// row's columns aligned regardless of name length, and matches the
-		// list layout used everywhere else in the app (Clients, Revoked,
-		// Users). The bar next to each count is a genuine at-a-glance
-		// signal (group size relative to the largest group), not decoration.
-		const maxCount = Math.max(1, ...lastGroups.map(t => t.count));
-		const sorted = [...lastGroups].sort((a, b) => {
-			if (a.id == null) return 1;   // Unassigned always last
-			if (b.id == null) return -1;
-			return b.count - a.count;
-		});
-		grid.innerHTML = `<table>
-			<thead><tr><th>Group</th><th>Members</th><th></th></tr></thead>
-			<tbody>${sorted.map(t => {
-				const isUnassigned = t.id == null;
-				const pct = t.count === 0 ? 0 : Math.max(6, Math.round((t.count / maxCount) * 100));
-				return `
-				<tr class="group-row ${isUnassigned ? "row-dim" : ""}" data-group-id="${isUnassigned ? "unassigned" : t.id}" tabindex="0">
-					<td>${isUnassigned
-						? `<span class="muted" style="font-style:italic">${escapeHtml(t.group)}</span>`
-						: `<span style="font-weight:700">${escapeHtml(t.group)}</span>`}</td>
-					<td>
-						<div class="group-row-count">
-							<span class="mono">${t.count}</span>
-							<span class="group-row-bar"><span class="group-row-bar-fill${isUnassigned ? " muted-fill" : ""}" style="width:${pct}%"></span></span>
-						</div>
-					</td>
-					<td class="text-right"><span class="group-row-view">View →</span></td>
-				</tr>`;
-			}).join("")}</tbody>
-		</table>`;
-		grid.querySelectorAll("[data-group-id]").forEach(row => {
-			const toggle = () => {
-				if (groupDetailOpen && String(currentGroupId) === row.dataset.groupId) {
-					closeGroupDetail();
-				} else {
-					showGroup(row.dataset.groupId);
-				}
-			};
-			row.addEventListener("click", toggle);
-			row.addEventListener("keydown", (ev) => {
-				if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggle(); }
-			});
-		});
+		renderGroupList();
 		const fromHash = decodeURIComponent(location.hash.replace(/^#/, ""));
 		if (fromHash && lastGroups.some(t => String(t.id == null ? "unassigned" : t.id) === fromHash)) showGroup(fromHash);
 	} catch (e) {
@@ -225,10 +205,73 @@ async function loadGroups() {
 	}
 }
 
+function renderGroupList() {
+	const grid = document.getElementById("group-grid");
+	if (lastGroups.length === 0) {
+		grid.innerHTML = '<div class="empty-state">No groups yet.</div>';
+		return;
+	}
+	const visible = lastGroups.filter(matchesGroupSearch);
+	if (visible.length === 0) {
+		grid.innerHTML = '<div class="empty-state">No groups match your search.</div>';
+		return;
+	}
+	// A plain table, not a KPI-card grid: group names vary a lot in
+	// length (unlike a fixed short number), so a card grid sized by
+	// auto-fit ended up with uneven row widths and long names either
+	// truncating or colliding with the hover hint. A table keeps every
+	// row's columns aligned regardless of name length, and matches the
+	// list layout used everywhere else in the app (Clients, Revoked,
+	// Users). The bar next to each count is a genuine at-a-glance
+	// signal (group size relative to the largest group), not decoration.
+	const maxCount = Math.max(1, ...lastGroups.map(t => t.count));
+	const sorted = [...visible].sort((a, b) => {
+		if (a.id == null) return 1;   // Unassigned always last
+		if (b.id == null) return -1;
+		return b.count - a.count;
+	});
+	grid.innerHTML = `<table>
+		<thead><tr><th>Group</th><th>Members</th><th></th></tr></thead>
+		<tbody>${sorted.map(t => {
+			const isUnassigned = t.id == null;
+			const isSelected = groupDetailOpen && String(currentGroupId) === String(isUnassigned ? "unassigned" : t.id);
+			const pct = t.count === 0 ? 0 : Math.max(6, Math.round((t.count / maxCount) * 100));
+			return `
+			<tr class="group-row ${isUnassigned ? "row-dim" : ""} ${isSelected ? "group-row-selected" : ""}" data-group-id="${isUnassigned ? "unassigned" : t.id}" tabindex="0">
+				<td>${isUnassigned
+					? `<span class="muted" style="font-style:italic">${escapeHtml(t.group)}</span>`
+					: `<span style="font-weight:700">${escapeHtml(t.group)}</span>`}</td>
+				<td>
+					<div class="group-row-count">
+						<span class="mono">${t.count}</span>
+						<span class="group-row-bar"><span class="group-row-bar-fill${isUnassigned ? " muted-fill" : ""}" style="width:${pct}%"></span></span>
+					</div>
+				</td>
+				<td class="text-right"><span class="group-row-view">View →</span></td>
+			</tr>`;
+		}).join("")}</tbody>
+	</table>`;
+	grid.querySelectorAll("[data-group-id]").forEach(row => {
+		const toggle = () => {
+			if (groupDetailOpen && String(currentGroupId) === row.dataset.groupId) {
+				closeGroupDetail();
+			} else {
+				showGroup(row.dataset.groupId);
+			}
+		};
+		row.addEventListener("click", toggle);
+		row.addEventListener("keydown", (ev) => {
+			if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggle(); }
+		});
+	});
+}
+
 function closeGroupDetail() {
 	groupDetailOpen = false;
 	document.getElementById("group-detail-card").style.display = "none";
+	document.getElementById("group-detail-placeholder").style.display = "";
 	if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+	renderGroupList(); // clears the selected-row highlight
 }
 
 function showGroup(id) {
@@ -237,7 +280,9 @@ function showGroup(id) {
 	currentGroupId = id;
 	groupDetailOpen = true;
 	location.hash = encodeURIComponent(id);
+	document.getElementById("group-detail-placeholder").style.display = "none";
 	document.getElementById("group-detail-card").style.display = "";
+	renderGroupList(); // reflects the now-selected row
 	document.getElementById("group-detail-title").textContent = group.group;
 	document.getElementById("group-detail-count").textContent = `${group.count} member${group.count === 1 ? "" : "s"}`;
 	const deleteBtn = document.getElementById("group-delete-btn");
@@ -314,7 +359,6 @@ function showGroup(id) {
 		}
 	}
 	if (canManageGroups) renderGroupRoles(group);
-	document.getElementById("group-detail-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 // Assigned Roles panel -- Group-Based Permissions Phase 1. Shown only for a
@@ -334,7 +378,7 @@ function renderGroupRoles(group) {
 				${escapeHtml(r.name)}
 				<button type="button" class="chip-remove-btn remove-group-role-btn" aria-label="Remove ${escapeHtml(r.name)}" style="border:none;background:none;cursor:pointer;padding:0;line-height:1">&times;</button>
 			</span>`).join("")
-		: '<span class="muted" style="font-size:0.85rem">No roles assigned -- members inherit only their own individual role.</span>';
+		: '<span class="muted" style="font-size:0.85rem">No roles assigned -- members of this group have no permissions.</span>';
 	chips.querySelectorAll(".remove-group-role-btn").forEach(btn => {
 		btn.addEventListener("click", async () => {
 			const roleId = btn.closest("[data-role-id]").dataset.roleId;
@@ -348,6 +392,9 @@ function renderGroupRoles(group) {
 			}
 		});
 	});
+	// super_admin is already excluded by GET /api/groups/available-roles
+	// itself (see routes/groups.py -- that account's access never depends
+	// on group membership), so nothing to filter out here.
 	const assignedIds = new Set(group.roles.map(r => r.id));
 	const candidates = allRoles.filter(r => !assignedIds.has(r.id));
 	const select = document.getElementById("add-group-role-select");
@@ -359,7 +406,21 @@ function renderGroupRoles(group) {
 	form.querySelector("button[type=submit]").disabled = candidates.length === 0;
 }
 
+document.getElementById("group-search").addEventListener("input", (ev) => {
+	groupSearchTerm = ev.target.value.trim().toLowerCase();
+	renderGroupList();
+});
+
 if (canManageGroups) {
+	// Add Group is now a dialog (matches Add User on the Users page)
+	// rather than an always-visible inline form -- creating a group is an
+	// occasional setup task, not something this page is opened for daily,
+	// so it no longer permanently occupies space above the list every
+	// single visit.
+	const createGroupDialog = document.getElementById("create-group-dialog");
+	document.getElementById("add-group-btn").addEventListener("click", () => createGroupDialog.showModal());
+	document.getElementById("create-group-cancel").addEventListener("click", () => createGroupDialog.close());
+
 	// Auto-fills the slug from the name as the admin types (slugify), but
 	// only until the slug field is edited by hand -- same "suggest, don't
 	// force" pattern as e.g. GitHub's repo-name -> URL-slug field.
@@ -369,10 +430,6 @@ if (canManageGroups) {
 		if (!slugTouched) document.getElementById("new-group-slug").value = slugify(ev.target.value);
 	});
 
-	document.getElementById("create-group-clear").addEventListener("click", () => {
-		document.getElementById("create-group-form").reset();
-		slugTouched = false;
-	});
 	document.getElementById("create-group-form").addEventListener("submit", async (ev) => {
 		ev.preventDefault();
 		const name = document.getElementById("new-group-name").value.trim();
@@ -380,11 +437,13 @@ if (canManageGroups) {
 		const description = document.getElementById("new-group-description").value.trim();
 		const tags = parseTagsInput(document.getElementById("new-group-tags").value);
 		try {
-			await apiFetch("/api/groups", { method: "POST", body: { name, slug, description: description || null, tags } });
+			const created = await apiFetch("/api/groups", { method: "POST", body: { name, slug, description: description || null, tags } });
 			toast(`Group '${name}' created.`);
 			document.getElementById("create-group-form").reset();
 			slugTouched = false;
-			loadGroups();
+			createGroupDialog.close();
+			await loadGroups();
+			if (created && created.id != null) showGroup(created.id);
 		} catch (e) {
 			toast(e.message, "error");
 		}

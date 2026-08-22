@@ -307,3 +307,25 @@ class TestGroupRoleAssignmentApi:
         assert r2.status_code == 200
         slugs = {r["slug"] for r in r2.json()}
         assert "admin" in slugs and "viewer" in slugs
+
+    def test_available_roles_excludes_super_admin(self, app_client, db_session):
+        """super_admin is reserved for the bootstrap admin account and
+        never sourced from group membership (see effective_role_ids'
+        hardcoded exemption) -- it must not be offered as an assignable
+        role on the Groups page at all."""
+        login(app_client, "admin", "adminpass123")
+        r = app_client.get("/api/groups/available-roles")
+        assert r.status_code == 200
+        assert "super_admin" not in {row["slug"] for row in r.json()}
+
+    def test_assigning_super_admin_role_to_a_group_is_rejected(self, app_client, db_session):
+        """Server-side backstop behind the (now super_admin-free) Assign
+        Roles dropdown -- a direct API call can't slip it in either."""
+        super_admin_role = db_session.query(RoleDef).filter_by(slug="super_admin").one()
+        group = Group(name="Sneaky Group")
+        db_session.add(group)
+        db_session.commit()
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post(f"/api/groups/{group.id}/roles", json={"role_id": super_admin_role.id})
+        assert r.status_code == 400
+        assert "super admin" in r.json()["detail"].lower()

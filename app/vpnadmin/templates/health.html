@@ -206,6 +206,25 @@ async function loadTraefikHealth() {
 
 		let html = "";
 
+		// Requests leads the Traefik section (moved ahead of Entrypoints/
+		// Middlewares/Services/Routers, 2026-08-22) -- it's the number an
+		// admin actually opens this card to check first ("is Traefik
+		// serving traffic"), the more static inventory-style subsections
+		// below it are for when something looks wrong and you need to dig
+		// into why.
+		html += '<h3 style="margin:2px 0 4px">Requests</h3>';
+		if (d.metrics) {
+			html += '<p class="note" style="margin:0 0 6px"><strong>Note:</strong> cumulative totals since Traefik last started, not a live rate.</p>';
+			html += `<div class="traefik-subsection-grid traefik-subsection-grid-2col">
+				<div><p class="muted" style="font-size:0.85rem;margin:6px 0 2px">By service</p>${traefikReqTotals(d.metrics.services)}</div>
+				<div><p class="muted" style="font-size:0.85rem;margin:6px 0 2px">By entrypoint</p>${traefikReqTotals(d.metrics.entrypoints)}</div>
+			</div>`;
+		} else if (d.metrics_error) {
+			html += `<p class="muted">${escapeHtml(d.metrics_error)}</p>`;
+		} else {
+			html += '<p class="muted">No metrics reported.</p>';
+		}
+
 		let entrypointsHtml = '<h3 style="margin:14px 0 4px">Entrypoints</h3>';
 		if (d.entrypoints.length) {
 			entrypointsHtml += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Name</th><th>Address</th></tr></thead><tbody>${d.entrypoints.map(e => `
@@ -213,20 +232,27 @@ async function loadTraefikHealth() {
 		} else {
 			entrypointsHtml += '<p class="muted">No entrypoints reported.</p>';
 		}
-		let middlewaresHtml = "";
+		let middlewaresHtml = '<h3 style="margin:14px 0 4px">Middlewares</h3>';
 		if (d.middlewares.length) {
-			middlewaresHtml = '<h3 style="margin:14px 0 4px">Middlewares</h3>';
 			middlewaresHtml += `<div class="table-scroll"><table class="traefik-router-table"><thead><tr><th>Name</th><th>Type</th></tr></thead><tbody>${d.middlewares.map(m => `
 				<tr><td class="mono">${escapeHtml(m.name || "—")}</td><td>${escapeHtml(m.type || "—")}</td></tr>`).join("")}</tbody></table></div>`;
+		} else {
+			middlewaresHtml += '<p class="muted">No middlewares reported.</p>';
 		}
 		// Side by side, not stacked -- both are short (a handful of rows at
 		// most), and this card is now full-width (see the template's own
 		// comment on why Traefik moved out of .health-grid) with plenty of
-		// room to spare. align-items:start on the wrapper, not the grid
-		// default of stretch -- exactly the "sibling gets stretched to
-		// match a taller one" issue this whole redesign exists to avoid,
-		// just contained to two short tables instead of four whole cards.
-		html += `<div class="traefik-subsection-grid">${entrypointsHtml}${middlewaresHtml}</div>`;
+		// room to spare. A fixed 2-column grid (not auto-fit) so the pair
+		// always lines up as two even columns with matching header
+		// baselines regardless of either table's row count or an empty
+		// Middlewares list -- auto-fit used to let a short/empty side
+		// collapse or stretch independently of its partner, which is what
+		// "not properly aligned" was pointing at. align-items:start, not
+		// the grid default of stretch -- exactly the "sibling gets
+		// stretched to match a taller one" issue this whole redesign
+		// exists to avoid, just contained to two short tables instead of
+		// four whole cards.
+		html += `<div class="traefik-subsection-grid traefik-subsection-grid-2col">${entrypointsHtml}${middlewaresHtml}</div>`;
 
 		html += '<h3 style="margin:14px 0 4px">Services &amp; backends</h3>';
 		if (d.services.length) {
@@ -259,19 +285,6 @@ async function loadTraefikHealth() {
 				</tr>`).join("")}</tbody></table></div>`;
 		} else {
 			html += '<p class="muted">No routers reported.</p>';
-		}
-
-		html += '<h3 style="margin:14px 0 4px">Requests</h3>';
-		if (d.metrics) {
-			html += '<p class="note" style="margin:0 0 6px"><strong>Note:</strong> cumulative totals since Traefik last started, not a live rate.</p>';
-			html += `<div class="traefik-subsection-grid">
-				<div><p class="muted" style="font-size:0.85rem;margin:6px 0 2px">By service</p>${traefikReqTotals(d.metrics.services)}</div>
-				<div><p class="muted" style="font-size:0.85rem;margin:6px 0 2px">By entrypoint</p>${traefikReqTotals(d.metrics.entrypoints)}</div>
-			</div>`;
-		} else if (d.metrics_error) {
-			html += `<p class="muted">${escapeHtml(d.metrics_error)}</p>`;
-		} else {
-			html += '<p class="muted">No metrics reported.</p>';
 		}
 
 		if (d.error) html += `<p style="color:var(--danger-text);margin-top:10px">${escapeHtml(d.error)}</p>`;

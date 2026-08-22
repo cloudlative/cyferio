@@ -1925,25 +1925,58 @@ dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; ma
 dialog ul { padding-left: 20px; margin: 8px 0; }
 dialog li { margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 
-/* --- Team rows (teams.html) -- a plain table row per team, same list
+/* --- Group rows (groups.html) -- a plain table row per group, same list
    pattern as Clients/Revoked/Users, instead of a KPI-style card grid.
    Card grids size columns by auto-fit, which looks fine for short fixed
    numbers (dashboard stats) but produced uneven row widths and
-   truncated/colliding text once the content was a variable-length team
+   truncated/colliding text once the content was a variable-length group
    name -- a table keeps every row's columns aligned regardless of name
    length. Also reused as-is (clickable row + relative-size bar) by Users
    Activity's Most Active Users leaderboard (users_activity.html) -- the
    pattern is generic (a clickable named row with a proportional count
-   bar), not actually team-specific, despite the class name. */
-tr.team-row { cursor: pointer; }
-tr.team-row:hover td { background: var(--surface-alt); }
-tr.team-row:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; }
-.team-row-count { display: flex; align-items: center; gap: 10px; }
-.team-row-bar { position: relative; display: inline-block; width: 110px; height: 6px; border-radius: 999px; background: var(--surface-alt); overflow: hidden; flex: none; }
-.team-row-bar-fill { position: absolute; inset: 0; width: 0; border-radius: inherit; background: var(--accent-gradient); }
-.team-row-bar-fill.muted-fill { background: var(--text-faint); opacity: 0.5; }
-.team-row-view { color: var(--text-faint); font-size: 0.82rem; font-weight: 600; opacity: 0; transition: opacity 0.15s ease; }
-tr.team-row:hover .team-row-view, tr.team-row:focus-visible .team-row-view { opacity: 1; }
+   bar), not actually group-specific, despite the class name.
+   Renamed from .team-row* -- the Team->Group rename (2026-08-22) already
+   updated every template's class names to .group-row*, but missed this
+   CSS file, so these rows (on both groups.html and users_activity.html)
+   had been rendering completely unstyled since that merge. */
+tr.group-row { cursor: pointer; }
+tr.group-row:hover td { background: var(--surface-alt); }
+tr.group-row:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; }
+.group-row-count { display: flex; align-items: center; gap: 10px; }
+.group-row-bar { position: relative; display: inline-block; width: 110px; height: 6px; border-radius: 999px; background: var(--surface-alt); overflow: hidden; flex: none; }
+.group-row-bar-fill { position: absolute; inset: 0; width: 0; border-radius: inherit; background: var(--accent-gradient); }
+.group-row-bar-fill.muted-fill { background: var(--text-faint); opacity: 0.5; }
+.group-row-view { color: var(--text-faint); font-size: 0.82rem; font-weight: 600; opacity: 0; transition: opacity 0.15s ease; }
+tr.group-row:hover .group-row-view, tr.group-row:focus-visible .group-row-view { opacity: 1; }
+/* The currently-open group's row, so switching between groups doesn't
+   lose track of which one you're looking at once the list and the detail
+   panel are side by side (see .groups-layout below) instead of stacked
+   with the list scrolled out of view. */
+tr.group-row.group-row-selected td { background: var(--surface-alt); box-shadow: inset 3px 0 0 var(--accent-2); }
+
+/* --- Groups page (groups.html) -- master/detail layout: a narrower list
+   column that stays fully visible next to a wider detail column, instead
+   of the list and the selected group's members/roles stacking full-width
+   one after another (which meant scrolling past a potentially long member
+   list just to get back to the group list). Falls back to a single
+   stacked column below 900px, where there isn't room for both side by
+   side. The placeholder card (shown before any group is selected) and the
+   real detail card occupy the same grid slot -- exactly one of the two is
+   visible at a time, toggled in showGroup()/closeGroupDetail(). */
+.groups-layout { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 20px; align-items: start; }
+/* .groups-detail-col holds the placeholder and the real detail card --
+   exactly one visible at a time -- so the grid only ever sees two items
+   (list, detail-col) and the second one never wraps onto its own row. */
+.groups-detail-col { min-width: 0; }
+.groups-list-card, .groups-detail-placeholder, .groups-detail-card { margin-bottom: 0; min-width: 0; }
+.groups-detail-placeholder .empty-state { margin: 0; }
+@media (max-width: 900px) { .groups-layout { grid-template-columns: 1fr; } }
+/* Members and Assigned Roles as two visually distinct sub-sections within
+   the detail card, rather than a border-top rule as the only separator --
+   this is a real "page" of content now (a group can have several members
+   and several roles), not a short appendix under the member table. */
+.groups-detail-section { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+.groups-detail-section:first-of-type { margin-top: 16px; }
 
 /* --- Health page -- one card per health source (App/Database/Host
    Machine/Traefik), each a compact label/value list rather than a table
@@ -1961,6 +1994,14 @@ tr.team-row:hover .team-row-view, tr.team-row:focus-visible .team-row-view { opa
    in the first place, just scoped here to two short tables instead of
    four whole cards. */
 .traefik-subsection-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 4px 24px; align-items: start; }
+/* Entrypoints/Middlewares and the Requests "by service"/"by entrypoint"
+   pair both want a fixed, even 2-column split -- auto-fit above collapses
+   a side to full width when its partner is short or empty (e.g. no
+   middlewares reported), which is what threw the pair out of alignment.
+   Falls back to a single column below 560px so neither table gets
+   squeezed unreadably narrow on a small viewport. */
+.traefik-subsection-grid-2col { grid-template-columns: 1fr 1fr; }
+@media (max-width: 560px) { .traefik-subsection-grid-2col { grid-template-columns: 1fr; } }
 
 /* --- Reports' Analytics section (see reports.html; moved here from the
    Dashboard) -- one tile per chart, same responsive-grid-of-cards shape as
