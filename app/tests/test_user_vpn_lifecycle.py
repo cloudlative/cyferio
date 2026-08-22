@@ -9,14 +9,14 @@ from .conftest import login
 
 
 class TestCreateUserProvisionsVpnProfile:
-    def test_success_creates_cert_user_and_link(self, app_client, db_session, monkeypatch):
+    def test_success_creates_cert_user_and_link(self, app_client, db_session, monkeypatch, default_group_id):
         from vpnadmin.routes import users as users_mod
         calls = {}
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: calls.setdefault("add_client", (name, mac)) or f"{name} added.")
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "newvpnuser", "password": "Somepass123!", "first_name": "New",
-            "email": "newvpnuser@example.com", "mac": "aa:bb:cc:dd:ee:ff",
+            "email": "newvpnuser@example.com", "mac": "aa:bb:cc:dd:ee:ff", "group_id": default_group_id,
         })
         assert r.status_code == 201
         assert calls["add_client"] == ("newvpnuser", "aa:bb:cc:dd:ee:ff")
@@ -27,7 +27,7 @@ class TestCreateUserProvisionsVpnProfile:
         user = db_session.query(User).filter(User.username == "newvpnuser").one()
         assert link.user_id == user.id
 
-    def test_cert_creation_failure_leaves_no_user_created(self, app_client, db_session, monkeypatch):
+    def test_cert_creation_failure_leaves_no_user_created(self, app_client, db_session, monkeypatch, default_group_id):
         from vpnadmin.routes import users as users_mod
         from vpnadmin.cli_wrapper import ScriptError
 
@@ -37,7 +37,7 @@ class TestCreateUserProvisionsVpnProfile:
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "failedvpnuser", "password": "Somepass123!", "first_name": "Failed",
-            "email": "failedvpnuser@example.com", "mac": "aa:bb:cc:dd:ee:ff",
+            "email": "failedvpnuser@example.com", "mac": "aa:bb:cc:dd:ee:ff", "group_id": default_group_id,
         })
         assert r.status_code == 400
         assert db_session.query(User).filter(User.username == "failedvpnuser").first() is None

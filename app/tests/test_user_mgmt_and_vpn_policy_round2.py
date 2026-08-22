@@ -29,13 +29,13 @@ class TestNotificationDurationSetting:
 
 
 class TestClientUserLinksEndpoint:
-    def test_shows_linked_and_omits_unlinked(self, app_client, db_session, monkeypatch):
+    def test_shows_linked_and_omits_unlinked(self, app_client, db_session, monkeypatch, default_group_id):
         from vpnadmin.routes import users as users_mod
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
         app_client.post("/api/users", json={
             "username": "linkeduser", "password": "Somepass123!", "first_name": "Linked",
-            "email": "linkeduser@example.com", "mac": "aa:bb:cc:dd:ee:01",
+            "email": "linkeduser@example.com", "mac": "aa:bb:cc:dd:ee:01", "group_id": default_group_id,
         })
         r = app_client.get("/api/clients/user-links")
         assert r.status_code == 200
@@ -67,14 +67,14 @@ class TestBandwidthQuotaPrecision:
 
 
 class TestUserCreateUpdateSyncsVpnPolicy:
-    def test_create_user_with_os_and_bandwidth_syncs_policy(self, app_client, db_session, monkeypatch, tmp_path):
+    def test_create_user_with_os_and_bandwidth_syncs_policy(self, app_client, db_session, monkeypatch, tmp_path, default_group_id):
         from vpnadmin.routes import users as users_mod
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "policieduser", "password": "Somepass123!", "first_name": "Policied",
-            "email": "policieduser@example.com", "mac": "aa:bb:cc:dd:ee:02",
+            "email": "policieduser@example.com", "mac": "aa:bb:cc:dd:ee:02", "group_id": default_group_id,
             "allowed_os": ["windows", "mac"], "bandwidth_monthly_gb": 2.5,
         })
         assert r.status_code == 201
@@ -83,14 +83,14 @@ class TestUserCreateUpdateSyncsVpnPolicy:
         assert body["bandwidth_monthly_gb"] == 2.5
         assert policy_store.get_policy("policieduser")["bandwidth_monthly_gb"] == 2.5
 
-    def test_update_user_syncs_policy_onto_linked_profile(self, app_client, db_session, monkeypatch, tmp_path):
+    def test_update_user_syncs_policy_onto_linked_profile(self, app_client, db_session, monkeypatch, tmp_path, default_group_id):
         from vpnadmin.routes import users as users_mod
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
         login(app_client, "admin", "adminpass123")
         app_client.post("/api/users", json={
             "username": "policieduser2", "password": "Somepass123!", "first_name": "Policied2",
-            "email": "policieduser2@example.com", "mac": "aa:bb:cc:dd:ee:03",
+            "email": "policieduser2@example.com", "mac": "aa:bb:cc:dd:ee:03", "group_id": default_group_id,
         })
         user_id = db_session.query(User).filter(User.username == "policieduser2").one().id
 
@@ -121,7 +121,7 @@ class TestSuperAdminRole:
         assert role is not None
         assert role.is_system is True
 
-    def test_role_field_in_create_user_is_silently_ignored_not_assignable(self, app_client, monkeypatch):
+    def test_role_field_in_create_user_is_silently_ignored_not_assignable(self, app_client, monkeypatch, db_session):
         """Group-only permissions: CreateUserRequest no longer has a
         `role` field at all (see routes/users.py) -- a personal role can
         no longer be assigned directly to ANYONE through this endpoint,
@@ -133,15 +133,25 @@ class TestSuperAdminRole:
         this is a harmless 201 with the new account left with zero
         effective role (see effective_role_ids), never a 400 and never an
         actual super_admin grant."""
+        from vpnadmin.models import Group
         from vpnadmin.routes import users as users_mod
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
+        # A group with NO role assigned -- keeps "role had no effect" a
+        # meaningful assertion under the mandatory-group model (every user
+        # must belong to a group now, but a group with no role still
+        # grants nothing, same "no access" outcome the old "zero groups"
+        # case demonstrated before groups became mandatory).
+        no_role_group = Group(name="No-Role Group")
+        db_session.add(no_role_group)
+        db_session.commit()
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "wannabesuper", "password": "Somepass123!", "first_name": "W",
             "email": "wannabesuper@example.com", "mac": "aa:bb:cc:dd:ee:04", "role": "super_admin",
+            "group_id": no_role_group.id,
         })
         assert r.status_code == 201
-        assert r.json()["effective_roles"] == []  # in zero groups -- role field had no effect
+        assert r.json()["effective_roles"] == []  # group has no role assigned -- role field had no effect
 
     def test_role_field_in_update_user_is_silently_ignored_not_assignable(self, app_client, db_session):
         # Group-only permissions equivalent of the old "cannot be

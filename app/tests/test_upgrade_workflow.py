@@ -14,12 +14,10 @@ def _make_second_admin(db_session, username="admin2", password="somepass123"):
     # Group-only permissions: a role only grants anything via group
     # membership now (see permissions.py's effective_role_ids).
     admin_role = db_session.query(RoleDef).filter_by(slug="admin").one()
-    group = Group(name=f"{username}-admin-group")
-    group.role_defs.append(admin_role)
+    group = Group(name=f"{username}-admin-group", role_id=admin_role.id)
     db_session.add(group)
     db_session.flush()
-    user = User(username=username, password_hash=hash_password(password), role=Role.admin, role_id=admin_role.id)
-    user.groups.append(group)
+    user = User(username=username, password_hash=hash_password(password), role=Role.admin, role_id=admin_role.id, group_id=group.id)
     db_session.add(user)
     db_session.commit()
     return user

@@ -1,18 +1,18 @@
 """Tests for permissions.py's system-role seeding, including the
 rename_legacy_vpn_self_service_role() migration fixup (see its own
 docstring / db.py's _seed_rbac for why it exists and must run first), and
-migrate_users_to_role_groups() -- the group-only permissions auto-migration
-(see its own docstring for the algorithm) that's the single most
-important guarantee in this whole feature: nobody's access changes on
-deploy."""
-from sqlalchemy import create_engine
+migrate_groups_and_users_to_single_assignment() -- the single-group/
+single-role permissions auto-migration (see its own docstring for the
+algorithm) that's the single most important guarantee in this whole
+feature: nobody's access changes on deploy."""
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from vpnadmin.auth import hash_password
 from vpnadmin.db import Base
-from vpnadmin.models import Group, ObjectPermission, RoleDef, User, group_role_defs, user_groups
-from vpnadmin.permissions import ACTIONS, OBJECTS, _has_permission, effective_role_ids, has_permission
+from vpnadmin.models import SUPER_ADMIN_GROUP_NAME, Group, ObjectPermission, RoleDef, User
+from vpnadmin.permissions import ACTIONS, OBJECTS, ensure_super_admin_group, has_permission
 
 
 def _fresh_session():
@@ -185,32 +185,117 @@ class TestRenameLegacyVpnSelfServiceRole:
         assert db.query(RoleDef).filter_by(slug="user").first().id == legacy_id
 
 
-class TestMigrateUsersToRoleGroups:
-    """The group-only permissions auto-migration. THE test that proves
-    "nobody's access changes on day one" is test_migration_preserves_every_
-    role_s_permissions_exactly below -- everything else here covers
-    idempotency and the specific collision/skip rules from the function's
-    own docstring."""
+class TestEnsureSuperAdminGroup:
+    """permissions.py's ensure_super_admin_group -- the immutable
+    "SuperAdmin" group's idempotent creation/maintenance, mirroring
+    db.py's promote_bootstrap_admin_to_super_admin's own structure and
+    tests almost exactly."""
+
+    def test_noop_when_super_admin_role_not_yet_seeded(self):
+        db = _fresh_session()
+        ensure_super_admin_group(db)
+        assert db.query(Group).count() == 0
+
+    def test_creates_group_but_no_bootstrap_admin_yet_is_a_partial_noop(self):
+        """Fresh-install ordering: seed_system_roles has run, but
+        bootstrap_admin() (main.py's lifespan) hasn't created the account
+        yet -- the group is still created (so it's visible/ready), but
+        nothing to point its membership at."""
+        from vpnadmin.permissions import seed_system_roles
+
+        db = _fresh_session()
+        seed_system_roles(db)
+        ensure_super_admin_group(db)
+
+        group = db.query(Group).filter_by(name=SUPER_ADMIN_GROUP_NAME).one()
+        role = db.query(RoleDef).filter_by(slug="super_admin").one()
+        assert group.role_id == role.id
+
+    def test_places_bootstrap_admin_into_the_group(self):
+        from vpnadmin.permissions import seed_system_roles
+
+        db = _fresh_session()
+        seed_system_roles(db)
+        role = db.query(RoleDef).filter_by(slug="super_admin").one()
+        bootstrap = User(username="root", password_hash=hash_password("pw"), role_id=role.id, is_bootstrap_admin=True)
+        db.add(bootstrap)
+        db.commit()
+
+        ensure_super_admin_group(db)
+        db.expire_all()
+
+        group = db.query(Group).filter_by(name=SUPER_ADMIN_GROUP_NAME).one()
+        assert db.query(User).filter_by(username="root").one().group_id == group.id
+
+    def test_idempotent_running_twice_produces_identical_end_state(self):
+        from vpnadmin.permissions import seed_system_roles
+
+        db = _fresh_session()
+        seed_system_roles(db)
+        role = db.query(RoleDef).filter_by(slug="super_admin").one()
+        bootstrap = User(username="root", password_hash=hash_password("pw"), role_id=role.id, is_bootstrap_admin=True)
+        db.add(bootstrap)
+        db.commit()
+
+        ensure_super_admin_group(db)
+        db.expire_all()
+        group_count_1 = db.query(Group).count()
+
+        ensure_super_admin_group(db)  # second run -- must be a no-op
+        db.expire_all()
+
+        assert db.query(Group).count() == group_count_1
+        group = db.query(Group).filter_by(name=SUPER_ADMIN_GROUP_NAME).one()
+        assert db.query(User).filter_by(username="root").one().group_id == group.id
+
+
+class TestMigrateGroupsAndUsersToSingleAssignment:
+    """The single-group/single-role permissions auto-migration. THE test
+    that proves "nobody's access changes on day one" is
+    test_migration_preserves_every_role_s_permissions_exactly below --
+    everything else here covers idempotency and the specific tie-break/
+    fallback rules from the function's own docstring."""
 
     def _seed(self, db):
         from vpnadmin.permissions import seed_system_roles
+
         seed_system_roles(db)
         return {r.slug: r for r in db.query(RoleDef).all()}
 
-    def test_migration_preserves_every_role_s_permissions_exactly(self):
-        """THE regression test: simulate "every current user has some
-        role_id set, no groups exist yet" (today's reality for every
-        pre-existing deployment), capture what has_permission() would have
-        returned for every OBJECTS x ACTIONS combination under the OLD
-        logic (a bare role_id lookup -- Phase 1's effective_role_ids for a
-        user in zero teams was exactly {user.role_id}, and pre-migration
-        there ARE zero groups, so this is precisely equivalent), run the
-        migration, then assert has_permission() under the NEW (group-only)
-        logic produces the EXACT same result for every single combination,
-        for a representative user of every system role (super_admin,
-        admin, editor, viewer, user) plus one custom role."""
-        from vpnadmin.permissions import migrate_users_to_role_groups
+    def _create_legacy_group_tables(self, db):
+        """Simulates an already-provisioned deployment that still has data
+        in the pre-single-assignment group_role_defs/user_groups join
+        tables -- these are no longer mapped in models.py (see Group's own
+        docstring), so a real production database created by an older
+        version of this app is the only place they'd still exist; this
+        recreates that physical shape by hand via raw DDL against the same
+        connection the test's session uses."""
+        db.execute(text("CREATE TABLE group_role_defs (group_id INTEGER, role_id INTEGER)"))
+        db.execute(text("CREATE TABLE user_groups (user_id INTEGER, group_id INTEGER)"))
+        db.commit()
 
+    def _assign_role_to_group_legacy(self, db, group_id, role_id):
+        db.execute(text("INSERT INTO group_role_defs (group_id, role_id) VALUES (:g, :r)"), {"g": group_id, "r": role_id})
+        db.commit()
+
+    def _add_user_to_group_legacy(self, db, user_id, group_id):
+        db.execute(text("INSERT INTO user_groups (user_id, group_id) VALUES (:u, :g)"), {"u": user_id, "g": group_id})
+        db.commit()
+
+    def test_migration_preserves_every_role_s_permissions_exactly(self):
+        """THE regression test: for every predefined system role
+        (super_admin, admin, editor, viewer, user) plus one custom role,
+        create a representative user ALREADY in a single group with that
+        one role assigned (the realistic post-Groups-feature state every
+        real deployment is in by the time this migration ships), capture
+        what has_permission() returns for every OBJECTS x ACTIONS
+        combination, run the migration (a true no-op for these
+        already-single-assignment users), then assert has_permission()
+        afterward is IDENTICAL. This is intentionally the trivial case --
+        no union was ever actually needed for a single-group user, single-
+        group-single-role migration input equals its own output -- but
+        it's still the single most important guarantee: this migration
+        must never be the thing that silently changes someone's access."""
         db = _fresh_session()
         roles = self._seed(db)
         custom = RoleDef(slug="custom-auditor", name="Custom Auditor", is_system=False)
@@ -223,27 +308,27 @@ class TestMigrateUsersToRoleGroups:
         sample_slugs = ["super_admin", "admin", "editor", "viewer", "user", "custom-auditor"]
         users = {}
         for slug in sample_slugs:
-            u = User(username=f"u-{slug}", password_hash=hash_password("pw"), role_id=roles[slug].id)
+            group = Group(name=f"{slug}-group", role_id=roles[slug].id)
+            db.add(group)
+            db.flush()
+            u = User(username=f"u-{slug}", password_hash=hash_password("pw"), role_id=roles[slug].id, group_id=group.id)
             if slug == "super_admin":
                 u.is_bootstrap_admin = True
             db.add(u)
             users[slug] = u
         db.commit()
 
-        # "Before" snapshot, using the OLD logic directly: a bare
-        # role_id -> ObjectPermission lookup, no groups involved (there are
-        # none yet) -- exactly what Phase 1's effective_role_ids resolved
-        # to for a user in zero teams.
         before = {
             slug: {
-                (obj, action): _has_permission(db, {roles[slug].id}, obj, action)
+                (obj, action): has_permission(db, users[slug], obj, action)
                 for obj in OBJECTS for action in ACTIONS
             }
             for slug in sample_slugs
         }
 
-        migrate_users_to_role_groups(db)
-        db.expire_all()  # force a fresh read of .groups for every user below
+        from vpnadmin.permissions import migrate_groups_and_users_to_single_assignment
+        migrate_groups_and_users_to_single_assignment(db)
+        db.expire_all()
 
         after = {
             slug: {
@@ -256,92 +341,227 @@ class TestMigrateUsersToRoleGroups:
         for slug in sample_slugs:
             assert after[slug] == before[slug], f"permission set changed for role '{slug}' across the migration"
 
-    def test_creates_one_group_per_distinct_role_and_adds_holders(self):
-        from vpnadmin.permissions import migrate_users_to_role_groups
+    def test_collapses_a_group_with_multiple_roles_to_the_lowest_role_id(self):
+        from vpnadmin.permissions import migrate_groups_and_users_to_single_assignment
 
         db = _fresh_session()
         roles = self._seed(db)
-        alice = User(username="alice", password_hash=hash_password("pw"), role_id=roles["admin"].id)
-        bob = User(username="bob", password_hash=hash_password("pw"), role_id=roles["admin"].id)
-        carol = User(username="carol", password_hash=hash_password("pw"), role_id=roles["viewer"].id)
-        db.add_all([alice, bob, carol])
+        self._create_legacy_group_tables(db)
+        group = Group(name="Multi-Role Group")
+        db.add(group)
         db.commit()
+        self._assign_role_to_group_legacy(db, group.id, roles["admin"].id)
+        self._assign_role_to_group_legacy(db, group.id, roles["viewer"].id)
 
-        migrate_users_to_role_groups(db)
+        migrate_groups_and_users_to_single_assignment(db)
         db.expire_all()
 
-        admin_groups = [g for g in db.query(Group).all() if roles["admin"] in g.role_defs]
-        assert len(admin_groups) == 1
-        assert {u.username for u in admin_groups[0].members} == {"alice", "bob"}
-        viewer_groups = [g for g in db.query(Group).all() if roles["viewer"] in g.role_defs]
-        assert len(viewer_groups) == 1
-        assert {u.username for u in viewer_groups[0].members} == {"carol"}
+        refreshed = db.query(Group).filter_by(name="Multi-Role Group").one()
+        assert refreshed.role_id == min(roles["admin"].id, roles["viewer"].id)
 
-    def test_excludes_super_admin_from_migration(self):
-        """super_admin is exempted from the group-only model entirely (see
-        effective_role_ids' hardcoded exemption) -- migrating it into a
-        group would be pointless clutter, not a real backward-compat
-        need, so the migration must skip it."""
-        from vpnadmin.permissions import migrate_users_to_role_groups
+    def test_collapses_a_user_in_multiple_groups_to_the_widest_access_one(self):
+        """Explicit precedence order: admin > custom > editor > user >
+        viewer. A user in an "editor" group and an "admin" group must end
+        up in the admin group."""
+        from vpnadmin.permissions import migrate_groups_and_users_to_single_assignment
 
         db = _fresh_session()
         roles = self._seed(db)
+        self._create_legacy_group_tables(db)
+        editor_group = Group(name="Editor Group", role_id=roles["editor"].id)
+        admin_group = Group(name="Admin Group", role_id=roles["admin"].id)
+        db.add_all([editor_group, admin_group])
+        db.flush()
+        user = User(username="multi-group-user", password_hash=hash_password("pw"))
+        db.add(user)
+        db.commit()
+        self._add_user_to_group_legacy(db, user.id, editor_group.id)
+        self._add_user_to_group_legacy(db, user.id, admin_group.id)
+
+        migrate_groups_and_users_to_single_assignment(db)
+        db.expire_all()
+
+        assert db.query(User).filter_by(username="multi-group-user").one().group_id == admin_group.id
+
+    def test_custom_role_outranks_editor_user_viewer_but_not_admin(self):
+        from vpnadmin.permissions import migrate_groups_and_users_to_single_assignment
+
+        db = _fresh_session()
+        roles = self._seed(db)
+        self._create_legacy_group_tables(db)
+        custom = RoleDef(slug="custom-mid", name="Custom Mid", is_system=False)
+        db.add(custom)
+        db.commit()
+        viewer_group = Group(name="Viewer Group", role_id=roles["viewer"].id)
+        custom_group = Group(name="Custom Group", role_id=custom.id)
+        db.add_all([viewer_group, custom_group])
+        db.flush()
+        user = User(username="custom-mid-user", password_hash=hash_password("pw"))
+        db.add(user)
+        db.commit()
+        self._add_user_to_group_legacy(db, user.id, viewer_group.id)
+        self._add_user_to_group_legacy(db, user.id, custom_group.id)
+
+        migrate_groups_and_users_to_single_assignment(db)
+        db.expire_all()
+
+        # Custom beats viewer...
+        assert db.query(User).filter_by(username="custom-mid-user").one().group_id == custom_group.id
+
+        admin_group = Group(name="Admin Group 2", role_id=roles["admin"].id)
+        db.add(admin_group)
+        db.flush()
+        user2 = User(username="custom-vs-admin-user", password_hash=hash_password("pw"))
+        db.add(user2)
+        db.commit()
+        self._add_user_to_group_legacy(db, user2.id, custom_group.id)
+        self._add_user_to_group_legacy(db, user2.id, admin_group.id)
+
+        migrate_groups_and_users_to_single_assignment(db)
+        db.expire_all()
+
+        # ...but admin beats custom.
+        assert db.query(User).filter_by(username="custom-vs-admin-user").one().group_id == admin_group.id
+
+    def test_multi_group_reduction_is_audit_logged(self):
+        from vpnadmin.models import AuditLog
+        from vpnadmin.permissions import migrate_groups_and_users_to_single_assignment
+
+        db = _fresh_session()
+        roles = self._seed(db)
+        self._create_legacy_group_tables(db)
+        editor_group = Group(name="Editor Group", role_id=roles["editor"].id)
+        admin_group = Group(name="Admin Group", role_id=roles["admin"].id)
+        db.add_all([editor_group, admin_group])
+        db.flush()
+        user = User(username="logged-user", password_hash=hash_password("pw"))
+        db.add(user)
+        db.commit()
+        self._add_user_to_group_legacy(db, user.id, editor_group.id)
+        self._add_user_to_group_legacy(db, user.id, admin_group.id)
+
+        migrate_groups_and_users_to_single_assignment(db)
+
+        entry = db.query(AuditLog).filter_by(action="group_membership_reduced").one()
+        assert entry.username == "logged-user"
+        assert "Admin Group" in entry.detail
+        assert "Editor Group" in entry.detail
+
+    def test_excludes_bootstrap_admin_from_the_multi_group_reduction(self):
+        """The bootstrap admin is handled exclusively by
+        ensure_super_admin_group -- even if legacy data somehow shows it
+        in multiple groups, this migration must not touch its group_id."""
+        from vpnadmin.permissions import ensure_super_admin_group, migrate_groups_and_users_to_single_assignment
+
+        db = _fresh_session()
+        roles = self._seed(db)
+        self._create_legacy_group_tables(db)
         root = User(username="root", password_hash=hash_password("pw"), role_id=roles["super_admin"].id, is_bootstrap_admin=True)
         db.add(root)
         db.commit()
+        ensure_super_admin_group(db)
+        db.expire_all()
+        original_group_id = db.query(User).filter_by(username="root").one().group_id
 
-        migrate_users_to_role_groups(db)
+        editor_group = Group(name="Editor Group", role_id=roles["editor"].id)
+        db.add(editor_group)
+        db.flush()
+        self._add_user_to_group_legacy(db, root.id, editor_group.id)
+
+        migrate_groups_and_users_to_single_assignment(db)
         db.expire_all()
 
-        assert db.query(Group).count() == 0
-        assert root.groups == []
+        assert db.query(User).filter_by(username="root").one().group_id == original_group_id
+
+    def test_zero_group_user_falls_back_to_a_user_role_group(self):
+        from vpnadmin.permissions import migrate_groups_and_users_to_single_assignment
+
+        db = _fresh_session()
+        roles = self._seed(db)
+        lonely = User(username="lonely", password_hash=hash_password("pw"))
+        db.add(lonely)
+        db.commit()
+
+        migrate_groups_and_users_to_single_assignment(db)
+        db.expire_all()
+
+        refreshed = db.query(User).filter_by(username="lonely").one()
+        assert refreshed.group_id is not None
+        assert refreshed.group.role_id == roles["user"].id
+        assert refreshed.group.name == "User"
+
+    def test_zero_group_fallback_name_collision_appends_auto(self):
+        """Mirrors the prior migrate_users_to_role_groups()'s own
+        collision-avoidance convention exactly: a "User" group that
+        already exists for an unrelated purpose (no "user" role assigned)
+        is never repurposed -- the fallback group gets " (auto)" appended
+        instead."""
+        from vpnadmin.permissions import migrate_groups_and_users_to_single_assignment
+
+        db = _fresh_session()
+        roles = self._seed(db)
+        unrelated = Group(name="User", role_id=roles["viewer"].id)  # not the "user" role -- unrelated purpose
+        db.add(unrelated)
+        db.commit()
+        lonely = User(username="lonely2", password_hash=hash_password("pw"))
+        db.add(lonely)
+        db.commit()
+
+        migrate_groups_and_users_to_single_assignment(db)
+        db.expire_all()
+
+        refreshed = db.query(User).filter_by(username="lonely2").one()
+        assert refreshed.group.name == "User (auto)"
+        assert refreshed.group.role_id == roles["user"].id
+
+    def test_excludes_bootstrap_admin_from_the_zero_group_fallback(self):
+        from vpnadmin.permissions import ensure_super_admin_group, migrate_groups_and_users_to_single_assignment
+
+        db = _fresh_session()
+        roles = self._seed(db)
+        root = User(username="root2", password_hash=hash_password("pw"), role_id=roles["super_admin"].id, is_bootstrap_admin=True)
+        db.add(root)
+        db.commit()
+        ensure_super_admin_group(db)
+        db.expire_all()
+        super_admin_group_id = db.query(User).filter_by(username="root2").one().group_id
+
+        migrate_groups_and_users_to_single_assignment(db)
+        db.expire_all()
+
+        assert db.query(User).filter_by(username="root2").one().group_id == super_admin_group_id
         # And access is still fully intact regardless (the hardcoded
         # exemption, not group membership, is what grants it).
         assert has_permission(db, root, "settings", "manage") is True
 
     def test_idempotent_running_twice_produces_identical_end_state(self):
-        from vpnadmin.permissions import migrate_users_to_role_groups
+        from vpnadmin.permissions import migrate_groups_and_users_to_single_assignment
 
         db = _fresh_session()
         roles = self._seed(db)
-        alice = User(username="alice2", password_hash=hash_password("pw"), role_id=roles["admin"].id)
-        db.add(alice)
+        self._create_legacy_group_tables(db)
+        editor_group = Group(name="Editor Group", role_id=roles["editor"].id)
+        admin_group = Group(name="Admin Group", role_id=roles["admin"].id)
+        db.add_all([editor_group, admin_group])
+        db.flush()
+        user = User(username="idempotent-user", password_hash=hash_password("pw"))
+        db.add(user)
+        db.commit()
+        self._add_user_to_group_legacy(db, user.id, editor_group.id)
+        self._add_user_to_group_legacy(db, user.id, admin_group.id)
+        lonely = User(username="idempotent-lonely", password_hash=hash_password("pw"))
+        db.add(lonely)
         db.commit()
 
-        migrate_users_to_role_groups(db)
+        migrate_groups_and_users_to_single_assignment(db)
         db.expire_all()
         group_count_1 = db.query(Group).count()
-        membership_count_1 = db.query(user_groups).count()
-        assignment_count_1 = db.query(group_role_defs).count()
+        user_group_1 = db.query(User).filter_by(username="idempotent-user").one().group_id
+        lonely_group_1 = db.query(User).filter_by(username="idempotent-lonely").one().group_id
 
-        migrate_users_to_role_groups(db)  # second run -- must be a no-op
+        migrate_groups_and_users_to_single_assignment(db)  # second run -- must be a no-op
         db.expire_all()
 
         assert db.query(Group).count() == group_count_1
-        assert db.query(user_groups).count() == membership_count_1
-        assert db.query(group_role_defs).count() == assignment_count_1
-        assert effective_role_ids(db, alice) == {roles["admin"].id}
-
-    def test_skips_a_user_already_in_a_group_with_the_equivalent_role(self):
-        """A user an admin already manually organized into a group with
-        the same role_id (before the migration ever ran, or between two
-        runs) must not get a redundant second membership in the
-        auto-created migration group."""
-        from vpnadmin.permissions import migrate_users_to_role_groups
-
-        db = _fresh_session()
-        roles = self._seed(db)
-        manual_group = Group(name="Hand-Rolled Editors")
-        manual_group.role_defs.append(roles["editor"])
-        db.add(manual_group)
-        db.flush()
-        dave = User(username="dave", password_hash=hash_password("pw"), role_id=roles["editor"].id)
-        dave.groups.append(manual_group)
-        db.add(dave)
-        db.commit()
-
-        migrate_users_to_role_groups(db)
-        db.expire_all()
-
-        assert dave.groups == [manual_group]  # no second, auto-created group membership
-        assert db.query(Group).count() == 1  # no new group created either
+        assert db.query(User).filter_by(username="idempotent-user").one().group_id == user_group_1
+        assert db.query(User).filter_by(username="idempotent-lonely").one().group_id == lonely_group_1

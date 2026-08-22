@@ -19,7 +19,7 @@ from ..geo_validators import valid_asn_list as _valid_asn_list
 from ..geo_validators import valid_city_list as _valid_city_list
 from ..geo_validators import valid_country_list as _valid_country_list
 from ..geo_validators import valid_ip_list as _valid_ip_list
-from ..models import Gender, Group, User, VpnProfileLink
+from ..models import SUPER_ADMIN_GROUP_NAME, Gender, Group, User, VpnProfileLink
 from ..permissions import has_permission, require_permission
 from ..policy_store import PolicyValidationError
 
@@ -40,7 +40,7 @@ require_mfa_admin = require_permission("mfa_admin", "manage")
 # with those requests' `role` field -- see this file's group-only
 # permissions changes. A role is no longer ever assigned directly to a
 # user through this API; only to a Group (routes/groups.py), which a user
-# then joins via `group_ids` below.
+# then belongs to via `group_id` below.
 
 
 _PW_UPPER_RE = re.compile(r"[A-Z]")
@@ -285,32 +285,34 @@ def _valid_mac_format(v: str) -> str:
         )
 
 
-def _resolve_groups(db: Session, group_ids: list[int]) -> list[Group]:
-    """Validates every id in group_ids references an existing Group, and
-    returns the Group rows themselves (for assigning to User.groups). Used by
-    both the admin-edit and self-service endpoints so a client can only
-    ever land a user in real groups, never arbitrary free text or bogus ids.
-    A user can belong to zero, one, or several groups at once."""
-    if not group_ids:
-        return []
-    groups = db.query(Group).filter(Group.id.in_(group_ids)).all()
-    found_ids = {t.id for t in groups}
-    missing = [tid for tid in group_ids if tid not in found_ids]
-    if missing:
-        raise HTTPException(status_code=400, detail=f"No such group(s): {missing}")
-    return groups
+def _resolve_group(db: Session, group_id: int) -> Group:
+    """Validates group_id references an existing, assignable Group, and
+    returns the row itself (for User.group_id/User.group). Used by
+    create_user/update_user below so a client can only ever land a user in
+    a real group, never an arbitrary/bogus id -- and never the immutable
+    "SuperAdmin" group, whose one member (the bootstrap admin) is fixed and
+    never chosen through this ordinary picker (see routes/groups.py)."""
+    group = db.get(Group, group_id)
+    if group is None:
+        raise HTTPException(status_code=400, detail=f"No such group: {group_id}")
+    if group.name == SUPER_ADMIN_GROUP_NAME:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{SUPER_ADMIN_GROUP_NAME}' can't be assigned here -- it's reserved for the bootstrap admin account.",
+        )
+    return group
 
 
 class CreateUserRequest(BaseModel):
     username: str
     password: str
-    # No direct role field -- under the group-only permission model a
-    # user's permissions come exclusively from group membership (see
-    # permissions.py's effective_role_ids), so setting a personal role here
-    # would silently do nothing. Grant access via `group_ids` below
-    # (assigning to an existing, role-bearing group), or leave empty and
-    # organize the account into a group afterward from the Groups page --
-    # a user in no group has zero permissions until then, by design.
+    # No direct role field -- under the single-group/single-role
+    # permission model a user's permissions come exclusively from the ONE
+    # group they belong to (see permissions.py's effective_role_ids), so
+    # setting a personal role here would silently do nothing. Grant access
+    # via `group_id` below -- MANDATORY (no default), since every user
+    # must belong to exactly one group; there is no "create with no group,
+    # organize it later" path any more.
     first_name: str
     last_name: str | None = None
     gender: Gender = Gender.unspecified
@@ -338,7 +340,7 @@ class CreateUserRequest(BaseModel):
     # own field below, reusing the exact same "attach" semantics via
     # create_user()'s own inlined version of link_vpn_profile()'s logic.
     link_existing_vpn_profile: str | None = None
-    group_ids: list[int] = []
+    group_id: int
 
     # "Send VPN Profile via Email" checkbox (Add User form) -- best-effort,
     # fire-and-forget: see create_user()'s own handling below for why a
@@ -544,9 +546,10 @@ class UpdateUserRequest(BaseModel):
     """Admin-only edits to another (or their own, for non-guardrailed
     fields) user's account. Password here is an unconditional admin reset --
     no current-password check, unlike the self-service /me endpoint below."""
-    # No `role` field -- under the group-only permission model, editing a
-    # user's personal role would silently do nothing (see permissions.py's
-    # effective_role_ids). Grant/revoke access via `group_ids` below.
+    # No `role` field -- under the single-group/single-role permission
+    # model, editing a user's personal role would silently do nothing (see
+    # permissions.py's effective_role_ids). Grant/revoke access via
+    # `group_id` below.
     is_active: bool | None = None
     deleted: bool | None = None  # True = soft-delete, False = restore
     password: str | None = None
@@ -555,7 +558,17 @@ class UpdateUserRequest(BaseModel):
     gender: Gender | None = None
     email: str | None = None
     phone: str | None = None
-    group_ids: list[int] | None = None  # explicit [] = clear all groups; see model_fields_set usage below
+    # See model_fields_set usage below: the field may be OMITTED from a
+    # PATCH (e.g. an unrelated profile-only edit) without touching group
+    # membership at all, but an explicit `null` is rejected -- every user
+    # must belong to exactly one group, so this endpoint can only ever
+    # MOVE a user to a different group, never clear it to none. (Removing
+    # a user from a group entirely, leaving them with none, is a distinct,
+    # narrower operation this app deliberately doesn't expose through the
+    # ordinary Edit User form -- see routes/groups.py's remove_group_member
+    # for the one place that IS still possible, subject to that endpoint's
+    # own SuperAdmin-group immutability guard.)
+    group_id: int | None = None
 
     # Edit User's "Force Password Reset on Next Login" checkbox -- an
     # explicit, independent toggle for User.must_reset_password, on top of
@@ -589,7 +602,7 @@ class UpdateUserRequest(BaseModel):
     # linked VPN profile's policy (a no-op if this user has no linked
     # profile yet, e.g. the rare cert-created-but-DB-failed edge case).
     # None means "not provided in this PATCH" (model_fields_set decides,
-    # same convention as group_ids/allowed_login_* above); an explicit []/null
+    # same convention as allowed_login_* above); an explicit []/null
     # clears the restriction.
     allowed_os: list[str] | None = None
     bandwidth_monthly_gb: float | None = None
@@ -761,17 +774,16 @@ class UpdateProfileRequest(BaseModel):
 
 
 def _effective_role_names(u: User) -> list[str]:
-    """Names of every role this user's group memberships actually grant --
-    the union of RoleDef.name across every group they belong to, i.e. the
-    same role set permissions.py's effective_role_ids() would resolve to
-    (kept as a plain in-Python computation over already-loaded
-    relationships rather than calling effective_role_ids() itself, so this
-    doesn't need a `db` session threaded through every _serialize() caller;
-    correct as long as the caller eager-loads User.groups and
-    Group.role_defs -- see _USERS_LIST_OPTIONS below). Deliberately NOT
-    u.role/u.role_id -- neither is consulted for permission checks any
-    more (see effective_role_ids' docstring), so surfacing either here
-    would be stale/misleading data presented as if it were authoritative.
+    """Name of the one role this user's group grants, if any -- the same
+    role set permissions.py's effective_role_ids() would resolve to (kept
+    as a plain in-Python computation over an already-loaded relationship
+    rather than calling effective_role_ids() itself, so this doesn't need
+    a `db` session threaded through every _serialize() caller; correct as
+    long as the caller eager-loads User.group and Group.role -- see
+    _USERS_LIST_OPTIONS below). Deliberately NOT u.role/u.role_id --
+    neither is consulted for permission checks any more (see
+    effective_role_ids' docstring), so surfacing either here would be
+    stale/misleading data presented as if it were authoritative.
 
     HARDCODED EXEMPTION -- super_admin (see User.effective_role_names'
     own docstring in models.py, reused here): that account's access never
@@ -806,8 +818,8 @@ def _serialize(u: User, policies: dict | None = None) -> dict:
         "gender": u.gender.value if u.gender else Gender.unspecified.value,
         "email": u.email,
         "phone": u.phone,
-        "group_ids": [t.id for t in u.groups],
-        "groups": [t.name for t in u.groups],
+        "group_id": u.group_id,
+        "group": u.group.name if u.group is not None else None,
         # Portal Login Restrictions -- User columns, enforced only by
         # routes/auth.py's login check. Independent from the VPN Access
         # Restrictions block below; see
@@ -875,17 +887,16 @@ def _guard_against_self_lockout(db: Session, target: User, admin: User, *, remov
         raise HTTPException(status_code=400, detail="Can't remove the last active user able to manage users.")
 
 
-# selectinload(groups).selectinload(role_defs): _serialize() (above, via
-# _effective_role_names) walks every user's groups' role_defs -- without
-# eager-loading both hops, that's a lazy-fired query per group per user
-# (N+1 on top of N+1) on every call to either endpoint below. This batches
-# it into two extra queries total, up front, regardless of how many users
-# are returned. role_def IS still loaded here (unlike a prior draft of
-# this line) -- _effective_role_names' super_admin exemption check needs
-# it.
+# selectinload(group).selectinload(role): _serialize() (above, via
+# _effective_role_names) walks every user's group's role -- without eager-
+# loading both hops, that's a lazy-fired query per user (N+1) on every
+# call to either endpoint below. This batches it into two extra queries
+# total, up front, regardless of how many users are returned. role_def IS
+# still loaded here (unlike a prior draft of this line) --
+# _effective_role_names' super_admin exemption check needs it.
 _USERS_LIST_OPTIONS = (
     selectinload(User.role_def),
-    selectinload(User.groups).selectinload(Group.role_defs),
+    selectinload(User.group).selectinload(Group.role),
     selectinload(User.vpn_profile_link),
 )
 
@@ -946,8 +957,8 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
 
     # Group membership is deliberately NOT self-service for anyone (not even
     # admins/editors editing their own account) -- UpdateProfileRequest has
-    # no group_ids field at all. Assignment happens only through admin/editor
-    # user management (PATCH /api/users/{id}'s UpdateUserRequest.group_ids),
+    # no group_id field at all. Assignment happens only through admin/editor
+    # user management (PATCH /api/users/{id}'s UpdateUserRequest.group_id),
     # per the "Regular users should not be able to assign or modify their
     # own group membership" requirement -- see profile.html, which shows
     # group(s) read-only.
@@ -1010,7 +1021,7 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
 def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == body.username).first() is not None:
         raise HTTPException(status_code=409, detail=f"Username '{body.username}' already exists.")
-    groups = _resolve_groups(db, body.group_ids)
+    group = _resolve_group(db, body.group_id)
 
     # Two mutually-exclusive ways to give this new user a VPN profile (see
     # CreateUserRequest._exactly_one_profile_source): provision a brand new
@@ -1051,8 +1062,8 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
     # (Role.viewer / NULL) -- neither is consulted for permission checks any
     # more (see permissions.py's effective_role_ids), so there's nothing
     # meaningful to set here. This new account's actual permissions come
-    # entirely from `groups` above; a user created into zero groups has
-    # zero permissions until an admin adds them to one.
+    # entirely from `group` above, which is mandatory (see
+    # CreateUserRequest.group_id).
     user = User(
         username=body.username,
         password_hash=hash_password(body.password),
@@ -1061,7 +1072,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
         gender=body.gender,
         email=body.email,
         phone=body.phone,
-        groups=groups,
+        group_id=group.id,
         # Every newly-provisioned account must change its password on
         # first login, regardless of how the admin set it -- see
         # models.py's must_reset_password docstring for the full policy.
@@ -1127,8 +1138,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
                    f"The VPN profile was NOT rolled back -- use Edit User's \"Attach existing VPN profile\" to link it "
                    f"to an account manually.",
         )
-    log_action(db, admin, "create_user", target=body.username,
-               detail=f"groups={','.join(g.name for g in groups)}" if groups else "groups=(none)")
+    log_action(db, admin, "create_user", target=body.username, detail=f"group={group.name}")
     if body.monitoring_enabled:
         log_action(db, admin, "device_monitoring_enabled", target=effective_client_name,
                    detail=f"threshold_minutes={body.monitoring_offline_threshold_minutes} (set at user creation)")
@@ -1179,7 +1189,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
             body=(
                 f"{admin.username} created a new user account.\n\n"
                 f"Username: {body.username}\n"
-                f"Groups: {', '.join(g.name for g in groups) if groups else '(none -- no permissions until assigned)'}\n"
+                f"Group: {group.name}\n"
                 f"Email: {body.email}\n"
                 f"VPN profile: {effective_client_name}"
                 f"{' (existing profile, linked)' if body.link_existing_vpn_profile else ''}\n"
@@ -1251,10 +1261,10 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     # CURRENT group membership actually grant users:manage right now,
     # matching what require_admin above checks). Deliberately does NOT
     # additionally simulate the effect of an in-this-same-request
-    # `group_ids` change (e.g. an admin removing the last users:manage
-    # group from the last such user) -- doing that precisely would mean
-    # duplicating effective_role_ids' resolution against a hypothetical,
-    # not-yet-committed group set. The existing behavior before this
+    # `group_id` change (e.g. an admin moving the last users:manage-capable
+    # user to a group with no such permission) -- doing that precisely
+    # would mean duplicating effective_role_ids' resolution against a
+    # hypothetical, not-yet-committed group. The existing behavior before this
     # change had the identical gap (a team's role assignment being
     # removed elsewhere was never guarded against either) -- this keeps
     # that same, pre-existing scope rather than expanding this guard's
@@ -1327,18 +1337,22 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
                 changes.append(field)
     # Group membership is deliberately excluded from the bootstrap admin's
     # (super_admin's) "Not modifiable" protections above (see this
-    # function's other is_bootstrap_admin guards) even though group
-    # membership never actually affects that account's access either way
-    # (see permissions.py's effective_role_ids hardcoded exemption) --
-    # nobody but the account itself should be able to change ANY of its
-    # attributes, group membership included, matching the "not even a
-    # regular admin can touch this account" posture the rest of this
-    # function already enforces.
-    if "group_ids" in body.model_fields_set and not target.is_bootstrap_admin:
-        new_groups = _resolve_groups(db, body.group_ids or [])
-        if {t.id for t in new_groups} != {t.id for t in target.groups}:
-            target.groups = new_groups
-            changes.append("groups")
+    # function's other is_bootstrap_admin guards) -- it's pinned to the
+    # immutable "SuperAdmin" group (see permissions.py's ensure_super_
+    # admin_group), and nobody but the account itself should be able to
+    # change ANY of its attributes, matching the "not even a regular admin
+    # can touch this account" posture the rest of this function already
+    # enforces. This mirrors routes/groups.py's own is_bootstrap_admin
+    # guard on its member-management endpoints -- the SAME rule enforced
+    # from the two different places group membership could otherwise be
+    # changed.
+    if "group_id" in body.model_fields_set and not target.is_bootstrap_admin:
+        if body.group_id is None:
+            raise HTTPException(status_code=400, detail="Every user must belong to a group -- group_id can't be cleared.")
+        new_group = _resolve_group(db, body.group_id)
+        if target.group_id != new_group.id:
+            target.group_id = new_group.id
+            changes.append("group")
     if "restrict_login_by_country" in body.model_fields_set and body.restrict_login_by_country != target.restrict_login_by_country:
         target.restrict_login_by_country = body.restrict_login_by_country
         changes.append(f"restrict_login_by_country {target.restrict_login_by_country}")

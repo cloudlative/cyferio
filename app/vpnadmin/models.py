@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Date, DateTime, Enum, Text, Float, ForeignKey, Table, UniqueConstraint, event
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Date, DateTime, Enum, Text, Float, ForeignKey, UniqueConstraint, event
 from sqlalchemy.orm import backref, validates, relationship
 
 from .db import Base
@@ -119,10 +119,19 @@ class Group(Base):
     """A proper group resource (added on top of the earlier free-text `group`
     field on User -- see git history) so groups can be created/deleted/listed
     on their own, independent of whether any user currently belongs to one.
-    Membership is many-to-many (see user_groups below) -- a user can belong
-    to zero, one, or several groups; a user with no group is simply absent
-    from every group's `members`, not a row here ("Unassigned" is a UI
-    concept, not a database one)."""
+
+    Single-group/single-role permissions model (see permissions.py's
+    effective_role_ids): a user belongs to AT MOST one group (User.group_id
+    below), and a group has AT MOST one role (this class's own role_id) --
+    the earlier "a user can belong to several groups, a group can have
+    several roles, effective permissions are the union of all of it" model
+    (Group.members/role_defs as many-to-many relationships, backed by the
+    user_groups/group_role_defs join tables) has been deliberately removed.
+    See migrate_groups_and_users_to_single_assignment() in permissions.py
+    for how an existing deployment's multi-group/multi-role data is
+    resolved down to single assignments, and this class's own docstring
+    note on user_groups/group_role_defs below for why those two tables
+    still physically exist in the database but are no longer mapped here."""
     __tablename__ = "groups"
 
     id = Column(Integer, primary_key=True)
@@ -140,14 +149,21 @@ class Group(Base):
     tags = Column(Text, nullable=True)  # JSON list of strings, same convention as User.allowed_login_countries etc.
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
-    members = relationship("User", secondary="user_groups", back_populates="groups", order_by="User.username")
-    # Roles assigned to this group (see group_role_defs above) -- every
-    # current member inherits every one of these roles' permissions. Groups
-    # are the ONLY source of a user's effective permissions (see
-    # permissions.py's effective_role_ids) -- a user's own User.role_id is
-    # never consulted for permission checks. Zero rows here means this
-    # group grants nothing.
-    role_defs = relationship("RoleDef", secondary="group_role_defs", order_by="RoleDef.name")
+    # One-to-many now (was many-to-many via the user_groups join table) --
+    # every User whose group_id points at this row. Nullable at the DB
+    # level, same as User.role_id, even though "every user has exactly one
+    # group" is enforced at the API/UI layer (routes/users.py) -- this
+    # schema has no real migration framework for retroactively adding a
+    # NOT NULL constraint to an already-populated column (see db.py's
+    # module docstring).
+    members = relationship("User", back_populates="group", order_by="User.username", foreign_keys="User.group_id")
+
+    # The single role this group grants -- every current member inherits
+    # it (see permissions.py's effective_role_ids). Groups are the ONLY
+    # source of a non-super_admin user's effective permissions; NULL here
+    # means this group currently grants its members nothing.
+    role_id = Column(Integer, ForeignKey("roles.id"), nullable=True)
+    role = relationship("RoleDef")
 
     @validates("name")
     def _normalize_name(self, key, value):
@@ -158,54 +174,43 @@ class Group(Base):
         return value.strip().lower() if value else value
 
 
-# Pure association table for the many-to-many User<->Group membership
-# (replaces the earlier single nullable User.group_id FK -- see git history).
-# A composite primary key (user_id, group_id) is enough here; there's no need
-# for a surrogate id since a given user/group pair can only be linked once.
-# New tables like this are picked up automatically by db.init_db()'s
-# `Base.metadata.create_all()` -- no change needed to the migration helper
-# itself, same as when the `groups` table was first added.
-user_groups = Table(
-    "user_groups",
-    Base.metadata,
-    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
-    Column("group_id", Integer, ForeignKey("groups.id"), primary_key=True),
-)
+# The immutable, system-managed group that exists purely so the bootstrap
+# admin (super_admin) account satisfies the "every user belongs to exactly
+# one group" invariant like everyone else, without a special-cased "no
+# group" carve-out anywhere in the Add/Edit User UI -- see permissions.py's
+# ensure_super_admin_group() (which creates/maintains it) and
+# routes/groups.py (which enforces its immutability server-side: can't be
+# renamed/re-described/deleted, its role can never change away from
+# super_admin, and its one member -- the bootstrap admin -- can never be
+# added to or removed from it via the ordinary member-management
+# endpoints). IMPORTANT: this group's role assignment is COSMETIC -- the
+# bootstrap admin's actual permissions come exclusively from the hardcoded
+# super_admin exemption in effective_role_ids(), never from group
+# membership; both mechanisms deliberately coexist (belt-and-suspenders),
+# per explicit product decision.
+SUPER_ADMIN_GROUP_NAME = "SuperAdmin"
 
 
-# Pure association table for the many-to-many Group<->RoleDef assignment --
-# groups as role containers: an admin assigns a role to a group ONCE and
-# every current member inherits it, instead of setting a role on N users
-# individually. Same shape/reasoning as user_groups above -- a composite
-# primary key is enough (a given group/role pair can only be linked once),
-# and no extra columns are needed today: WHO assigned/removed a role and
-# WHEN is captured via AuditLog's group_role_assigned/group_role_removed
-# actions (routes/groups.py), not duplicated here, same "AuditLog is the
-# audit trail, not this table" stance ObjectPermission/RoleApiScope already
-# take.
-#
-# This is now the ONLY source of a user's effective permissions -- see
-# permissions.py's effective_role_ids, which is EXCLUSIVELY the union of
-# every role_id reachable through group_role_defs for each group a user
-# belongs to. User.role_id (the column below) is legacy/inert for
-# permission purposes: a user in no groups, or in groups with zero
-# assigned roles, gets ZERO effective permissions -- there is no fallback
-# to a personal role. See migrate_users_to_role_groups() in permissions.py
-# for how existing deployments' access is preserved across this change
-# (auto-creates a group per previously-held role and populates it).
-#
-# ondelete=CASCADE on both FKs: deleting a group or a role should silently
-# drop the assignment row rather than leave an orphaned reference (Postgres
-# enforces this at the DB level in production; routes/roles.py's delete_role
-# additionally refuses to delete a role still assigned to a group at the
-# application level, mirroring its existing "still assigned to N users"
-# guard, so this FK is defense-in-depth, not the primary guard).
-group_role_defs = Table(
-    "group_role_defs",
-    Base.metadata,
-    Column("group_id", Integer, ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True),
-    Column("role_id", Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
-)
+# user_groups and group_role_defs (the many-to-many join tables for the
+# earlier "several groups per user, several roles per group" model) are
+# DELIBERATELY NOT mapped here any more -- neither table, nor the
+# relationships that used them (the old Group.members/User.groups
+# many-to-many and Group.role_defs), are read or written anywhere in this
+# codebase going forward. This follows the exact precedent this codebase
+# already established for User.role/User.role_id when THAT model was
+# superseded by groups in the first place (see User.role_id's own comment
+# below): a superseded column/table is left in place as an inert relic
+# rather than dropped, because (1) this app's schema-sync migration
+# (db.py's _sync_missing_columns) only ever ADDS columns/tables, it never
+# drops or renames one, and (2) dropping a table out from under an
+# already-populated production database is irreversible data loss with no
+# offsetting benefit. permissions.py's migrate_groups_and_users_to_single_
+# assignment() reads these two tables' raw rows directly (via `text()` SQL
+# against the live connection, not through an ORM mapping) exactly ONCE,
+# at migration time, to resolve each pre-existing group/user down to a
+# single role/group -- after that migration has run on a given deployment,
+# both tables are permanently orphaned and nothing in this app ever looks
+# at them again.
 
 
 class User(Base):
@@ -296,13 +301,24 @@ class User(Base):
     # rules as first_name/last_name/gender above.
     email = Column(String(254), nullable=True)
     phone = Column(String(32), nullable=True)
-    # Deprecated: replaced by the many-to-many `groups` relationship below
-    # (a user can now belong to several groups at once, see git history) --
-    # this nullable FK column may still physically exist in older databases
-    # (this app's migration approach only ever ADDs columns, see db.py) but
-    # is no longer read or written anywhere.
+    # Single-group/single-role permissions model: the ONE group this user
+    # belongs to (NULL = no group, "Unassigned" on the Groups page). This
+    # column briefly went unused between the Team->Group (many-to-many)
+    # rewrite and this change -- see git history -- but is the ACTIVE
+    # source of group membership again as of the single-group model; it is
+    # NOT the same thing as the identically-named, still-inert legacy
+    # column some pre-Team databases may also have physically carried (this
+    # app's migration approach only ever ADDs columns, see db.py -- there's
+    # only ever been the one `group_id` column on this table, its meaning
+    # has just changed across releases). Mandatory at the API/UI layer
+    # (routes/users.py rejects a Create/Edit User request with no
+    # group_id) but nullable here, same reasoning as role_id above: no real
+    # migration framework to retroactively add a NOT NULL constraint to an
+    # already-populated column. See permissions.py's migrate_groups_and_
+    # users_to_single_assignment for how an existing multi-group user's
+    # membership is resolved down to exactly one group.
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=True)
-    groups = relationship("Group", secondary="user_groups", back_populates="members", order_by="Group.name")
+    group = relationship("Group", back_populates="members", foreign_keys=[group_id])
 
     last_login_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -394,24 +410,25 @@ class User(Base):
 
     @property
     def effective_role_slugs(self) -> list[str]:
-        """Group-only permissions: every role slug this user's group
-        membership actually grants (the union across every group they
-        belong to -- mirrors permissions.py's effective_role_ids, but
-        computed here in plain Python over already-loaded relationships,
-        for templates that don't have a `db` session handy). NOT
-        role_id/role -- neither is consulted for permission purposes any
-        more. Empty for a user in zero groups, or in group(s) with no role
-        assigned -- that's the correct "no access" answer, not a bug.
+        """Single-group/single-role permissions: the slug of the one role
+        this user's group grants, if any (mirrors permissions.py's
+        effective_role_ids, but computed here in plain Python over an
+        already-loaded relationship, for templates that don't have a `db`
+        session handy). NOT role_id/role -- neither is consulted for
+        permission purposes any more. Empty for a user with no group, or
+        whose group has no role assigned -- that's the correct "no access"
+        answer, not a bug.
 
         HARDCODED EXEMPTION -- super_admin (same one effective_role_ids in
         permissions.py applies, mirrored here for display purposes): never
-        computed from groups at all, so a super_admin account correctly
-        shows its role here even with zero group memberships, instead of
-        the misleading "no access" empty list every other zero-group user
-        gets."""
+        computed from the group at all, so a super_admin account correctly
+        shows its role here regardless of what its (cosmetic, see
+        SUPER_ADMIN_GROUP_NAME) group's role is set to."""
         if self.role_def is not None and self.role_def.slug == "super_admin":
             return ["super_admin"]
-        return sorted({r.slug for g in self.groups for r in g.role_defs})
+        if self.group is not None and self.group.role is not None:
+            return [self.group.role.slug]
+        return []
 
     @property
     def effective_role_names(self) -> list[str]:
@@ -420,7 +437,9 @@ class User(Base):
         role badge rather than a slug. Same super_admin exemption."""
         if self.role_def is not None and self.role_def.slug == "super_admin":
             return [self.role_def.name]
-        return sorted({r.name for g in self.groups for r in g.role_defs})
+        if self.group is not None and self.group.role is not None:
+            return [self.group.role.name]
+        return []
 
 
 @event.listens_for(User, "before_insert")

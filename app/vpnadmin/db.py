@@ -81,8 +81,9 @@ def _seed_rbac():
     than inlined in init_db) so Phase 2's migrate_user_roles() backfill can
     be added right after this call without further restructuring."""
     from .permissions import (
+        ensure_super_admin_group,
+        migrate_groups_and_users_to_single_assignment,
         migrate_user_roles,
-        migrate_users_to_role_groups,
         rename_legacy_vpn_self_service_role,
         seed_system_roles,
     )
@@ -95,16 +96,20 @@ def _seed_rbac():
         seed_system_roles(db)
         migrate_user_roles(db)  # Phase 2 backfill -- see permissions.py's docstring
         promote_bootstrap_admin_to_super_admin(db)
-        # Group-only permissions migration -- MUST run after both
-        # migrate_user_roles (needs User.role_id backfilled from the legacy
-        # `role` enum first) and promote_bootstrap_admin_to_super_admin
-        # (needs the bootstrap account's role_id already at its FINAL
-        # value, "super_admin", not the plain "admin" it started as) --
-        # see permissions.py's migrate_users_to_role_groups docstring.
+        # Single-group/single-role permissions migration -- MUST run after
+        # both promote_bootstrap_admin_to_super_admin (ensure_super_admin_
+        # group below only checks is_bootstrap_admin, but keeping the same
+        # relative order as before is simplest to reason about) and
+        # ensure_super_admin_group (the bootstrap admin's group membership
+        # must already be settled before migrate_groups_and_users_to_
+        # single_assignment's zero-group fallback runs, since that step
+        # explicitly excludes the bootstrap admin on the assumption its
+        # group is already correct) -- see both functions' own docstrings.
         # Also called a second time from main.py's lifespan, same
         # "fresh-install first call is necessarily a no-op" reasoning as
         # promote_bootstrap_admin_to_super_admin's own docstring explains.
-        migrate_users_to_role_groups(db)
+        ensure_super_admin_group(db)
+        migrate_groups_and_users_to_single_assignment(db)
     finally:
         db.close()
 

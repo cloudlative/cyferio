@@ -13,14 +13,27 @@ Design recap (full detail in docs/rbac_identity_design.md §1-3):
     pair means no access, including for objects added after a role was
     created.
 """
+import logging
 from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from .auth import require_user
 from .db import get_db
-from .models import ApiScope, Group, ObjectPermission, RoleApiScope, RoleDef, RoleKind, User, group_role_defs, user_groups
+from .models import (
+    ApiScope,
+    Group,
+    ObjectPermission,
+    RoleApiScope,
+    RoleDef,
+    RoleKind,
+    SUPER_ADMIN_GROUP_NAME,
+    User,
+)
+
+logger = logging.getLogger(__name__)
 
 # object_key -> display name, shown in the Roles Management permission-
 # matrix UI (Phase 5) and used nowhere else structurally -- this dict is the
@@ -263,178 +276,285 @@ def migrate_user_roles(db: Session) -> None:
 
 
 def effective_role_ids(db: Session, user: User) -> set[int]:
-    """Group-Only Permissions: the full set of role_ids a user's access is
-    evaluated against -- EXCLUSIVELY the union of every role_id assigned
-    (via group_role_defs) to every group this user belongs to (via
-    user_groups). `User.role_id` itself is NOT consulted here -- it is
-    legacy/inert for permission purposes (kept on the model only so
-    migrate_users_to_role_groups below has something to read the user's
-    pre-migration role from; see that function's docstring). Permissions
-    come exclusively from group membership now: a user in zero groups, or
-    in group(s) with zero assigned roles, gets back the empty set and fails
-    every permission check -- there is no fallback to a personal role and
-    no implicit "Default" group.
+    """Single-Group, Single-Role Permissions: the full set of role_ids a
+    user's access is evaluated against. As of this model there is AT MOST
+    one: the role assigned to the ONE group this user belongs to
+    (`user.group.role_id`). `User.role_id` itself is NOT consulted here --
+    it is legacy/inert for permission purposes (kept on the model only for
+    the same historical reasons documented on User.role_id's own column
+    comment). A user with no group, or whose group has no role assigned,
+    gets back the empty set and fails every permission check -- there is
+    no fallback to a personal role.
 
-    This replaces the earlier "Team-Based Permissions Phase 1" behavior,
-    where a user's own direct role_id was UNIONed on top of whatever their
-    teams granted. That union-with-a-personal-role model is gone: groups
-    are now the ONLY source of permissions. Backward compatibility for
-    existing deployments is instead provided at migration time --
-    migrate_users_to_role_groups() (run once at startup, see its docstring)
-    auto-creates a group per distinct previously-held role and places every
-    holder of that role into it, so effective_role_ids() returns the exact
-    same set of role_ids for every user immediately after that migration
-    runs as effective_role_ids() would have returned under the OLD
-    (role_id UNION teams) logic beforehand. See test_group_roles.py's
-    TestGroupOnlyMigrationPreservesAccess for the explicit regression test
-    proving this.
+    Still returns a `set[int]` (not a bare int/None) even though it now
+    holds at most one element -- this deliberately minimizes blast radius:
+    every downstream caller (has_permission, _granting_role_ids,
+    _effective_scope, require_permission, ...) already consumes a set, and
+    their "least-restrictive-wins across the set" logic degrades correctly
+    and harmlessly to a 0-or-1-element set without needing to be rewritten.
+
+    This replaces the earlier "Group-Only Permissions" model, where a
+    user could belong to several groups and a group could be assigned
+    several roles, with effective_role_ids() returning the UNION of every
+    role_id reachable through every group membership. That union is gone:
+    a user has one group, a group has one role, full stop. Backward
+    compatibility for existing deployments is provided at migration time
+    -- migrate_groups_and_users_to_single_assignment() (run once at
+    startup, see its own docstring) collapses any pre-existing multi-
+    group/multi-role data down to single assignments before this function
+    is ever consulted for real traffic.
 
     HARDCODED EXEMPTION -- super_admin: reserved exclusively for the
     bootstrap admin account (see db.py's promote_bootstrap_admin_to_
     super_admin and _SYSTEM_ROLES["super_admin"] below), super_admin must
     keep full, unconditional access to everything and must NEVER depend on
-    group membership -- not required to be in any group, not subject to
-    the "zero groups = zero permissions" rule everyone else gets. Checked
-    directly here, structurally, BEFORE any group resolution runs, via
-    whether this user's own `role_id` resolves to the "super_admin"
-    RoleDef -- the same signal that already made super_admin's
-    ObjectPermission rows (manage=True on every object) apply to them
-    under the OLD Phase 1 logic, back when `user.role_id` was still part
-    of the union. Verified (not assumed) before writing this rewrite:
-    pre-rewrite, effective_role_ids() routed super_admin through the
-    exact same ObjectPermission-lookup path as every other role via their
-    own role_id, with no separate bypass anywhere in has_permission/
-    require_permission -- so removing role_id from the general union
-    would otherwise have been the FIRST time super_admin's access could
-    ever be affected by group membership at all. This short-circuit is
-    what keeps that from happening. Deliberately NOT a group ("SuperAdmin"
-    or similar) -- an explicit design decision to keep this exemption pure
-    hardcoded logic, no group machinery involved."""
+    group membership. Checked directly here, structurally, BEFORE any
+    group resolution runs, via whether this user's own `role_id` resolves
+    to the "super_admin" RoleDef. UNCHANGED from the prior Group-Only
+    model's version of this same check -- this rewrite touches only the
+    non-super_admin path below it. The bootstrap admin account is ALSO a
+    member of the immutable "SuperAdmin" group (see ensure_super_admin_
+    group below) so it satisfies the "every user has exactly one group"
+    UI/structural invariant like everyone else, but that group membership
+    is purely cosmetic -- it is never consulted here, on purpose, so this
+    hardcoded exemption remains the one and only source of super_admin's
+    actual permissions (belt-and-suspenders, per explicit design
+    decision: both mechanisms exist, only one of them is load-bearing)."""
     if user.role_def is not None and user.role_def.slug == "super_admin":
         return {user.role_id}
-    group_ids = [g.id for g in user.groups]
-    if not group_ids:
+    if user.group_id is None or user.group is None or user.group.role_id is None:
         return set()
-    rows = db.query(group_role_defs.c.role_id).filter(group_role_defs.c.group_id.in_(group_ids)).distinct().all()
-    return {row[0] for row in rows}
+    return {user.group.role_id}
 
 
-def migrate_users_to_role_groups(db: Session) -> None:
+def ensure_super_admin_group(db: Session) -> None:
+    """Idempotent creation/maintenance of the immutable "SuperAdmin" group
+    (see models.SUPER_ADMIN_GROUP_NAME) -- exists purely so the bootstrap
+    admin account satisfies the new "every user belongs to exactly one
+    group" structural/UI invariant cleanly, without a special-cased "no
+    group" carve-out in the Add/Edit User dialogs. Its role assignment is
+    COSMETIC: super_admin's actual permissions come exclusively from the
+    hardcoded exemption in effective_role_ids() above, never from this (or
+    any) group -- see that function's own docstring for why both
+    mechanisms deliberately coexist.
+
+    Mirrors db.py's promote_bootstrap_admin_to_super_admin exactly:
+    registered from BOTH db.py's _seed_rbac (covers every startup on an
+    already-provisioned database) and main.py's lifespan (covers a
+    genuinely fresh install, where the bootstrap account doesn't exist yet
+    the first time _seed_rbac runs) -- same "fresh-install first call is
+    necessarily a partial no-op" reasoning. Must run AFTER seed_system_
+    roles() (the super_admin RoleDef must already exist) and AFTER
+    promote_bootstrap_admin_to_super_admin() is registered to have already
+    run for this startup (it doesn't strictly need the bootstrap account
+    to already BE on the super_admin role_id -- only is_bootstrap_admin is
+    checked below -- but see db.py/main.py's own comments for the actual
+    call order, kept identical to that existing pair for consistency).
+    Must run BEFORE migrate_groups_and_users_to_single_assignment() (see
+    that function's own docstring): the bootstrap admin is excluded from
+    that migration's "zero-group fallback" rule entirely, so its group
+    membership must already be settled by the time that migration runs."""
+    super_admin_role = db.query(RoleDef).filter_by(slug="super_admin").first()
+    if super_admin_role is None:
+        return  # seed_system_roles somehow didn't run -- nothing to anchor the group to yet
+    group = db.query(Group).filter_by(name=SUPER_ADMIN_GROUP_NAME).first()
+    if group is None:
+        group = Group(
+            name=SUPER_ADMIN_GROUP_NAME, slug="super-admin", role_id=super_admin_role.id,
+            description=(
+                "Immutable, system-managed -- exists only so the bootstrap admin account "
+                "satisfies the 'every user belongs to exactly one group' rule. Its real "
+                "permissions come from a hardcoded exemption, not from this group's role."
+            ),
+        )
+        db.add(group)
+        db.flush()  # get group.id
+    elif group.role_id != super_admin_role.id:
+        # Defensive: routes/groups.py's update_group/set_group_role both
+        # reject changing this away from super_admin, so this should be
+        # unreachable in practice -- kept as a self-healing backstop, same
+        # spirit as seed_system_roles' own backfill-not-skip approach.
+        group.role_id = super_admin_role.id
+    bootstrap = db.query(User).filter_by(is_bootstrap_admin=True).first()
+    if bootstrap is not None and bootstrap.group_id != group.id:
+        bootstrap.group_id = group.id
+    db.commit()
+
+
+# Deterministic "widest access" precedence used by migrate_groups_and_
+# users_to_single_assignment below when a User's pre-existing multi-group
+# membership has to be collapsed to one group -- lower number = more
+# permissive, wins the tie-break. Per explicit product decision: "admin"
+# (this app's actual highest predefined privilege short of super_admin,
+# which is never group-assignable to begin with) outranks everything;
+# any CUSTOM role (not in this map at all) is treated as ranking between
+# admin and editor -- more permissive than every other predefined role,
+# since a custom role an admin deliberately created is more likely to be
+# a deliberately elevated one than not, but never assumed to outrank the
+# literal "admin" role itself.
+_ROLE_RANK = {"admin": 0, "editor": 2, "user": 3, "viewer": 4}
+_CUSTOM_ROLE_RANK = 1
+
+
+def _role_rank(slug: str | None) -> int:
+    if slug is None:
+        return _CUSTOM_ROLE_RANK + 1  # no role at all -- least permissive of all, sorts last
+    return _ROLE_RANK.get(slug, _CUSTOM_ROLE_RANK)
+
+
+def migrate_groups_and_users_to_single_assignment(db: Session) -> None:
     """One-time (idempotent, safe on every startup) data migration for the
-    group-only permission model: since effective_role_ids() above no longer
-    ever consults User.role_id, this backfills a Group for every distinct
-    role_id currently held directly by at least one User, assigns that role
-    to the group, and adds every current holder of that role_id as a
-    member -- so nobody's effective permissions change the moment the
-    group-only model ships. Mirrors migrate_user_roles()'s idempotency/
-    startup-registration style above; must run AFTER seed_system_roles()
-    (roles must exist to look up their names/ids) and AFTER migrate_user_roles()
-    (so User.role_id is backfilled from the legacy `role` enum first, giving
-    this function the most complete picture of "current role" to migrate
-    from) -- see main.py's lifespan for the registration order.
+    single-group/single-role permissions model. Collapses any pre-existing
+    "a group can have several roles" / "a user can belong to several
+    groups" data (from the earlier Group-Only Permissions model -- shipped
+    in v2.16.0/v2.16.1, so real multi-role/multi-group data is expected to
+    be rare, but this handles it defensively per explicit spec) down to
+    exactly one role per group and one group per user, then places any
+    genuinely group-less user into a safe default. Must run AFTER
+    seed_system_roles() (needs the "user" RoleDef to exist for step 3) and
+    AFTER ensure_super_admin_group() (the bootstrap admin's group
+    membership must already be settled -- this migration's step 3
+    explicitly excludes it, on the assumption ensure_super_admin_group
+    already handled it). Registered from the same two places as every
+    other migration in this file (db.py's _seed_rbac + main.py's
+    lifespan) -- see their own comments for the "fresh install vs.
+    already-provisioned DB" reasoning.
 
-    Algorithm, per distinct role_id found on >=1 User row:
-      1. Find-or-create a Group whose assigned role (via group_role_defs)
-         is exactly that role_id. Naming: the RoleDef's own `name` (e.g.
-         RoleDef "Admin" -> Group "Admin"). Collision handling: if a Group
-         with that exact name already exists but does NOT have this role_id
-         assigned (e.g. an admin manually created a "Admin" group for an
-         unrelated purpose before this migration ever ran), this appends
-         " (auto)" to the name instead of reusing/renaming the existing
-         group -- never silently repurposes a group an admin created,
-         and never silently grants an existing group a role its owner
-         didn't ask for. If a Group with the exact target name AND that
-         exact role_id assigned already exists (e.g. this migration's own
-         prior run, or an admin who set things up by hand identically),
-         it's reused as-is -- this is what makes re-running idempotent.
-      2. For every User currently holding that role_id, add them as a
-         member of the group UNLESS they're already a member of ANY group
-         that has this exact role_id assigned (covers both "this migration
-         already ran for them" and "an admin already manually organized
-         this user into a group with the equivalent role" -- avoids
-         duplicate/pointless memberships either way).
+    Reads the OLD group_role_defs/user_groups many-to-many join tables
+    DIRECTLY via raw SQL (`text()` against the live connection) rather
+    than through an ORM relationship -- models.py deliberately no longer
+    maps either table (see Group's own docstring and the module-level
+    comment right below it) now that neither is written to going forward,
+    following the exact precedent this codebase already established for
+    User.role/User.role_id when THAT model was superseded by groups (left
+    in place as an inert relic, never dropped -- see db.py's module
+    docstring for why this app's migration approach can only ever ADD
+    schema, never drop/rename it). Both tables are guarded with
+    `inspect(...).has_table(...)` first so this is also a safe no-op on a
+    genuinely fresh install, where neither table has ever been created.
 
-    Never touches User.role_id itself (left in place as inert legacy data,
-    per the group-only model's design -- see effective_role_ids' docstring).
-    Never removes a group or membership -- purely additive, matching every
-    other startup migration in this file.
+    Algorithm:
+      1. Group role collapse: for every Group the OLD group_role_defs data
+         shows holding more than one role, keep exactly the LOWEST role_id
+         (earliest-created role, a simple and fully deterministic tie-
+         break) and log which one was kept. Skipped for a Group whose
+         role_id is already set (this migration's own prior run, or a
+         group created directly under the new model).
+      2. User group collapse: for every User the OLD user_groups data
+         shows belonging to more than one group, keep the group whose
+         assigned role is the WIDEST-access one, per _role_rank's explicit
+         precedence order above (admin > any custom role > editor > user >
+         viewer > no role at all); ties within the same rank break on the
+         lowest group id, for determinism. This is a genuine, unavoidable
+         access-REDUCING operation now that the union-of-groups feature is
+         gone -- every affected user is logged (via this app's AuditLog,
+         same mechanism every other state-changing action here uses) so
+         an admin can review exactly who had a group membership dropped
+         and which one was kept. Skipped for a User whose group_id is
+         already set, or who is the bootstrap admin (that account is
+         handled exclusively by ensure_super_admin_group, never here).
+      3. Zero-group fallback: every remaining User with no group_id at all
+         (never had one, or had zero groups in the old model) is placed
+         into a find-or-create Group assigned the "user" RoleDef -- the
+         least-privileged predefined role, chosen as a safe default rather
+         than attempting to infer or preserve whatever the account might
+         have implied before (there is no reliable prior signal to infer
+         from for a user who was never actually in any group). Naming/
+         collision handling mirrors the prior migrate_users_to_role_
+         groups()'s own convention exactly: "User", or "User (auto)" /
+         "User (auto N)" if that name is already taken by an unrelated
+         group. The bootstrap admin is excluded from this step entirely
+         (see ensure_super_admin_group, which must run first).
 
-    Deliberately EXCLUDES "super_admin" from the roles it migrates: that
-    role is exempted from the group-only model entirely (see
-    effective_role_ids' hardcoded exemption above) -- the bootstrap admin
-    account's access already doesn't depend on group membership, so
-    creating and populating an auto-migration group for it would just be
-    pointless clutter on the Groups page, not a real backward-compatibility
-    need."""
-    role_by_id = {r.id: r for r in db.query(RoleDef).all()}
-
-    # Every distinct role_id currently held directly by >=1 non-deleted
-    # user, EXCLUDING super_admin (see docstring above -- that one's
-    # exempted from groups entirely, not migrated into one). Deleted users
-    # are also excluded -- no point creating/populating a migration group
-    # for a role only a soft-deleted account still points at.
-    distinct_role_ids = {
-        row[0] for row in db.query(User.role_id).join(RoleDef, User.role_id == RoleDef.id).filter(
-            User.role_id.isnot(None), User.deleted.is_(False), RoleDef.slug != "super_admin"
-        ).distinct().all()
-    }
+    Idempotent: a second run is a true no-op, since every step's guard
+    (role_id/group_id already set) is checked before acting."""
+    inspector = inspect(db.get_bind())
 
     changed = False
-    for role_id in distinct_role_ids:
-        role = role_by_id.get(role_id)
-        if role is None:
-            continue  # orphaned role_id (role since deleted) -- nothing sensible to migrate onto
 
-        # Users currently already covered (member of ANY group -- whether
-        # auto-created by a prior run of this migration, or manually
-        # assembled by an admin -- that has this exact role_id assigned)
-        # -- skip them; only genuinely uncovered holders need a new
-        # membership. Computed BEFORE find-or-create below so a role every
-        # one of whose holders is already covered doesn't spawn a
-        # pointless, empty auto-group -- see test_permissions.py's
-        # TestMigrateUsersToRoleGroups.test_skips_a_user_already_in_a_
-        # group_with_the_equivalent_role.
-        already_covered_user_ids = {
-            row[0] for row in db.query(user_groups.c.user_id)
-            .join(group_role_defs, group_role_defs.c.group_id == user_groups.c.group_id)
-            .filter(group_role_defs.c.role_id == role_id)
-            .distinct().all()
-        }
-        holders = db.query(User).filter(User.role_id == role_id, User.deleted.is_(False)).all()
-        uncovered = [u for u in holders if u.id not in already_covered_user_ids]
-        if not uncovered:
-            continue
-
-        # Find-or-create the target group for this role_id -- only reached
-        # when there's actually at least one holder needing a membership.
-        group = (
-            db.query(Group)
-            .join(group_role_defs, group_role_defs.c.group_id == Group.id)
-            .filter(Group.name == role.name, group_role_defs.c.role_id == role_id)
-            .first()
-        )
-        if group is None:
-            name = role.name
-            if db.query(Group).filter(Group.name == name).first() is not None:
-                # Name taken by an unrelated, manually-created group -- don't
-                # repurpose it. See docstring's collision strategy.
-                name = f"{role.name} (auto)"
-                n = 2
-                while db.query(Group).filter(Group.name == name).first() is not None:
-                    name = f"{role.name} (auto {n})"
-                    n += 1
-            group = Group(name=name, slug=None, description=(
-                f"Auto-created during the group-only permissions migration to preserve "
-                f"every existing '{role.name}' user's access -- reorganize freely."
-            ))
-            db.add(group)
-            db.flush()  # get group.id
-            db.execute(group_role_defs.insert().values(group_id=group.id, role_id=role_id))
+    # --- Step 1: collapse any Group holding >1 role -------------------------
+    if inspector.has_table("group_role_defs"):
+        rows = db.execute(text("SELECT group_id, role_id FROM group_role_defs ORDER BY group_id, role_id")).all()
+        roles_by_group: dict[int, list[int]] = {}
+        for group_id, role_id in rows:
+            roles_by_group.setdefault(group_id, []).append(role_id)
+        for group_id, role_ids in roles_by_group.items():
+            group = db.get(Group, group_id)
+            if group is None or group.role_id is not None:
+                continue
+            keep = min(role_ids)
+            group.role_id = keep
             changed = True
+            if len(role_ids) > 1:
+                logger.warning(
+                    "[single-group migration] Group '%s' (id=%s) had %d roles assigned (%s); "
+                    "kept role_id=%d (lowest id).",
+                    group.name, group.id, len(role_ids), sorted(role_ids), keep,
+                )
 
-        for user in uncovered:
-            db.execute(user_groups.insert().values(user_id=user.id, group_id=group.id))
+    # --- Step 2: collapse any User belonging to >1 group ---------------------
+    if inspector.has_table("user_groups"):
+        rows = db.execute(text("SELECT user_id, group_id FROM user_groups ORDER BY user_id, group_id")).all()
+        groups_by_user: dict[int, list[int]] = {}
+        for user_id, group_id in rows:
+            groups_by_user.setdefault(user_id, []).append(group_id)
+        for user_id, group_ids in groups_by_user.items():
+            user = db.get(User, user_id)
+            if user is None or user.deleted or user.group_id is not None or user.is_bootstrap_admin:
+                continue
+            candidates = [g for g in (db.get(Group, gid) for gid in group_ids) if g is not None]
+            if not candidates:
+                continue
+
+            def _candidate_rank(g: Group) -> tuple[int, int]:
+                role = db.get(RoleDef, g.role_id) if g.role_id is not None else None
+                return (_role_rank(role.slug if role is not None else None), g.id)
+
+            chosen = min(candidates, key=_candidate_rank)
+            user.group_id = chosen.id
             changed = True
+            if len(candidates) > 1:
+                dropped = [g.name for g in candidates if g.id != chosen.id]
+                logger.warning(
+                    "[single-group migration] User '%s' (id=%s) was in %d groups; kept '%s', dropped %s.",
+                    user.username, user.id, len(candidates), chosen.name, dropped,
+                )
+                from .audit import log_action
+                log_action(
+                    db, user, "group_membership_reduced", target=user.username,
+                    detail=f"single-group migration kept '{chosen.name}', dropped {dropped}",
+                )
+
+    # --- Step 3: zero-group fallback -----------------------------------------
+    user_role = db.query(RoleDef).filter_by(slug="user").first()
+    if user_role is not None:
+        zero_group_users = db.query(User).filter(
+            User.group_id.is_(None), User.deleted.is_(False), User.is_bootstrap_admin.is_(False),
+        ).all()
+        if zero_group_users:
+            fallback_group = db.query(Group).filter(Group.role_id == user_role.id).order_by(Group.id).first()
+            if fallback_group is None:
+                name = "User"
+                if db.query(Group).filter(Group.name == name).first() is not None:
+                    name = "User (auto)"
+                    n = 2
+                    while db.query(Group).filter(Group.name == name).first() is not None:
+                        name = f"User (auto {n})"
+                        n += 1
+                fallback_group = Group(
+                    name=name, slug=None, role_id=user_role.id,
+                    description=(
+                        "Auto-created during the single-group/single-role permissions migration "
+                        "as the default home for any account with no group assignment -- "
+                        "reorganize freely."
+                    ),
+                )
+                db.add(fallback_group)
+                db.flush()
+                changed = True
+            for user in zero_group_users:
+                user.group_id = fallback_group.id
+                changed = True
 
     if changed:
         db.commit()

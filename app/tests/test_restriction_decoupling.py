@@ -17,14 +17,22 @@ from vpnadmin.models import User
 from .conftest import login
 
 
-def _create_user_with_profile(app_client, username, mac_suffix, monkeypatch, tmp_path):
+def _create_user_with_profile(app_client, username, mac_suffix, monkeypatch, tmp_path, db_session):
+    from vpnadmin.models import Group
     from vpnadmin.routes import users as users_mod
     monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
     monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
     login(app_client, "admin", "adminpass123")
+    # group_id is mandatory on create_user now (see routes/users.py's
+    # CreateUserRequest) -- which group it is doesn't matter for any of
+    # this file's Portal/VPN-restriction-independence assertions, so a
+    # throwaway one per call is fine.
+    group = Group(name=f"{username}-group")
+    db_session.add(group)
+    db_session.commit()
     r = app_client.post("/api/users", json={
         "username": username, "password": "Somepass123!", "first_name": username.title(),
-        "email": f"{username}@example.com", "mac": f"aa:bb:cc:dd:ee:{mac_suffix}",
+        "email": f"{username}@example.com", "mac": f"aa:bb:cc:dd:ee:{mac_suffix}", "group_id": group.id,
     })
     assert r.status_code == 201
     return r.json()["id"]
@@ -35,7 +43,7 @@ class TestScenarioA_IndependentCountryRestrictions:
     Country B. Confirm both operate independently."""
 
     def test_portal_and_vpn_country_restrictions_stay_independent(self, app_client, db_session, monkeypatch, tmp_path):
-        user_id = _create_user_with_profile(app_client, "scenarioa", "20", monkeypatch, tmp_path)
+        user_id = _create_user_with_profile(app_client, "scenarioa", "20", monkeypatch, tmp_path, db_session)
 
         # Admin sets a Portal restriction to Country A ("PK")...
         r = app_client.patch(f"/api/users/{user_id}", json={
@@ -69,8 +77,8 @@ class TestScenarioA_IndependentCountryRestrictions:
 class TestScenarioB_VpnRestrictionDoesNotBlockPortal:
     """User can access the portal even though VPN access is restricted."""
 
-    def test_vpn_only_restriction_leaves_portal_login_unaffected(self, app_client, monkeypatch, tmp_path):
-        _create_user_with_profile(app_client, "scenariob", "21", monkeypatch, tmp_path)
+    def test_vpn_only_restriction_leaves_portal_login_unaffected(self, app_client, db_session, monkeypatch, tmp_path):
+        _create_user_with_profile(app_client, "scenariob", "21", monkeypatch, tmp_path, db_session)
         app_client.put("/api/clients/scenariob/policy", json={"allowed_countries": ["JP"]})
         app_client.post("/logout")
 
@@ -88,7 +96,7 @@ class TestScenarioC_PortalRestrictionBlocksLoginIndependently:
     user is blocked from portal login due to Portal restrictions."""
 
     def test_portal_restriction_blocks_login_even_with_unrestricted_vpn(self, app_client, db_session, monkeypatch, tmp_path):
-        user_id = _create_user_with_profile(app_client, "scenarioc", "22", monkeypatch, tmp_path)
+        user_id = _create_user_with_profile(app_client, "scenarioc", "22", monkeypatch, tmp_path, db_session)
         # No VPN Access Restriction ever set for this client -- policy_store
         # has no entry, i.e. fully unrestricted VPN access.
         assert policy_store.get_policy("scenarioc") == {}
@@ -114,8 +122,8 @@ class TestScenarioD_SelfServiceVpnCountryIsVpnOnly:
     test_self_service_login_country.py; this is the end-to-end version
     exercising the real login route)."""
 
-    def test_self_service_vpn_country_does_not_block_portal_login(self, app_client, monkeypatch, tmp_path):
-        _create_user_with_profile(app_client, "scenariod", "23", monkeypatch, tmp_path)
+    def test_self_service_vpn_country_does_not_block_portal_login(self, app_client, db_session, monkeypatch, tmp_path):
+        _create_user_with_profile(app_client, "scenariod", "23", monkeypatch, tmp_path, db_session)
         app_client.post("/logout")
         login(app_client, "scenariod", "Somepass123!")
         r = app_client.patch("/api/users/me", json={"login_country": "PK"})
@@ -135,7 +143,7 @@ class TestMigrateDecouplePortalAndVpnRestrictions:
         from vpnadmin import app_settings
 
         monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
-        user_id = _create_user_with_profile(app_client, "legacyuser", "24", monkeypatch, tmp_path)
+        user_id = _create_user_with_profile(app_client, "legacyuser", "24", monkeypatch, tmp_path, db_session)
         app_client.patch(f"/api/users/{user_id}", json={
             "restrict_login_by_country": True, "allowed_login_countries": ["PK"],
             "restrict_login_by_city": False,
@@ -156,7 +164,7 @@ class TestMigrateDecouplePortalAndVpnRestrictions:
         from vpnadmin import app_settings
 
         monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
-        user_id = _create_user_with_profile(app_client, "legacyuser2", "25", monkeypatch, tmp_path)
+        user_id = _create_user_with_profile(app_client, "legacyuser2", "25", monkeypatch, tmp_path, db_session)
         app_client.patch(f"/api/users/{user_id}", json={
             "restrict_login_by_country": True, "allowed_login_countries": ["PK"],
         })
@@ -177,14 +185,14 @@ class TestInlineVpnAccessRestrictionsOnCreateAndEditUser:
     directly (vpn_restrict_by_*/vpn_allowed_* fields), not just Portal
     Login Restrictions -- no separate trip to the Clients page required."""
 
-    def test_create_user_applies_vpn_restrictions_to_new_profile(self, app_client, monkeypatch, tmp_path):
+    def test_create_user_applies_vpn_restrictions_to_new_profile(self, app_client, db_session, monkeypatch, tmp_path, default_group_id):
         from vpnadmin.routes import users as users_mod
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         monkeypatch.setattr(settings, "CLIENT_POLICY_FILE", str(tmp_path / "client_policy.json"))
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "createvpnr", "password": "Somepass123!", "first_name": "CreateVpnR",
-            "email": "createvpnr@example.com", "mac": "aa:bb:cc:dd:ee:30",
+            "email": "createvpnr@example.com", "mac": "aa:bb:cc:dd:ee:30", "group_id": default_group_id,
             "vpn_restrict_by_country": True, "vpn_allowed_countries": ["PK"],
             "vpn_restrict_by_ip": True, "vpn_allowed_ips": ["203.0.113.5"],
             # Deliberately no Portal restriction in this request -- must
@@ -202,7 +210,7 @@ class TestInlineVpnAccessRestrictionsOnCreateAndEditUser:
         assert policy_store.get_policy("createvpnr")["allowed_ips"] == ["203.0.113.5"]
 
     def test_edit_user_applies_vpn_restrictions_to_linked_profile(self, app_client, db_session, monkeypatch, tmp_path):
-        user_id = _create_user_with_profile(app_client, "editvpnr", "31", monkeypatch, tmp_path)
+        user_id = _create_user_with_profile(app_client, "editvpnr", "31", monkeypatch, tmp_path, db_session)
         r = app_client.patch(f"/api/users/{user_id}", json={
             "vpn_restrict_by_city": True, "vpn_allowed_cities": ["Lahore"],
         })
@@ -214,12 +222,12 @@ class TestInlineVpnAccessRestrictionsOnCreateAndEditUser:
         user = db_session.query(User).filter(User.username == "editvpnr").one()
         assert user.restrict_login_by_city is False
 
-    def test_edit_user_vpn_restriction_kinds_are_independently_touched(self, app_client, monkeypatch, tmp_path):
+    def test_edit_user_vpn_restriction_kinds_are_independently_touched(self, app_client, db_session, monkeypatch, tmp_path):
         """Editing one VPN restriction kind (e.g. country) must not clear a
         different kind (e.g. ASN) that was set in an earlier, separate
         PATCH -- same per-kind touched-ness guarantee Portal restrictions
         already had."""
-        user_id = _create_user_with_profile(app_client, "editvpnr2", "32", monkeypatch, tmp_path)
+        user_id = _create_user_with_profile(app_client, "editvpnr2", "32", monkeypatch, tmp_path, db_session)
         app_client.patch(f"/api/users/{user_id}", json={
             "vpn_restrict_by_asn": True, "vpn_allowed_asns": ["AS12345"],
         })

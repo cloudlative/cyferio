@@ -8,13 +8,13 @@ from .conftest import login
 
 
 class TestForcePasswordResetToggle:
-    def test_new_user_is_auto_flagged(self, app_client, db_session, monkeypatch):
+    def test_new_user_is_auto_flagged(self, app_client, db_session, monkeypatch, default_group_id):
         from vpnadmin.routes import users as users_mod
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "freshuser", "password": "Somepass123!", "first_name": "Fresh",
-            "email": "freshuser@example.com", "mac": "aa:bb:cc:dd:ee:10",
+            "email": "freshuser@example.com", "mac": "aa:bb:cc:dd:ee:10", "group_id": default_group_id,
         })
         assert r.status_code == 201
         user = db_session.query(User).filter(User.username == "freshuser").one()

@@ -170,16 +170,19 @@ def effective_policy(user: User, db: Session) -> str:
             role_requirements = json.loads(s.mfa_role_requirements)
         except (ValueError, TypeError):
             role_requirements = {}
-    # Group-only permissions: a user can now have SEVERAL effective roles
-    # (union across every group they belong to -- see models.py's
-    # effective_role_slugs), not just one, so a per-role MFA requirement
-    # can no longer be a single lookup. FORK/DECISION: apply the most
-    # restrictive override among every effective role that has one
-    # configured -- "required" beats "optional" beats "exempt" -- so
-    # belonging to an additional, less-strict-MFA group can never silently
-    # weaken a requirement another one of a user's groups already imposes.
-    # Matches this app's general security posture elsewhere (fail toward
-    # requiring MFA, not away from it).
+    # Single-group/single-role permissions: user.effective_role_slugs holds
+    # at most one slug now (the role of the ONE group this user belongs to,
+    # or the hardcoded super_admin exemption -- see models.py's own
+    # docstring). This list comprehension still iterates it rather than
+    # indexing a single value -- deliberately kept in this shape (it
+    # degrades correctly and harmlessly to a 0-or-1-element list) rather
+    # than rewritten to a single lookup, matching this codebase's general
+    # "minimize blast radius" stance on this same rewrite elsewhere (see
+    # permissions.py's effective_role_ids docstring for the identical
+    # reasoning re: keeping set[int] instead of Optional[int]). The "most
+    # restrictive of every match" reduction below is consequently a no-op
+    # tie-break now (there's only ever one match), left in place rather
+    # than special-cased away for the same reason.
     matched = [role_requirements[slug] for slug in user.effective_role_slugs
                if slug in role_requirements and role_requirements[slug] in VALID_POLICY_OVERRIDES]
     for strictest in ("required", "optional", "exempt"):
