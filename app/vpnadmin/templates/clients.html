@@ -184,11 +184,17 @@
 				<div class="field-stack">
 					{% if features.geoip %}
 					<div class="field">
-						<label>Restrict by country <span class="muted">(blank = any country)</span></label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label>Restrict by country <span class="muted">(blank = any country)</span></label>
+							<button type="button" class="link-button" id="policy-country-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<div id="policy-country-ms"></div>
 					</div>
 					<div class="field">
-						<label>Restrict by city <span class="muted">(blank = any city)</span></label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label>Restrict by city <span class="muted">(blank = any city)</span></label>
+							<button type="button" class="link-button" id="policy-city-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint" id="policy-cities-building" style="display:none">City list is still building -- try again shortly.</p>
 						<div class="geo-picker-row">
 							<select id="policy-city-country"><option value="">Loading countries…</option></select>
@@ -196,7 +202,10 @@
 						</div>
 					</div>
 					<div class="field">
-						<label>Restrict by network (ASN) <span class="muted">(blank = any network)</span></label>
+						<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+							<label>Restrict by network (ASN) <span class="muted">(blank = any network)</span></label>
+							<button type="button" class="link-button" id="policy-asn-reset" style="font-size:0.8rem;flex-shrink:0">Reset</button>
+						</div>
 						<p class="field-hint" id="policy-asns-building" style="display:none">Network list is still building -- try again shortly.</p>
 						<div class="geo-picker-row">
 							<select id="policy-asn-country"><option value="">Any country (search all networks)</option></select>
@@ -935,6 +944,9 @@ if (isAdmin) {
 		mountEl: document.getElementById("policy-asns-ms"), countrySelectEl: document.getElementById("policy-asn-country"),
 		kind: "asns", buildingEl: document.getElementById("policy-asns-building"), pickerOpts: ASN_PICKER_OPTS,
 	});
+	wireRestrictionReset("policy-country-reset", policyCountryMs, document.getElementById("policy-country-ms"));
+	wireRestrictionReset("policy-city-reset", policyCitiesMs, document.getElementById("policy-cities-ms"), { countrySelectEl: document.getElementById("policy-city-country") });
+	wireRestrictionReset("policy-asn-reset", policyAsnsMs, document.getElementById("policy-asns-ms"), { countrySelectEl: document.getElementById("policy-asn-country") });
 
 	let policyClientName = null;
 	// Snapshot of the four restriction lists (country/city/asn/ip) as
