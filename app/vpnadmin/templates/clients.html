@@ -440,19 +440,19 @@ function renderClients() {
 		return;
 	}
 
-	// Actions live in their own leftmost column, colorful buttons per row
-	// (Manage MACs/Manage Restrictions/View-Copy .ovpn plus a "More"
-	// dropdown for the rest) -- see initClientRowActions() above for the
-	// single delegated click handler every one of these buttons runs
-	// through. Everything else trimmed from this row (OS, Source IP,
-	// Connected Since, Duration, In MAC DB, Last Seen, the MAC list
-	// itself) lives in the Details dialog instead (openDetailsDialog()),
+	// Actions live in their own rightmost column, plain capsule buttons with
+	// text labels per row (Manage MACs/Manage Restrictions/View-Copy .ovpn
+	// plus a "More" dropdown for the rest) -- see initClientRowActions()
+	// above for the single delegated click handler every one of these
+	// buttons runs through. Everything else trimmed from this row (OS,
+	// Source IP, Connected Since, Duration, In MAC DB, Last Seen, the MAC
+	// list itself) lives in the Details dialog instead (openDetailsDialog()),
 	// one of the "More" items below.
 	el.innerHTML = `<div class="table-scroll"><table>
 		<thead><tr>
-			<th>Actions</th><th>Name</th><th>Status</th><th>Portal User</th>
+			<th>Name</th><th>Status</th><th>Portal User</th>
 			${isAdmin ? "<th>Bandwidth (this month)</th>" : ""}
-			<th>RX / TX</th><th>Restrictions</th>
+			<th>RX / TX</th><th>Restrictions</th><th>Actions</th>
 		</tr></thead>
 		<tbody>${filtered.map(({ c, s, online }) => {
 			const policy = lastPoliciesByName[c.name];
@@ -460,31 +460,31 @@ function renderClients() {
 			const session = lastSessionsByName[c.name];
 			const n = escapeHtml(c.name);
 			return `<tr data-name="${n}" class="${online ? "row-online" : ""}">
-				<td><div class="row-actions">
-					<button type="button" class="btn-row-action c-teal" data-action="macs" data-name="${n}" title="Manage MACs" aria-label="Manage MACs for ${n}"><span aria-hidden="true">◇</span></button>
-					${isAdmin ? `
-					<button type="button" class="btn-row-action c-amber" data-action="policy" data-name="${n}" title="Manage Restrictions" aria-label="Manage Restrictions for ${n}"><span aria-hidden="true">⛨</span></button>
-					<button type="button" class="btn-row-action c-sky" data-action="ovpn" data-name="${n}" title="View / Copy .ovpn" aria-label="View or copy .ovpn profile for ${n}"><span aria-hidden="true">⭳</span></button>
-					<div class="client-actions-menu">
-						<button type="button" class="btn-row-action c-violet client-actions-toggle" data-name="${n}" aria-haspopup="true" aria-expanded="false" title="More actions" aria-label="More actions for ${n}"><span aria-hidden="true">⋯</span></button>
-						<div class="client-actions-panel" style="display:none">
-							<button type="button" class="client-actions-item c-indigo" data-action="details" data-name="${n}"><span class="btn-icon">ℹ</span>Details</button>
-							<button type="button" class="client-actions-item c-purple" data-action="monitoring" data-name="${n}"><span class="btn-icon">◉</span>Manage Monitoring</button>
-							<button type="button" class="client-actions-item c-blue" data-action="email" data-name="${n}"><span class="btn-icon">✉</span>Email Profile</button>
-							<button type="button" class="client-actions-item c-amber" data-action="reset-usage" data-name="${n}"><span class="btn-icon">↺</span>Reset Usage</button>
-							<div class="client-actions-divider"></div>
-							<button type="button" class="client-actions-item danger" data-action="disconnect" data-name="${n}" ${online ? "" : "disabled"}><span class="btn-icon">✕</span>Disconnect</button>
-							<button type="button" class="client-actions-item danger" data-action="revoke" data-name="${n}"><span class="btn-icon">⛔</span>Revoke</button>
-						</div>
-					</div>` : `
-					<button type="button" class="btn-row-action c-indigo" data-action="details" data-name="${n}" title="Details" aria-label="Details for ${n}"><span aria-hidden="true">ℹ</span></button>`}
-				</div></td>
 				<td>${escapeHtml(c.name)}</td>
 				<td><span class="status-pill status-${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span></td>
 				<td>${linkedUser ? escapeHtml(linkedUser.display_name || linkedUser.username) : '<span class="muted">-</span>'}</td>
 				${isAdmin ? `<td>${bandwidthUsageHtml(policy, lastUsageByName[c.name])}</td>` : ""}
 				<td class="mono">${session ? `${fmtBytes(session.bytes_received)} / ${fmtBytes(session.bytes_sent)}` : '<span class="muted">—</span>'}</td>
 				<td>${restrictionChipsHtml(policy) || '<span class="muted">—</span>'}</td>
+				<td><div class="row-actions">
+					<button type="button" class="btn-secondary btn-sm" data-action="macs" data-name="${n}"><span class="btn-icon">◇</span>Manage MACs</button>
+					${isAdmin ? `
+					<button type="button" class="btn-secondary btn-sm" data-action="policy" data-name="${n}"><span class="btn-icon">⛨</span>Manage Restrictions</button>
+					<button type="button" class="btn-secondary btn-sm" data-action="ovpn" data-name="${n}"><span class="btn-icon">⭳</span>View / Copy .ovpn</button>
+					<div class="client-actions-menu">
+						<button type="button" class="btn-secondary btn-sm client-actions-toggle" data-name="${n}" aria-haspopup="true" aria-expanded="false">More<span class="dropdown-caret"></span></button>
+						<div class="client-actions-panel" style="display:none">
+							<button type="button" class="client-actions-item" data-action="details" data-name="${n}"><span class="btn-icon">ℹ</span>Details</button>
+							<button type="button" class="client-actions-item" data-action="monitoring" data-name="${n}"><span class="btn-icon">◉</span>Manage Monitoring</button>
+							<button type="button" class="client-actions-item" data-action="email" data-name="${n}"><span class="btn-icon">✉</span>Email Profile</button>
+							<button type="button" class="client-actions-item" data-action="reset-usage" data-name="${n}"><span class="btn-icon">↺</span>Reset Usage</button>
+							<div class="client-actions-divider"></div>
+							<button type="button" class="client-actions-item danger" data-action="disconnect" data-name="${n}" ${online ? "" : "disabled"}><span class="btn-icon">✕</span>Disconnect</button>
+							<button type="button" class="client-actions-item danger" data-action="revoke" data-name="${n}"><span class="btn-icon">⛔</span>Revoke</button>
+						</div>
+					</div>` : `
+					<button type="button" class="btn-secondary btn-sm" data-action="details" data-name="${n}"><span class="btn-icon">ℹ</span>Details</button>`}
+				</div></td>
 			</tr>`;
 		}).join("")}</tbody>
 	</table></div>`;
