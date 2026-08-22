@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from .auth import require_user
 from .db import get_db
-from .models import ApiScope, ObjectPermission, RoleApiScope, RoleDef, RoleKind, User
+from .models import ApiScope, ObjectPermission, RoleApiScope, RoleDef, RoleKind, User, team_role_defs
 
 # object_key -> display name, shown in the Roles Management permission-
 # matrix UI (Phase 5) and used nowhere else structurally -- this dict is the
@@ -262,34 +262,92 @@ def migrate_user_roles(db: Session) -> None:
         db.commit()
 
 
+def effective_role_ids(db: Session, user: User) -> set[int]:
+    """Team-Based Permissions Phase 1: the full set of role_ids a user's
+    access is evaluated against -- their own direct `role_id` (if set) UNION
+    every role_id assigned (via team_role_defs) to any team they belong to
+    (via the existing user_teams membership). Teams only ever ADD roles on
+    top of a user's own direct role -- they never remove or restrict it, so
+    this is a pure union, never a replacement.
+
+    Backward-compatibility guarantee: a user in zero teams, or in team(s)
+    with zero assigned roles, gets back EXACTLY {user.role_id} (or an empty
+    set if role_id is unset) -- byte-for-byte the same effective role a
+    single `_has_permission(db, user.role_id, ...)` lookup would have used
+    before this function existed. See test_permissions.py's
+    TestEffectiveRoleIds for the explicit regression tests backing this
+    claim -- every existing deployment (no teams with roles assigned yet)
+    must see zero behavior change the moment this ships."""
+    ids: set[int] = set()
+    if user.role_id is not None:
+        ids.add(user.role_id)
+    team_ids = [t.id for t in user.teams]
+    if team_ids:
+        rows = db.query(team_role_defs.c.role_id).filter(team_role_defs.c.team_id.in_(team_ids)).distinct().all()
+        ids.update(row[0] for row in rows)
+    return ids
+
+
 def has_permission(db: Session, user: User, object_key: str, action: str) -> bool:
     """Non-raising counterpart to require_permission, for callers that need
     a plain bool rather than a 403 -- e.g. routes/pages.py's server-rendered
     nav/redirect guards, which can't use a Depends()-raised HTTPException
     the way API routes do."""
-    return _has_permission(db, user.role_id, object_key, action)
+    return _has_permission(db, effective_role_ids(db, user), object_key, action)
 
 
-def _scope_for(db: Session, role_id: int, object_key: str) -> ApiScope:
-    row = db.query(RoleApiScope).filter_by(role_id=role_id, object_key=object_key).first()
-    return row.scope if row is not None else ApiScope.any
+def _granting_role_ids(db: Session, role_ids: set[int], object_key: str, action: str) -> set[int]:
+    """Which of `role_ids` individually grant {action} on {object_key} --
+    the set-aware core of the old single-role _has_permission check, kept
+    as its own helper because scope resolution (_effective_scope below)
+    needs to know WHICH roles actually granted access, not just whether at
+    least one did. Fail-closed per role (a role with no ObjectPermission
+    row for this object grants nothing), fail-open across the set (only
+    one granting role is needed) -- same posture require_permission has
+    always had for a single role, just extended from 1 role to N."""
+    if not role_ids:
+        return set()
+    perms = db.query(ObjectPermission).filter(
+        ObjectPermission.role_id.in_(role_ids), ObjectPermission.object_key == object_key
+    ).all()
+    # can_manage is a superset: full control, unlocks every action -- see
+    # ObjectPermission's docstring -- same rule the old single-role check applied.
+    return {p.role_id for p in perms if p.can_manage or getattr(p, f"can_{action}", False)}
 
 
-def _has_permission(db: Session, role_id: int | None, object_key: str, action: str) -> bool:
-    if role_id is None:
-        return False
-    perm = db.query(ObjectPermission).filter_by(role_id=role_id, object_key=object_key).first()
-    if perm is None:
-        return False
-    if perm.can_manage:  # superset: full control, unlocks every action -- see ObjectPermission's docstring
-        return True
-    return getattr(perm, f"can_{action}", False)
+def _has_permission(db: Session, role_ids: set[int], object_key: str, action: str) -> bool:
+    return bool(_granting_role_ids(db, role_ids, object_key, action))
+
+
+def _effective_scope(db: Session, granting_role_ids: set[int], object_key: str) -> ApiScope:
+    """Least-restrictive scope across `granting_role_ids` (roles already
+    confirmed to grant the permission being checked, see
+    _granting_role_ids) -- if ANY of them has "any" scope for this object
+    (including the default: no RoleApiScope row at all), the union is
+    "any"; only when EVERY granting role is explicitly scoped "own" does
+    the union stay "own". Same fail-open-across-the-set posture as
+    _has_permission above: a single role with unrestricted access already
+    grants unrestricted access, regardless of how many other roles in the
+    set are more restricted. Only ever called with a non-empty set (every
+    caller checks _has_permission/_granting_role_ids first)."""
+    scoped = {s.role_id: s.scope for s in db.query(RoleApiScope).filter(
+        RoleApiScope.role_id.in_(granting_role_ids), RoleApiScope.object_key == object_key
+    ).all()}
+    for role_id in granting_role_ids:
+        if scoped.get(role_id, ApiScope.any) == ApiScope.any:
+            return ApiScope.any
+    return ApiScope.own
 
 
 def require_permission(object_key: str, action: str) -> Callable[..., User]:
     """For any route needing 'this role can {action} on {object_key}'.
     Fail-closed: no row, or role_id unset (still-mid-Phase-2 accounts), means
     403. `object_key` must be a key in OBJECTS; `action` one of ACTIONS.
+
+    Checks the caller's full effective_role_ids (own role_id plus every
+    role granted via team membership, see effective_role_ids) -- ANY one of
+    them granting the permission is enough, same union semantics a single
+    role's own permissions have always had.
 
     Does NOT check scope -- a role scoped "own" for this object (e.g.
     the "User" self-service role on "vpn_profiles") still passes here, since it does
@@ -299,7 +357,7 @@ def require_permission(object_key: str, action: str) -> Callable[..., User]:
     must use require_permission_any_scope below instead, or an "own"-scoped
     role would see every other user's records too."""
     def _dep(user: User = Depends(require_user), db: Session = Depends(get_db)) -> User:
-        if not _has_permission(db, user.role_id, object_key, action):
+        if not _has_permission(db, effective_role_ids(db, user), object_key, action):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing '{action}' permission on '{object_key}'.",
@@ -312,11 +370,10 @@ def has_permission_any_scope(db: Session, user: User, object_key: str, action: s
     """Non-raising counterpart to require_permission_any_scope, for
     routes/pages.py's redirect-style guards -- same reasoning as
     has_permission above."""
-    if not _has_permission(db, user.role_id, object_key, action):
+    granting = _granting_role_ids(db, effective_role_ids(db, user), object_key, action)
+    if not granting:
         return False
-    if user.role_id is not None and _scope_for(db, user.role_id, object_key) == ApiScope.own:
-        return False
-    return True
+    return _effective_scope(db, granting, object_key) != ApiScope.own
 
 
 def require_permission_any_scope(object_key: str, action: str) -> Callable[..., User]:
@@ -342,20 +399,22 @@ def require_permission_any_scope(object_key: str, action: str) -> Callable[..., 
 def require_own_or_permission(
     object_key: str, action: str, owner_username: Callable[[Request], str | None]
 ) -> Callable[..., User]:
-    """Like require_permission, but if the caller's role is scoped "own" for
-    this object, additionally requires owner_username(request) == the
-    caller's own username. owner_username typically pulls a path param or
-    resolves the record being acted on (e.g. the username on a
-    VpnProfileLink) -- return None if the target record doesn't exist, which
-    this treats as "not the caller's own" (403, not 404 -- existing routes
-    still do their own 404 handling after this dependency passes)."""
+    """Like require_permission, but if every one of the caller's granting
+    roles is scoped "own" for this object, additionally requires
+    owner_username(request) == the caller's own username. owner_username
+    typically pulls a path param or resolves the record being acted on
+    (e.g. the username on a VpnProfileLink) -- return None if the target
+    record doesn't exist, which this treats as "not the caller's own" (403,
+    not 404 -- existing routes still do their own 404 handling after this
+    dependency passes)."""
     def _dep(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)) -> User:
-        if not _has_permission(db, user.role_id, object_key, action):
+        granting = _granting_role_ids(db, effective_role_ids(db, user), object_key, action)
+        if not granting:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing '{action}' permission on '{object_key}'.",
             )
-        if user.role_id is not None and _scope_for(db, user.role_id, object_key) == ApiScope.own:
+        if _effective_scope(db, granting, object_key) == ApiScope.own:
             target_username = owner_username(request)
             if target_username is None or target_username != user.username:
                 raise HTTPException(

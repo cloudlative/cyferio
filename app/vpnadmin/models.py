@@ -141,6 +141,12 @@ class Team(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     members = relationship("User", secondary="user_teams", back_populates="teams", order_by="User.username")
+    # Roles assigned to this team (Phase 1 of Team-Based Permissions -- see
+    # team_role_defs above) -- every current member inherits every one of
+    # these roles' permissions on top of their own direct role_id. Zero rows
+    # here (the pre-Phase-1 default for every existing team) means this
+    # team grants nothing extra, matching today's behavior exactly.
+    role_defs = relationship("RoleDef", secondary="team_role_defs", order_by="RoleDef.name")
 
     @validates("name")
     def _normalize_name(self, key, value):
@@ -163,6 +169,41 @@ user_teams = Table(
     Base.metadata,
     Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
     Column("team_id", Integer, ForeignKey("teams.id"), primary_key=True),
+)
+
+
+# Pure association table for the many-to-many Team<->RoleDef assignment --
+# Phase 1 of Team-Based Permissions/Roles/Policy Inheritance (teams as
+# role containers: an admin assigns a role to a team ONCE and every current
+# member inherits it, instead of setting role_id on N users individually).
+# Same shape/reasoning as user_teams above -- a composite primary key is
+# enough (a given team/role pair can only be linked once), and no extra
+# columns are needed today: WHO assigned/removed a role and WHEN is
+# captured via AuditLog's team_role_assigned/team_role_removed actions
+# (routes/teams.py), not duplicated here, same "AuditLog is the audit
+# trail, not this table" stance ObjectPermission/RoleApiScope already take.
+#
+# Deliberately does NOT touch User.role_id, which stays the single direct
+# role it's always been -- a team's roles are purely ADDITIVE on top of
+# whatever a user's own role_id already grants (see permissions.py's
+# effective_role_ids, the union of a user's own role_id plus every role_id
+# reachable through team_role_defs for each team they belong to). A user in
+# no teams, or in teams with zero assigned roles, resolves to EXACTLY the
+# same single-role permission set as before this table existed -- that
+# backward-compatibility guarantee is asserted explicitly in
+# test_permissions.py.
+#
+# ondelete=CASCADE on both FKs: deleting a team or a role should silently
+# drop the assignment row rather than leave an orphaned reference (Postgres
+# enforces this at the DB level in production; routes/roles.py's delete_role
+# additionally refuses to delete a role still assigned to a team at the
+# application level, mirroring its existing "still assigned to N users"
+# guard, so this FK is defense-in-depth, not the primary guard).
+team_role_defs = Table(
+    "team_role_defs",
+    Base.metadata,
+    Column("team_id", Integer, ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True),
+    Column("role_id", Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
 )
 
 

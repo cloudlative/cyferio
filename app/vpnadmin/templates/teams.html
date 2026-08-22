@@ -95,6 +95,20 @@
 	</form>
 	{% endif %}
 	<div id="team-detail-table"></div>
+	{% if can_manage_teams %}
+	<div id="team-roles-panel" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+		<h3 style="margin:0 0 4px">Assigned Roles</h3>
+		<p class="muted" style="margin:0 0 12px;font-size:0.82rem">Every role assigned here is inherited by every current member of this team, on top of their own role.</p>
+		<div id="team-roles-chips" style="margin-bottom:12px"></div>
+		<form id="add-team-role-form" class="form-row">
+			<div class="field" style="flex:2">
+				<label for="add-team-role-select">Assign a role</label>
+				<select id="add-team-role-select"></select>
+			</div>
+			<button type="submit" class="btn-secondary">Assign Role</button>
+		</form>
+	</div>
+	{% endif %}
 </div>
 {% endblock %}
 
@@ -112,6 +126,7 @@ const canManageTeams = {{ "true" if can_manage_teams else "false" }};
 const canManageUsers = {{ "true" if is_admin else "false" }};
 let lastTeams = [];
 let allUsers = [];
+let allRoles = []; // populated only when canManageTeams -- GET /api/teams/available-roles is gated on teams:manage
 let currentTeamId = "unassigned";
 let teamDetailOpen = false; // tracks whether the detail card is actually showing, so clicking the already-open team's row again toggles it closed
 let teamEditDirty; // assigned below, only when canManageTeams -- the edit panel doesn't exist in the DOM otherwise
@@ -138,11 +153,14 @@ function renderSummary() {
 async function loadTeams() {
 	const grid = document.getElementById("team-grid");
 	try {
-		const requests = [apiFetch("/api/teams")];
-		if (canManageUsers) requests.push(apiFetch("/api/users"));
-		const [teams, users] = await Promise.all(requests);
+		const [teams, users, roles] = await Promise.all([
+			apiFetch("/api/teams"),
+			canManageUsers ? apiFetch("/api/users") : Promise.resolve([]),
+			canManageTeams ? apiFetch("/api/teams/available-roles") : Promise.resolve([]),
+		]);
 		lastTeams = teams;
 		if (canManageUsers) allUsers = users;
+		if (canManageTeams) allRoles = roles;
 		renderSummary();
 		if (lastTeams.length === 0) {
 			grid.innerHTML = '<div class="empty-state">No teams yet.</div>';
@@ -290,7 +308,50 @@ function showTeam(id) {
 			});
 		}
 	}
+	if (canManageTeams) renderTeamRoles(team);
 	document.getElementById("team-detail-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+// Assigned Roles panel -- Team-Based Permissions Phase 1. Shown only for a
+// real team (not the synthetic "Unassigned" bucket, which has no id and
+// can't be assigned roles); the panel element itself only exists in the
+// DOM at all when canManageTeams (see the can_manage_teams guard around
+// #team-roles-panel in the template above).
+function renderTeamRoles(team) {
+	const panel = document.getElementById("team-roles-panel");
+	const isRealTeam = team.id != null;
+	panel.style.display = isRealTeam ? "" : "none";
+	if (!isRealTeam) return;
+	const chips = document.getElementById("team-roles-chips");
+	chips.innerHTML = team.roles.length
+		? team.roles.map(r => `
+			<span class="restriction-chip" data-role-id="${r.id}" style="margin:0 6px 6px 0;display:inline-flex;align-items:center;gap:6px">
+				${escapeHtml(r.name)}
+				<button type="button" class="chip-remove-btn remove-team-role-btn" aria-label="Remove ${escapeHtml(r.name)}" style="border:none;background:none;cursor:pointer;padding:0;line-height:1">&times;</button>
+			</span>`).join("")
+		: '<span class="muted" style="font-size:0.85rem">No roles assigned -- members inherit only their own individual role.</span>';
+	chips.querySelectorAll(".remove-team-role-btn").forEach(btn => {
+		btn.addEventListener("click", async () => {
+			const roleId = btn.closest("[data-role-id]").dataset.roleId;
+			try {
+				await apiFetch(`/api/teams/${team.id}/roles/${roleId}`, { method: "DELETE" });
+				toast("Role removed from team.");
+				await loadTeams();
+				showTeam(currentTeamId);
+			} catch (e) {
+				toast(e.message, "error");
+			}
+		});
+	});
+	const assignedIds = new Set(team.roles.map(r => r.id));
+	const candidates = allRoles.filter(r => !assignedIds.has(r.id));
+	const select = document.getElementById("add-team-role-select");
+	select.innerHTML = candidates.length
+		? candidates.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join("")
+		: '<option value="">No other roles available</option>';
+	select.disabled = candidates.length === 0;
+	const form = document.getElementById("add-team-role-form");
+	form.querySelector("button[type=submit]").disabled = candidates.length === 0;
 }
 
 if (canManageTeams) {
@@ -356,6 +417,21 @@ if (canManageTeams) {
 		try {
 			await apiFetch(`/api/teams/${team.id}/members`, { method: "POST", body: { user_id: Number(userId) } });
 			toast("Member added to team.");
+			await loadTeams();
+			showTeam(currentTeamId);
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+
+	document.getElementById("add-team-role-form").addEventListener("submit", async (ev) => {
+		ev.preventDefault();
+		const team = lastTeams.find(t => String(t.id) === String(currentTeamId));
+		const roleId = document.getElementById("add-team-role-select").value;
+		if (!team || !roleId) return;
+		try {
+			await apiFetch(`/api/teams/${team.id}/roles`, { method: "POST", body: { role_id: Number(roleId) } });
+			toast("Role assigned to team.");
 			await loadTeams();
 			showTeam(currentTeamId);
 		} catch (e) {
