@@ -346,11 +346,19 @@ jobs:
   test:
     name: Test
     # `inputs.run_tests` is only populated on a workflow_dispatch/
-    # workflow_call trigger -- on a plain pull_request run it resolves to
-    # null, and `null != false` is true, so the job still runs by default
-    # there too. Only an explicit `false` (dispatch input unchecked, or
-    # build.yml passing run_tests: false) skips it.
-    if: ${{ inputs.run_tests != false }}
+    # workflow_call trigger. The comment that used to be here claimed a
+    # plain pull_request run resolves `inputs.run_tests` to null and that
+    # `null != false` is true there -- confirmed live (PR #63,
+    # 2026-08-22) that this is WRONG: GitHub Actions' expression engine
+    # coerces null to false for this comparison, so `inputs.run_tests !=
+    # false` evaluates to `false != false` -> false, and the job silently
+    # skipped on every ordinary PR, never actually gating merges into
+    # master. Fixed by short-circuiting on the event type itself instead
+    # of trusting the inputs/null comparison: a plain pull_request run
+    # always runs the suite, full stop; only workflow_dispatch/
+    # workflow_call (dispatch input unchecked, or build.yml passing
+    # run_tests: false for a release build) can skip it.
+    if: ${{ github.event_name == 'pull_request' || inputs.run_tests != false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     defaults:
