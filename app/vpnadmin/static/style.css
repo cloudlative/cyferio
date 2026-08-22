@@ -2049,6 +2049,20 @@ tr.group-row.group-row-selected td { background: var(--surface-alt); box-shadow:
    squeezed unreadably narrow on a small viewport. */
 .traefik-subsection-grid-2col { grid-template-columns: 1fr 1fr; }
 @media (max-width: 560px) { .traefik-subsection-grid-2col { grid-template-columns: 1fr; } }
+/* Vertical rule between "By service" and "By entrypoint" -- requested
+   specifically for this pair, not Entrypoints/Middlewares below it (same
+   grid class, deliberately left untouched), so this lives on its own
+   modifier rather than .traefik-subsection-grid-2col itself. Sits on the
+   first child's own edge, inside the existing 24px gap, rather than
+   adding extra padding that would need compensating for elsewhere. */
+.traefik-metrics-grid > div:first-child { border-right: 1px solid var(--border-light); }
+@media (max-width: 560px) { .traefik-metrics-grid > div:first-child { border-right: none; } }
+/* Only this one pair overrides the grid's own align-items: start (see
+   .traefik-subsection-grid's comment on why that's the default) --
+   without it, the border-right above only runs as tall as "By service"'s
+   own content, stopping short of a taller "By entrypoint" list instead of
+   reading as a full-height rule between the two. */
+.traefik-metrics-grid { align-items: stretch; }
 /* Small label ("Entrypoints:", "Middlewares:", "By service:", "By
    entrypoint:") sitting directly above its own kv-list -- one consistent
    style for all four instead of two of them being full <h3> headings and
