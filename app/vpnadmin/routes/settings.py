@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy.orm import Session
 
-from .. import captcha, mailer, policy_store
+from .. import captcha, mailer, notification_prefs, policy_store
 from ..app_settings import ACTIVE_THEME_IDS, SECRET_PLACEHOLDER, THEME_CHOICES, get_settings_row, refresh_runtime_cache, runtime
 from ..audit import log_action
 from ..config import settings as env_settings
@@ -51,6 +51,12 @@ class UpdateSettingsRequest(BaseModel):
     support_max_attachment_size_mb: int | None = None
     support_max_attachments_per_message: int | None = None
     notify_admin_on_ticket_created: bool | None = None
+    # Per-event granular replacement for notify_admin_on_ticket_created
+    # above (see notification_prefs.TICKET_EMAIL_EVENTS) -- {} is a valid
+    # request meaning "turn every ticket admin email off", same "merge
+    # with current, don't replace wholesale" handling as Slack's own
+    # notify_types below (see update_settings()).
+    ticket_email_notify_types: dict[str, bool] | None = None
     ticket_duplicate_window_minutes: int | None = None
 
     # Multi-Factor Authentication (TOTP) -- see mfa.py's effective_policy /
@@ -87,6 +93,13 @@ class UpdateSettingsRequest(BaseModel):
     quota_notify_warning_pct: int | None = None
     quota_notify_critical_pct: int | None = None
     notify_admin_on_quota_critical: bool | None = None
+
+    # In-app notification bell -- per-event control over which events from
+    # Support Center/Bandwidth Quota/System Audit actually get written to
+    # a user's bell (see notification_prefs.BELL_EVENT_GROUPS). Spans
+    # several existing feature areas above rather than belonging to any
+    # one of them, hence its own standalone field here.
+    bell_notify_types: dict[str, bool] | None = None
 
     reports_default_range_days: int | None = None
     db_snapshot_retention_days: int | None = None
@@ -289,6 +302,26 @@ class UpdateSettingsRequest(BaseModel):
                 raise ValueError(f"MFA requirement for role '{slug}' must be one of: {', '.join(VALID_POLICY_OVERRIDES)}.")
         return v
 
+    @field_validator("ticket_email_notify_types")
+    @classmethod
+    def _ticket_email_notify_types_keys(cls, v: dict[str, bool] | None) -> dict[str, bool] | None:
+        if v is None:
+            return v
+        unknown = set(v) - notification_prefs.TICKET_EMAIL_KEYS
+        if unknown:
+            raise ValueError(f"Unknown ticket email notification type(s): {', '.join(sorted(unknown))}.")
+        return v
+
+    @field_validator("bell_notify_types")
+    @classmethod
+    def _bell_notify_types_keys(cls, v: dict[str, bool] | None) -> dict[str, bool] | None:
+        if v is None:
+            return v
+        unknown = set(v) - notification_prefs.BELL_EVENT_KEYS
+        if unknown:
+            raise ValueError(f"Unknown bell notification type(s): {', '.join(sorted(unknown))}.")
+        return v
+
     @field_validator("release_check_interval_minutes")
     @classmethod
     def _release_check_interval(cls, v):
@@ -429,7 +462,14 @@ def _serialize() -> dict:
         "support_max_attachments_per_message": (
             s.support_max_attachments_per_message if s.support_max_attachments_per_message is not None else 5
         ),
-        "notify_admin_on_ticket_created": bool(s.notify_admin_on_ticket_created),
+        # notify_admin_on_ticket_created itself is deliberately NOT
+        # serialized here any more -- superseded by ticket_email_notify_
+        # types below (see models.AppSettings' own comment on why it's
+        # left in place, unread, past its one-time migration seed).
+        "ticket_email_notify_types": notification_prefs.effective_ticket_email_types(s.ticket_email_notify_types),
+        "ticket_email_events": notification_prefs.ticket_email_events_for_form(),
+        "bell_notify_types": notification_prefs.effective_bell_types(s.bell_notify_types),
+        "bell_event_groups": notification_prefs.bell_event_groups_for_form(),
         "ticket_duplicate_window_minutes": (
             s.ticket_duplicate_window_minutes if s.ticket_duplicate_window_minutes is not None else 1440
         ),
@@ -549,6 +589,28 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
         if new_value != row.mfa_role_requirements:
             row.mfa_role_requirements = new_value
             changes.append("mfa_role_requirements")
+
+    # ticket_email_notify_types/bell_notify_types: merged with the
+    # CURRENT effective values, not stored as a wholesale replacement --
+    # same reasoning as Slack's own notify_types PATCH handling below
+    # (update_slack_settings): the frontend's checkbox grid always submits
+    # every key that's currently rendered, but only the keys an admin
+    # actually checked/unchecked should really need to change, and merging
+    # (rather than replacing) means a future new event type added to
+    # notification_prefs.py that an older cached page doesn't know about
+    # yet can't get silently reset to its default by an unrelated save.
+    if "ticket_email_notify_types" in fields_set:
+        current = notification_prefs.effective_ticket_email_types(row.ticket_email_notify_types)
+        merged = {**current, **body.ticket_email_notify_types}
+        if merged != current:
+            row.ticket_email_notify_types = json.dumps(merged)
+            changes.append("ticket_email_notify_types")
+    if "bell_notify_types" in fields_set:
+        current = notification_prefs.effective_bell_types(row.bell_notify_types)
+        merged = {**current, **body.bell_notify_types}
+        if merged != current:
+            row.bell_notify_types = json.dumps(merged)
+            changes.append("bell_notify_types")
 
     # Secret-bearing fields: an incoming value exactly equal to
     # SECRET_PLACEHOLDER means "unchanged" (the Settings page always

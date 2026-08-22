@@ -697,7 +697,37 @@ class AppSettings(Base):
     # Same notify_admin_on_* pattern as notify_admin_on_user_created/
     # notify_admin_on_client_revoked -- gated by admin_notification_email
     # being set (see routes/settings.py's notify_fields check).
+    # SUPERSEDED by ticket_email_notify_types below (per-event granularity,
+    # see notification_prefs.py) -- left in place, read exactly once by
+    # app_settings.migrate_ticket_email_notify_types() to seed that new
+    # column's initial value on upgrade, then otherwise inert/unread. Same
+    # "leave the old column as dead data" precedent as User.role/role_id
+    # after the Team->Group rename.
     notify_admin_on_ticket_created = Column(Boolean, nullable=True)
+    # JSON {event_type: bool} -- per-event granular control over which
+    # ticket events send an admin EMAIL (see notification_prefs.py's
+    # TICKET_EMAIL_EVENTS for the exact event list and
+    # notification_prefs.effective_ticket_email_types for the "a key
+    # missing from this JSON defaults to False" semantics, mirroring
+    # notify_admin_on_ticket_created's own historical default-off stance).
+    # Replaces that one coarse toggle with Slack Integration's own
+    # per-event-checkbox UX (slack_notifications.py's notify_types is the
+    # direct template this followed). NULL until either an admin saves
+    # this section for the first time, or migrate_ticket_email_notify_types
+    # backfills it once from the legacy toggle above.
+    ticket_email_notify_types = Column(Text, nullable=True)
+    # JSON {event_type: bool} -- per-event granular control over which
+    # events actually get written to a user's in-app notification bell
+    # (see notification_prefs.py's BELL_EVENT_GROUPS for the full event
+    # list spanning Support Center/Bandwidth Quota/System Audit, and
+    # notification_prefs.effective_bell_types for the "a key missing from
+    # this JSON defaults to True" semantics -- unlike the email toggle
+    # above, there was never a prior per-event (or even per-category) bell
+    # toggle at all: the bell has always shown every one of these
+    # unconditionally, so a brand new deployment's default must be
+    # "everything on" to keep behaving exactly as before until an admin
+    # opts something out).
+    bell_notify_types = Column(Text, nullable=True)
     # Duplicate Cleanup Tools -- the "created within a configurable time
     # window of each other" heuristic used by GET /api/tickets/
     # duplicate-clusters (routes/tickets.py) to group candidate duplicates

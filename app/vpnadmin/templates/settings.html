@@ -272,9 +272,9 @@
 			</div>
 		</div>
 		<p class="field-hint">Allowed attachment types (images, PDF, txt/log/csv, zip) are fixed and not configurable here. The Duplicate Detection Window controls how close together (in time) two tickets must be created to be surfaced as a candidate duplicate cluster in Support Center's Duplicate Cleanup tool.</p>
-		<div class="checkbox-row" style="margin-top:12px">
-			<label class="checkbox-label"><input type="checkbox" id="s-notify-ticket-created"> Email me on new tickets, user replies, reopened tickets, and critical-priority tickets</label>
-		</div>
+		<h3 style="margin:18px 0 4px">Ticket Email Notifications</h3>
+		<p class="muted" style="margin:0 0 10px;font-size:0.85rem">Which ticket events send YOU (the admin) an email -- same per-event control as Slack Integration below. This is independent of what a ticket's own creator gets emailed (they're always notified of replies/status changes on their own ticket, regardless of these).</p>
+		<div id="ticket-email-notify-types" class="notify-groups-grid"></div>
 	</div>
 
 	<div class="card">
@@ -400,6 +400,9 @@
 			<label class="checkbox-label"><input type="checkbox" id="s-notify-quota-critical"> Email me when a user hits the critical quota threshold</label>
 		</div>
 		<p class="muted" style="margin:10px 0 0;font-size:0.82rem">Users are always shown their own bandwidth quota warnings in-app (bell icon) at both thresholds -- these two fields set where those thresholds sit; the checkbox above is only about the admin's own email copy at the critical threshold.</p>
+		<h3 style="margin:18px 0 4px">In-App Notifications (Bell)</h3>
+		<p class="muted" style="margin:0 0 10px;font-size:0.85rem">Which events actually appear in a user's own notification bell (top-right corner) -- unchecking a type here doesn't stop it from happening, just from being shown there. Independent of the email/Slack controls elsewhere on this page; each account only ever sees its own notifications regardless of this setting.</p>
+		<div id="bell-notify-types" class="notify-groups-grid"></div>
 	</div>
 
 	<div class="card">
@@ -659,6 +662,31 @@ function populateTimezoneSelect(current) {
 	select.value = current || "UTC";
 }
 
+// Shared renderer for a "one checkbox per event type, optionally grouped
+// under a category heading" grid -- the exact same UX Slack Integration
+// pioneered (see loadSlackSettings below), now reused for Ticket Email
+// Notifications and In-App Notifications (Bell) too rather than each
+// hand-rolling its own copy. `groups` is [{group: "Label"|null, options:
+// [{key, label}]}] -- a null group renders its options with no <strong>
+// heading (Ticket Email Notifications has only one implicit category, so
+// a heading would be redundant); `current` is {key: bool}; `cssClass` is
+// the class every rendered checkbox gets, used to gather values back out
+// on save (see e.g. the ticket-email-notify-type / bell-notify-type
+// querySelectorAll calls in this page's save handlers).
+function renderNotifyTypeCheckboxes(container, groups, current, cssClass) {
+	container.innerHTML = groups.map(group => `
+		<div>
+			${group.group ? `<strong style="font-size:0.85rem">${escapeHtml(group.group)}</strong>` : ""}
+			<div class="checkbox-col">
+				${group.options.map(o => `
+					<label class="checkbox-label">
+						<input type="checkbox" class="${cssClass}" data-key="${escapeHtml(o.key)}" ${current[o.key] ? "checked" : ""}>
+						${escapeHtml(o.label)}
+					</label>`).join("")}
+			</div>
+		</div>`).join("");
+}
+
 // SMTP lock/edit UX -- a new pattern for this app (no existing "locked
 // until Edit is clicked" precedent elsewhere), kept deliberately simple:
 async function loadSettings() {
@@ -683,7 +711,15 @@ async function loadSettings() {
 		setVal("s-support-max-attachment-size", s.support_max_attachment_size_mb != null ? s.support_max_attachment_size_mb : 10);
 		setVal("s-support-max-attachments", s.support_max_attachments_per_message != null ? s.support_max_attachments_per_message : 5);
 		setVal("s-ticket-duplicate-window", s.ticket_duplicate_window_minutes != null ? s.ticket_duplicate_window_minutes : 1440);
-		document.getElementById("s-notify-ticket-created").checked = !!s.notify_admin_on_ticket_created;
+		renderNotifyTypeCheckboxes(
+			document.getElementById("ticket-email-notify-types"),
+			[{ group: null, options: s.ticket_email_events || [] }],
+			s.ticket_email_notify_types || {}, "ticket-email-notify-type",
+		);
+		renderNotifyTypeCheckboxes(
+			document.getElementById("bell-notify-types"),
+			s.bell_event_groups || [], s.bell_notify_types || {}, "bell-notify-type",
+		);
 		setVal("s-devmon-interval", s.device_monitoring_check_interval_minutes != null ? s.device_monitoring_check_interval_minutes : 5);
 		document.getElementById("s-devmon-default-threshold").value = String(s.device_monitoring_default_offline_threshold_minutes != null ? s.device_monitoring_default_offline_threshold_minutes : 15);
 		setVal("s-devmon-default-cooldown", s.device_monitoring_default_cooldown_minutes != null ? s.device_monitoring_default_cooldown_minutes : 60);
@@ -988,7 +1024,12 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		support_max_attachment_size_mb: intOrNull(val("s-support-max-attachment-size")),
 		support_max_attachments_per_message: intOrNull(val("s-support-max-attachments")),
 		ticket_duplicate_window_minutes: intOrNull(val("s-ticket-duplicate-window")),
-		notify_admin_on_ticket_created: document.getElementById("s-notify-ticket-created").checked,
+		ticket_email_notify_types: Object.fromEntries(
+			[...document.querySelectorAll(".ticket-email-notify-type")].map(el => [el.dataset.key, el.checked])
+		),
+		bell_notify_types: Object.fromEntries(
+			[...document.querySelectorAll(".bell-notify-type")].map(el => [el.dataset.key, el.checked])
+		),
 		device_monitoring_check_interval_minutes: intOrNull(val("s-devmon-interval")),
 		device_monitoring_default_offline_threshold_minutes: intOrNull(document.getElementById("s-devmon-default-threshold").value),
 		device_monitoring_default_cooldown_minutes: intOrNull(val("s-devmon-default-cooldown")),
@@ -1274,18 +1315,7 @@ async function loadSlackSettings() {
 		document.getElementById("slack-webhook-url").value = s.webhook_url || "";
 		document.getElementById("slack-channel").value = s.channel_override || "";
 		document.getElementById("slack-enabled").checked = !!s.is_enabled;
-		const typesEl = document.getElementById("slack-notify-types");
-		typesEl.innerHTML = (s.event_groups || []).map(group => `
-			<div>
-				<strong style="font-size:0.85rem">${escapeHtml(group.group)}</strong>
-				<div class="checkbox-col">
-					${group.options.map(o => `
-						<label class="checkbox-label">
-							<input type="checkbox" class="slack-notify-type" data-key="${escapeHtml(o.key)}" ${s.notify_types && s.notify_types[o.key] ? "checked" : ""}>
-							${escapeHtml(o.label)}
-						</label>`).join("")}
-				</div>
-			</div>`).join("");
+		renderNotifyTypeCheckboxes(document.getElementById("slack-notify-types"), s.event_groups || [], s.notify_types || {}, "slack-notify-type");
 	} catch (e) {
 		toast(e.message, "error");
 	}

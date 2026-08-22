@@ -19,12 +19,23 @@ module an admin would ever need to grant/revoke access to.
 Each source table's own numeric id isn't unique ACROSS the two tables, so
 every notification's `id` in this router's responses is prefixed
 ("quota:<id>" / "ticket:<id>") -- mark_read/mark_all_read parse that
-prefix to know which table to update."""
+prefix to know which table to update.
+
+Per-event bell visibility (Settings -> In-App Notifications, see
+notification_prefs.py) is enforced HERE, at read time, on every row this
+router returns or counts -- never at the write side (see
+ticket_notifications.py's own comment on why: a producer with its own
+"already notified this" dedup-by-row-existence check, like main.py's
+quota loop, would otherwise re-fire indefinitely while its bell category
+is muted). A row a preference has since hidden is still written, still
+markable-read, and reappears immediately if the preference is turned back
+on -- "hidden by preference" is a display filter, not a deletion."""
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from .. import app_settings, notification_prefs
 from ..auth import require_user
 from ..db import get_db
 from ..models import AuditNotification, QuotaNotification, TicketNotification, User
@@ -102,6 +113,10 @@ def _serialize_audit(n: AuditNotification) -> dict:
     }
 
 
+def _bell_visible(n: dict) -> bool:
+    return notification_prefs.bell_enabled(app_settings.runtime.bell_notify_types, n["kind"])
+
+
 @router.get("")
 def list_my_notifications(user: User = Depends(require_user), db: Session = Depends(get_db)):
     quota_rows = (
@@ -116,15 +131,30 @@ def list_my_notifications(user: User = Depends(require_user), db: Session = Depe
         db.query(AuditNotification).filter(AuditNotification.user_id == user.id)
         .order_by(AuditNotification.created_at.desc()).limit(30).all()
     )
+    # Fetch 30 per source table, THEN filter by bell preference, THEN
+    # re-slice to 30 overall -- a preference-hidden row still occupies one
+    # of each table's own 30-row fetch, so a user with many muted-category
+    # notifications could see fewer than 30 in the end even though more
+    # exist; the same trade-off the pre-existing "30 per table, merge,
+    # slice to 30" pagination already made, just one filtering step later.
     merged = sorted(
-        [_serialize_quota(n) for n in quota_rows] + [_serialize_ticket(n) for n in ticket_rows]
-        + [_serialize_audit(n) for n in audit_rows],
+        filter(_bell_visible, [_serialize_quota(n) for n in quota_rows] + [_serialize_ticket(n) for n in ticket_rows]
+               + [_serialize_audit(n) for n in audit_rows]),
         key=lambda n: n["created_at"] or "", reverse=True,
     )[:30]
+    # unread_count can't be a plain SQL .count() any more -- whether a row
+    # counts now depends on its kind, which the preference check needs in
+    # Python. Loads each table's unread rows (not just their id/kind) since
+    # ORM objects are what _serialize_* already expects; a user's own
+    # unread count is small in practice, so this is a non-issue.
+    unread_quota = db.query(QuotaNotification).filter(QuotaNotification.user_id == user.id, QuotaNotification.read_at.is_(None)).all()
+    unread_ticket = db.query(TicketNotification).filter(TicketNotification.user_id == user.id, TicketNotification.read_at.is_(None)).all()
+    unread_audit = db.query(AuditNotification).filter(AuditNotification.user_id == user.id, AuditNotification.read_at.is_(None)).all()
+    bell_types = app_settings.runtime.bell_notify_types
     unread_count = (
-        db.query(QuotaNotification).filter(QuotaNotification.user_id == user.id, QuotaNotification.read_at.is_(None)).count()
-        + db.query(TicketNotification).filter(TicketNotification.user_id == user.id, TicketNotification.read_at.is_(None)).count()
-        + db.query(AuditNotification).filter(AuditNotification.user_id == user.id, AuditNotification.read_at.is_(None)).count()
+        sum(1 for n in unread_quota if notification_prefs.bell_enabled(bell_types, f"quota_{n.level}"))
+        + sum(1 for n in unread_ticket if notification_prefs.bell_enabled(bell_types, n.kind))
+        + sum(1 for n in unread_audit if notification_prefs.bell_enabled(bell_types, f"audit_{n.reason}"))
     )
     return {"notifications": merged, "unread_count": unread_count}
 

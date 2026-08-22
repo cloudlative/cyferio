@@ -234,6 +234,8 @@ class _RuntimeSettings:
         self.support_max_attachment_size_mb = 10
         self.support_max_attachments_per_message = 5
         self.notify_admin_on_ticket_created = False
+        self.ticket_email_notify_types = None  # raw JSON string or None -- see notification_prefs.effective_ticket_email_types
+        self.bell_notify_types = None  # raw JSON string or None -- see notification_prefs.effective_bell_types
         self.ticket_duplicate_window_minutes = 1440  # 24h -- see AppSettings.ticket_duplicate_window_minutes
 
         # Multi-Factor Authentication (TOTP) -- see mfa.py's effective_policy.
@@ -351,6 +353,8 @@ def refresh_runtime_cache(db: Session) -> None:
         row.support_max_attachments_per_message if row.support_max_attachments_per_message is not None else 5
     )
     runtime.notify_admin_on_ticket_created = bool(row.notify_admin_on_ticket_created)
+    runtime.ticket_email_notify_types = row.ticket_email_notify_types
+    runtime.bell_notify_types = row.bell_notify_types
     runtime.ticket_duplicate_window_minutes = (
         row.ticket_duplicate_window_minutes if row.ticket_duplicate_window_minutes is not None else 1440
     )
@@ -473,6 +477,35 @@ def migrate_legacy_smtp_provider(db: Session) -> None:
     smtp_type_key = PROVIDERS["smtp"].type_key
     provider = EmailProvider(name="Primary SMTP", provider_type=smtp_type_key, is_active=True, is_default=True, config=json.dumps(config))
     db.add(provider)
+    db.commit()
+
+
+def migrate_ticket_email_notify_types(db: Session) -> None:
+    """One-time backfill for AppSettings.ticket_email_notify_types (see
+    notification_prefs.py): subdivides the single legacy
+    notify_admin_on_ticket_created toggle into the 4 distinct admin-email
+    events it used to gate all-or-nothing, seeding every one of them from
+    that toggle's CURRENT value so an existing deployment's admin email
+    behavior doesn't change the moment this ships -- an admin who'd left
+    it unchecked keeps getting no ticket admin email; one who'd checked it
+    keeps getting all 4, until they visit Settings and narrow it down.
+
+    No-op once ticket_email_notify_types is non-NULL (whether set by this
+    migration on a previous startup, or an admin saving the new Ticket
+    Email Notifications section directly) -- same idempotent-migration
+    shape as migrate_legacy_smtp_provider above. Also fine to run on a
+    completely fresh install: notify_admin_on_ticket_created is NULL
+    there too, seeds every key to False, matching that toggle's own
+    documented default-off stance (app_settings.py's _RuntimeSettings)."""
+    import json
+
+    from . import notification_prefs
+
+    row = get_settings_row(db)
+    if row.ticket_email_notify_types is not None:
+        return
+    legacy_on = bool(row.notify_admin_on_ticket_created)
+    row.ticket_email_notify_types = json.dumps({key: legacy_on for key in notification_prefs.TICKET_EMAIL_KEYS})
     db.commit()
 
 
