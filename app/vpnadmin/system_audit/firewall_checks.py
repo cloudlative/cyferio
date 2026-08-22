@@ -422,6 +422,13 @@ def _live_findings(data: dict) -> list[Finding]:
             findings.append(Finding(
                 check_id="firewall.firewalld_enabled", category="firewall", severity="passed",
                 title="firewalld is running", description="`firewall-cmd --state` reports running.",
+                # active_zone_config (`firewall-cmd --list-all`) was
+                # already collected by probe_firewalld() but never
+                # actually surfaced anywhere -- added so the System Audit
+                # page's firewall-status line has real policy/zone detail
+                # to show for firewalld the same way ufw's status_output
+                # and nftables' ruleset already do (user ask, 2026-08-22).
+                evidence=(firewalld.get("active_zone_config") or "")[:2000],
             ))
         else:
             findings.append(Finding(

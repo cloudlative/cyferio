@@ -191,10 +191,45 @@ function renderFirewallStatus(run) {
 	fwFindings.forEach(f => { byCheckId[f.check_id] = f; });
 
 	const active = _FIREWALL_MANAGER_CHECK_IDS
-		.filter(([id]) => byCheckId[id] && byCheckId[id].severity === "passed")
-		.map(([, name]) => name);
+		.filter(([id]) => byCheckId[id] && byCheckId[id].severity === "passed");
 	if (active.length > 0) {
-		el.innerHTML = `<span class="status-pill status-online">Firewall: On</span> <span class="muted">${escapeHtml(active.join(" + "))} is active on this host.</span>`;
+		const names = active.map(([, name]) => name);
+		el.innerHTML = `<span class="status-pill status-online">Firewall: On</span> <span class="muted">${escapeHtml(names.join(" + "))} is active on this host.</span> ` +
+			`<button type="button" class="link-button" id="firewall-status-details-toggle" style="font-size:0.85rem">Show policy/table details ▾</button>` +
+			`<div id="firewall-status-details" style="display:none;margin-top:8px"></div>`;
+		document.getElementById("firewall-status-details-toggle").addEventListener("click", (e) => {
+			const box = document.getElementById("firewall-status-details");
+			const opening = box.style.display === "none";
+			box.style.display = opening ? "" : "none";
+			e.target.textContent = opening ? "Hide policy/table details ▴" : "Show policy/table details ▾";
+			if (opening && !box.dataset.rendered) {
+				box.dataset.rendered = "1";
+				// The active manager's OWN evidence (ufw's `status verbose`
+				// output, firewalld's `--list-all` zone config, nftables'
+				// `list ruleset`) plus, separately, the raw iptables base
+				// chain policies (INPUT/FORWARD/OUTPUT) if that was probed
+				// -- the two are complementary, not redundant: the manager
+				// evidence is what it's actually configured to allow, the
+				// iptables policies are the underlying kernel table's own
+				// default-accept/default-drop state (see
+				// _managed_firewall_active's docstring for why base-chain
+				// ACCEPT is normal/expected here, not itself a problem).
+				const blocks = [];
+				active.forEach(([id, name]) => {
+					const f = byCheckId[id];
+					if (f.evidence) blocks.push([`${name} status`, f.evidence]);
+				});
+				const iptFinding = byCheckId["firewall.iptables_input_policy"];
+				if (iptFinding && iptFinding.evidence) blocks.push(["iptables base chain policies", iptFinding.evidence]);
+				box.innerHTML = blocks.length
+					? blocks.map(([label, text]) => `
+						<div style="margin-bottom:10px">
+							<div class="muted" style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px">${escapeHtml(label)}</div>
+							<pre class="firewall-status-evidence">${escapeHtml(text)}</pre>
+						</div>`).join("")
+					: '<p class="muted" style="font-size:0.85rem">No additional policy/table detail was captured for this run.</p>';
+			}
+		});
 		return;
 	}
 

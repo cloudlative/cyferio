@@ -272,6 +272,28 @@ class TestFirewallLiveFindings:
         assert by_id["firewall.ufw_enabled"].severity == "passed"
         assert "firewall.iptables_unrestricted_rules" not in by_id
 
+    def test_firewalld_running_finding_carries_zone_evidence(self):
+        """Regression guard (2026-08-22): active_zone_config was already
+        collected by probe_firewalld() but never actually attached to
+        any Finding -- the System Audit page's "Show policy/table
+        details" needs real evidence here, the same way ufw's
+        status_output and nftables' ruleset already provide it."""
+        from vpnadmin.system_audit.firewall_checks import _live_findings
+
+        data = {
+            "ufw": {"installed": False},
+            "iptables": {"installed": False},
+            "firewalld": {
+                "installed": True, "running": True, "state_output": "running",
+                "active_zone_config": "public\n  target: default\n  services: ssh dhcpv6-client",
+            },
+            "units": {},
+        }
+        findings = _live_findings(data)
+        by_id = {f.check_id: f for f in findings}
+        assert by_id["firewall.firewalld_enabled"].severity == "passed"
+        assert "ssh" in by_id["firewall.firewalld_enabled"].evidence
+
     def test_iptables_permission_error_not_reported_as_zero_rules(self):
         """Regression guard: a real error reading iptables state must
         never be silently indistinguishable from "confirmed zero rules"
