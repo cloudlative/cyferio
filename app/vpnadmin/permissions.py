@@ -560,6 +560,47 @@ def migrate_groups_and_users_to_single_assignment(db: Session) -> None:
         db.commit()
 
 
+def drop_legacy_group_membership_fk_constraints(db: Session) -> None:
+    """One-time (idempotent, safe on every startup) fix for a real bug
+    found live 2026-08-22: deleting ANY group that pre-dates the single-
+    group/single-role migration above -- i.e. any group that ever had
+    more than one member back when memberships were many-to-many -- 500s
+    with a ForeignKeyViolation, even when routes/groups.py's delete_group
+    has already confirmed (correctly) that the group has zero ACTIVE
+    members today.
+
+    The cause: user_groups (the old many-to-many join table
+    migrate_groups_and_users_to_single_assignment superseded -- see
+    Group's own docstring in models.py for why it's left in place,
+    unmapped, as inert historical data rather than dropped) still has
+    its OWN foreign key constraints pointing at groups.id/users.id, and
+    those were never relaxed when the table was retired. A leftover row
+    in that now-unread, unwritten table is invisible to every
+    application-level check (the ORM doesn't even map it any more), but
+    Postgres itself still enforces it at the schema level -- so `DELETE
+    FROM groups` fails underneath the app's own "no active members"
+    guard, on a table the app doesn't know exists.
+
+    Drops just the two constraints, not the table or its rows -- the
+    historical data stays exactly as it was, purely inert, matching this
+    file's "leave superseded stuff in place, never destroy data" own
+    convention; only the enforcement that was silently blocking a live
+    feature goes away. `IF EXISTS` on both the table check and each
+    constraint drop makes repeat runs (every startup) and a fresh install
+    (where user_groups is never created in the first place, so this is a
+    no-op) equally safe. Postgres-only: SQLite doesn't enforce foreign
+    keys by default, which is also why the test suite's in-memory SQLite
+    DB never caught this."""
+    bind = db.get_bind()  # unlike db.bind, typed as non-Optional -- see mypy's own complaint about the latter
+    if bind.dialect.name != "postgresql":
+        return
+    if "user_groups" not in inspect(bind).get_table_names():
+        return
+    for constraint in ("user_groups_group_id_fkey", "user_groups_user_id_fkey"):
+        db.execute(text(f"ALTER TABLE user_groups DROP CONSTRAINT IF EXISTS {constraint}"))
+    db.commit()
+
+
 def has_permission(db: Session, user: User, object_key: str, action: str) -> bool:
     """Non-raising counterpart to require_permission, for callers that need
     a plain bool rather than a 403 -- e.g. routes/pages.py's server-rendered

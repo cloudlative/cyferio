@@ -81,6 +81,7 @@ def _seed_rbac():
     than inlined in init_db) so Phase 2's migrate_user_roles() backfill can
     be added right after this call without further restructuring."""
     from .permissions import (
+        drop_legacy_group_membership_fk_constraints,
         ensure_super_admin_group,
         migrate_groups_and_users_to_single_assignment,
         migrate_user_roles,
@@ -110,6 +111,13 @@ def _seed_rbac():
         # promote_bootstrap_admin_to_super_admin's own docstring explains.
         ensure_super_admin_group(db)
         migrate_groups_and_users_to_single_assignment(db)
+        # Fixes a real bug (deleting a pre-migration group 500s) rather
+        # than migrating data -- order relative to the above doesn't
+        # matter, it only touches user_groups' own constraints. Also
+        # called a second time from main.py's lifespan, same "fresh-
+        # install first call is necessarily a no-op" reasoning as every
+        # other migration here.
+        drop_legacy_group_membership_fk_constraints(db)
     finally:
         db.close()
 

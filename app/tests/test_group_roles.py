@@ -17,7 +17,12 @@ super_admin role (see TestSuperAdminExemption), which never depends on
 group membership at all."""
 from vpnadmin.auth import hash_password
 from vpnadmin.models import SUPER_ADMIN_GROUP_NAME, AuditLog, Group, ObjectPermission, RoleDef, RoleKind, User
-from vpnadmin.permissions import effective_role_ids, ensure_super_admin_group, has_permission
+from vpnadmin.permissions import (
+    drop_legacy_group_membership_fk_constraints,
+    effective_role_ids,
+    ensure_super_admin_group,
+    has_permission,
+)
 
 from .conftest import login
 
@@ -327,3 +332,52 @@ class TestSuperAdminGroupImmutability:
         assert r.status_code == 200  # silently a no-op, not an error -- same as every other bootstrap-admin guard
         db_session.expire_all()
         assert db_session.get(User, bootstrap.id).group_id == group.id
+
+
+class TestDeleteGroup:
+    """DELETE /api/groups/{id} -- covers the ordinary "empty, non-SuperAdmin
+    group" happy path (previously untested -- only the SuperAdmin-group
+    rejection case had coverage) and a real bug found live 2026-08-22: on
+    Postgres, deleting a group that pre-dates the single-group/single-role
+    migration 500'd with a ForeignKeyViolation from user_groups (the old
+    many-to-many join table -- see permissions.py's
+    drop_legacy_group_membership_fk_constraints for the full story), even
+    though routes/groups.py's own "no active members" guard had already
+    passed. That specific failure can't be reproduced here -- SQLite (this
+    suite's DB) doesn't enforce foreign keys by default, which is exactly
+    why it was never caught by CI in the first place -- so this only
+    confirms the fix function itself is a safe no-op against SQLite,
+    verified for real against a throwaway Postgres instance instead (see
+    the PR this shipped in)."""
+
+    def test_delete_empty_group_succeeds(self, app_client, db_session):
+        group = Group(name="Deletable Group")
+        db_session.add(group)
+        db_session.commit()
+        gid = group.id
+        login(app_client, "admin", "adminpass123")
+        r = app_client.delete(f"/api/groups/{gid}")
+        assert r.status_code == 200
+        assert db_session.get(Group, gid) is None
+
+    def test_cannot_delete_a_group_with_active_members(self, app_client, db_session):
+        role = db_session.query(RoleDef).filter_by(slug="viewer").one()
+        group = Group(name="Occupied Group", role_id=role.id)
+        db_session.add(group)
+        db_session.flush()
+        viewer = db_session.query(User).filter_by(username="viewer").one()
+        viewer.group_id = group.id
+        db_session.commit()
+        login(app_client, "admin", "adminpass123")
+        r = app_client.delete(f"/api/groups/{group.id}")
+        assert r.status_code == 400
+        assert "member" in r.json()["detail"].lower()
+        assert db_session.get(Group, group.id) is not None
+
+    def test_drop_legacy_fk_constraints_is_a_safe_noop_on_sqlite(self, db_session):
+        # No user_groups table exists at all under this suite's schema
+        # (unmapped, never created by Base.metadata.create_all) -- this
+        # just confirms the SQLite dialect short-circuit doesn't raise
+        # rather than exercising the actual Postgres fix.
+        drop_legacy_group_membership_fk_constraints(db_session)
+        drop_legacy_group_membership_fk_constraints(db_session)  # idempotent
