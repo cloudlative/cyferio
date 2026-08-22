@@ -95,7 +95,7 @@ TERMINAL_STATUSES: frozenset[str] = frozenset({"resolved", "closed", "completed"
 # Design:
 #   - A terminal status (TERMINAL_STATUSES above) can ONLY move to "open"
 #     -- never straight back to another active working status, and never
-#     sideways to a different terminal status either (e.g. Resolved can't
+#     sideways to a different terminal status either (e.g. Failed can't
 #     jump straight to Cancelled -- reopen it first). This mirrors routes/
 #     me_tickets.py's self-service reopen_my_ticket, which already enforces
 #     exactly this ("Only a Resolved or Closed ticket can be reopened") --
@@ -111,6 +111,18 @@ TERMINAL_STATUSES: frozenset[str] = frozenset({"resolved", "closed", "completed"
 #     above for why) -- same destination the old rule's dedicated
 #     "reopened" status meant in practice, since "reopened" only ever
 #     behaved like a fresh "open" ticket from that point on anyway.
+#   - ONE deliberate exception to the rule above: Resolved -> Closed is
+#     also allowed, on top of Resolved -> Open (reopen). Reported live
+#     2026-08-23 (the Ticket Workflow Update review, and confirmed again
+#     live after it shipped without this): "transition from resolved to
+#     close does not work from the close button" -- Resolved moving on to
+#     Closed is forward progress through the workflow, not an exit from
+#     it, unlike every other terminal status here (Closed/Completed/
+#     Failed/Cancelled are genuine dead ends -- there's nowhere further
+#     for THEM to go but back to Open). Self-service reply is still
+#     blocked on a Resolved ticket exactly as before -- this only widens
+#     the admin console's own next-status menu, not what a ticket's owner
+#     can do with it.
 #   - Every non-terminal ("active") status can move to ANY other status --
 #     including terminal ones (an admin can resolve/close/complete/fail/
 #     cancel a ticket from wherever it currently sits, without being
@@ -136,6 +148,7 @@ ACTIVE_STATUSES: frozenset[str] = frozenset(set(STATUSES) - TERMINAL_STATUSES)
 TRANSITIONS: dict[str, frozenset[str]] = {
     **{s: frozenset(set(STATUSES) - {s}) for s in ACTIVE_STATUSES},
     **{s: frozenset({"open"}) for s in TERMINAL_STATUSES},
+    "resolved": frozenset({"open", "closed"}),
 }
 
 

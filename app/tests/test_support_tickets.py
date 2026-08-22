@@ -282,6 +282,22 @@ class TestStatusWorkflowRules:
         r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "cancelled"})
         assert r.status_code == 409
 
+    def test_resolved_can_move_to_closed(self, app_client, db_session):
+        """The one deliberate exception to "terminal statuses only exit via
+        reopen": Resolved -> Closed is forward progress through the
+        workflow, not an exit from it -- reported live as broken
+        ("transition from resolved to close does not work from the close
+        button")."""
+        _make_self_service_user(db_session, "mona")
+        login(app_client, "mona", "somepass123")
+        ticket_id = _create_ticket(app_client).json()["id"]
+
+        login(app_client, "admin", "adminpass123")
+        app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "resolved"})
+        r = app_client.patch(f"/api/tickets/{ticket_id}", json={"status": "closed"})
+        assert r.status_code == 200
+        assert r.json()["status"] == "closed"
+
     def test_active_status_can_jump_straight_to_a_terminal_one(self, app_client, db_session):
         """A brand-new ticket can be closed directly -- real collaboration
         tools don't force a rigid step-by-step sequence for the active
