@@ -47,9 +47,8 @@
 			</div>
 			<div style="flex:1;min-width:280px">
 				<p class="note" style="margin:0">
-					<strong>How this is calculated:</strong> starts at 100, then -25 per Critical finding, -10 per High,
-					-4 per Medium, -1 per Low (Informational/Passed findings don't affect the score). Not a percentage
-					of checks passed -- a single Critical finding drops the score sharply on purpose.
+					<strong>How this is calculated:</strong> 100 − 25/Critical − 10/High − 4/Medium − 1/Low (Info/Passed don't count).
+					Not a percentage -- one Critical drops it sharply on purpose.
 				</p>
 			</div>
 		</div>
