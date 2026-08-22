@@ -20,7 +20,18 @@
 		</div>
 		<div class="field">
 			<label for="sc-filter-status">Status</label>
-			<select id="sc-filter-status"><option value="">All</option></select>
+			<!-- Default ("") means "active" -- every status except Closed --
+			     so a closed ticket never clutters the day-to-day view. A
+			     dedicated "All Statuses" option (__all__) is the explicit
+			     opt-in for everything including Closed; picking "Closed"
+			     itself from the list below is the dedicated way to review
+			     just those, same idea as the Ticket Type filter's own
+			     "Deleted Tickets" option -- closed tickets stay fully
+			     searchable/filterable, just not mixed into the default view. -->
+			<select id="sc-filter-status">
+				<option value="" selected>Active (excludes Closed)</option>
+				<option value="__all__">All Statuses</option>
+			</select>
 		</div>
 		<div class="field">
 			<label for="sc-filter-category">Category</label>
@@ -115,8 +126,13 @@ function currentFilteredTickets() {
 		if (special === "parents" && !(t.duplicate_count > 0)) return false;
 		if (assignee === "__unassigned__" && t.assigned_admin) return false;
 		if (assignee && assignee !== "__unassigned__" && t.assigned_admin_id != assignee) return false;
+		// "" (the default) means active -- everything except Closed.
+		// "__all__" is the explicit opt-in for literally every status.
+		// Anything else is a specific status (including "closed" itself,
+		// the dedicated way to review just those).
+		const statusMatch = status === "__all__" ? true : status ? t.status === status : t.status !== "closed";
 		return (!q || t.subject.toLowerCase().includes(q)) &&
-			(!status || t.status === status) &&
+			statusMatch &&
 			(!category || t.category === category) &&
 			(!priority || t.priority === priority);
 	});

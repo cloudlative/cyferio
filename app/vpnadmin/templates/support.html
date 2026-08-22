@@ -23,7 +23,15 @@
 		</div>
 		<div class="field">
 			<label for="t-filter-status">Status</label>
-			<select id="t-filter-status"><option value="">All</option></select>
+			<!-- Default ("") means "active" -- every status except Closed --
+			     so an old closed ticket doesn't clutter your list forever.
+			     "All Statuses" is the explicit opt-in; picking "Closed"
+			     itself is the dedicated way to review just those -- still
+			     fully searchable, just not mixed into the default view. -->
+			<select id="t-filter-status">
+				<option value="" selected>Active (excludes Closed)</option>
+				<option value="__all__">All Statuses</option>
+			</select>
 		</div>
 		<div class="field">
 			<label for="t-filter-category">Category</label>
@@ -111,9 +119,13 @@ function currentFilteredTickets() {
 	const q = (document.getElementById("t-search").value || "").toLowerCase();
 	const status = document.getElementById("t-filter-status").value;
 	const category = document.getElementById("t-filter-category").value;
+	// "" (the default) means active -- everything except Closed. "__all__"
+	// is the explicit opt-in for literally every status. Anything else is
+	// a specific status (including "closed" itself).
+	const statusMatch = (t) => status === "__all__" ? true : status ? t.status === status : t.status !== "closed";
 	return allTickets.filter((t) =>
 		(!q || t.subject.toLowerCase().includes(q)) &&
-		(!status || t.status === status) &&
+		statusMatch(t) &&
 		(!category || t.category === category)
 	);
 }
@@ -210,16 +222,17 @@ document.getElementById("new-ticket-form").addEventListener("submit", async (e) 
 	prioritySel.innerHTML = catData.priorities.map((p) => `<option value="${p.value}" ${p.value === "medium" ? "selected" : ""}>${p.label}</option>`).join("");
 
 	const statusSel = document.getElementById("t-filter-status");
-	// Built from whatever's actually in the ticket list rather than a
-	// separate statuses endpoint -- self-service only ever needs to filter
-	// by statuses that could exist on ITS OWN tickets, not the full admin set.
-	await loadTickets();
-	const seenStatuses = [...new Map(allTickets.map((t) => [t.status, t.status_label])).entries()];
-	for (const [value, label] of seenStatuses) {
+	// Every regular-ticket status, in canonical order (Open, In Progress,
+	// Resolved, Waiting on Customer, Closed) -- previously built from
+	// whatever happened to already appear in this user's own ticket list,
+	// which both hid statuses they hadn't hit yet AND ordered the dropdown
+	// by first-appearance rather than the actual workflow order.
+	for (const s of catData.statuses) {
 		const o = document.createElement("option");
-		o.value = value; o.textContent = label;
+		o.value = s.value; o.textContent = s.label;
 		statusSel.appendChild(o);
 	}
+	await loadTickets();
 })();
 </script>
 {% endblock %}

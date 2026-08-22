@@ -48,15 +48,15 @@ from .models import SupportTicket
 # ticket (assigned_admin_id is set, via the existing PATCH endpoint) but
 # hasn't started the actual maintenance work yet.
 STATUSES: tuple[str, ...] = (
-    "open", "in_progress", "waiting_for_user", "resolved", "closed",
+    "open", "in_progress", "resolved", "waiting_for_user", "closed",
     "assigned", "completed", "failed", "cancelled",
 )
 
 STATUS_LABELS: dict[str, str] = {
     "open": "Open",
     "in_progress": "In Progress",
-    "waiting_for_user": "Waiting on Customer",
     "resolved": "Resolved",
+    "waiting_for_user": "Waiting on Customer",
     "closed": "Closed",
     "assigned": "Assigned",
     "completed": "Completed",
@@ -258,6 +258,20 @@ def category_label(slug: str) -> str:
 
 def status_label(status: str) -> str:
     return STATUS_LABELS.get(status, status)
+
+
+def status_sort_key(status: str) -> int:
+    """Canonical STATUSES order (Open, In Progress, Resolved, Waiting on
+    Customer, Closed, ...) rather than alphabetical -- used anywhere a
+    status <select>'s options are built from a set (allowed_next_statuses
+    returns a frozenset, with no ordering of its own) so the dropdown
+    always lists options in the same order regardless of which subset
+    happens to be allowed for a given ticket. An unrecognized status
+    (shouldn't happen) sorts last rather than raising."""
+    try:
+        return STATUSES.index(status)
+    except ValueError:
+        return len(STATUSES)
 
 
 def priority_label(priority: str) -> str:

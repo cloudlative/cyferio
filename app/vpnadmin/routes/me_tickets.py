@@ -33,6 +33,8 @@ from ..support_tickets import (
     DEFAULT_PRIORITY,
     DEFAULT_STATUS,
     PRIORITIES,
+    REGULAR_STATUSES,
+    STATUSES,
     TERMINAL_STATUSES,
     allowed_next_statuses,
     categories_for_form,
@@ -40,6 +42,7 @@ from ..support_tickets import (
     is_valid_category,
     priority_label,
     status_label,
+    status_sort_key,
 )
 from .me_vpn import get_my_vpn_report
 
@@ -184,7 +187,7 @@ def _serialize_ticket_detail(t: SupportTicket, *, is_admin_view: bool) -> dict:
         # generic status picker (only the dedicated POST .../reopen
         # action), so it gets an empty list rather than exposing this.
         "allowed_next_statuses": (
-            [{"value": s, "label": status_label(s)} for s in sorted(allowed_next_statuses(t.status, t.category))]
+            [{"value": s, "label": status_label(s)} for s in sorted(allowed_next_statuses(t.status, t.category), key=status_sort_key)]
             if is_admin_view else []
         ),
         "locked_at": t.locked_at.isoformat() if t.locked_at else None,
@@ -241,7 +244,17 @@ def list_my_tickets(user: User = Depends(require_permission("support_tickets", "
 
 @router.get("/categories")
 def get_ticket_categories(_: User = Depends(require_permission("support_tickets", "view"))):
-    return {"categories": categories_for_form(), "priorities": [{"value": p, "label": priority_label(p)} for p in PRIORITIES]}
+    return {
+        "categories": categories_for_form(),
+        "priorities": [{"value": p, "label": priority_label(p)} for p in PRIORITIES],
+        # Regular-ticket statuses only, in canonical STATUSES order -- a
+        # self-service ticket is never sysmaint-categorized, so those
+        # statuses (assigned/completed/failed/cancelled) are excluded
+        # rather than just unreachable. Lets support.html's own status
+        # filter list every possible status up front instead of only
+        # whichever ones happen to already appear on this user's tickets.
+        "statuses": [{"value": s, "label": status_label(s)} for s in STATUSES if s in REGULAR_STATUSES],
+    }
 
 
 @router.post("", status_code=201)
