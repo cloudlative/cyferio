@@ -338,7 +338,15 @@ def list_available_roles(_: User = Depends(require_admin), db: Session = Depends
     on roles:manage: an admin granted groups:manage but not roles:manage
     must still be able to assign an existing role to a group without also
     needing Roles Management access."""
-    roles = db.query(RoleDef).order_by(RoleDef.name).all()
+    # Excludes "super_admin" -- reserved exclusively for the bootstrap
+    # admin account (see permissions.py's effective_role_ids hardcoded
+    # exemption and db.py's promote_bootstrap_admin_to_super_admin). That
+    # account's access never depends on group membership by design, so
+    # assigning this role to a group would be a no-op at best and
+    # confusing at worst -- it shouldn't be offered as a choice here at
+    # all. Server-side backstop for this same rule lives in
+    # assign_group_role below.
+    roles = db.query(RoleDef).filter(RoleDef.slug != "super_admin").order_by(RoleDef.name).all()
     return [_role_brief(r) for r in roles]
 
 
@@ -354,6 +362,8 @@ def assign_group_role(group_id: int, body: GroupRoleRequest, admin: User = Depen
     role = db.get(RoleDef, body.role_id)
     if role is None:
         raise HTTPException(status_code=404, detail="Role not found.")
+    if role.slug == "super_admin":
+        raise HTTPException(status_code=400, detail="The Super Admin role can't be assigned to a group -- it's reserved for the bootstrap admin account and is never sourced from group membership.")
     if role not in group.role_defs:
         group.role_defs.append(role)
         db.commit()

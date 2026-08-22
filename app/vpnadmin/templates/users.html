@@ -130,61 +130,6 @@
 			</fieldset>
 
 			<fieldset style="margin-top:16px">
-				<legend>Device Monitoring <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
-				<p class="muted" style="margin-top:0">VPN Device Availability Monitoring -- for a device expected to keep a continuous VPN connection (a branch gateway, an always-on server, a kiosk). If it drops offline for longer than the threshold below, an alert is sent through the channels you enable. Same feature as Manage Monitoring on the Clients page -- enabling it here just skips the extra trip for a device that's meant to be monitored from day one. Leave unchecked to set this up later instead.</p>
-				<div class="checkbox-row">
-					<label class="checkbox-label"><input type="checkbox" id="u-monitoring-enabled"> Enable monitoring for this device</label>
-				</div>
-				<div class="field-stack" id="u-monitoring-fields" style="opacity:0.5;margin-top:12px">
-					<div class="field">
-						<label for="u-monitoring-name">Monitoring Name <span class="muted">(optional friendly label, e.g. "Head Office Gateway")</span></label>
-						<input type="text" id="u-monitoring-name" maxlength="128" placeholder="Defaults to the VPN profile name">
-					</div>
-					<div class="field">
-						<label for="u-monitoring-connectivity">Expected Connectivity</label>
-						<select id="u-monitoring-connectivity">
-							<option value="always">Always Connected (24x7)</option>
-							<option value="business_hours">Business Hours Only</option>
-							<option value="custom">Custom Schedule</option>
-						</select>
-					</div>
-					<div class="field">
-						<label for="u-monitoring-threshold">Offline Detection Threshold <span class="muted">(alert if not connected for longer than this)</span></label>
-						<select id="u-monitoring-threshold">
-							<option value="1">1 minute</option>
-							<option value="5">5 minutes</option>
-							<option value="10">10 minutes</option>
-							<option value="15" selected>15 minutes</option>
-							<option value="30">30 minutes</option>
-							<option value="60">60 minutes</option>
-						</select>
-					</div>
-					<fieldset>
-						<legend>Notifications</legend>
-						<div class="checkbox-row" style="flex-direction:column;align-items:flex-start;gap:8px">
-							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-email" checked> Email alert</label>
-							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-slack" checked> Slack alert <span class="muted">(to the workspace configured in Settings -> Integrations)</span></label>
-							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-assigned-user" checked> Email the assigned portal user</label>
-							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-recovery" checked> Also notify when the device comes back online</label>
-						</div>
-						<div class="field" style="margin-top:10px">
-							<label for="u-monitoring-additional-emails">Additional Recipients <span class="muted">(one email per line, optional)</span></label>
-							<textarea id="u-monitoring-additional-emails" rows="2" class="mono" placeholder="ops@example.com"></textarea>
-						</div>
-					</fieldset>
-					<fieldset>
-						<legend>Alert Cooldown</legend>
-						<div class="checkbox-row" style="flex-direction:column;align-items:flex-start;gap:8px">
-							<label class="checkbox-label"><input type="radio" name="u-monitoring-cooldown-mode" value="once" checked> Send one alert, then stay silent until it reconnects</label>
-							<label class="checkbox-label"><input type="radio" name="u-monitoring-cooldown-mode" value="repeat"> Repeat while still offline, every
-								<input type="text" id="u-monitoring-cooldown-minutes" inputmode="numeric" style="width:70px;display:inline-block;margin:0 6px" placeholder="60"> minutes
-							</label>
-						</div>
-					</fieldset>
-				</div>
-			</fieldset>
-
-			<fieldset style="margin-top:16px">
 				<legend>Portal Login Restrictions <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
 				{% if features.geoip %}
 				<p class="muted" style="margin-top:0">GeoIP and network (ASN) lookups on the sign-in IP -- MaxMind-based, so these are approximate, not exact-location guarantees. These affect signing in to this web portal only -- they have no effect on VPN connections. To restrict VPN access instead, use VPN Access Restrictions below.</p>
@@ -284,6 +229,66 @@
 				</div>
 			</fieldset>
 
+			<!-- Device Monitoring last, after every access/restriction section
+			     -- it's a device-availability add-on for the rare device that
+			     needs it, not core account setup, so it belongs at the bottom
+			     of the form rather than between Device & Access Policy and
+			     the restriction sections. -->
+			<fieldset style="margin-top:16px">
+				<legend>Device Monitoring <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></legend>
+				<p class="muted" style="margin-top:0">VPN Device Availability Monitoring -- for a device expected to keep a continuous VPN connection (a branch gateway, an always-on server, a kiosk). If it drops offline for longer than the threshold below, an alert is sent through the channels you enable. Same feature as Manage Monitoring on the Clients page -- enabling it here just skips the extra trip for a device that's meant to be monitored from day one. Leave unchecked to set this up later instead.</p>
+				<div class="checkbox-row">
+					<label class="checkbox-label"><input type="checkbox" id="u-monitoring-enabled"> Enable monitoring for this device</label>
+				</div>
+				<div class="field-stack" id="u-monitoring-fields" style="opacity:0.5;margin-top:12px">
+					<div class="field">
+						<label for="u-monitoring-name">Monitoring Name <span class="muted">(optional friendly label, e.g. "Head Office Gateway")</span></label>
+						<input type="text" id="u-monitoring-name" maxlength="128" placeholder="Defaults to the VPN profile name">
+					</div>
+					<div class="field">
+						<label for="u-monitoring-connectivity">Expected Connectivity</label>
+						<select id="u-monitoring-connectivity">
+							<option value="always">Always Connected (24x7)</option>
+							<option value="business_hours">Business Hours Only</option>
+							<option value="custom">Custom Schedule</option>
+						</select>
+					</div>
+					<div class="field">
+						<label for="u-monitoring-threshold">Offline Detection Threshold <span class="muted">(alert if not connected for longer than this)</span></label>
+						<select id="u-monitoring-threshold">
+							<option value="1">1 minute</option>
+							<option value="5">5 minutes</option>
+							<option value="10">10 minutes</option>
+							<option value="15" selected>15 minutes</option>
+							<option value="30">30 minutes</option>
+							<option value="60">60 minutes</option>
+						</select>
+					</div>
+					<fieldset>
+						<legend>Notifications</legend>
+						<div class="checkbox-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-email" checked> Email alert</label>
+							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-slack" checked> Slack alert <span class="muted">(to the workspace configured in Settings -> Integrations)</span></label>
+							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-assigned-user" checked> Email the assigned portal user</label>
+							<label class="checkbox-label"><input type="checkbox" id="u-monitoring-notify-recovery" checked> Also notify when the device comes back online</label>
+						</div>
+						<div class="field" style="margin-top:10px">
+							<label for="u-monitoring-additional-emails">Additional Recipients <span class="muted">(one email per line, optional)</span></label>
+							<textarea id="u-monitoring-additional-emails" rows="2" class="mono" placeholder="ops@example.com"></textarea>
+						</div>
+					</fieldset>
+					<fieldset>
+						<legend>Alert Cooldown</legend>
+						<div class="checkbox-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+							<label class="checkbox-label"><input type="radio" name="u-monitoring-cooldown-mode" value="once" checked> Send one alert, then stay silent until it reconnects</label>
+							<label class="checkbox-label"><input type="radio" name="u-monitoring-cooldown-mode" value="repeat"> Repeat while still offline, every
+								<input type="text" id="u-monitoring-cooldown-minutes" inputmode="numeric" style="width:70px;display:inline-block;margin:0 6px" placeholder="60"> minutes
+							</label>
+						</div>
+					</fieldset>
+				</div>
+			</fieldset>
+
 			<div class="dialog-actions">
 				<button type="button" class="btn-secondary" id="add-user-clear">Clear</button>
 				<button type="button" class="btn-secondary" id="add-user-cancel">Cancel</button>
@@ -300,10 +305,10 @@
 			<!-- Row 1: Username (read-only), First Name, Last Name, Status --
 			     no direct Role field: under the group-only permission model
 			     editing a personal role would silently do nothing (see
-			     permissions.py's effective_role_ids) -- "Effective Role(s)"
-			     below is a read-only display of what this account's CURRENT
-			     group membership actually grants; change it from the Groups
-			     picker in Row 2, or from the Groups page.
+			     permissions.py's effective_role_ids) -- change access via
+			     the Groups picker in Row 2, or from the Groups page, which
+			     shows each member's effective role(s) already; repeating a
+			     read-only echo of it here too was redundant.
 			     autocomplete="off" throughout -- same reasoning as Add User's
 			     own fields: this dialog edits someone ELSE's identity, never
 			     the admin's own, so browser autofill must never touch it. -->
@@ -316,39 +321,58 @@
 					<select id="e-active"><option value="true">Active</option><option value="false">Disabled</option></select>
 				</div>
 			</div>
-			<div class="field" style="margin-top:10px">
-				<label>Effective Role(s) <span class="muted">(from group membership, read-only)</span></label>
-				<div class="muted" id="e-effective-roles">&mdash;</div>
-			</div>
 			<!-- Row 2: Email, Phone, Group(s) -->
 			<div class="form-row" style="margin-top:14px">
 				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email" required autocomplete="off"></div>
 				<div class="field field-wide-phone"><label for="e-phone-mount">Phone</label><div id="e-phone-mount"></div></div>
 				<div class="field"><label for="e-group-toggle">Groups <span class="muted">(select several)</span></label><div id="e-group-ms"></div></div>
 			</div>
-			<!-- Row 3: New Password, Confirm Password, Generate (aligned to row end) -->
-			<div class="form-row password-row" style="margin-top:14px">
+			<div class="form-row" style="margin-top:14px">
 				<div class="field">
-					<label for="e-password">New Password <span class="muted">(optional)</span></label>
-					<input type="password" id="e-password" minlength="8" placeholder="Leave blank to keep current password">
-				</div>
-				<div class="field">
-					<label for="e-password-confirm">Confirm Password</label>
-					<input type="password" id="e-password-confirm" minlength="8" placeholder="Leave blank to keep current password">
-				</div>
-				<div class="field password-row-generate">
-					<label aria-hidden="true">&nbsp;</label>
-					<button type="button" class="btn-secondary" id="e-password-generate">Generate</button>
+					<label for="e-gender">Gender</label>
+					<select id="e-gender">
+						<option value="unspecified">Prefer not to say</option>
+						<option value="male">Male</option>
+						<option value="female">Female</option>
+						<option value="other">Other</option>
+					</select>
 				</div>
 			</div>
-			<p class="muted" style="margin:6px 0 0;font-size:0.82rem">If set, the new password must be at least 8 characters and include at least 1 uppercase letter, 1 number, and 1 special character.</p>
-			<div class="field" style="margin-top:10px">
-				<label class="checkbox-label"><input type="checkbox" id="e-force-reset"> Force Password Reset on Next Login</label>
-				<p class="field-hint">The user will be required to set a new password before they can use the portal again. Uncheck and save to cancel a pending request before the user has logged in.</p>
-			</div>
-			<div class="field" style="margin-top:14px">
-				<label>Multi-Factor Authentication</label>
-				<p class="muted" id="e-mfa-status-line" style="margin:2px 0 8px;font-size:0.85rem"></p>
+
+			<!-- Password + Force Password Reset assembled into their own
+			     section, matching the fieldset styling every other part of
+			     this dialog uses (VPN Profile, Portal Login Restrictions,
+			     etc.) rather than being bare form-rows floating between
+			     unrelated fields. -->
+			<fieldset style="margin-top:16px">
+				<legend>Password</legend>
+				<div class="form-row password-row">
+					<div class="field">
+						<label for="e-password">New Password <span class="muted">(optional)</span></label>
+						<input type="password" id="e-password" minlength="8" placeholder="Leave blank to keep current password">
+					</div>
+					<div class="field">
+						<label for="e-password-confirm">Confirm Password</label>
+						<input type="password" id="e-password-confirm" minlength="8" placeholder="Leave blank to keep current password">
+					</div>
+					<div class="field password-row-generate">
+						<label aria-hidden="true">&nbsp;</label>
+						<button type="button" class="btn-secondary" id="e-password-generate">Generate</button>
+					</div>
+				</div>
+				<p class="muted" style="margin:6px 0 0;font-size:0.82rem">If set, the new password must be at least 8 characters and include at least 1 uppercase letter, 1 number, and 1 special character.</p>
+				<div class="field" style="margin-top:12px">
+					<label class="checkbox-label"><input type="checkbox" id="e-force-reset"> Force Password Reset on Next Login</label>
+					<p class="field-hint">The user will be required to set a new password before they can use the portal again. Uncheck and save to cancel a pending request before the user has logged in.</p>
+				</div>
+			</fieldset>
+
+			<!-- Multi-Factor Authentication, assembled the same way -- was
+			     previously a bare labeled div; now a proper fieldset like
+			     every other section in this dialog. -->
+			<fieldset style="margin-top:16px">
+				<legend>Multi-Factor Authentication</legend>
+				<p class="muted" id="e-mfa-status-line" style="margin:0 0 8px;font-size:0.85rem"></p>
 				<div class="form-row">
 					<div class="field">
 						<label for="e-mfa-override">Policy Override</label>
@@ -368,18 +392,7 @@
 				</div>
 				<p class="field-hint">These three actions take effect immediately (no need to click Save Changes below) and are independent of the Policy Override dropdown, which only applies on Save.</p>
 				{% endif %}
-			</div>
-			<div class="form-row" style="margin-top:14px">
-				<div class="field">
-					<label for="e-gender">Gender</label>
-					<select id="e-gender">
-						<option value="unspecified">Prefer not to say</option>
-						<option value="male">Male</option>
-						<option value="female">Female</option>
-						<option value="other">Other</option>
-					</select>
-				</div>
-			</div>
+			</fieldset>
 
 			<fieldset id="e-vpn-fieldset" style="margin-top:16px">
 				<legend>VPN Profile</legend>
@@ -1202,8 +1215,6 @@ function openEdit(u) {
 	document.getElementById("e-email").value = u.email || "";
 	editPhone.setValue(u.phone || "");
 	editGroupMs.setSelected(u.group_ids);
-	document.getElementById("e-effective-roles").textContent =
-		(u.effective_roles && u.effective_roles.length) ? u.effective_roles.join(", ") : "None (no access until placed in a group)";
 	document.getElementById("e-active").value = String(u.is_active);
 	// The bootstrap admin account can never be demoted/deactivated/deleted
 	// (by anyone, even another admin) -- the API enforces this
