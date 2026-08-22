@@ -360,7 +360,14 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	color: var(--text-muted);
 	opacity: 0.75;
 }
-.sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+/* min-height: 0 overrides flexbox's default "never shrink below content
+   size" for a flex child -- without it, a nav with every section expanded
+   grows taller than the sidebar's fixed 100vh and pushes its own bottom
+   items out of view with no way to reach them (reported live: items at
+   the bottom aren't visible once everything's expanded). overflow-y: auto
+   then gives that overflow somewhere to go -- an internal scrollbar on
+   the nav itself, not the whole sidebar (brand/logo above stays put). */
+.sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; overflow-y: auto; }
 /* Groups the sidebar into labeled sections (My Account / VPN Management /
    Monitoring / Administration) -- see base.html's own comment on why the
    grouping exists, and its Expand/Collapse comment for why most roles get
