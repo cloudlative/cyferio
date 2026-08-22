@@ -6,25 +6,32 @@ approved plan for the full feature spec; cli_wrapper-level plumbing
 """
 from vpnadmin.app_settings import runtime as runtime_settings
 from vpnadmin.auth import hash_password
-from vpnadmin.models import RoleDef, User
+from vpnadmin.models import Group, RoleDef, User
 
 from .conftest import login
 
 
-def _make_self_service_user(db_session, username, password="somepass123"):
-    role = db_session.query(RoleDef).filter_by(slug="user").first()
+def _make_role_user(db_session, username, role_slug, password="somepass123"):
+    # Group-only permissions: a role only grants anything via group
+    # membership now (see permissions.py's effective_role_ids).
+    role = db_session.query(RoleDef).filter_by(slug=role_slug).first()
+    group = Group(name=f"{username}-{role_slug}-group")
+    group.role_defs.append(role)
+    db_session.add(group)
+    db_session.flush()
     user = User(username=username, password_hash=hash_password(password), role_id=role.id)
+    user.groups.append(group)
     db_session.add(user)
     db_session.commit()
     return user
+
+
+def _make_self_service_user(db_session, username, password="somepass123"):
+    return _make_role_user(db_session, username, "user", password)
 
 
 def _make_editor(db_session, username, password="somepass123"):
-    role = db_session.query(RoleDef).filter_by(slug="editor").first()
-    user = User(username=username, password_hash=hash_password(password), role_id=role.id)
-    db_session.add(user)
-    db_session.commit()
-    return user
+    return _make_role_user(db_session, username, "editor", password)
 
 
 def _create_ticket(client, *, subject="Cannot connect", category="vpn_cannot_connect", priority="high", description="It just won't connect."):

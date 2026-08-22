@@ -22,7 +22,7 @@ class Role(str, enum.Enum):
     admin = "admin"
     editor = "editor"  # can add/revoke/edit VPN clients and manage their MAC
     # addresses (everything in routes/clients.py) -- but not user
-    # management, teams, or settings, which stay admin-only
+    # management, groups, or settings, which stay admin-only
     viewer = "viewer"  # read-only: status/list/check/lint-db, no add/revoke/user-management
 
 
@@ -64,7 +64,7 @@ class ObjectPermission(Base):
     """One row per (role, object) -- the CRUD-ish permission matrix from the
     spec. `object_key` is a free string matched against the OBJECTS registry
     in permissions.py (e.g. "dashboard", "vpn_profiles", "users", "roles",
-    "audit_log", "settings", "teams", "reports", "health") rather than its
+    "audit_log", "settings", "groups", "reports", "health") rather than its
     own DB table -- adding a future module is one line in that registry, not
     a migration."""
     __tablename__ = "role_object_permissions"
@@ -115,38 +115,39 @@ class Gender(str, enum.Enum):
     unspecified = "unspecified"  # default -- nobody is forced to disclose this
 
 
-class Team(Base):
-    """A proper team resource (added on top of the earlier free-text `team`
-    field on User -- see git history) so teams can be created/deleted/listed
+class Group(Base):
+    """A proper group resource (added on top of the earlier free-text `group`
+    field on User -- see git history) so groups can be created/deleted/listed
     on their own, independent of whether any user currently belongs to one.
-    Membership is many-to-many (see user_teams below) -- a user can belong
-    to zero, one, or several teams; a user with no team is simply absent
-    from every team's `members`, not a row here ("Unassigned" is a UI
+    Membership is many-to-many (see user_groups below) -- a user can belong
+    to zero, one, or several groups; a user with no group is simply absent
+    from every group's `members`, not a row here ("Unassigned" is a UI
     concept, not a database one)."""
-    __tablename__ = "teams"
+    __tablename__ = "groups"
 
     id = Column(Integer, primary_key=True)
     name = Column(String(64), unique=True, nullable=False, index=True)
     # slug/description/tags added for future reporting (bandwidth/usage/
-    # connection-stats by team) -- schema only for now, no reporting UI yet.
+    # connection-stats by group) -- schema only for now, no reporting UI yet.
     # slug is nullable at the DB level (unlike RoleDef.slug) even though
     # it's required going forward at the API layer: existing rows predate
     # this column and db.py's generic column-sync migration can't backfill
     # a per-row-unique value on its own, so a small one-time slug backfill
-    # runs at startup instead (see db.py's _backfill_team_slugs) -- nullable
+    # runs at startup instead (see db.py's _backfill_group_slugs) -- nullable
     # here just means "not yet backfilled on an old row", not "optional."
     slug = Column(String(64), unique=True, nullable=True, index=True)
     description = Column(Text, nullable=True)
     tags = Column(Text, nullable=True)  # JSON list of strings, same convention as User.allowed_login_countries etc.
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
-    members = relationship("User", secondary="user_teams", back_populates="teams", order_by="User.username")
-    # Roles assigned to this team (Phase 1 of Team-Based Permissions -- see
-    # team_role_defs above) -- every current member inherits every one of
-    # these roles' permissions on top of their own direct role_id. Zero rows
-    # here (the pre-Phase-1 default for every existing team) means this
-    # team grants nothing extra, matching today's behavior exactly.
-    role_defs = relationship("RoleDef", secondary="team_role_defs", order_by="RoleDef.name")
+    members = relationship("User", secondary="user_groups", back_populates="groups", order_by="User.username")
+    # Roles assigned to this group (see group_role_defs above) -- every
+    # current member inherits every one of these roles' permissions. Groups
+    # are the ONLY source of a user's effective permissions (see
+    # permissions.py's effective_role_ids) -- a user's own User.role_id is
+    # never consulted for permission checks. Zero rows here means this
+    # group grants nothing.
+    role_defs = relationship("RoleDef", secondary="group_role_defs", order_by="RoleDef.name")
 
     @validates("name")
     def _normalize_name(self, key, value):
@@ -157,52 +158,52 @@ class Team(Base):
         return value.strip().lower() if value else value
 
 
-# Pure association table for the many-to-many User<->Team membership
-# (replaces the earlier single nullable User.team_id FK -- see git history).
-# A composite primary key (user_id, team_id) is enough here; there's no need
-# for a surrogate id since a given user/team pair can only be linked once.
+# Pure association table for the many-to-many User<->Group membership
+# (replaces the earlier single nullable User.group_id FK -- see git history).
+# A composite primary key (user_id, group_id) is enough here; there's no need
+# for a surrogate id since a given user/group pair can only be linked once.
 # New tables like this are picked up automatically by db.init_db()'s
 # `Base.metadata.create_all()` -- no change needed to the migration helper
-# itself, same as when the `teams` table was first added.
-user_teams = Table(
-    "user_teams",
+# itself, same as when the `groups` table was first added.
+user_groups = Table(
+    "user_groups",
     Base.metadata,
     Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
-    Column("team_id", Integer, ForeignKey("teams.id"), primary_key=True),
+    Column("group_id", Integer, ForeignKey("groups.id"), primary_key=True),
 )
 
 
-# Pure association table for the many-to-many Team<->RoleDef assignment --
-# Phase 1 of Team-Based Permissions/Roles/Policy Inheritance (teams as
-# role containers: an admin assigns a role to a team ONCE and every current
-# member inherits it, instead of setting role_id on N users individually).
-# Same shape/reasoning as user_teams above -- a composite primary key is
-# enough (a given team/role pair can only be linked once), and no extra
-# columns are needed today: WHO assigned/removed a role and WHEN is
-# captured via AuditLog's team_role_assigned/team_role_removed actions
-# (routes/teams.py), not duplicated here, same "AuditLog is the audit
-# trail, not this table" stance ObjectPermission/RoleApiScope already take.
+# Pure association table for the many-to-many Group<->RoleDef assignment --
+# groups as role containers: an admin assigns a role to a group ONCE and
+# every current member inherits it, instead of setting a role on N users
+# individually. Same shape/reasoning as user_groups above -- a composite
+# primary key is enough (a given group/role pair can only be linked once),
+# and no extra columns are needed today: WHO assigned/removed a role and
+# WHEN is captured via AuditLog's group_role_assigned/group_role_removed
+# actions (routes/groups.py), not duplicated here, same "AuditLog is the
+# audit trail, not this table" stance ObjectPermission/RoleApiScope already
+# take.
 #
-# Deliberately does NOT touch User.role_id, which stays the single direct
-# role it's always been -- a team's roles are purely ADDITIVE on top of
-# whatever a user's own role_id already grants (see permissions.py's
-# effective_role_ids, the union of a user's own role_id plus every role_id
-# reachable through team_role_defs for each team they belong to). A user in
-# no teams, or in teams with zero assigned roles, resolves to EXACTLY the
-# same single-role permission set as before this table existed -- that
-# backward-compatibility guarantee is asserted explicitly in
-# test_permissions.py.
+# This is now the ONLY source of a user's effective permissions -- see
+# permissions.py's effective_role_ids, which is EXCLUSIVELY the union of
+# every role_id reachable through group_role_defs for each group a user
+# belongs to. User.role_id (the column below) is legacy/inert for
+# permission purposes: a user in no groups, or in groups with zero
+# assigned roles, gets ZERO effective permissions -- there is no fallback
+# to a personal role. See migrate_users_to_role_groups() in permissions.py
+# for how existing deployments' access is preserved across this change
+# (auto-creates a group per previously-held role and populates it).
 #
-# ondelete=CASCADE on both FKs: deleting a team or a role should silently
+# ondelete=CASCADE on both FKs: deleting a group or a role should silently
 # drop the assignment row rather than leave an orphaned reference (Postgres
 # enforces this at the DB level in production; routes/roles.py's delete_role
-# additionally refuses to delete a role still assigned to a team at the
+# additionally refuses to delete a role still assigned to a group at the
 # application level, mirroring its existing "still assigned to N users"
 # guard, so this FK is defense-in-depth, not the primary guard).
-team_role_defs = Table(
-    "team_role_defs",
+group_role_defs = Table(
+    "group_role_defs",
     Base.metadata,
-    Column("team_id", Integer, ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True),
+    Column("group_id", Integer, ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True),
     Column("role_id", Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
 )
 
@@ -214,12 +215,18 @@ class User(Base):
     username = Column(String(64), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     role = Column(Enum(Role), nullable=False, default=Role.viewer)
-    # Transitional dynamic-RBAC column, added alongside `role` above rather
-    # than replacing it -- see docs/rbac_identity_design.md and the
-    # joyful-sauteeing-cookie plan's Phase 1/2 split. Nullable and unused
-    # until Phase 2's migrate_user_roles() backfill runs and every
-    # permission check is confirmed moved onto it; only then does `role`
-    # (the enum column above) get removed and this becomes non-nullable.
+    # LEGACY/INERT for permission purposes as of the group-only permissions
+    # change -- permissions.py's effective_role_ids() no longer consults
+    # this column at all; a user's effective permissions come exclusively
+    # from the roles assigned to the group(s) they belong to (see
+    # models.Group/group_role_defs). Deliberately NOT deleted/dropped: (1)
+    # migrate_users_to_role_groups() (permissions.py) reads it once, at
+    # migration time, to know each user's pre-migration role so it can
+    # place them into the matching auto-created group without anyone's
+    # access changing on deploy; (2) dropping a column is data-loss that
+    # can't be undone, with no offsetting benefit for a live production
+    # database. No UI writes this field going forward (see routes/users.py
+    # -- the Add/Edit User dialogs no longer offer a direct role picker).
     role_id = Column(Integer, ForeignKey("roles.id"), nullable=True)
     role_def = relationship("RoleDef")
     is_active = Column(Boolean, nullable=False, default=True)
@@ -289,13 +296,13 @@ class User(Base):
     # rules as first_name/last_name/gender above.
     email = Column(String(254), nullable=True)
     phone = Column(String(32), nullable=True)
-    # Deprecated: replaced by the many-to-many `teams` relationship below
-    # (a user can now belong to several teams at once, see git history) --
+    # Deprecated: replaced by the many-to-many `groups` relationship below
+    # (a user can now belong to several groups at once, see git history) --
     # this nullable FK column may still physically exist in older databases
     # (this app's migration approach only ever ADDs columns, see db.py) but
     # is no longer read or written anywhere.
-    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
-    teams = relationship("Team", secondary="user_teams", back_populates="members", order_by="Team.name")
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=True)
+    groups = relationship("Group", secondary="user_groups", back_populates="members", order_by="Group.name")
 
     last_login_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -386,17 +393,34 @@ class User(Base):
         return full or self.username
 
     @property
-    def role_slug(self) -> str:
-        """Dynamic-RBAC role slug, with a fallback to the legacy `role`
-        enum for the narrow pre-backfill window -- see permissions.py's
-        migrate_user_roles docstring. Used by templates (base.html,
-        profile.html) so they never read the legacy enum column directly,
-        which can't represent a custom or "User" self-service role."""
-        return self.role_def.slug if self.role_def is not None else self.role.value
+    def effective_role_slugs(self) -> list[str]:
+        """Group-only permissions: every role slug this user's group
+        membership actually grants (the union across every group they
+        belong to -- mirrors permissions.py's effective_role_ids, but
+        computed here in plain Python over already-loaded relationships,
+        for templates that don't have a `db` session handy). NOT
+        role_id/role -- neither is consulted for permission purposes any
+        more. Empty for a user in zero groups, or in group(s) with no role
+        assigned -- that's the correct "no access" answer, not a bug.
+
+        HARDCODED EXEMPTION -- super_admin (same one effective_role_ids in
+        permissions.py applies, mirrored here for display purposes): never
+        computed from groups at all, so a super_admin account correctly
+        shows its role here even with zero group memberships, instead of
+        the misleading "no access" empty list every other zero-group user
+        gets."""
+        if self.role_def is not None and self.role_def.slug == "super_admin":
+            return ["super_admin"]
+        return sorted({r.slug for g in self.groups for r in g.role_defs})
 
     @property
-    def role_display_name(self) -> str:
-        return self.role_def.name if self.role_def is not None else self.role.value.capitalize()
+    def effective_role_names(self) -> list[str]:
+        """Display-name counterpart to effective_role_slugs above, for
+        templates (base.html, profile.html) that show a human-readable
+        role badge rather than a slug. Same super_admin exemption."""
+        if self.role_def is not None and self.role_def.slug == "super_admin":
+            return [self.role_def.name]
+        return sorted({r.name for g in self.groups for r in g.role_defs})
 
 
 @event.listens_for(User, "before_insert")

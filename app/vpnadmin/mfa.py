@@ -170,9 +170,21 @@ def effective_policy(user: User, db: Session) -> str:
             role_requirements = json.loads(s.mfa_role_requirements)
         except (ValueError, TypeError):
             role_requirements = {}
-    role_slug = user.role_slug
-    if role_slug in role_requirements and role_requirements[role_slug] in VALID_POLICY_OVERRIDES:
-        return role_requirements[role_slug]
+    # Group-only permissions: a user can now have SEVERAL effective roles
+    # (union across every group they belong to -- see models.py's
+    # effective_role_slugs), not just one, so a per-role MFA requirement
+    # can no longer be a single lookup. FORK/DECISION: apply the most
+    # restrictive override among every effective role that has one
+    # configured -- "required" beats "optional" beats "exempt" -- so
+    # belonging to an additional, less-strict-MFA group can never silently
+    # weaken a requirement another one of a user's groups already imposes.
+    # Matches this app's general security posture elsewhere (fail toward
+    # requiring MFA, not away from it).
+    matched = [role_requirements[slug] for slug in user.effective_role_slugs
+               if slug in role_requirements and role_requirements[slug] in VALID_POLICY_OVERRIDES]
+    for strictest in ("required", "optional", "exempt"):
+        if strictest in matched:
+            return strictest
     return s.mfa_mode if s.mfa_mode in ("required", "optional") else "optional"
 
 

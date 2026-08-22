@@ -424,7 +424,7 @@ class TestReleaseCheckIntervalClamp:
 
     def _run_clamp_against(self, db_session):
         # Same "point SessionLocal at the fixture's own StaticPool-pinned
-        # connection" pattern as test_teams_metadata.py's slug-backfill
+        # connection" pattern as test_groups_metadata.py's slug-backfill
         # tests -- _clamp_release_check_interval() opens its own
         # SessionLocal() rather than taking a session param, since it's a
         # startup migration step (db.init_db()), not a request-scoped

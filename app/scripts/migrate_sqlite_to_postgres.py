@@ -35,10 +35,10 @@ from vpnadmin.db import Base
 from vpnadmin import models  # noqa: F401 -- registers all tables on Base
 
 
-# Migration order matters: Team before User (user_teams FKs both), User
-# before user_teams. AuditLog/AppSettings have no FK dependencies on
+# Migration order matters: Group before User (user_groups FKs both), User
+# before user_groups. AuditLog/AppSettings have no FK dependencies on
 # anything else in this list, safe to do last.
-TABLE_ORDER = ["teams", "users", "user_teams", "audit_log", "app_settings"]
+TABLE_ORDER = ["groups", "users", "user_groups", "audit_log", "app_settings"]
 
 
 def _session(url):
@@ -79,7 +79,7 @@ def main():
             print(f"  {t}: {c}")
         return
 
-    # Create every table (teams, users, user_teams, audit_log, app_settings)
+    # Create every table (groups, users, user_groups, audit_log, app_settings)
     # in Postgres via the same models the app itself uses.
     Base.metadata.create_all(bind=dst_engine)
 
@@ -90,18 +90,18 @@ def main():
               f"Wipe those tables first if you intend to re-run this migration.", file=sys.stderr)
         sys.exit(1)
 
-    model_by_table = {m.__tablename__: m for m in (models.Team, models.User, models.AuditLog, models.AppSettings)}
+    model_by_table = {m.__tablename__: m for m in (models.Group, models.User, models.AuditLog, models.AppSettings)}
 
     print("\n== Migrating ==")
     for table_name in TABLE_ORDER:
-        if table_name == "user_teams":
+        if table_name == "user_groups":
             # Pure association table -- no ORM model class, copy via Core.
-            assoc = models.user_teams
+            assoc = models.user_groups
             rows = src_session.execute(assoc.select()).mappings().all()
             for row in rows:
                 dst_session.execute(assoc.insert().values(**dict(row)))
             dst_session.commit()
-            print(f"  user_teams: {len(rows)} row(s) copied")
+            print(f"  user_groups: {len(rows)} row(s) copied")
             continue
 
         model = model_by_table[table_name]

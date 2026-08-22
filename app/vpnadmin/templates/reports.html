@@ -32,15 +32,15 @@
 </div>
 
 <div class="card">
-	<h2>Team-Based Reporting</h2>
-	<div id="team-report"><p class="muted">Loading…</p></div>
+	<h2>Group-Based Reporting</h2>
+	<div id="group-report"><p class="muted">Loading…</p></div>
 </div>
 
 <div class="card">
 	<div class="toolbar">
 		<h2 style="margin:0">Per User</h2>
 		<div class="field" style="max-width:280px;margin-bottom:0">
-			<input type="text" id="user-search" placeholder="Search by name, username, or team…">
+			<input type="text" id="user-search" placeholder="Search by name, username, or group…">
 		</div>
 	</div>
 	<div id="user-report"><p class="muted">Loading…</p></div>
@@ -968,17 +968,17 @@ function renderGlobalSummary(g) {
 		: '<p class="muted">Nobody is currently over quota.</p>';
 }
 
-function renderTeamReport(teams) {
-	const el = document.getElementById("team-report");
-	if (!teams.length) {
-		el.innerHTML = '<p class="muted">No teams or unassigned users with a linked VPN profile yet.</p>';
+function renderGroupReport(groups) {
+	const el = document.getElementById("group-report");
+	if (!groups.length) {
+		el.innerHTML = '<p class="muted">No groups or unassigned users with a linked VPN profile yet.</p>';
 		return;
 	}
 	el.innerHTML = `<div class="table-scroll"><table>
-		<thead><tr><th>Team</th><th>Members</th><th>Allocated</th><th>Consumed</th><th>Utilization</th><th>Top Consumer</th></tr></thead>
-		<tbody>${teams.map(t => `
+		<thead><tr><th>Group</th><th>Members</th><th>Allocated</th><th>Consumed</th><th>Utilization</th><th>Top Consumer</th></tr></thead>
+		<tbody>${groups.map(t => `
 			<tr>
-				<td><strong>${escapeHtml(t.team)}</strong></td>
+				<td><strong>${escapeHtml(t.group)}</strong></td>
 				<td>${t.member_count}</td>
 				<td class="mono">${fmtGb(t.total_quota_gb)}</td>
 				<td class="mono">${fmtGb(t.total_used_gb)}</td>
@@ -996,19 +996,19 @@ function renderUserReport() {
 		? lastUserRows.filter(r =>
 			r.username.toLowerCase().includes(term) ||
 			r.display_name.toLowerCase().includes(term) ||
-			r.team_names.some(t => t.toLowerCase().includes(term)))
+			r.group_names.some(t => t.toLowerCase().includes(term)))
 		: lastUserRows;
 	if (!filtered.length) {
 		el.innerHTML = `<p class="muted">${lastUserRows.length ? "No users match this search." : "No users with a linked VPN profile yet."}</p>`;
 		return;
 	}
 	el.innerHTML = `<div class="table-scroll"><table>
-		<thead><tr><th>Username</th><th>VPN Profile</th><th>Team(s)</th><th>Quota</th><th>Used</th><th>Remaining</th><th>% Used</th></tr></thead>
+		<thead><tr><th>Username</th><th>VPN Profile</th><th>Group(s)</th><th>Quota</th><th>Used</th><th>Remaining</th><th>% Used</th></tr></thead>
 		<tbody>${filtered.map(r => `
 			<tr>
 				<td>${escapeHtml(r.display_name)} <span class="muted">(${escapeHtml(r.username)})</span></td>
 				<td class="mono">${escapeHtml(r.vpn_client_name)}</td>
-				<td>${r.team_names.length ? r.team_names.map(escapeHtml).join(", ") : '<span class="muted">—</span>'}</td>
+				<td>${r.group_names.length ? r.group_names.map(escapeHtml).join(", ") : '<span class="muted">—</span>'}</td>
 				<td class="mono">${fmtGb(r.quota_gb)}</td>
 				<td class="mono">${fmtGb(r.used_gb)}</td>
 				<td class="mono">${fmtGb(r.remaining_gb)}</td>
@@ -1031,15 +1031,15 @@ function renderMfaReport(r) {
 
 async function loadReports() {
 	try {
-		const [users, teams, global_, mfa] = await Promise.all([
+		const [users, groups, global_, mfa] = await Promise.all([
 			apiFetch("/api/reports/users"),
-			apiFetch("/api/reports/teams"),
+			apiFetch("/api/reports/groups"),
 			apiFetch("/api/reports/global"),
 			apiFetch("/api/reports/mfa"),
 		]);
 		lastUserRows = users;
 		renderUserReport();
-		renderTeamReport(teams);
+		renderGroupReport(groups);
 		renderGlobalSummary(global_);
 		renderMfaReport(mfa);
 	} catch (e) {

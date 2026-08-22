@@ -4,9 +4,40 @@ and the Upgrade Assignment Workflow's auto-ticket-filing. Every test mocks
 the actual GitHub HTTP call (release_check._fetch_latest_release) --
 never hits the real GitHub API."""
 from vpnadmin import release_check
-from vpnadmin.models import SupportTicket
+from vpnadmin.auth import hash_password
+from vpnadmin.models import Group, Role, RoleDef, SupportTicket, User
 
 from .conftest import login
+
+
+def _make_admin_user(db_session, username="admin", password="adminpass123"):
+    # Group-only permissions: a role only grants anything via group
+    # membership now (see permissions.py's effective_role_ids) --
+    # file_upgrade_ticket's candidate lookup below goes through
+    # has_permission_any_scope, which needs real group membership.
+    admin_role = db_session.query(RoleDef).filter_by(slug="admin").one()
+    group = Group(name=f"{username}-admin-group")
+    group.role_defs.append(admin_role)
+    db_session.add(group)
+    db_session.flush()
+    user = User(username=username, password_hash=hash_password(password), role=Role.admin, role_id=admin_role.id)
+    user.groups.append(group)
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+def _make_viewer_user(db_session, username="viewer", password="viewerpass123"):
+    viewer_role = db_session.query(RoleDef).filter_by(slug="viewer").one()
+    group = Group(name=f"{username}-viewer-group")
+    group.role_defs.append(viewer_role)
+    db_session.add(group)
+    db_session.flush()
+    user = User(username=username, password_hash=hash_password(password), role=Role.viewer, role_id=viewer_role.id)
+    user.groups.append(group)
+    db_session.add(user)
+    db_session.commit()
+    return user
 
 
 class TestClassify:
@@ -98,11 +129,7 @@ class TestFileUpgradeTicket:
             "tag_name": "v9.9.9", "name": "Big release", "body": "Some notes",
             "html_url": "https://github.com/x/y/releases/tag/v9.9.9", "published_at": "2026-01-01T00:00:00Z",
         })
-        from vpnadmin.auth import hash_password
-        from vpnadmin.models import Role, User
-        admin = User(username="admin", password_hash=hash_password("adminpass123"), role=Role.admin)
-        db_session.add(admin)
-        db_session.commit()
+        _make_admin_user(db_session)
 
         release_check.check_for_new_release(force=True)
         ticket = release_check.file_upgrade_ticket(db_session)
@@ -119,12 +146,8 @@ class TestFileUpgradeTicket:
         monkeypatch.setattr(release_check, "_fetch_latest_release", lambda *a, **k: {
             "tag_name": "v9.9.9", "name": None, "body": None, "html_url": None, "published_at": None,
         })
-        from vpnadmin.auth import hash_password
-        from vpnadmin.models import Role, User
-        admin = User(username="admin", password_hash=hash_password("adminpass123"), role=Role.admin)
-        viewer = User(username="viewer", password_hash=hash_password("viewerpass123"), role=Role.viewer)
-        db_session.add_all([admin, viewer])
-        db_session.commit()
+        admin = _make_admin_user(db_session)
+        _make_viewer_user(db_session)
 
         release_check.check_for_new_release(force=True)
         ticket = release_check.file_upgrade_ticket(db_session)
@@ -135,11 +158,7 @@ class TestFileUpgradeTicket:
         monkeypatch.setattr(release_check, "_fetch_latest_release", lambda *a, **k: {
             "tag_name": "v9.9.9", "name": None, "body": None, "html_url": None, "published_at": None,
         })
-        from vpnadmin.auth import hash_password
-        from vpnadmin.models import Role, User
-        admin = User(username="admin", password_hash=hash_password("adminpass123"), role=Role.admin)
-        db_session.add(admin)
-        db_session.commit()
+        _make_admin_user(db_session)
 
         release_check.check_for_new_release(force=True)
         first = release_check.file_upgrade_ticket(db_session)
@@ -152,11 +171,7 @@ class TestFileUpgradeTicket:
         monkeypatch.setattr(release_check, "_fetch_latest_release", lambda *a, **k: {
             "tag_name": "v9.9.9", "name": None, "body": "Fixes a SECURITY issue.", "html_url": None, "published_at": None,
         })
-        from vpnadmin.auth import hash_password
-        from vpnadmin.models import Role, User
-        admin = User(username="admin", password_hash=hash_password("adminpass123"), role=Role.admin)
-        db_session.add(admin)
-        db_session.commit()
+        _make_admin_user(db_session)
 
         release_check.check_for_new_release(force=True)
         ticket = release_check.file_upgrade_ticket(db_session)

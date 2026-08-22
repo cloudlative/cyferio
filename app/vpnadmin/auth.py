@@ -143,7 +143,7 @@ def require_user(user: User | None = Depends(get_current_user)) -> User:
 # require_permission(object_key, action), which every former call site now
 # uses (often via a module-local `require_admin = require_permission(...)`
 # alias, to avoid touching every Depends() at the call site -- see
-# routes/settings.py, routes/teams.py, routes/status.py, routes/users.py,
+# routes/settings.py, routes/groups.py, routes/status.py, routes/users.py,
 # and routes/clients.py's `_require_client_manager`). See
 # docs/rbac_identity_design.md and the joyful-sauteeing-cookie plan.
 

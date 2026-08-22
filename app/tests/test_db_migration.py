@@ -2,7 +2,7 @@
 Tests for db._sync_missing_columns(), the lightweight auto-migration that
 adds columns a model gained after a table already existed in production
 (e.g. this exact repo's users table, deployed before first_name/gender/
-team/deleted/etc. existed). Uses a separate in-memory engine seeded with a
+group/deleted/etc. existed). Uses a separate in-memory engine seeded with a
 deliberately old-shaped `users` table -- not the full ORM model -- so this
 actually exercises the "existing deployment, new code" scenario rather than
 a table that was always up to date.
@@ -48,7 +48,7 @@ def test_sync_adds_missing_columns(monkeypatch):
     sync_missing_columns()
 
     after = {c["name"] for c in inspect(engine).get_columns("users")}
-    for col in ("first_name", "last_name", "gender", "team_id", "last_login_at", "deleted", "deleted_at"):
+    for col in ("first_name", "last_name", "gender", "group_id", "last_login_at", "deleted", "deleted_at"):
         assert col in after
 
 

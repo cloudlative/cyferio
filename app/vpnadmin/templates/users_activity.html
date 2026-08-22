@@ -5,7 +5,7 @@
 	<div class="toolbar-title"><h1 style="margin:0">Users Activity</h1></div>
 	<button class="btn-secondary" id="refresh-btn">Refresh</button>
 </div>
-<p class="page-subtitle" style="margin-top:-10px">Who did what, when -- the full accountability trail across clients, users, teams, and settings.</p>
+<p class="page-subtitle" style="margin-top:-10px">Who did what, when -- the full accountability trail across clients, users, groups, and settings.</p>
 
 <div class="card activity-breakdown">
 	<div class="toolbar">
@@ -74,10 +74,10 @@ const ACTION_LABELS = {
 	update_own_profile: "Updated own profile",
 	delete_user: "Deleted user account",
 	permanently_delete_user: "Permanently deleted user account",
-	create_team: "Created team",
-	delete_team: "Deleted team",
-	add_team_member: "Added team member",
-	remove_team_member: "Removed team member",
+	create_group: "Created group",
+	delete_group: "Deleted group",
+	add_group_member: "Added group member",
+	remove_group_member: "Removed group member",
 	update_settings: "Updated app settings",
 	test_smtp_settings: "Sent SMTP test email",
 	login_blocked_country: "Blocked login (country restriction)",
@@ -94,7 +94,7 @@ const ACTION_LABELS = {
 // applied blindly to every action's detail text.
 const FIELD_LABELS = {
 	is_active: "active", first_name: "first name", last_name: "last name",
-	gender: "gender", teams: "teams", password: "password",
+	gender: "gender", groups: "groups", password: "password",
 	email: "email", phone: "phone",
 };
 
@@ -164,7 +164,7 @@ const ACTION_CATEGORIES = {
 	delete_user: "user", permanently_delete_user: "user",
 	login_blocked_country: "user", login_blocked_ip: "user",
 	login_blocked_city: "user", login_blocked_asn: "user",
-	create_team: "team", delete_team: "team", add_team_member: "team", remove_team_member: "team",
+	create_group: "group", delete_group: "group", add_group_member: "group", remove_group_member: "group",
 	update_settings: "settings", test_smtp_settings: "settings",
 };
 // Fixed slot order/hues -- never reassigned by frequency or filtering, so
@@ -175,7 +175,7 @@ const ACTION_CATEGORIES = {
 const CATEGORY_META = {
 	client: { label: "Client management", color: "#3987e5" },
 	user: { label: "User management", color: "#d95926" },
-	team: { label: "Team management", color: "#199e70" },
+	group: { label: "Group management", color: "#199e70" },
 	settings: { label: "Settings & email", color: "#c98500" },
 };
 
@@ -241,7 +241,7 @@ function renderActivityBreakdown(entries) {
 	const failed = entries.length - succeeded;
 	const activeUsers = new Set(entries.map(e => e.username)).size;
 
-	const counts = { client: 0, user: 0, team: 0, settings: 0 };
+	const counts = { client: 0, user: 0, group: 0, settings: 0 };
 	for (const e of entries) {
 		const cat = ACTION_CATEGORIES[e.action];
 		if (cat) counts[cat] += 1;
@@ -350,9 +350,9 @@ function renderMostActive(entries) {
 		<thead><tr><th>User</th><th>Actions</th><th>Failed</th></tr></thead>
 		<tbody>${ranked.map(([username, c]) => {
 			const pct = Math.max(6, Math.round((c.total / maxCount) * 100));
-			return `<tr class="team-row" data-username="${escapeHtml(username)}" tabindex="0">
+			return `<tr class="group-row" data-username="${escapeHtml(username)}" tabindex="0">
 				<td style="font-weight:700">${escapeHtml(username)}</td>
-				<td><div class="team-row-count"><span class="mono">${c.total}</span><span class="team-row-bar"><span class="team-row-bar-fill" style="width:${pct}%"></span></span></div></td>
+				<td><div class="group-row-count"><span class="mono">${c.total}</span><span class="group-row-bar"><span class="group-row-bar-fill" style="width:${pct}%"></span></span></div></td>
 				<td>${c.failed > 0 ? `<span class="status-pill status-revoked">${c.failed}</span>` : '<span class="muted">0</span>'}</td>
 			</tr>`;
 		}).join("")}</tbody>

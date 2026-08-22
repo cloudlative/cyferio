@@ -169,6 +169,20 @@ def app_client(db_session, monkeypatch):
     viewer = User(username="viewer", password_hash=hash_password("viewerpass123"), role=Role.viewer)
     db_session.add_all([admin, viewer])
     db_session.commit()
+    # Group-only permissions: role= (the legacy enum, above) and the
+    # role_id it backfills (via models.py's _default_role_id_from_legacy_
+    # role listener) are no longer consulted for permission checks at all
+    # -- see permissions.py's effective_role_ids. Without this, "admin"
+    # and "viewer" here would each have ZERO effective permissions (no
+    # group membership), and every require_permission-gated route in every
+    # test using this fixture would 403. This is the exact same
+    # migrate_users_to_role_groups() call production runs at startup (see
+    # main.py's lifespan / db.py's _seed_rbac) -- mirrored here explicitly
+    # for the same reason seed_system_roles() already is in db_session
+    # above: this fixture builds its schema/session directly rather than
+    # through init_db()'s real startup sequence.
+    from vpnadmin.permissions import migrate_users_to_role_groups
+    migrate_users_to_role_groups(db_session)
 
     with TestClient(app) as client:
         yield client

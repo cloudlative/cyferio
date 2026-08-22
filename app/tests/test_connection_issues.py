@@ -10,14 +10,21 @@ import pytest
 from vpnadmin.app_settings import prune_connection_rejections, runtime
 from vpnadmin.auth import hash_password
 from vpnadmin.config import settings
-from vpnadmin.models import AuditLog, ConnectionRejectionLog, RoleDef, User, VpnProfileLink
+from vpnadmin.models import AuditLog, ConnectionRejectionLog, Group, RoleDef, User, VpnProfileLink
 
 from .conftest import login
 
 
 def _make_self_service_user(db_session, username, *, vpn_client_name=None, password="somepass123"):
+    # Group-only permissions: a role only grants anything via group
+    # membership now (see permissions.py's effective_role_ids).
     role = db_session.query(RoleDef).filter_by(slug="user").first()
+    group = Group(name=f"{username}-user-group")
+    group.role_defs.append(role)
+    db_session.add(group)
+    db_session.flush()
     user = User(username=username, password_hash=hash_password(password), role_id=role.id)
+    user.groups.append(group)
     db_session.add(user)
     db_session.commit()
     if vpn_client_name:

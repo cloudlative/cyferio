@@ -14,7 +14,7 @@
 		</div>
 	</div>
 	<div class="field" style="max-width:320px;margin-bottom:16px">
-		<input type="text" id="user-search" placeholder="Search by name, username, team, or VPN profile…">
+		<input type="text" id="user-search" placeholder="Search by name, username, group, or VPN profile…">
 	</div>
 	<div id="users-table"><p class="muted">Loading…</p></div>
 </div>
@@ -30,7 +30,12 @@
 	<div class="dialog-body">
 		<h2>Add a User</h2>
 		<form id="add-user-form" autocomplete="off">
-			<!-- Row 1: Username, First Name, Last Name, Role -->
+			<!-- Row 1: Username, First Name, Last Name -- no direct Role field:
+			     under the group-only permission model a personal role would
+			     silently do nothing (see permissions.py's effective_role_ids).
+			     Grant access via the Groups picker below (Row 2), or leave
+			     the new account in zero groups and organize it later from
+			     the Groups page -- it has no permissions until then. -->
 			<div class="form-row">
 				<div class="field">
 					<label for="u-username">Username</label>
@@ -50,12 +55,8 @@
 					<label for="u-last">Last Name <span class="muted">(optional)</span></label>
 					<input type="text" id="u-last" autocomplete="off">
 				</div>
-				<div class="field">
-					<label for="u-role">Role</label>
-					<select id="u-role"></select>
-				</div>
 			</div>
-			<!-- Row 2: Email, Phone, Team(s) -->
+			<!-- Row 2: Email, Phone, Group(s) -->
 			<div class="form-row" style="margin-top:16px">
 				<div class="field">
 					<label for="u-email">Email</label>
@@ -66,8 +67,8 @@
 					<div id="u-phone-mount"></div>
 				</div>
 				<div class="field">
-					<label for="u-team-toggle">Teams <span class="muted">(optional, select several)</span></label>
-					<div id="u-team-ms"></div>
+					<label for="u-group-toggle">Groups <span class="muted">(optional, select several)</span></label>
+					<div id="u-group-ms"></div>
 				</div>
 			</div>
 			<div class="checkbox-row" style="margin-top:10px">
@@ -296,10 +297,13 @@
 	<div class="dialog-body">
 		<h2>Edit User</h2>
 		<form id="edit-form" autocomplete="off">
-			<!-- Row 1: Username (read-only), First Name, Last Name, Role -- plus
-			     Status, which has no home in the requested 3-row layout (Create
-			     has no equivalent concept -- a new account always starts
-			     Active) but still needs to live somewhere admin-visible.
+			<!-- Row 1: Username (read-only), First Name, Last Name, Status --
+			     no direct Role field: under the group-only permission model
+			     editing a personal role would silently do nothing (see
+			     permissions.py's effective_role_ids) -- "Effective Role(s)"
+			     below is a read-only display of what this account's CURRENT
+			     group membership actually grants; change it from the Groups
+			     picker in Row 2, or from the Groups page.
 			     autocomplete="off" throughout -- same reasoning as Add User's
 			     own fields: this dialog edits someone ELSE's identity, never
 			     the admin's own, so browser autofill must never touch it. -->
@@ -308,19 +312,19 @@
 				<div class="field"><label for="e-first">First Name</label><input type="text" id="e-first" required autocomplete="off"></div>
 				<div class="field"><label for="e-last">Last Name</label><input type="text" id="e-last" autocomplete="off"></div>
 				<div class="field">
-					<label for="e-role">Role</label>
-					<select id="e-role"></select>
-				</div>
-				<div class="field">
 					<label for="e-active">Status</label>
 					<select id="e-active"><option value="true">Active</option><option value="false">Disabled</option></select>
 				</div>
 			</div>
-			<!-- Row 2: Email, Phone, Team(s) -->
+			<div class="field" style="margin-top:10px">
+				<label>Effective Role(s) <span class="muted">(from group membership, read-only)</span></label>
+				<div class="muted" id="e-effective-roles">&mdash;</div>
+			</div>
+			<!-- Row 2: Email, Phone, Group(s) -->
 			<div class="form-row" style="margin-top:14px">
 				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email" required autocomplete="off"></div>
 				<div class="field field-wide-phone"><label for="e-phone-mount">Phone</label><div id="e-phone-mount"></div></div>
-				<div class="field"><label for="e-team-toggle">Teams <span class="muted">(select several)</span></label><div id="e-team-ms"></div></div>
+				<div class="field"><label for="e-group-toggle">Groups <span class="muted">(select several)</span></label><div id="e-group-ms"></div></div>
 			</div>
 			<!-- Row 3: New Password, Confirm Password, Generate (aligned to row end) -->
 			<div class="form-row password-row" style="margin-top:14px">
@@ -550,7 +554,7 @@
 const currentUsername = {{ user.username | tojson }};
 let editingUserId = null;
 let editingUserIsBootstrapAdmin = false;
-let allTeams = [];
+let allGroups = [];
 let lastUsers = [];
 let userSearchTerm = "";
 
@@ -558,8 +562,8 @@ function fmtDate(iso) {
 	return iso ? fmtTimestamp(iso) : "—";
 }
 
-const addTeamMs = createMultiselectDropdown(document.getElementById("u-team-ms"), { placeholder: "Unassigned" });
-const editTeamMs = createMultiselectDropdown(document.getElementById("e-team-ms"), { placeholder: "Unassigned" });
+const addGroupMs = createMultiselectDropdown(document.getElementById("u-group-ms"), { placeholder: "Unassigned" });
+const editGroupMs = createMultiselectDropdown(document.getElementById("e-group-ms"), { placeholder: "Unassigned" });
 
 const addCountriesMs = createMultiselectDropdown(document.getElementById("u-countries-ms"), {
 	placeholder: "Any country", idType: "string", emptyLabel: "No countries found.", unitLabel: "countries",
@@ -691,7 +695,7 @@ function resetAddUserForm() {
 	document.getElementById("add-user-form").reset();
 	resetPasswordVisibility(document.getElementById("u-password"));
 	resetPasswordVisibility(document.getElementById("u-password-confirm"));
-	addTeamMs.reset();
+	addGroupMs.reset();
 	addPhone.reset();
 	addCountriesMs.reset();
 	addCitiesMs.reset();
@@ -704,10 +708,6 @@ function resetAddUserForm() {
 	// syncs the two sections' visibility/required-ness to match, same as
 	// a fresh dialog open.
 	setAddUserVpnMode("new");
-	// Must run AFTER the native .reset() above -- see
-	// applyDefaultRoleToAddUserForm's own docstring for why the reset would
-	// otherwise silently win and leave Role on whatever option sorts first.
-	applyDefaultRoleToAddUserForm();
 	// Native .reset() already unchecks u-monitoring-enabled -- this just
 	// re-syncs the fields' dimmed/enabled look to match, same reasoning as
 	// setAddUserVpnMode above.
@@ -821,94 +821,25 @@ document.getElementById("reset-pw-form").addEventListener("submit", async (ev) =
 	}
 });
 
-let allRoles = [];
-let creatableRoles = [];
+// allRoles/creatableRoles + setEditRoleOptions/loadRoleOptions/
+// applyDefaultRoleToAddUserForm (which used to populate and default the
+// Add/Edit User Role <select>s from GET /api/roles) were removed along
+// with that dropdown -- see the group-only permissions change. A role is
+// no longer ever assigned directly to a user from this page; only to a
+// Group (Groups page), which a user then joins via the Groups picker
+// here. NOTE: Settings -> User Management's "default role for new users"
+// (default_new_user_role) is consequently unused by this page now -- left
+// in place/unremoved (out of this change's scope) since it may still be
+// meaningful input for a future "default group for new users" feature;
+// flagged here for whoever reviews this so it isn't a silent dead
+// setting nobody knows about.
 
-// Renders e-role's option list -- creatableRoles (excludes Super Admin,
-// see the module-level docstring below) in every normal case, or the full
-// allRoles list (the only case that needs Super Admin visible at all) when
-// editing the bootstrap admin account specifically, so its actual current
-// role still displays correctly. That control is disabled either way for
-// the bootstrap admin (see openEdit), so this never offers Super Admin as
-// something an admin can actually pick -- it's display-only in that one
-// case.
-function setEditRoleOptions(isBootstrapAdmin) {
-	const roles = isBootstrapAdmin ? allRoles : creatableRoles;
-	document.getElementById("e-role").innerHTML = roles.map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
-}
-
-async function loadRoleOptions() {
-	// Populates both the Add-User and Edit-User role <select>s from the
-	// live dynamic-RBAC role list (GET /api/roles) instead of a hardcoded
-	// admin/editor/viewer set -- picks up the "User" self-service role and any
-	// custom role created via Roles Management with no code change needed here.
-	// GET /api/roles is roles-manage-gated; a non-admin viewing this page
-	// wouldn't reach users.html at all (server-side page guard), so no
-	// separate fallback is needed for that case.
+async function loadGroupOptions() {
 	try {
-		allRoles = await apiFetch("/api/roles");
-		// Super Admin is reserved for the bootstrap admin account only (see
-		// permissions.py's _SYSTEM_ROLES) -- never offered as a choice when
-		// creating a new user, nor as a normal Edit User choice (task
-		// feedback: "Administrators should not be able to assign or change
-		// users to the Super Admin role through normal user editing
-		// workflows"). setEditRoleOptions above is the one place that still
-		// reaches for allRoles instead of this list, and only to correctly
-		// display (not offer) the bootstrap admin's own current role.
-		creatableRoles = allRoles.filter(r => r.slug !== "super_admin");
-		document.getElementById("u-role").innerHTML = creatableRoles.map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
-		setEditRoleOptions(false);
-	} catch (e) {
-		toast(e.message, "error");
-	}
-}
-
-// Applies Settings -> User Management's configured default role to the Add
-// User form's Role field. Bug fix: this used to only run once, inside
-// loadRoleOptions() at page load -- but resetAddUserForm() (called every
-// time the Add User dialog opens, see openAddUserDialog) calls the native
-// <form>.reset(), which resets a <select> populated purely via JS (no
-// `selected` attribute on any of its dynamically-inserted <option>s) back
-// to its first option, silently undoing that one-time default-role
-// selection on every dialog open after the first. Calling this again,
-// AFTER resetAddUserForm()'s own form.reset(), fixes that for good.
-//
-// Re-fetches Settings -> User Management every time (rather than caching
-// the slug from loadRoleOptions()'s own settings fetch) so a default-role
-// change an admin makes on the Settings page mid-session is honored the
-// very next time Add User is opened, without needing a full page reload
-// of the Users page -- task feedback: "Any future changes to the
-// configured default role should be reflected automatically."
-async function applyDefaultRoleToAddUserForm() {
-	// The API orders roles is_system-desc-then-name, which puts "Admin"
-	// alphabetically before "Viewer" -- without an explicit default, a
-	// freshly-reset Add User form would default to creating an ADMIN
-	// account. "viewer" is the safe fallback if nothing's configured (or
-	// the configured slug no longer exists, e.g. a deleted custom role).
-	let defaultRoleSlug = "viewer";
-	try {
-		// GET /api/settings is settings-manage-gated, a narrower permission
-		// than what got this page loaded at all -- an Editor with
-		// users-manage but not settings-manage is expected to hit a 403
-		// here, silently kept on the "viewer" fallback rather than surfaced
-		// as an error toast (this is a UX nicety, not a required capability
-		// of this form).
-		const s = await apiFetch("/api/settings");
-		if (s.default_new_user_role && creatableRoles.some(r => r.slug === s.default_new_user_role)) {
-			defaultRoleSlug = s.default_new_user_role;
-		}
-	} catch (e) { /* not settings-manage -- keep the "viewer" fallback */ }
-	if (creatableRoles.some(r => r.slug === defaultRoleSlug)) {
-		document.getElementById("u-role").value = defaultRoleSlug;
-	}
-}
-
-async function loadTeamOptions() {
-	try {
-		allTeams = (await apiFetch("/api/teams")).filter(t => t.team !== "Unassigned");
-		const opts = allTeams.map(t => ({ id: t.id, label: t.team }));
-		addTeamMs.setOptions(opts);
-		editTeamMs.setOptions(opts);
+		allGroups = (await apiFetch("/api/groups")).filter(t => t.group !== "Unassigned");
+		const opts = allGroups.map(t => ({ id: t.id, label: t.group }));
+		addGroupMs.setOptions(opts);
+		editGroupMs.setOptions(opts);
 	} catch (e) {
 		toast(e.message, "error");
 	}
@@ -916,7 +847,7 @@ async function loadTeamOptions() {
 
 function matchesSearch(u) {
 	if (!userSearchTerm) return true;
-	const haystack = `${u.display_name} ${u.username} ${(u.teams || []).join(" ")} ${u.vpn_client_name || ""}`.toLowerCase();
+	const haystack = `${u.display_name} ${u.username} ${(u.groups || []).join(" ")} ${u.vpn_client_name || ""}`.toLowerCase();
 	return haystack.includes(userSearchTerm);
 }
 
@@ -1004,7 +935,7 @@ function renderUsers() {
 		return;
 	}
 	el.innerHTML = `<table>
-		<thead><tr><th>User</th><th>VPN Profile</th><th>Teams</th><th>Role</th><th>Status</th><th>MFA</th><th>Restrictions</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
+		<thead><tr><th>User</th><th>VPN Profile</th><th>Groups</th><th>Effective Role(s)</th><th>Status</th><th>MFA</th><th>Restrictions</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
 		<tbody>${filtered.map(u => `
 			<tr data-id="${u.id}">
 				<td>
@@ -1012,8 +943,8 @@ function renderUsers() {
 					<div class="muted" style="font-size:0.82em">${escapeHtml(u.username)}${u.username === currentUsername ? " (you)" : ""}</div>
 				</td>
 				<td class="mono">${u.vpn_client_name ? escapeHtml(u.vpn_client_name) : '<span class="muted">— unlinked —</span>'}</td>
-				<td class="muted">${u.teams && u.teams.length ? escapeHtml(u.teams.join(", ")) : "—"}</td>
-				<td><span class="role-badge role-${u.role}">${u.role}</span>${u.is_bootstrap_admin ? ' <span class="muted" style="font-size:0.78em">(bootstrap)</span>' : ""}</td>
+				<td class="muted">${u.groups && u.groups.length ? escapeHtml(u.groups.join(", ")) : "—"}</td>
+				<td>${u.effective_roles && u.effective_roles.length ? u.effective_roles.map(r => `<span class="role-badge">${escapeHtml(r)}</span>`).join(" ") : '<span class="muted">None</span>'}${u.is_bootstrap_admin ? ' <span class="muted" style="font-size:0.78em">(bootstrap)</span>' : ""}</td>
 				<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
 				<td>${u.mfa_enabled ? '<span class="status-pill status-online">Enabled</span>' : (u.mfa_setup_required ? '<span class="status-pill status-offline">Pending</span>' : '<span class="muted">Disabled</span>')}</td>
 				<td>${combinedRestrictionCellHtml(u)}</td>
@@ -1062,11 +993,11 @@ async function loadDeleted() {
 			return;
 		}
 		el.innerHTML = `<table>
-			<thead><tr><th>User</th><th>Role</th><th>Deleted At</th><th class="text-right">Actions</th></tr></thead>
+			<thead><tr><th>User</th><th>Effective Role(s)</th><th>Deleted At</th><th class="text-right">Actions</th></tr></thead>
 			<tbody>${users.map(u => `
 				<tr class="row-dim" data-id="${u.id}">
 					<td>${escapeHtml(u.display_name)} <span class="muted" style="font-size:0.82em">(${escapeHtml(u.username)})</span></td>
-					<td><span class="role-badge role-${u.role}">${u.role}</span></td>
+					<td>${u.effective_roles && u.effective_roles.length ? u.effective_roles.map(r => `<span class="role-badge">${escapeHtml(r)}</span>`).join(" ") : '<span class="muted">None</span>'}</td>
 					<td class="muted">${fmtDate(u.deleted_at)}</td>
 					<td class="text-right">
 						<button class="btn-secondary btn-sm restore-btn">Restore</button>
@@ -1270,16 +1201,15 @@ function openEdit(u) {
 	document.getElementById("e-gender").value = u.gender || "unspecified";
 	document.getElementById("e-email").value = u.email || "";
 	editPhone.setValue(u.phone || "");
-	editTeamMs.setSelected(u.team_ids);
-	setEditRoleOptions(editingUserIsBootstrapAdmin);
-	document.getElementById("e-role").value = u.role;
+	editGroupMs.setSelected(u.group_ids);
+	document.getElementById("e-effective-roles").textContent =
+		(u.effective_roles && u.effective_roles.length) ? u.effective_roles.join(", ") : "None (no access until placed in a group)";
 	document.getElementById("e-active").value = String(u.is_active);
 	// The bootstrap admin account can never be demoted/deactivated/deleted
 	// (by anyone, even another admin) -- the API enforces this
-	// unconditionally (see routes/users.py's update_user); disable those
-	// controls here too so the UI doesn't offer actions that will just be
+	// unconditionally (see routes/users.py's update_user); disable that
+	// control here too so the UI doesn't offer an action that will just be
 	// rejected.
-	document.getElementById("e-role").disabled = editingUserIsBootstrapAdmin;
 	document.getElementById("e-active").disabled = editingUserIsBootstrapAdmin;
 	document.getElementById("e-password").value = "";
 	resetPasswordVisibility(document.getElementById("e-password"));
@@ -1352,7 +1282,7 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		gender: document.getElementById("e-gender").value,
 		email: document.getElementById("e-email").value.trim(),
 		phone: editPhone.getValue(),
-		team_ids: editTeamMs.getSelected(),
+		group_ids: editGroupMs.getSelected(),
 		allowed_os: [...document.querySelectorAll(".e-os-check:checked")].map(cb => cb.value),
 		bandwidth_monthly_gb: (() => {
 			const raw = document.getElementById("e-bandwidth").value.trim();
@@ -1362,7 +1292,6 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		mfa_policy_override: document.getElementById("e-mfa-override").value || null,
 	};
 	if (!editingUserIsBootstrapAdmin) {
-		body.role = document.getElementById("e-role").value;
 		body.is_active = document.getElementById("e-active").value === "true";
 	}
 	const pw = document.getElementById("e-password").value;
@@ -1417,7 +1346,6 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 	ev.preventDefault();
 	const username = document.getElementById("u-username").value.trim();
 	const password = document.getElementById("u-password").value;
-	const role = document.getElementById("u-role").value;
 	const firstName = document.getElementById("u-first").value.trim();
 	const linkingExisting = document.getElementById("u-vpn-mode-link").checked;
 	const mac = document.getElementById("u-mac").value.trim();
@@ -1453,14 +1381,14 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 		const result = await apiFetch("/api/users", {
 			method: "POST",
 			body: {
-				username, password, role,
+				username, password,
 				mac: linkingExisting ? null : mac,
 				link_existing_vpn_profile: linkingExisting ? linkExistingVpnProfile : null,
 				first_name: firstName,
 				last_name: document.getElementById("u-last").value.trim() || null,
 				email: document.getElementById("u-email").value.trim(),
 				phone: addPhone.getValue() || null,
-				team_ids: addTeamMs.getSelected(),
+				group_ids: addGroupMs.getSelected(),
 				restrict_login_by_country: document.getElementById("u-restrict-country").checked,
 				allowed_login_countries: addCountriesMs.getSelected(),
 				restrict_login_by_city: document.getElementById("u-restrict-city").checked,
@@ -1532,10 +1460,9 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 
 document.getElementById("add-user-clear").addEventListener("click", resetAddUserForm);
 
-document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); loadTeamOptions(); loadRoleOptions(); });
+document.getElementById("refresh-btn").addEventListener("click", () => { loadUsers(); loadDeleted(); loadGroupOptions(); });
 loadUsers();
 loadDeleted();
-loadTeamOptions();
-loadRoleOptions();
+loadGroupOptions();
 </script>
 {% endblock %}

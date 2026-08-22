@@ -1,4 +1,4 @@
-"""Bandwidth reporting -- per-user, per-team, and global rollups over the
+"""Bandwidth reporting -- per-user, per-group, and global rollups over the
 same two sources every other bandwidth feature in this app already reads:
 policy_store.get_all_policies() (quotas) and policy_store.get_all_usage()
 (this-month bytes used, written by host-scripts/openvpn-client-disconnect.py
@@ -6,7 +6,7 @@ on every session end -- same "as of last disconnect, not live" caveat as
 the Clients page's own usage bars and My VPN Profile's self-service card).
 
 No new data collection here -- this is read-only aggregation, joined
-against User/Team/VpnProfileLink for the "which portal user/team does this
+against User/Group/VpnProfileLink for the "which portal user/group does this
 VPN client belong to" mapping. See the architecture review this feature
 shipped with for why on-read aggregation (rather than a periodic rollup
 job) is the right choice at this deployment's scale.
@@ -21,7 +21,7 @@ from .. import cli_wrapper as cli
 from .. import geoip, health, policy_store
 from ..cli_wrapper import ScriptError
 from ..db import engine, get_db
-from ..models import AuditLog, ConnectionRejectionLog, DbStatSnapshot, Team, User, VpnProfileLink
+from ..models import AuditLog, ConnectionRejectionLog, DbStatSnapshot, Group, User, VpnProfileLink
 from ..permissions import require_permission_any_scope
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -57,7 +57,7 @@ def _per_client_row(user: User, client_name: str | None, policies: dict, usage: 
         "used_gb": round(used_gb, 3),
         "remaining_gb": remaining_gb,
         "pct_used": pct_used,
-        "team_names": [t.name for t in user.teams],
+        "group_names": [t.name for t in user.groups],
     }
 
 
@@ -107,7 +107,7 @@ def _load_rows(db: Session) -> list[dict]:
     so they're excluded here rather than shown with every field null."""
     users = (
         db.query(User)
-        .options(selectinload(User.teams), selectinload(User.vpn_profile_link))
+        .options(selectinload(User.groups), selectinload(User.vpn_profile_link))
         .filter(User.deleted.is_(False), User.is_active.is_(True))
         .order_by(User.username)
         .all()
@@ -168,16 +168,16 @@ def get_user_report(_: User = Depends(require_reports_view), db: Session = Depen
     return _load_rows(db)
 
 
-@router.get("/teams")
-def get_team_report(db: Session = Depends(get_db), _: User = Depends(require_reports_view)):
-    """Team-based: total quota/usage/utilization per team, plus each
-    team's top consumer. A user belonging to several teams counts toward
-    each of them (teams are a many-to-many membership, not a partition --
-    see models.py's Team docstring), same as every other team-scoped view
-    in this app. Users with no team at all are summarized separately under
+@router.get("/groups")
+def get_group_report(db: Session = Depends(get_db), _: User = Depends(require_reports_view)):
+    """Group-based: total quota/usage/utilization per group, plus each
+    group's top consumer. A user belonging to several groups counts toward
+    each of them (groups are a many-to-many membership, not a partition --
+    see models.py's Group docstring), same as every other group-scoped view
+    in this app. Users with no group at all are summarized separately under
     "Unassigned" so their usage isn't silently invisible from this report."""
     rows = _load_rows(db)
-    teams = db.query(Team).order_by(Team.name).all()
+    groups = db.query(Group).order_by(Group.name).all()
 
     def _summarize(label: str, members: list[dict]) -> dict:
         with_quota = [r for r in members if r["quota_gb"]]
@@ -186,7 +186,7 @@ def get_team_report(db: Session = Depends(get_db), _: User = Depends(require_rep
         pct = round((total_used / total_quota) * 100, 1) if total_quota else None
         top = sorted(members, key=lambda r: r["used_gb"], reverse=True)[:5]
         return {
-            "team": label,
+            "group": label,
             "member_count": len(members),
             "total_quota_gb": total_quota,
             "total_used_gb": total_used,
@@ -195,10 +195,10 @@ def get_team_report(db: Session = Depends(get_db), _: User = Depends(require_rep
         }
 
     result = []
-    for team in teams:
-        members = [r for r in rows if team.name in r["team_names"]]
-        result.append(_summarize(team.name, members))
-    unassigned = [r for r in rows if not r["team_names"]]
+    for group in groups:
+        members = [r for r in rows if group.name in r["group_names"]]
+        result.append(_summarize(group.name, members))
+    unassigned = [r for r in rows if not r["group_names"]]
     if unassigned:
         result.append(_summarize("Unassigned", unassigned))
     return result
@@ -306,7 +306,7 @@ def get_user_analytics(user_id: int, _: User = Depends(require_reports_view), db
     never hit this 404 for an option it actually offered."""
     user = (
         db.query(User)
-        .options(selectinload(User.teams), selectinload(User.vpn_profile_link))
+        .options(selectinload(User.groups), selectinload(User.vpn_profile_link))
         .filter(User.id == user_id, User.deleted.is_(False), User.is_active.is_(True))
         .one_or_none()
     )
