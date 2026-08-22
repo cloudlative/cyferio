@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..audit import log_action
 from ..db import get_db
-from ..models import ApiScope, ObjectPermission, RoleApiScope, RoleDef, RoleKind, User
+from ..models import ApiScope, ObjectPermission, RoleApiScope, RoleDef, RoleKind, User, team_role_defs
 from ..permissions import ACTIONS, OBJECTS, require_permission
 
 router = APIRouter(prefix="/api/roles", tags=["roles"])
@@ -160,6 +160,19 @@ def delete_role(role_id: int, admin: User = Depends(require_roles_admin), db: Se
         raise HTTPException(
             status_code=409,
             detail=f"Can't delete '{role.name}' -- {in_use} user(s) still have this role. Reassign them first.",
+        )
+    # Team-Based Permissions Phase 1: same "still in use" guard as the
+    # direct-user check above, extended to team-level assignment (see
+    # models.py's team_role_defs) -- a role assigned to a team is still
+    # granting access to every one of that team's members via
+    # permissions.py's effective_role_ids, even if zero users have it as
+    # their own direct role_id.
+    team_assignments = db.query(team_role_defs.c.team_id).filter(team_role_defs.c.role_id == role.id).count()
+    if team_assignments:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Can't delete '{role.name}' -- {team_assignments} team(s) still have this role assigned. "
+                   f"Unassign it from those teams first.",
         )
     slug = role.slug
     db.delete(role)  # cascades to ObjectPermission/RoleApiScope rows -- see RoleDef's relationship cascade

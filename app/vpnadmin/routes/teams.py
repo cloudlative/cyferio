@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..audit import log_action
 from ..auth import require_user
 from ..db import get_db
-from ..models import Team, User
+from ..models import RoleDef, Team, User
 from ..permissions import require_permission
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
@@ -126,6 +126,10 @@ class UpdateTeamRequest(BaseModel):
         return _valid_tags(v)
 
 
+def _role_brief(r: RoleDef) -> dict:
+    return {"id": r.id, "slug": r.slug, "name": r.name}
+
+
 def _team_detail(t: Team) -> dict:
     return {
         "id": t.id,
@@ -133,6 +137,12 @@ def _team_detail(t: Team) -> dict:
         "slug": t.slug,
         "description": t.description,
         "tags": json.loads(t.tags) if t.tags else [],
+        # Team-Based Permissions Phase 1 -- roles assigned to this team,
+        # inherited by every current member on top of their own direct
+        # role (see permissions.py's effective_role_ids). Empty for every
+        # team until an admin explicitly assigns one via the endpoints
+        # below -- zero behavior change for existing teams.
+        "roles": [_role_brief(r) for r in t.role_defs],
     }
 
 
@@ -156,7 +166,11 @@ def list_teams(_: User = Depends(require_user), db: Session = Depends(get_db)):
     just teams that happen to already have someone assigned. Deliberately
     open to any logged-in user (viewer or admin), unlike /api/users, since
     only non-sensitive fields are exposed here (no password/email/etc.)."""
-    teams = db.query(Team).order_by(Team.name).all()
+    # selectinload(Team.role_defs): same N+1 reasoning as selectinload(User.
+    # teams) below, just for the roles-assigned-to-team list _team_detail
+    # now includes -- one extra query total for every team's roles, instead
+    # of one lazy SELECT per team the first time `.role_defs` is touched.
+    teams = db.query(Team).options(selectinload(Team.role_defs)).order_by(Team.name).all()
     # selectinload(User.teams): without it, every `t in u.teams` check below
     # lazy-fires its own SELECT the first time each user's `.teams` is
     # touched -- one extra query per user (N+1), the actual cause of this
@@ -177,7 +191,7 @@ def list_teams(_: User = Depends(require_user), db: Session = Depends(get_db)):
 
     unassigned_members = [_member(u) for u in users if len(u.teams) == 0]
     groups.append({
-        "id": None, "team": UNASSIGNED, "slug": None, "description": None, "tags": [],
+        "id": None, "team": UNASSIGNED, "slug": None, "description": None, "tags": [], "roles": [],
         "count": len(unassigned_members), "members": unassigned_members,
     })
 
@@ -287,3 +301,59 @@ def remove_team_member(team_id: int, user_id: int, admin: User = Depends(require
         db.commit()
         log_action(db, admin, "remove_team_member", target=team.name, detail=user.username)
     return {"message": f"'{user.username}' removed from '{team.name}'."}
+
+
+# --- Team-Based Permissions Phase 1: role assignment -----------------------
+# A team can be assigned zero or more roles; every current member inherits
+# every assigned role's permissions on top of their own direct role_id (see
+# permissions.py's effective_role_ids). Deliberately its own pair of
+# endpoints, same "membership stays on its own dedicated endpoints" split
+# UpdateTeamRequest's docstring already establishes for members -- role
+# assignment is a distinct concern from team metadata and from membership.
+# Gated on the same teams:manage permission (require_admin above) as every
+# other Teams write.
+
+@router.get("/available-roles")
+def list_available_roles(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Every RoleDef, for the "Assign Roles" picker on the Teams page --
+    deliberately its own minimal endpoint (id/slug/name only, no
+    permission matrix) rather than reusing GET /api/roles, which is gated
+    on roles:manage: an admin granted teams:manage but not roles:manage
+    must still be able to assign an existing role to a team without also
+    needing Roles Management access."""
+    roles = db.query(RoleDef).order_by(RoleDef.name).all()
+    return [_role_brief(r) for r in roles]
+
+
+class TeamRoleRequest(BaseModel):
+    role_id: int
+
+
+@router.post("/{team_id}/roles", status_code=201)
+def assign_team_role(team_id: int, body: TeamRoleRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    team = db.get(Team, team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail="Team not found.")
+    role = db.get(RoleDef, body.role_id)
+    if role is None:
+        raise HTTPException(status_code=404, detail="Role not found.")
+    if role not in team.role_defs:
+        team.role_defs.append(role)
+        db.commit()
+        log_action(db, admin, "team_role_assigned", target=team.name, detail=role.slug)
+    return {**_team_detail(team), "count": len([u for u in team.members if not u.deleted]), "members": [_member(u) for u in team.members if not u.deleted]}
+
+
+@router.delete("/{team_id}/roles/{role_id}")
+def remove_team_role(team_id: int, role_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    team = db.get(Team, team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail="Team not found.")
+    role = db.get(RoleDef, role_id)
+    if role is None:
+        raise HTTPException(status_code=404, detail="Role not found.")
+    if role in team.role_defs:
+        team.role_defs.remove(role)
+        db.commit()
+        log_action(db, admin, "team_role_removed", target=team.name, detail=role.slug)
+    return {"message": f"Role '{role.slug}' removed from '{team.name}'."}
