@@ -596,8 +596,13 @@ def drop_legacy_group_membership_fk_constraints(db: Session) -> None:
         return
     if "user_groups" not in inspect(bind).get_table_names():
         return
+    # `constraint` is one of the two literal strings in the tuple above,
+    # never external input -- SQL also has no bind-parameter syntax for an
+    # identifier in DDL (ALTER TABLE ... DROP CONSTRAINT :name isn't valid),
+    # so a parameterized query isn't an option here anyway; same accepted
+    # pattern as db.py's own ALTER TABLE/ADD COLUMN migrations.
     for constraint in ("user_groups_group_id_fkey", "user_groups_user_id_fkey"):
-        db.execute(text(f"ALTER TABLE user_groups DROP CONSTRAINT IF EXISTS {constraint}"))
+        db.execute(text(f"ALTER TABLE user_groups DROP CONSTRAINT IF EXISTS {constraint}"))  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
     db.commit()
 
 
