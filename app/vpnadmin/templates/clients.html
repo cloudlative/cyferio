@@ -37,59 +37,40 @@
 		<button class="filter-chip" data-filter="offline">Offline Only</button>
 		<button class="filter-chip" data-filter="missing_mac">Missing MAC</button>
 	</div>
-	{# Select one row below, then act on it here -- replaces the previous
-	   one-action-button-per-row layout (5-7 buttons crammed into every row
-	   forced horizontal scrolling on any normal-width screen). Every button
-	   starts disabled until selectedClientName is set; see
-	   updateClientToolbarState() below.
-
-	   Redesigned again 2026-08-21 ("any other pretty way to pretty the VPN
-	   Clients page") -- the 3 actions used most often (Manage MACs, Manage
-	   Restrictions, View/Copy .ovpn) stay as full visible buttons with an
-	   icon each; the other 5 (Monitoring/Email/Reset Usage/Disconnect/
-	   Revoke -- all admin-only via can_manage_clients, same as before) move
-	   into a single "More" dropdown, same anchored-panel shape as
-	   #notif-bell/#theme-quick-switch in base.html (relative wrapper,
-	   absolutely-positioned panel, closed on outside click -- see app.js's
-	   initClientActionsMenu()). Every button keeps its EXACT same id as
-	   before this redesign -- updateClientToolbarState() and every
-	   .addEventListener() further down needed zero changes, only where
-	   each button physically lives moved. #}
-	<div class="toolbar client-action-toolbar" id="client-action-toolbar" style="margin-top:12px">
-		<span class="muted" id="client-toolbar-hint" style="font-size:0.85rem">Select a client below to enable actions.</span>
-		<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-			<button class="btn-secondary btn-sm" id="action-macs-btn" disabled><span class="btn-icon">◇</span>Manage MACs</button>
-			{% if can_manage_clients %}
-			<button class="btn-secondary btn-sm" id="action-policy-btn" disabled><span class="btn-icon">⛨</span>Manage Restrictions</button>
-			<button class="btn-secondary btn-sm" id="action-ovpn-btn" disabled><span class="btn-icon">⭳</span>View / Copy .ovpn</button>
-			<div class="client-actions-menu" id="client-actions-menu">
-				<button class="btn-secondary btn-sm" id="client-actions-toggle" disabled aria-haspopup="true" aria-expanded="false">More<span class="dropdown-caret"></span></button>
-				<div class="client-actions-panel" id="client-actions-panel" style="display:none">
-					<button type="button" class="client-actions-item" id="action-monitoring-btn"><span class="btn-icon">◉</span>Manage Monitoring</button>
-					<button type="button" class="client-actions-item" id="action-email-btn"><span class="btn-icon">✉</span>Email Profile</button>
-					<button type="button" class="client-actions-item" id="action-reset-usage-btn"><span class="btn-icon">↺</span>Reset Usage</button>
-					<div class="client-actions-divider"></div>
-					<button type="button" class="client-actions-item danger" id="action-disconnect-btn"><span class="btn-icon">✕</span>Disconnect</button>
-					<button type="button" class="client-actions-item danger" id="action-revoke-btn"><span class="btn-icon">⛔</span>Revoke</button>
-				</div>
-			</div>
-			{% endif %}
-		</div>
-	</div>
 	<div id="clients-table"><p class="muted">Loading…</p></div>
 </div>
 
-{# Detail drawer -- slides in from the right instead of rendering inline
-   below the table (see renderClientDetailPanel() below for why: with a
-   large/filtered client list, "below the table" could be hundreds of rows
-   down from whichever one you actually selected). Same off-canvas
-   fixed+translateX idiom base.html's mobile sidebar uses, but a PUSH
-   drawer, not a modal overlay -- no backdrop -- since the table/toolbar
-   need to stay usable while it's open (see .content's body.drawer-open
-   rule in style.css). Kept as a sibling of the card, not nested inside
-   it, so position:fixed is relative to the viewport with no ancestor
-   transform/overflow to fight. #}
-<div class="client-detail-drawer" id="client-detail-panel"></div>
+{# Per-row action buttons -- replaces the earlier "select one row, then act
+   on it from a toolbar above the table" layout: with the actions living
+   right on each row, there's no longer any reason to make an admin select
+   a row first, so the radio-select column and the toolbar acting on
+   selectedClientName are both gone (see renderClients() below).
+
+   Redesigned again 2026-08-22 ("lets move ... buttons to each user['s
+   row]") -- the 3 actions used most often (Manage MACs, Manage
+   Restrictions, View/Copy .ovpn) render as full colorful buttons on every
+   row; the rest (Details -- new, replacing the old right-side drawer that
+   used to open automatically on row selection -- plus Manage
+   Monitoring/Email Profile/Reset Usage/Disconnect/Revoke, all admin-only
+   via can_manage_clients) collapse into a per-row "More" dropdown, same
+   anchored-panel shape as before, just instantiated once per row instead
+   of once for the whole toolbar -- see initClientRowActions() below for
+   the single delegated-click handler this now runs through instead of
+   one addEventListener() per button per row. #}
+
+<dialog id="client-details-dialog">
+	<div class="dialog-body">
+		<h2 id="client-details-title">Details</h2>
+		<dl class="detail-kv" id="client-details-content"></dl>
+		<div style="margin-top:14px">
+			<label class="muted" style="font-size:0.78rem">MAC Addresses (<span id="client-details-mac-count">0</span>)</label>
+			<div id="client-details-macs" style="margin-top:6px"><p class="muted">Loading…</p></div>
+		</div>
+		<div class="dialog-actions">
+			<button class="btn-secondary" id="client-details-close">Close</button>
+		</div>
+	</div>
+</dialog>
 
 <dialog id="macs-dialog">
 	<div class="dialog-body">
@@ -355,10 +336,10 @@ let currentFilter = _initialParams.get("online") === "1" ? "online"
 	: _initialParams.get("missing_mac") === "1" ? "missing_mac"
 	: "all";
 let lastClients = [], lastStatusByName = {}, lastPoliciesByName = {}, lastUsageByName = {}, lastUserLinksByName = {}, lastSessionsByName = {};
-// The one selected row (radio-button, single-select -- see renderClients'
-// table markup) that every toolbar action above the table now acts on,
-// replacing the old one-button-per-row layout.
-let selectedClientName = null;
+// Which row's "More" dropdown is currently open, if any -- at most one at
+// a time, same as before (formerly a single toolbar-level menu, now one
+// instantiated per row -- see renderClients() and initClientRowActions()).
+let openRowActionsMenuName = null;
 
 function applyFilterUI() {
 	document.querySelectorAll(".filter-chip").forEach(c => c.classList.toggle("active", c.dataset.filter === currentFilter));
@@ -404,8 +385,6 @@ async function loadClients() {
 		const disconnectAllBtn = document.getElementById("disconnect-all-btn");
 		if (disconnectAllBtn) disconnectAllBtn.disabled = onlineCount === 0;
 		renderClients();
-		updateClientToolbarState();
-		renderClientDetailPanel();
 	} catch (e) {
 		toast(e.message, "error");
 	}
@@ -414,6 +393,13 @@ async function loadClients() {
 function renderClients() {
 	const el = document.getElementById("clients-table");
 	applyFilterUI();
+	// Every row's "More" panel always re-renders closed (style:none/
+	// aria-expanded:false below) -- clear the tracked open-menu name to
+	// match, otherwise a re-render while one was open (e.g. the 12s
+	// auto-refresh) leaves openRowActionsMenuName pointing at a menu
+	// that's already closed in the DOM, and the next click on that same
+	// toggle reads as "close" (a no-op) instead of "open".
+	openRowActionsMenuName = null;
 
 	// Online-first sort, then alphabetical within each group.
 	const withStatus = lastClients.map(c => {
@@ -454,15 +440,17 @@ function renderClients() {
 		return;
 	}
 
-	// Columns trimmed to the operationally-essential set (identity/status/
-	// who/bandwidth/throughput/restrictions) -- everything else (OS, Source
-	// IP, Connected Since, Duration, In MAC DB, Last Seen, the MAC list
-	// itself) moved into the detail panel below, shown for whichever ONE
-	// row is selected via the radio in the first column. Per-row action
-	// buttons are gone entirely -- see the toolbar above the table instead.
+	// Actions live in their own leftmost column, colorful buttons per row
+	// (Manage MACs/Manage Restrictions/View-Copy .ovpn plus a "More"
+	// dropdown for the rest) -- see initClientRowActions() above for the
+	// single delegated click handler every one of these buttons runs
+	// through. Everything else trimmed from this row (OS, Source IP,
+	// Connected Since, Duration, In MAC DB, Last Seen, the MAC list
+	// itself) lives in the Details dialog instead (openDetailsDialog()),
+	// one of the "More" items below.
 	el.innerHTML = `<div class="table-scroll"><table>
 		<thead><tr>
-			<th></th><th>Name</th><th>Status</th><th>Portal User</th>
+			<th>Actions</th><th>Name</th><th>Status</th><th>Portal User</th>
 			${isAdmin ? "<th>Bandwidth (this month)</th>" : ""}
 			<th>RX / TX</th><th>Restrictions</th>
 		</tr></thead>
@@ -470,8 +458,27 @@ function renderClients() {
 			const policy = lastPoliciesByName[c.name];
 			const linkedUser = lastUserLinksByName[c.name];
 			const session = lastSessionsByName[c.name];
-			return `<tr data-name="${escapeHtml(c.name)}" class="${online ? "row-online" : ""} ${c.name === selectedClientName ? "row-selected" : ""}">
-				<td><input type="radio" name="client-row-select" class="client-row-radio" value="${escapeHtml(c.name)}" ${c.name === selectedClientName ? "checked" : ""}></td>
+			const n = escapeHtml(c.name);
+			return `<tr data-name="${n}" class="${online ? "row-online" : ""}">
+				<td><div class="row-actions">
+					<button type="button" class="btn-row-action c-teal" data-action="macs" data-name="${n}" title="Manage MACs" aria-label="Manage MACs for ${n}"><span aria-hidden="true">◇</span></button>
+					${isAdmin ? `
+					<button type="button" class="btn-row-action c-amber" data-action="policy" data-name="${n}" title="Manage Restrictions" aria-label="Manage Restrictions for ${n}"><span aria-hidden="true">⛨</span></button>
+					<button type="button" class="btn-row-action c-sky" data-action="ovpn" data-name="${n}" title="View / Copy .ovpn" aria-label="View or copy .ovpn profile for ${n}"><span aria-hidden="true">⭳</span></button>
+					<div class="client-actions-menu">
+						<button type="button" class="btn-row-action c-violet client-actions-toggle" data-name="${n}" aria-haspopup="true" aria-expanded="false" title="More actions" aria-label="More actions for ${n}"><span aria-hidden="true">⋯</span></button>
+						<div class="client-actions-panel" style="display:none">
+							<button type="button" class="client-actions-item c-indigo" data-action="details" data-name="${n}"><span class="btn-icon">ℹ</span>Details</button>
+							<button type="button" class="client-actions-item c-purple" data-action="monitoring" data-name="${n}"><span class="btn-icon">◉</span>Manage Monitoring</button>
+							<button type="button" class="client-actions-item c-blue" data-action="email" data-name="${n}"><span class="btn-icon">✉</span>Email Profile</button>
+							<button type="button" class="client-actions-item c-amber" data-action="reset-usage" data-name="${n}"><span class="btn-icon">↺</span>Reset Usage</button>
+							<div class="client-actions-divider"></div>
+							<button type="button" class="client-actions-item danger" data-action="disconnect" data-name="${n}" ${online ? "" : "disabled"}><span class="btn-icon">✕</span>Disconnect</button>
+							<button type="button" class="client-actions-item danger" data-action="revoke" data-name="${n}"><span class="btn-icon">⛔</span>Revoke</button>
+						</div>
+					</div>` : `
+					<button type="button" class="btn-row-action c-indigo" data-action="details" data-name="${n}" title="Details" aria-label="Details for ${n}"><span aria-hidden="true">ℹ</span></button>`}
+				</div></td>
 				<td>${escapeHtml(c.name)}</td>
 				<td><span class="status-pill status-${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span></td>
 				<td>${linkedUser ? escapeHtml(linkedUser.display_name || linkedUser.username) : '<span class="muted">-</span>'}</td>
@@ -481,139 +488,105 @@ function renderClients() {
 			</tr>`;
 		}).join("")}</tbody>
 	</table></div>`;
-
-	el.querySelectorAll(".client-row-radio").forEach(radio => {
-		radio.addEventListener("change", () => {
-			selectedClientName = radio.value;
-			renderClients(); // re-render for the row-selected highlight + radio state
-			updateClientToolbarState();
-			renderClientDetailPanel();
-		});
-	});
 }
 
-// Everything moved OUT of the trimmed-down table above (OS, Source IP,
-// Connected Since, Duration, In MAC DB, Last Seen, MAC list) -- shown for
-// whichever one client is currently selected, right below the table.
-function closeClientDetailDrawer() {
-	document.getElementById("client-detail-panel").classList.remove("open");
-	document.body.classList.remove("drawer-open");
-}
-
-// Radio inputs can't be un-clicked natively (once selected, clicking it
-// again is a no-op) -- this is the only way to deselect/close the drawer
-// short of picking a different row. Shared by the drawer's own Close
-// button, the backdrop click-outside, and Escape.
-function deselectClient() {
-	selectedClientName = null;
-	renderClients(); // clears the row-selected highlight + radio state
-	updateClientToolbarState();
-	renderClientDetailPanel();
-}
-
-// One-time wiring for the drawer's other close affordance (its own Close
-// button is wired fresh on every render() call above, since the button
-// itself is destroyed/recreated each time) -- Escape, from anywhere on
-// the page. No click-outside-to-close / backdrop here on purpose: unlike
-// the "More" menu (a true transient popover), this drawer sits alongside
-// the rest of the page -- the whole point of the content-push above (see
-// body.drawer-open) is that the table/toolbar/filters stay fully usable
-// while it's open, e.g. picking Manage Restrictions for the very client
-// the drawer is showing. A page-wide "click anywhere closes it" would
-// fight that directly. Escape also closes the "More" menu first if
-// that's open, matching the usual "closest overlay first" feel rather
-// than closing both at once.
-document.addEventListener("keydown", (ev) => {
-	if (ev.key !== "Escape") return;
-	const panel = document.getElementById("client-actions-panel");
-	if (panel && panel.style.display === "block") {
-		closeClientActionsMenu();
-	} else if (selectedClientName) {
-		deselectClient();
-	}
-});
-
-function renderClientDetailPanel() {
-	const panel = document.getElementById("client-detail-panel");
-	if (!selectedClientName) {
-		closeClientDetailDrawer();
-		return;
-	}
-	const c = lastClients.find(x => x.name === selectedClientName);
-	const s = lastStatusByName[selectedClientName];
-	const session = lastSessionsByName[selectedClientName];
+// Details -- everything trimmed out of the compact table above (OS,
+// Source IP, Connected Since, Duration, In MAC DB, Last Seen, MAC list).
+// Used to live in a right-side drawer that auto-opened whenever a row was
+// radio-selected; now it's just another per-row "More" action, opened as
+// a plain modal <dialog> on demand -- same idiom as Manage MACs/View
+// .ovpn/etc, and available to every account (not just can_manage_clients)
+// same as the drawer was before it.
+async function openDetailsDialog(name) {
+	const dlg = document.getElementById("client-details-dialog");
+	const c = lastClients.find(x => x.name === name);
 	if (!c) {
-		// Selected client no longer exists in the latest fetch (revoked,
-		// filtered out, etc.) -- clear the stale selection rather than
-		// showing a detail panel for a row that's gone.
-		selectedClientName = null;
-		closeClientDetailDrawer();
-		updateClientToolbarState();
+		toast(`${name} no longer exists.`, "error");
 		return;
 	}
+	const s = lastStatusByName[name];
+	const session = lastSessionsByName[name];
 	const duration = session && session.connected_since_epoch != null
 		? fmtDuration((Date.now() / 1000) - session.connected_since_epoch)
 		: null;
-	panel.classList.add("open");
-	document.body.classList.add("drawer-open");
-	panel.innerHTML = `
-		<div class="toolbar" style="margin-bottom:12px">
-			<h3 style="margin:0">${escapeHtml(selectedClientName)} — Details</h3>
-			<button type="button" class="btn-secondary btn-sm" id="client-detail-close">Close</button>
-		</div>
-		<dl class="detail-kv">
-			<div class="detail-kv-row"><dt>OS</dt><dd>${escapeHtml(s && s.os && s.os !== "n/a" ? s.os : "—")}</dd></div>
-			<div class="detail-kv-row"><dt>Source IP</dt><dd class="mono">${session ? escapeHtml(session.source_ip) : "—"}</dd></div>
-			<div class="detail-kv-row"><dt>Connected Since</dt><dd>${session ? escapeHtml(session.connected_since) : "—"}</dd></div>
-			<div class="detail-kv-row"><dt>Duration</dt><dd class="mono">${duration ? escapeHtml(duration) : "—"}</dd></div>
-			<div class="detail-kv-row"><dt>In MAC DB</dt><dd>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</dd></div>
-			<div class="detail-kv-row"><dt>Last Seen</dt><dd>${escapeHtml(s ? s.last_seen : "—")}</dd></div>
-		</dl>
-		<div style="margin-top:14px">
-			<label class="muted" style="font-size:0.78rem">MAC Addresses (<span class="count-badge">${c.mac_count ?? 0}</span>)</label>
-			<div id="client-detail-macs" style="margin-top:6px"><p class="muted">Loading…</p></div>
-		</div>`;
-	// Radio inputs can't be un-clicked natively (once selected, clicking it
-	// again is a no-op) -- this is the only way to deselect/close the panel
-	// short of picking a different row.
-	document.getElementById("client-detail-close").addEventListener("click", deselectClient);
-	apiFetch(`/api/clients/${encodeURIComponent(selectedClientName)}/macs`).then(data => {
-		const macsEl = document.getElementById("client-detail-macs");
-		if (!macsEl) return; // panel may have re-rendered for a different selection by the time this resolves
+	document.getElementById("client-details-title").textContent = `${name} — Details`;
+	document.getElementById("client-details-content").innerHTML = `
+		<div class="detail-kv-row"><dt>OS</dt><dd>${escapeHtml(s && s.os && s.os !== "n/a" ? s.os : "—")}</dd></div>
+		<div class="detail-kv-row"><dt>Source IP</dt><dd class="mono">${session ? escapeHtml(session.source_ip) : "—"}</dd></div>
+		<div class="detail-kv-row"><dt>Connected Since</dt><dd>${session ? escapeHtml(session.connected_since) : "—"}</dd></div>
+		<div class="detail-kv-row"><dt>Duration</dt><dd class="mono">${duration ? escapeHtml(duration) : "—"}</dd></div>
+		<div class="detail-kv-row"><dt>In MAC DB</dt><dd>${c.in_db ? "Yes" : '<span style="color:var(--warning-text)">No — cannot connect</span>'}</dd></div>
+		<div class="detail-kv-row"><dt>Last Seen</dt><dd>${escapeHtml(s ? s.last_seen : "—")}</dd></div>`;
+	document.getElementById("client-details-mac-count").textContent = c.mac_count ?? 0;
+	document.getElementById("client-details-macs").innerHTML = '<p class="muted">Loading…</p>';
+	dlg.showModal();
+	try {
+		const data = await apiFetch(`/api/clients/${encodeURIComponent(name)}/macs`);
+		const macsEl = document.getElementById("client-details-macs");
+		if (!macsEl) return; // dialog may have been closed by the time this resolves
 		const macs = data.macs || [];
 		macsEl.innerHTML = macs.length
 			? `<div class="restriction-chips">${macs.map(m => `<span class="restriction-chip chip-ip mono">${escapeHtml(m)}</span>`).join("")}</div>`
 			: '<p class="muted">No MAC addresses registered.</p>';
-	}).catch(() => { /* non-fatal -- the rest of the detail panel is still useful */ });
-}
-
-function updateClientToolbarState() {
-	const hasSelection = !!selectedClientName;
-	const online = hasSelection && lastStatusByName[selectedClientName]?.status === "online";
-	document.getElementById("client-toolbar-hint").textContent = hasSelection
-		? `Selected: ${selectedClientName}` : "Select a client below to enable actions.";
-	document.getElementById("action-macs-btn").disabled = !hasSelection;
-	if (isAdmin) {
-		document.getElementById("action-policy-btn").disabled = !hasSelection;
-		document.getElementById("action-monitoring-btn").disabled = !hasSelection;
-		document.getElementById("action-ovpn-btn").disabled = !hasSelection;
-		document.getElementById("action-email-btn").disabled = !hasSelection;
-		document.getElementById("action-reset-usage-btn").disabled = !hasSelection;
-		document.getElementById("action-disconnect-btn").disabled = !hasSelection || !online;
-		document.getElementById("action-revoke-btn").disabled = !hasSelection;
-		// The "More" dropdown toggle itself -- enabled whenever ANY item
-		// inside it would be (i.e. a client is selected), independent of
-		// Disconnect's extra online-only condition above (that's still
-		// enforced on the individual item, not the toggle). Closes the
-		// panel too if selection is cleared out from under it (e.g. the
-		// selected row gets revoked by a concurrent admin and the table
-		// re-renders) so a disabled toggle never leaves a stale-looking
-		// open panel behind.
-		const actionsToggle = document.getElementById("client-actions-toggle");
-		actionsToggle.disabled = !hasSelection;
-		if (!hasSelection) closeClientActionsMenu();
+	} catch (e) {
+		/* non-fatal -- the rest of the dialog is still useful */
 	}
 }
+document.getElementById("client-details-close").addEventListener("click", () => document.getElementById("client-details-dialog").close());
+
+// Per-row "More" dropdown -- at most one open at a time (openRowActionsMenuName),
+// same anchored-panel shape as the old toolbar-level menu this replaces,
+// just instantiated fresh inside every row instead of once above the
+// table. A single delegated click handler on the table container (see
+// initClientRowActions() below) drives every row's buttons AND every
+// row's dropdown, rather than re-attaching one addEventListener() per
+// button on every render() -- there could be dozens of rows.
+function closeAllRowActionsMenus() {
+	if (openRowActionsMenuName === null) return;
+	document.querySelectorAll(".client-actions-panel").forEach(p => { p.style.display = "none"; });
+	document.querySelectorAll(".client-actions-toggle").forEach(t => t.setAttribute("aria-expanded", "false"));
+	openRowActionsMenuName = null;
+}
+
+function initClientRowActions() {
+	const container = document.getElementById("clients-table");
+	container.addEventListener("click", (ev) => {
+		const toggle = ev.target.closest(".client-actions-toggle");
+		if (toggle) {
+			const name = toggle.dataset.name;
+			const willOpen = openRowActionsMenuName !== name;
+			closeAllRowActionsMenus();
+			if (willOpen) {
+				toggle.parentElement.querySelector(".client-actions-panel").style.display = "block";
+				toggle.setAttribute("aria-expanded", "true");
+				openRowActionsMenuName = name;
+			}
+			return;
+		}
+		const actionEl = ev.target.closest("[data-action]");
+		if (!actionEl || actionEl.disabled) return;
+		if (actionEl.closest(".client-actions-panel")) closeAllRowActionsMenus();
+		const name = actionEl.dataset.name;
+		switch (actionEl.dataset.action) {
+			case "macs": showMacs(name); break;
+			case "details": openDetailsDialog(name); break;
+			case "policy": openPolicyDialog(name); break;
+			case "ovpn": showOvpn(name); break;
+			case "monitoring": openMonitoringDialog(name); break;
+			case "email": openEmailDialog(name); break;
+			case "reset-usage": resetClientUsage(name); break;
+			case "disconnect": disconnectClient(name); break;
+			case "revoke": revokeClient(name); break;
+		}
+	});
+	document.addEventListener("click", (ev) => {
+		if (!ev.target.closest(".client-actions-menu")) closeAllRowActionsMenus();
+	});
+	document.addEventListener("keydown", (ev) => {
+		if (ev.key === "Escape") closeAllRowActionsMenus();
+	});
+}
+initClientRowActions();
 
 // OS_LABELS, bandwidthUsageHtml(), restrictionChipsHtml() now live in
 // app.js (shared with dashboard.html's Connected Now table).
@@ -1163,8 +1136,6 @@ if (isAdmin) {
 	}
 	document.getElementById("monitoring-maintenance-enable").addEventListener("click", () => setMonitoringMaintenance(true));
 	document.getElementById("monitoring-maintenance-disable").addEventListener("click", () => setMonitoringMaintenance(false));
-
-	document.getElementById("action-monitoring-btn").addEventListener("click", () => { if (selectedClientName) openMonitoringDialog(selectedClientName); });
 }
 
 async function revokeClient(name) {
@@ -1229,50 +1200,11 @@ async function resetClientUsage(name) {
 	}
 }
 
-// Toolbar action buttons -- all act on selectedClientName (the one
-// radio-selected row), replacing what used to be a per-row button each.
-// Non-admin (viewer) accounts only get "Manage MACs" rendered in the
-// toolbar's markup at all (guarded server-side on can_manage_clients), so
-// the rest of these listeners are wired inside `if (isAdmin)` further up
-// alongside the dialogs/functions they call.
-document.getElementById("action-macs-btn").addEventListener("click", () => { if (selectedClientName) showMacs(selectedClientName); });
-if (isAdmin) {
-	document.getElementById("action-policy-btn").addEventListener("click", () => { if (selectedClientName) openPolicyDialog(selectedClientName); });
-	document.getElementById("action-ovpn-btn").addEventListener("click", () => { if (selectedClientName) showOvpn(selectedClientName); });
-	document.getElementById("action-email-btn").addEventListener("click", () => { if (selectedClientName) openEmailDialog(selectedClientName); });
-	document.getElementById("action-reset-usage-btn").addEventListener("click", () => { if (selectedClientName) resetClientUsage(selectedClientName); });
-	document.getElementById("action-disconnect-btn").addEventListener("click", () => { if (selectedClientName) disconnectClient(selectedClientName); });
-	document.getElementById("action-revoke-btn").addEventListener("click", () => { if (selectedClientName) revokeClient(selectedClientName); });
-
-	// "More" dropdown (Manage Monitoring/Email Profile/Reset Usage/
-	// Disconnect/Revoke) -- same anchored-panel toggle shape as base.html's
-	// initThemeQuickSwitch()/initNotificationBell() (plain style.display,
-	// closed on outside click), just page-local here rather than in app.js
-	// since this menu only exists on this one page.
-	const clientActionsMenu = document.getElementById("client-actions-menu");
-	const clientActionsToggle = document.getElementById("client-actions-toggle");
-	const clientActionsPanel = document.getElementById("client-actions-panel");
-	window.closeClientActionsMenu = () => {
-		clientActionsPanel.style.display = "none";
-		clientActionsToggle.setAttribute("aria-expanded", "false");
-	};
-	clientActionsToggle.addEventListener("click", () => {
-		const willOpen = clientActionsPanel.style.display !== "block";
-		clientActionsPanel.style.display = willOpen ? "block" : "none";
-		clientActionsToggle.setAttribute("aria-expanded", String(willOpen));
-	});
-	document.addEventListener("click", (ev) => {
-		if (!clientActionsMenu.contains(ev.target)) closeClientActionsMenu();
-	});
-	// Any item inside closes the panel on click too -- each item's own
-	// action-open-a-dialog/confirm-and-act listener above already fires
-	// (listeners on the same element all run), this just tidies the menu
-	// away afterward instead of leaving it open behind whatever dialog/
-	// confirm the click just triggered.
-	clientActionsPanel.querySelectorAll(".client-actions-item").forEach((item) => {
-		item.addEventListener("click", closeClientActionsMenu);
-	});
-}
+// Row action buttons (Manage MACs/Manage Restrictions/View-Copy .ovpn/
+// Details/the "More" dropdown) are all wired through the single delegated
+// click handler in initClientRowActions() above -- nothing left to wire
+// here now that they're generated fresh per row on every renderClients()
+// call instead of living as fixed toolbar elements.
 
 document.getElementById("refresh-btn").addEventListener("click", loadClients);
 loadClients();
@@ -1283,12 +1215,17 @@ loadClients();
 // of the backend's own snapshot lag -- see DASHBOARD_REFRESH_INTERVAL_SECONDS
 // in main.py, and the separate OpenVPN status-log write-interval fix in
 // openvpn-install.sh/server.conf). Skips a tick while any <dialog> is open
-// (Manage MACs/Restrictions/Email/View .ovpn) so a full table re-render
-// never yanks focus or closes something the admin is mid-edit on, and
-// pauses entirely while the tab isn't visible to avoid pointless polling.
+// (Manage MACs/Restrictions/Email/View .ovpn/Details) so a full table
+// re-render never yanks focus or closes something the admin is mid-edit
+// on; also skips while a row's "More" dropdown is open (renderClients()
+// always redraws every panel closed -- see openRowActionsMenuName's own
+// comment) so the poll can't silently close a menu out from under an
+// admin who's mid-click on it. Pauses entirely while the tab isn't
+// visible to avoid pointless polling.
 setInterval(() => {
 	if (document.hidden) return;
 	if (document.querySelector("dialog[open]")) return;
+	if (openRowActionsMenuName !== null) return;
 	loadClients();
 }, 12000);
 </script>

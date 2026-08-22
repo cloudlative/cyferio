@@ -1015,10 +1015,11 @@ tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--surface-hover); }
 tr.row-dim td { opacity: 0.55; }
 tr.row-online td:first-child { box-shadow: inset 3px 0 0 var(--success-strong); }
-/* VPN Clients' single-row-select toolbar redesign -- the selected row gets
-   a persistent highlight distinct from the transient :hover above, so it
-   stays visually obvious which client the toolbar buttons above the table
-   will act on even after the mouse moves away. */
+/* Single-row-select highlight (System Audit's run history table) -- the
+   selected row gets a persistent highlight distinct from the transient
+   :hover above, so it stays visually obvious which run is being viewed
+   even after the mouse moves away. (VPN Clients used this too before its
+   per-row-action-buttons redesign removed row selection entirely.) */
 tr.row-selected td { background: var(--surface-alt); }
 tr.row-selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
@@ -1178,34 +1179,16 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
    still the accessible name; this is additive, not a replacement). */
 .btn-icon { margin-right: 6px; opacity: 0.85; }
 
-/* Clients page's "More" overflow menu (Manage Monitoring/Email
-   Profile/Reset Usage/Disconnect/Revoke) -- same anchored-panel shape as
-   base.html's #notif-bell/#theme-quick-switch (relative wrapper,
-   absolutely-positioned panel, closed on outside click via app.js's
-   initClientActionsMenu()), reused here rather than inventing a second
-   dropdown pattern for the same interaction. Redesigned 2026-08-21 ("any
-   other pretty way to pretty the VPN Clients page") -- the 3 most-used
-   actions stay as full visible buttons; these 5 (all less frequent, and
-   Disconnect/Revoke destructive) collapse into this one menu instead of
-   crowding the toolbar into an 8-button wrapped row. */
+/* Clients page's per-row action buttons + "More" overflow menu (Manage
+   Monitoring/Email Profile/Reset Usage/Disconnect/Revoke/Details) -- same
+   anchored-panel shape as base.html's #notif-bell/#theme-quick-switch
+   (relative wrapper, absolutely-positioned panel, closed on outside click
+   via clients.html's initClientRowActions()), reused here rather than
+   inventing a second dropdown pattern for the same interaction.
+   Redesigned 2026-08-22 ("lets move ... buttons to each user['s row]") --
+   every row now gets its own copy of this menu instead of one shared
+   toolbar-level menu acting on whichever row was radio-selected. */
 .client-actions-menu { position: relative; display: inline-block; }
-.client-actions-toggle .dropdown-caret {
-	display: inline-block;
-	margin-left: 7px;
-	width: 0;
-	height: 0;
-	border-left: 3.5px solid transparent;
-	border-right: 3.5px solid transparent;
-	border-top: 4.5px solid currentColor;
-	vertical-align: middle;
-	opacity: 0.7;
-	transition: transform 0.18s ease;
-}
-/* Points up while the panel is open -- same rotate-on-expand idea as the
-   sidebar's .nav-section-caret, driven off the button's own aria-expanded
-   rather than a separate class, so it can never drift out of sync with
-   the actual open/closed state. */
-.client-actions-toggle[aria-expanded="true"] .dropdown-caret { transform: rotate(180deg); }
 .client-actions-panel {
 	position: absolute;
 	top: calc(100% + 6px);
@@ -1217,6 +1200,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 	border: 1.5px solid var(--border-light);
 	border-radius: 10px;
 	box-shadow: var(--shadow-lg);
+	text-align: left;
 }
 .client-actions-item {
 	display: flex;
@@ -1237,66 +1221,59 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .client-actions-item:hover { background: var(--surface-hover); }
 .client-actions-item:disabled { opacity: 0.45; cursor: not-allowed; background: none; }
 .client-actions-item .btn-icon { margin-right: 9px; }
+/* Colorful per-action-type icon tint (see .btn-row-action's own comment
+   below for why these are fixed hex, not theme accent variables) -- a
+   lighter touch than the row buttons' full gradient fill, since these
+   are stacked list items in a plain menu, not standalone pill buttons;
+   a full-color background on each would be far too busy shoulder to
+   shoulder like this. Just the icon glyph picks up the color; the label
+   stays the menu's normal text color. */
+.client-actions-item.c-indigo .btn-icon { color: #6366f1; }
+.client-actions-item.c-purple .btn-icon { color: #a855f7; }
+.client-actions-item.c-blue .btn-icon { color: #0ea5e9; }
+.client-actions-item.c-amber .btn-icon { color: #f59e0b; }
 /* Disconnect/Revoke -- the two genuinely destructive actions in this
    menu -- get danger-tinted text (not a full red button background,
    which would look jarring stacked in a plain white/dark menu list) plus
-   a divider above separating them from the 3 lower-stakes actions
-   (Monitoring/Email/Reset Usage) that precede them. */
+   a divider above separating them from the lower-stakes actions
+   (Details/Monitoring/Email/Reset Usage) that precede them. */
 .client-actions-item.danger { color: var(--danger-strong, #e11d48); }
 .client-actions-item.danger:hover { background: var(--danger-bg, rgba(225,29,72,0.08)); }
 .client-actions-divider { height: 1px; margin: 5px 4px; background: var(--border-light); }
 
-/* Client detail drawer (VPN Clients page, clients.html) -- slides in from
-   the right instead of rendering inline below the table. With a large or
-   filtered client list, "below the table" could be hundreds of rows past
-   whichever one was actually selected, forcing a long scroll every time.
-   Same off-canvas idiom the mobile sidebar above uses for the SLIDE itself
-   (position:fixed + translateX, toggled via .open) but deliberately no
-   backdrop/modal overlay -- this is a PUSH drawer (see body.drawer-open
-   below): the table/toolbar/filters need to stay clickable while it's
-   open (e.g. picking Manage Restrictions for the very client the drawer
-   is showing), which a backdrop would block regardless of z-index. z-index
-   still sits above the mobile sidebar's own 190/200 so the drawer wins if
-   both are ever open at once (sidebar is off-canvas only below 860px,
-   same breakpoint this drawer goes full-width at). */
-.client-detail-drawer {
-	position: fixed;
-	top: 0;
-	right: 0;
-	bottom: 0;
-	z-index: 310;
-	width: min(480px, 100vw);
-	background: var(--surface);
-	border-left: 1.5px solid var(--border-light);
-	box-shadow: var(--shadow-lg);
-	transform: translateX(100%);
-	transition: transform 0.22s ease;
-	overflow-y: auto;
-	padding: 22px 24px;
+/* Per-row action buttons (Manage MACs/Manage Restrictions/View-Copy
+   .ovpn/the "More" toggle/viewer-only Details) -- small colorful circular
+   icon buttons, one set generated fresh per row by renderClients(). Fixed
+   hex gradients rather than var(--accent-*) on purpose: those variables
+   are the SAME color for every button on a themed page (deliberately --
+   see the CSS custom properties block at the top of this file), but the
+   whole point here is that each action reads as its own distinct color at
+   a glance across a table of many rows, independent of whatever accent
+   theme is active. */
+.row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
+.btn-row-action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	padding: 0;
+	border-radius: 50%;
+	border: none;
+	font-size: 0.92rem;
+	line-height: 1;
+	color: white;
+	cursor: pointer;
+	flex-shrink: 0;
+	transition: transform 0.1s ease, box-shadow 0.15s ease;
 }
-.client-detail-drawer.open { transform: translateX(0); }
-
-@media (max-width: 640px) {
-	.client-detail-drawer { width: 100vw; }
-}
-
-/* .content has no max-width tight enough to guarantee a right-aligned
-   toolbar (clients.html's Manage MACs/Manage Restrictions/.../More row)
-   sits clear of a 480px-wide fixed drawer -- without this, opening the
-   drawer visually clipped whatever toolbar button happened to fall under
-   its left edge instead of cleanly covering or avoiding it. Pushing
-   .content's padding (not margin -- margin:0 auto is what centers it;
-   padding shrinks the box border-box already accounts for) reflows the
-   real page content out from under the drawer while it's open, same
-   general idea as the sidebar's own off-canvas push. Skipped below 640px
-   -- the drawer is already full-viewport-width there (see above), so
-   there's nothing beside it left to make room for. */
-@media (min-width: 641px) {
-	body.drawer-open .content {
-		padding-right: calc(32px + min(480px, 100vw));
-		transition: padding-right 0.22s ease;
-	}
-}
+.btn-row-action:hover { transform: translateY(-1px) scale(1.06); }
+.btn-row-action:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn-row-action.c-teal { background: linear-gradient(135deg, #0d9488, #14b8a6); box-shadow: 0 2px 8px rgba(20,184,166,0.35); }
+.btn-row-action.c-amber { background: linear-gradient(135deg, #d97706, #f59e0b); box-shadow: 0 2px 8px rgba(245,158,11,0.35); }
+.btn-row-action.c-sky { background: linear-gradient(135deg, #0284c7, #0ea5e9); box-shadow: 0 2px 8px rgba(14,165,233,0.35); }
+.btn-row-action.c-violet { background: linear-gradient(135deg, #7c3aed, #a855f7); box-shadow: 0 2px 8px rgba(168,85,247,0.35); }
+.btn-row-action.c-indigo { background: linear-gradient(135deg, #4f46e5, #6366f1); box-shadow: 0 2px 8px rgba(99,102,241,0.35); }
 
 /* Key/value list for the drawer's field set (OS, Source IP, Connected
    Since, ...) -- label left, value right, one pair per row. Tried
