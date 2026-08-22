@@ -187,7 +187,7 @@ class _RuntimeSettings:
         self.password_history_count = 3  # 0 = disabled (no reuse check)
         self.audit_retention_days = None  # None/0 = keep forever
         self.log_failed_login_attempts = True
-        self.default_new_user_role = "user"
+        self.default_group_id = None
         self.default_bandwidth_monthly_gb = None  # None = unlimited
         self.default_quota_enforcement_policy = "soft"  # pre-existing, only-ever behavior until Phase 2's hard mode
         self.admin_notification_email = None
@@ -305,7 +305,7 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.password_history_count = row.password_history_count if row.password_history_count is not None else 3
     runtime.audit_retention_days = row.audit_retention_days
     runtime.log_failed_login_attempts = row.log_failed_login_attempts if row.log_failed_login_attempts is not None else True
-    runtime.default_new_user_role = row.default_new_user_role or "user"
+    runtime.default_group_id = row.default_group_id
     runtime.default_bandwidth_monthly_gb = row.default_bandwidth_monthly_gb
     runtime.default_quota_enforcement_policy = row.default_quota_enforcement_policy or "soft"
     runtime.admin_notification_email = row.admin_notification_email

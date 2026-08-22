@@ -81,6 +81,40 @@ class TestUpdateSettings:
         })
         assert r.status_code == 201
 
+    def test_default_group_id_round_trips(self, app_client, default_group_id):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch("/api/settings", json={"default_group_id": default_group_id})
+        assert r.status_code == 200
+        assert r.json()["default_group_id"] == default_group_id
+        assert runtime_settings.default_group_id == default_group_id
+
+    def test_default_group_id_rejects_unknown_group(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch("/api/settings", json={"default_group_id": 999999})
+        assert r.status_code == 400
+
+    def test_default_group_id_rejects_super_admin_group(self, app_client, db_session):
+        from vpnadmin.models import SUPER_ADMIN_GROUP_NAME, Group, User
+        from vpnadmin.permissions import ensure_super_admin_group
+
+        # SuperAdmin isn't auto-created by the app_client/db_session
+        # fixtures -- same bootstrap dance test_group_roles.py's own
+        # TestSuperAdminGroupImmutability uses.
+        admin = db_session.query(User).filter(User.username == "admin").one()
+        admin.is_bootstrap_admin = True
+        db_session.commit()
+        ensure_super_admin_group(db_session)
+        super_admin_group = db_session.query(Group).filter_by(name=SUPER_ADMIN_GROUP_NAME).one()
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch("/api/settings", json={"default_group_id": super_admin_group.id})
+        assert r.status_code == 400
+
+    def test_group_choices_excludes_super_admin_group(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        names = [g["name"] for g in app_client.get("/api/settings").json()["group_choices"]]
+        assert "SuperAdmin" not in names
+
     def test_settings_change_audit_logged(self, app_client, db_session):
         from vpnadmin.models import AuditLog
 

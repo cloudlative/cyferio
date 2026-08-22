@@ -854,9 +854,25 @@ document.getElementById("reset-pw-form").addEventListener("submit", async (ev) =
 async function loadGroupOptions() {
 	try {
 		allGroups = (await apiFetch("/api/groups")).filter(t => t.group !== "Unassigned" && !t.is_super_admin_group);
-		const optionsHtml = allGroups.map(t => `<option value="${t.id}">${escapeHtml(t.group)}</option>`).join("");
-		document.getElementById("u-group").innerHTML = `<option value="" disabled selected>Select a group…</option>${optionsHtml}`;
-		document.getElementById("e-group").innerHTML = optionsHtml;
+		document.getElementById("e-group").innerHTML = allGroups.map(t => `<option value="${t.id}">${escapeHtml(t.group)}</option>`).join("");
+		// Settings -> User Management's "Default Group for New Users" --
+		// pre-selects it on the Add User form instead of forcing an explicit
+		// "Select a group..." placeholder every time (see AppSettings.
+		// default_group_id's own docstring). Falls back to the placeholder
+		// exactly as before when no default is configured, or the default
+		// group no longer exists (deleted -- is_default just won't match).
+		// The `selected` attribute (not just a JS-set .value) matters here:
+		// resetAddUserForm() calls the form's native .reset() every time the
+		// dialog re-opens, which restores whichever option was marked
+		// `selected` in the markup, not whatever .value happened to be set
+		// to previously.
+		const hasDefault = allGroups.some(t => t.is_default);
+		const groupOptionsHtml = allGroups
+			.map(t => `<option value="${t.id}"${t.is_default ? " selected" : ""}>${escapeHtml(t.group)}</option>`)
+			.join("");
+		document.getElementById("u-group").innerHTML = hasDefault
+			? groupOptionsHtml
+			: `<option value="" disabled selected>Select a group…</option>${groupOptionsHtml}`;
 	} catch (e) {
 		toast(e.message, "error");
 	}

@@ -202,9 +202,11 @@
 		<h2>User Management</h2>
 		<div class="form-grid">
 			<div class="field">
-				<label for="s-default-role">Default Role for New Users</label>
-				<select id="s-default-role"></select>
-				<p class="field-hint">Pre-selected on the Add User form -- an admin can still choose a different role before saving.</p>
+				<label for="s-default-group">Default Group for New Users</label>
+				<select id="s-default-group">
+					<option value="">No default -- always choose one</option>
+				</select>
+				<p class="field-hint">Pre-selected on the Add User form's Group field -- an admin can still choose a different group before saving.</p>
 			</div>
 		</div>
 	</div>
@@ -778,9 +780,10 @@ async function loadSettings() {
 		setVal("s-db-snapshot-retention", s.db_snapshot_retention_days);
 		document.getElementById("s-maintenance-mode").checked = !!s.maintenance_mode;
 		setVal("s-maintenance-message", s.maintenance_message);
-		const roleSelect = document.getElementById("s-default-role");
-		roleSelect.innerHTML = (s.role_choices || []).map(r => `<option value="${escapeHtml(r.slug)}">${escapeHtml(r.name)}</option>`).join("");
-		roleSelect.value = s.default_new_user_role || "user";
+		const groupSelect = document.getElementById("s-default-group");
+		groupSelect.innerHTML = '<option value="">No default -- always choose one</option>'
+			+ (s.group_choices || []).map(g => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("");
+		groupSelect.value = s.default_group_id != null ? String(s.default_group_id) : "";
 		setVal("s-notification-duration", s.notification_duration_ms != null ? (s.notification_duration_ms / 1000) : 1);
 
 		_themeChoices = s.theme_choices || [];
@@ -1022,7 +1025,7 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		audit_retention_days: intOrNull(val("s-audit-retention")),
 		connection_issue_retention_days: intOrNull(val("s-connection-issue-retention")),
 		log_failed_login_attempts: document.getElementById("s-log-failed-logins").checked,
-		default_new_user_role: document.getElementById("s-default-role").value || null,
+		default_group_id: intOrNull(val("s-default-group")),
 		default_bandwidth_monthly_gb: val("s-default-bandwidth") ? Number(val("s-default-bandwidth")) : null,
 		default_quota_enforcement_policy: document.querySelector('input[name="s-quota-policy"]:checked')?.value || "soft",
 		allow_duplicate_macs: document.getElementById("s-allow-duplicate-macs").checked,

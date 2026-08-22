@@ -545,10 +545,32 @@ class AppSettings(Base):
     log_failed_login_attempts = Column(Boolean, nullable=True)
 
     # User Management: which RoleDef slug the Add User form pre-selects --
-    # purely a UX default (an admin can always pick a different role before
-    # submitting), not a server-side fallback, since the form always submits
-    # an explicit role. NULL falls back to "user" (the self-service role).
+    # DEAD since the group-only permissions migration (see permissions.py's
+    # effective_role_ids): a role is no longer ever assigned directly to a
+    # user, only via Group membership, and the Add/Edit User Role <select>
+    # this was meant to pre-fill was removed along with that change (see
+    # templates/users.html's own comment on the removal). Column kept
+    # in place rather than dropped -- this app's schema only ever adds
+    # columns, never drops them (see db.py's _sync_missing_columns) -- but
+    # nothing reads or writes it any more; superseded by default_group_id
+    # below, which actually does something with the Add User form's
+    # surviving Group field.
     default_new_user_role = Column(String(64), nullable=True)
+
+    # User Management: which Group the Add User form pre-selects -- unlike
+    # default_new_user_role above, this is a REAL default: the Group field
+    # currently forces "Select a group..." every time with no pre-fill.
+    # Purely a UX default (an admin can always pick a different group
+    # before submitting), not a server-side fallback -- the form always
+    # submits an explicit group_id. NULL (the fresh-install default) means
+    # no default; the picker still forces an explicit choice. No FK
+    # constraint deliberately (same reasoning as VpnProfileLink and other
+    # soft references in this app) -- if the referenced group is later
+    # deleted, this just quietly stops matching anything in the Add User
+    # picker (see routes/groups.py's delete_group, which also proactively
+    # clears this back to NULL so a deleted group's id doesn't linger here
+    # doing nothing forever) rather than needing ON DELETE handling.
+    default_group_id = Column(Integer, nullable=True)
 
     # VPN Management: the Monthly Bandwidth Quota (GB) applied to a new
     # user's VPN profile when the Add User form's own quota field is left
@@ -591,7 +613,7 @@ class AppSettings(Base):
 
     # Reporting: default selected range (days) for the Dashboard's Usage
     # Analytics chart -- 0 means "All time". Purely a UI default, same
-    # spirit as default_new_user_role above; an admin can still change the
+    # spirit as default_group_id above; an admin can still change the
     # dropdown per-visit.
     reports_default_range_days = Column(Integer, nullable=True)
     # Database Reporting: how long to keep DbStatSnapshot rows -- NULL/0

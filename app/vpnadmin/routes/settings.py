@@ -11,7 +11,7 @@ from ..app_settings import ACTIVE_THEME_IDS, SECRET_PLACEHOLDER, THEME_CHOICES, 
 from ..audit import log_action
 from ..config import settings as env_settings
 from ..db import get_db
-from ..models import RoleDef, User
+from ..models import SUPER_ADMIN_GROUP_NAME, Group, RoleDef, User
 from ..permissions import require_permission
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -38,7 +38,7 @@ class UpdateSettingsRequest(BaseModel):
     log_failed_login_attempts: bool | None = None
     notification_duration_ms: int | None = None
 
-    default_new_user_role: str | None = None
+    default_group_id: int | None = None
     default_bandwidth_monthly_gb: float | None = None
     default_quota_enforcement_policy: str | None = None
     allow_duplicate_macs: bool | None = None
@@ -458,7 +458,7 @@ def _serialize() -> dict:
         "audit_retention_days": s.audit_retention_days,
         "connection_issue_retention_days": s.connection_issue_retention_days,
         "log_failed_login_attempts": s.log_failed_login_attempts,
-        "default_new_user_role": s.default_new_user_role,
+        "default_group_id": s.default_group_id,
         "default_bandwidth_monthly_gb": s.default_bandwidth_monthly_gb,
         "default_quota_enforcement_policy": s.default_quota_enforcement_policy,
         "admin_notification_email": s.admin_notification_email,
@@ -530,14 +530,21 @@ def _serialize() -> dict:
 def get_settings(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     body = _serialize()
     body["theme_choices"] = THEME_CHOICES
-    # Role choices for the "Default Role for New Users" dropdown (User
-    # Management card) -- same RoleDef rows the Add User form itself
-    # offers, so an admin can only ever pick a role that actually exists.
-    # Excludes super_admin for the same reason create_user() already
-    # forbids assigning it (see routes/users.py's _resolve_creatable_role).
+    # Role choices for the MFA Role Requirements table below -- excludes
+    # super_admin for the same reason create_user() already forbids
+    # assigning it (see routes/users.py's _resolve_creatable_role).
     body["role_choices"] = [
         {"slug": r.slug, "name": r.name}
         for r in db.query(RoleDef).filter(RoleDef.slug != "super_admin").order_by(RoleDef.name).all()
+    ]
+    # Group choices for the "Default Group for New Users" dropdown (User
+    # Management card) -- same groups the Add User form's own Group field
+    # offers (see templates/users.html's loadGroupOptions), minus the
+    # built-in SuperAdmin group, which is never manually assignable to
+    # anyone (see routes/groups.py's _is_super_admin_group).
+    body["group_choices"] = [
+        {"id": g.id, "name": g.name}
+        for g in db.query(Group).filter(Group.name != SUPER_ADMIN_GROUP_NAME).order_by(Group.name).all()
     ]
     # Lets the Settings page distinguish "toggled on but the DB hasn't
     # downloaded yet" from "actually working" -- see features.geoip_enabled's
@@ -552,9 +559,9 @@ def get_settings(_: User = Depends(require_admin), db: Session = Depends(get_db)
 
 @router.patch("")
 def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    if body.default_new_user_role is not None:
-        if not db.query(RoleDef).filter(RoleDef.slug == body.default_new_user_role).first():
-            raise HTTPException(status_code=400, detail=f"No such role: '{body.default_new_user_role}'.")
+    if body.default_group_id is not None:
+        if not db.query(Group).filter(Group.id == body.default_group_id, Group.name != SUPER_ADMIN_GROUP_NAME).first():
+            raise HTTPException(status_code=400, detail="No such group.")
     row = get_settings_row(db)
     fields_set = body.model_fields_set
     changes = []
@@ -572,7 +579,7 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
     for field in ("portal_url", "min_password_length",
                    "session_timeout_minutes", "account_lockout_threshold", "account_lockout_minutes",
                    "password_history_count",
-                   "audit_retention_days", "connection_issue_retention_days", "log_failed_login_attempts", "default_new_user_role",
+                   "audit_retention_days", "connection_issue_retention_days", "log_failed_login_attempts", "default_group_id",
                    "default_bandwidth_monthly_gb", "default_quota_enforcement_policy", "allow_duplicate_macs",
                    "min_session_duration_seconds", "admin_notification_email",
                    "notify_admin_on_user_created", "notify_admin_on_client_revoked",
