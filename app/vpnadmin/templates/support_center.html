@@ -5,7 +5,7 @@
 	<div class="toolbar-title"><h1 style="margin:0">Support Center</h1></div>
 	<div style="display:flex;gap:10px">
 		{% if can_delete_tickets %}
-		<a href="#" class="btn-secondary" id="sc-duplicate-cleanup-btn">Duplicate Cleanup</a>
+		<button type="button" class="btn-secondary" id="sc-duplicate-cleanup-btn">Duplicate Cleanup</button>
 		{% endif %}
 		<button type="button" class="btn-secondary" id="refresh-btn">Refresh</button>
 	</div>
@@ -72,7 +72,7 @@
 </div>
 
 <dialog id="sc-cluster-dialog">
-	<div class="dialog-body" style="min-width:520px;max-width:90vw">
+	<div class="dialog-body">
 		<h3 style="margin-top:0">Duplicate Cleanup</h3>
 		<p class="muted">Candidate duplicate clusters -- tickets grouped by matching subject or (creator + category), created within the configured detection window of each other. Pick a parent for each cluster and mark the rest as duplicates in one action.</p>
 		<div id="sc-cluster-body"><p class="muted">Loading...</p></div>
@@ -325,15 +325,17 @@ async function loadClusters() {
 			return;
 		}
 		body.innerHTML = data.clusters.map((cluster, ci) => `
-			<div class="card" style="margin-bottom:12px">
-				<div class="muted" style="margin-bottom:6px">Cluster ${ci + 1} -- ${cluster.tickets.length} tickets</div>
-				${cluster.tickets.map((t) => `
-					<label class="checkbox-label" style="display:block;margin-bottom:4px">
-						<input type="radio" name="sc-cluster-parent-${ci}" value="${t.id}" ${t.id === cluster.suggested_parent_id ? "checked" : ""}>
-						${formatTicketId(t.id)} -- ${t.subject} <span class="muted">(${t.status_label}, created ${new Date(t.created_at).toLocaleString()})</span>
-					</label>
-				`).join("")}
-				<button type="button" class="btn-secondary btn-sm" data-cluster-idx="${ci}" data-cluster-mark>Mark selected parent's siblings as duplicates</button>
+			<div class="sc-cluster-card">
+				<div style="font-weight:700;margin-bottom:8px">Cluster ${ci + 1} <span class="muted" style="font-weight:500">-- ${cluster.tickets.length} tickets</span></div>
+				<div class="sc-cluster-ticket-list">
+					${cluster.tickets.map((t) => `
+						<label class="checkbox-label sc-cluster-ticket-row">
+							<input type="radio" name="sc-cluster-parent-${ci}" value="${t.id}" ${t.id === cluster.suggested_parent_id ? "checked" : ""}>
+							<span>${formatTicketId(t.id)} -- ${escapeHtml(t.subject)} <span class="muted">(${t.status_label}, created ${new Date(t.created_at).toLocaleString()})</span></span>
+						</label>
+					`).join("")}
+				</div>
+				<button type="button" class="btn-secondary btn-sm" style="margin-top:10px" data-cluster-idx="${ci}" data-cluster-mark>Mark selected parent's siblings as duplicates</button>
 			</div>
 		`).join("");
 		body.querySelectorAll("[data-cluster-mark]").forEach((btn) => {
@@ -357,8 +359,7 @@ async function loadClusters() {
 	}
 }
 
-document.getElementById("sc-duplicate-cleanup-btn").addEventListener("click", async (e) => {
-	e.preventDefault();
+document.getElementById("sc-duplicate-cleanup-btn").addEventListener("click", async () => {
 	document.getElementById("sc-cluster-dialog").showModal();
 	await loadClusters();
 });
