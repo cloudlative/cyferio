@@ -291,7 +291,7 @@
 				<input type="text" id="s-devmon-interval" inputmode="numeric" placeholder="5">
 			</div>
 			<div class="field">
-				<label for="s-devmon-default-threshold">Default Offline Threshold <span class="muted">(pre-filled on a newly-monitored device)</span></label>
+				<label for="s-devmon-default-threshold">Default Offline Threshold</label>
 				<select id="s-devmon-default-threshold">
 					<option value="1">1 minute</option>
 					<option value="5">5 minutes</option>
@@ -300,10 +300,12 @@
 					<option value="30">30 minutes</option>
 					<option value="60">60 minutes</option>
 				</select>
+				<p class="field-hint">Pre-filled on a newly-monitored device.</p>
 			</div>
 			<div class="field">
-				<label for="s-devmon-default-cooldown">Default Repeat-Alert Cooldown <span class="muted">(minutes, used when a device's own cooldown mode is "Repeat")</span></label>
+				<label for="s-devmon-default-cooldown">Default Repeat-Alert Cooldown <span class="muted">(minutes)</span></label>
 				<input type="text" id="s-devmon-default-cooldown" inputmode="numeric" placeholder="60">
+				<p class="field-hint">Used when a device's own cooldown mode is "Repeat".</p>
 			</div>
 		</div>
 		<div class="checkbox-row" style="margin-top:12px">
