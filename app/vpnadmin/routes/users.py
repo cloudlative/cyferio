@@ -26,6 +26,13 @@ from ..policy_store import PolicyValidationError
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 require_admin = require_permission("users", "manage")  # former auth.require_admin, see permissions.py
+# The three admin MFA actions (reset/disable/force-enroll another account's
+# MFA) got their own OBJECTS entry, "mfa_admin", split out of "users" so a
+# role can be granted MFA administration without full user management --
+# see permissions.py's OBJECTS entry for the full rationale, including why
+# mfa_policy_override on update_user() below deliberately stayed on
+# require_admin instead of moving here.
+require_mfa_admin = require_permission("mfa_admin", "manage")
 
 
 def _resolve_role(db: Session, slug: str) -> RoleDef:
@@ -1445,7 +1452,7 @@ def _mfa_admin_notice_and_email(admin: User, target: User, db: Session, event_de
 
 
 @router.post("/{user_id}/mfa/reset")
-def reset_user_mfa(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def reset_user_mfa(user_id: int, admin: User = Depends(require_mfa_admin), db: Session = Depends(get_db)):
     """"Reset MFA" -- used when a user loses their authenticator device.
     Clears the current enrollment entirely (secret + recovery codes) AND
     forces re-enrollment at next login (mfa_setup_required=True) -- unlike
@@ -1465,7 +1472,7 @@ def reset_user_mfa(user_id: int, admin: User = Depends(require_admin), db: Sessi
 
 
 @router.post("/{user_id}/mfa/disable")
-def disable_user_mfa(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def disable_user_mfa(user_id: int, admin: User = Depends(require_mfa_admin), db: Session = Depends(get_db)):
     """"Disable MFA" -- troubleshooting/temporary access. Unlike /mfa/reset
     above, does NOT force re-enrollment -- the account is simply left
     without MFA until the user (or another admin action) re-enables it."""
@@ -1482,7 +1489,7 @@ def disable_user_mfa(user_id: int, admin: User = Depends(require_admin), db: Ses
 
 
 @router.post("/{user_id}/mfa/force-enroll")
-def force_enroll_user_mfa(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def force_enroll_user_mfa(user_id: int, admin: User = Depends(require_mfa_admin), db: Session = Depends(get_db)):
     """"Force MFA Enrollment" -- requires the user to complete enrollment at
     their NEXT login, without touching their current enrollment state
     (unlike /mfa/reset, this doesn't clear an already-working enrollment)."""

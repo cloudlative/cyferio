@@ -50,6 +50,23 @@ OBJECTS: dict[str, str] = {
     # more operationally sensitive than anything else "viewer" currently
     # sees, admin/super_admin only by default.
     "system_audit": "System Audit",
+    # Split out of "users" (previously the three admin MFA actions --
+    # reset/disable/force-enroll -- used require_permission("users",
+    # "manage") like every other user-management route) so a role can be
+    # granted "administer MFA for other accounts" without also getting
+    # rename/delete/role-change/restriction-editing power over every user.
+    # Same "generalize a broad object into a narrower one" move as
+    # "db_reporting" was split out of "reports". Deliberately does NOT
+    # cover `mfa_policy_override` (the per-user MFA policy exemption field
+    # on the general PATCH /users/{id} endpoint) -- that field is set in
+    # the same single-Depends() PATCH handler as role changes,
+    # deactivation, and login restrictions, all gated by one users:manage
+    # check for the whole endpoint; splitting one field out of that into a
+    # second in-handler permission check wouldn't match this app's
+    # per-ROUTE permission model anywhere else, for the sake of one field,
+    # so it stays under users:manage. See routes/users.py's
+    # reset_user_mfa/disable_user_mfa/force_enroll_user_mfa for what moved.
+    "mfa_admin": "MFA Administration",
 }
 
 ACTIONS = ("view", "create", "update", "delete", "execute", "manage")
@@ -109,7 +126,14 @@ _SYSTEM_ROLES: dict[str, dict] = {
         "Matches the pre-RBAC 'viewer' role exactly.",
         "permissions": {
             obj: {"view": True} for obj in OBJECTS
-            if obj not in ("settings", "roles", "db_reporting", "system_audit")
+            # "mfa_admin" excluded same as db_reporting/system_audit: it
+            # only has meaningful "manage"-level actions (reset/disable/
+            # force-enroll another account's MFA), nothing a bare "view"
+            # grant would do anything with, and viewer never had
+            # users:manage (the object mfa_admin was split out of) to
+            # begin with -- so this mirrors, not widens, viewer's existing
+            # access.
+            if obj not in ("settings", "roles", "db_reporting", "system_audit", "mfa_admin")
         },
         "scopes": {},
     },
