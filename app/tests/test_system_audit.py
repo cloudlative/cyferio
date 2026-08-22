@@ -132,12 +132,10 @@ class TestRunAuditOrchestration:
         # membership now (see permissions.py's effective_role_ids) --
         # _notify_admins below goes through has_permission.
         admin_role = db_session.query(RoleDef).filter_by(slug="admin").one()
-        group = Group(name="second-admin-group")
-        group.role_defs.append(admin_role)
+        group = Group(name="second-admin-group", role_id=admin_role.id)
         db_session.add(group)
         db_session.flush()
-        second_admin = User(username="second-admin", password_hash=hash_password("password123"), role=Role.admin, role_id=admin_role.id)
-        second_admin.groups.append(group)
+        second_admin = User(username="second-admin", password_hash=hash_password("password123"), role=Role.admin, role_id=admin_role.id, group_id=group.id)
         db_session.add(second_admin)
         db_session.commit()
 
@@ -163,12 +161,10 @@ class TestRunAuditOrchestration:
         from vpnadmin.models import Group, Role, RoleDef, User
 
         admin_role = db_session.query(RoleDef).filter_by(slug="admin").one()
-        group = Group(name="an-admin-group")
-        group.role_defs.append(admin_role)
+        group = Group(name="an-admin-group", role_id=admin_role.id)
         db_session.add(group)
         db_session.flush()
-        an_admin = User(username="an-admin", password_hash=hash_password("password123"), role=Role.admin, role_id=admin_role.id)
-        an_admin.groups.append(group)
+        an_admin = User(username="an-admin", password_hash=hash_password("password123"), role=Role.admin, role_id=admin_role.id, group_id=group.id)
         db_session.add(an_admin)
         db_session.commit()
 

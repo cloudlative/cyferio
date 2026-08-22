@@ -8,7 +8,7 @@
 		<button class="btn-secondary" id="refresh-btn">Refresh</button>
 	</div>
 </div>
-<p class="page-subtitle" style="margin-top:-10px">Permissions come exclusively from the roles assigned to a group -- a user's access is the union of every group they belong to. Select a group below to manage its members and roles.</p>
+<p class="page-subtitle" style="margin-top:-10px">Every user belongs to exactly one group, and every group has exactly one role -- that role is the user's only source of permissions. Select a group below to manage its members and role.</p>
 
 <div class="stat-grid" id="summary-grid" style="margin-bottom:24px">
 	<div class="stat-card accent-total"><div class="stat-value" id="stat-group-count">—</div><div class="stat-label">Groups</div></div>
@@ -104,17 +104,17 @@
 		{% endif %}
 
 		{% if can_manage_groups %}
-		<div class="groups-detail-section" id="group-roles-panel">
-			<h3 style="margin:0 0 4px">Assigned Roles</h3>
-			<p class="muted" style="margin:0 0 12px;font-size:0.82rem">Groups are the only source of permissions -- every role assigned here is inherited by every current member of this group. A member of no group, or of group(s) with no role assigned, has no access.</p>
-			<div id="group-roles-chips" style="margin-bottom:12px"></div>
-			<form id="add-group-role-form" class="form-row">
+		<div class="groups-detail-section" id="group-role-panel">
+			<h3 style="margin:0 0 4px">Role</h3>
+			<p class="muted" style="margin:0 0 12px;font-size:0.82rem">A group has exactly one role -- it's the only source of permissions for every current member of this group. Choosing a different role here REPLACES the group's current role, it doesn't add to a list. A group with no role assigned grants its members no permissions.</p>
+			<form id="group-role-form" class="form-row">
 				<div class="field" style="flex:2">
-					<label for="add-group-role-select">Assign a role</label>
-					<select id="add-group-role-select"></select>
+					<label for="group-role-select">Role</label>
+					<select id="group-role-select"></select>
 				</div>
-				<button type="submit" class="btn-secondary">Assign Role</button>
+				<button type="submit" class="btn-secondary" id="group-role-save-btn">Save Role</button>
 			</form>
+			<p class="muted" id="group-role-immutable-note" style="display:none;font-size:0.82rem;margin-top:8px">This group's role is fixed to Super Admin and can't be changed.</p>
 		</div>
 		{% endif %}
 
@@ -123,11 +123,12 @@
 			{% if can_manage_groups %}
 			<form id="add-member-form" class="form-row" style="margin:10px 0 14px">
 				<div class="field" style="flex:2">
-					<label for="add-member-select">Add a member</label>
+					<label for="add-member-select">Move a user here</label>
 					<select id="add-member-select"></select>
 				</div>
-				<button type="submit" class="btn-secondary">Add to Group</button>
+				<button type="submit" class="btn-secondary">Move to Group</button>
 			</form>
+			<p class="muted" id="add-member-immutable-note" style="display:none;font-size:0.82rem;margin:0 0 14px">This group's membership is fixed to the bootstrap admin account and can't be changed.</p>
 			{% endif %}
 			<div id="group-detail-table"></div>
 		</div>
@@ -243,7 +244,7 @@ function renderGroupList() {
 			<tr class="group-row ${isUnassigned ? "row-dim" : ""} ${isSelected ? "group-row-selected" : ""}" data-group-id="${isUnassigned ? "unassigned" : t.id}" tabindex="0">
 				<td>${isUnassigned
 					? `<span class="muted" style="font-style:italic">${escapeHtml(t.group)}</span>`
-					: `<span style="font-weight:700">${escapeHtml(t.group)}</span>`}</td>
+					: `<span style="font-weight:700">${escapeHtml(t.group)}</span>${t.is_super_admin_group ? ' <span class="muted" style="font-size:0.78em">(built-in)</span>' : ""}`}</td>
 				<td>
 					<div class="group-row-count">
 						<span class="mono">${t.count}</span>
@@ -291,6 +292,14 @@ function showGroup(id) {
 	const deleteBtn = document.getElementById("group-delete-btn");
 	const addForm = document.getElementById("add-member-form");
 	const isRealGroup = group.id != null;
+	// The "SuperAdmin" group is immutable everywhere the backend enforces it
+	// (routes/groups.py) -- can't be renamed/re-described, can't be deleted,
+	// its role can never change away from Super Admin, and its one member
+	// (the bootstrap admin account) can never be added to or removed via the
+	// ordinary member endpoints. Every control below is hidden/disabled to
+	// match, defense-in-depth same as this app's other bootstrap-admin
+	// immutability guards (see users.html's editingUserIsBootstrapAdmin).
+	const isSuperAdminGroup = !!group.is_super_admin_group;
 	const metaEl = document.getElementById("group-detail-meta");
 	if (isRealGroup) {
 		const bits = [`<span class="mono muted">${escapeHtml(group.slug || "—")}</span>`];
@@ -303,9 +312,9 @@ function showGroup(id) {
 	const editToggleBtn = document.getElementById("group-edit-toggle-btn");
 	const editPanel = document.getElementById("group-edit-panel");
 	if (editToggleBtn) {
-		editToggleBtn.style.display = isRealGroup ? "" : "none";
+		editToggleBtn.style.display = isRealGroup && !isSuperAdminGroup ? "" : "none";
 		editPanel.style.display = "none"; // always collapsed on switching groups
-		if (isRealGroup) {
+		if (isRealGroup && !isSuperAdminGroup) {
 			document.getElementById("edit-group-name").value = group.group;
 			document.getElementById("edit-group-slug").value = group.slug || "";
 			document.getElementById("edit-group-description").value = group.description || "";
@@ -315,12 +324,25 @@ function showGroup(id) {
 	}
 	if (deleteBtn) {
 		deleteBtn.style.display = isRealGroup ? "" : "none";
-		deleteBtn.disabled = group.count > 0;
-		deleteBtn.title = group.count > 0 ? "Remove all members before deleting a group." : "";
+		if (isSuperAdminGroup) {
+			deleteBtn.disabled = true;
+			deleteBtn.title = "The built-in SuperAdmin group can't be deleted.";
+		} else {
+			deleteBtn.disabled = group.count > 0;
+			deleteBtn.title = group.count > 0 ? "Remove all members before deleting a group." : "";
+		}
 	}
+	const addMemberNote = document.getElementById("add-member-immutable-note");
 	if (addForm) {
-		addForm.style.display = isRealGroup ? "" : "none";
-		if (isRealGroup) {
+		addForm.style.display = isRealGroup && !isSuperAdminGroup ? "" : "none";
+		if (addMemberNote) addMemberNote.style.display = isRealGroup && isSuperAdminGroup ? "" : "none";
+		if (isRealGroup && !isSuperAdminGroup) {
+			// Candidates are every user not ALREADY in this specific group --
+			// deliberately not limited to users in zero groups: since a user
+			// can only ever be in one group at a time now, picking someone
+			// already in a different group here MOVES them (see the submit
+			// handler below's confirmation), it doesn't add a second
+			// membership.
 			const memberIds = new Set(group.members.map(m => m.id));
 			const candidates = allUsers.filter(u => !memberIds.has(u.id));
 			const select = document.getElementById("add-member-select");
@@ -330,7 +352,7 @@ function showGroup(id) {
 			// mistake if the admin didn't look closely before submitting.
 			select.innerHTML = candidates.length
 				? `<option value="" selected disabled>Select a user…</option>` +
-					candidates.map(u => `<option value="${u.id}">${escapeHtml(u.display_name)} (${escapeHtml(u.username)})</option>`).join("")
+					candidates.map(u => `<option value="${u.id}">${escapeHtml(u.display_name)} (${escapeHtml(u.username)})${u.group ? ` — currently in ${escapeHtml(u.group)}` : ""}</option>`).join("")
 				: '<option value="">No other users available</option>';
 			select.disabled = candidates.length === 0;
 			addForm.querySelector("button[type=submit]").disabled = candidates.length === 0;
@@ -340,17 +362,18 @@ function showGroup(id) {
 	if (group.members.length === 0) {
 		el.innerHTML = '<div class="empty-state">No members in this group.</div>';
 	} else {
+		const showRemoveColumn = canManageGroups && isRealGroup && !isSuperAdminGroup;
 		el.innerHTML = `<table>
-			<thead><tr><th>User</th><th>Effective Role(s)</th><th>Status</th>${canManageGroups && isRealGroup ? "<th></th>" : ""}</tr></thead>
+			<thead><tr><th>User</th><th>Effective Role(s)</th><th>Status</th>${showRemoveColumn ? "<th></th>" : ""}</tr></thead>
 			<tbody>${group.members.map(m => `
 				<tr data-user-id="${m.id}">
 					<td>${escapeHtml(m.display_name)} <span class="muted" style="font-size:0.82em">(${escapeHtml(m.username)})</span></td>
 					<td>${m.effective_roles.length ? m.effective_roles.map(r => `<span class="role-badge">${escapeHtml(r)}</span>`).join(" ") : '<span class="muted">None</span>'}</td>
 					<td>${m.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
-					${canManageGroups && isRealGroup ? `<td class="text-right"><button class="btn-secondary btn-sm remove-member-btn">Remove from Group</button></td>` : ""}
+					${showRemoveColumn ? `<td class="text-right"><button class="btn-secondary btn-sm remove-member-btn">Remove from Group</button></td>` : ""}
 				</tr>`).join("")}</tbody>
 		</table>`;
-		if (canManageGroups && isRealGroup) {
+		if (showRemoveColumn) {
 			el.querySelectorAll(".remove-member-btn").forEach(btn => {
 				btn.addEventListener("click", async () => {
 					const userId = btn.closest("tr").dataset.userId;
@@ -366,64 +389,49 @@ function showGroup(id) {
 			});
 		}
 	}
-	if (canManageGroups) renderGroupRoles(group);
+	if (canManageGroups) renderGroupRole(group);
 }
 
-// Assigned Roles panel -- Group-Based Permissions Phase 1. Shown only for a
-// real group (not the synthetic "Unassigned" bucket, which has no id and
-// can't be assigned roles); the panel element itself only exists in the
-// DOM at all when canManageGroups (see the can_manage_groups guard around
-// #group-roles-panel in the template above).
-function renderGroupRoles(group) {
-	const panel = document.getElementById("group-roles-panel");
+// Role panel -- single-group/single-role permissions model: a group has
+// AT MOST one role, chosen from a plain <select>, and saving REPLACES
+// whatever role the group had before, it never adds to a list. Shown only
+// for a real group (not the synthetic "Unassigned" bucket, which has no id
+// and can't be assigned a role); the panel element itself only exists in
+// the DOM at all when canManageGroups (see the can_manage_groups guard
+// around #group-role-panel in the template above). The "SuperAdmin" group
+// is read-only here -- its role is permanently Super Admin (routes/
+// groups.py rejects any change server-side too).
+function renderGroupRole(group) {
+	const panel = document.getElementById("group-role-panel");
 	const isRealGroup = group.id != null;
 	panel.style.display = isRealGroup ? "" : "none";
 	if (!isRealGroup) return;
-	const chips = document.getElementById("group-roles-chips");
-	chips.innerHTML = group.roles.length
-		? group.roles.map(r => `
-			<span class="restriction-chip" data-role-id="${r.id}" style="margin:0 6px 6px 0;display:inline-flex;align-items:center;gap:6px">
-				${escapeHtml(r.name)}
-				<button type="button" class="chip-remove-btn remove-group-role-btn" aria-label="Remove ${escapeHtml(r.name)}" style="border:none;background:none;cursor:pointer;padding:0;line-height:1">&times;</button>
-			</span>`).join("")
-		: '<span class="muted" style="font-size:0.85rem">No roles assigned -- members of this group have no permissions.</span>';
-	chips.querySelectorAll(".remove-group-role-btn").forEach(btn => {
-		btn.addEventListener("click", async () => {
-			const roleId = btn.closest("[data-role-id]").dataset.roleId;
-			try {
-				await apiFetch(`/api/groups/${group.id}/roles/${roleId}`, { method: "DELETE" });
-				toast("Role removed from group.");
-				await loadGroups();
-				showGroup(currentGroupId);
-			} catch (e) {
-				toast(e.message, "error");
-			}
-		});
-	});
+	const isSuperAdminGroup = !!group.is_super_admin_group;
+	const select = document.getElementById("group-role-select");
+	const saveBtn = document.getElementById("group-role-save-btn");
+	const note = document.getElementById("group-role-immutable-note");
+	if (isSuperAdminGroup) {
+		select.innerHTML = `<option value="${group.role ? group.role.id : ""}">${group.role ? escapeHtml(group.role.name) : "Super Admin"}</option>`;
+		select.disabled = true;
+		saveBtn.disabled = true;
+		note.style.display = "";
+		return;
+	}
+	note.style.display = "none";
+	select.disabled = false;
+	saveBtn.disabled = false;
 	// super_admin is already excluded by GET /api/groups/available-roles
 	// itself (see routes/groups.py -- that account's access never depends
-	// on group membership), so nothing to filter out here.
-	const assignedIds = new Set(group.roles.map(r => r.id));
-	// "User" (the least-privileged, self-service role) is sorted to the
-	// end of the list rather than left in its alphabetical spot -- every
-	// other role stays in the server's alphabetical order, "User" just
-	// drops to last so it doesn't visually blend in among roles that
-	// grant real admin-side access.
-	const candidates = allRoles.filter(r => !assignedIds.has(r.id))
-		.sort((a, b) => (a.slug === "user") - (b.slug === "user"));
-	const select = document.getElementById("add-group-role-select");
-	select.innerHTML = candidates.length
-		? candidates.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join("")
-		: '<option value="">No other roles available</option>';
-	// Defaults to the least-privileged "User" role, not whatever sorts
-	// first (which is usually "Admin") -- a brand new group's Assign Role
-	// dropdown should never make it one accidental click away from
-	// granting full admin access.
-	const defaultRole = candidates.find(r => r.slug === "user");
-	if (defaultRole) select.value = String(defaultRole.id);
-	select.disabled = candidates.length === 0;
-	const form = document.getElementById("add-group-role-form");
-	form.querySelector("button[type=submit]").disabled = candidates.length === 0;
+	// on group membership, and it's reserved for the SuperAdmin group
+	// above), so nothing to filter out here. Defaults to "No role (no
+	// permissions)" for a group that doesn't have one yet -- safer than
+	// defaulting to whatever role happens to sort first (usually "Admin"):
+	// a brand new/roleless group's Role selector should never be one
+	// accidental click away from granting full admin access.
+	const options = ['<option value="">No role (no permissions)</option>']
+		.concat(allRoles.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`));
+	select.innerHTML = options.join("");
+	select.value = group.role ? String(group.role.id) : "";
 }
 
 const groupSearchInput = document.getElementById("group-search");
@@ -509,9 +517,21 @@ if (canManageGroups) {
 		const userId = document.getElementById("add-member-select").value;
 		if (!group) return;
 		if (!userId) { toast("Select a user to add first.", "error"); return; }
+		// A user can only ever be in one group at a time now, so picking
+		// someone already in a DIFFERENT, non-empty group here MOVES them --
+		// confirm first, naming which group they're being moved out of, so
+		// this can't happen by accident.
+		const user = allUsers.find(u => String(u.id) === String(userId));
+		if (user && user.group && user.group !== group.group) {
+			const ok = await confirmDialog(
+				`<strong>${escapeHtml(user.display_name)}</strong> is currently in <strong>${escapeHtml(user.group)}</strong> -- move them to <strong>${escapeHtml(group.group)}</strong> instead? They'll be removed from ${escapeHtml(user.group)}.`,
+				{ confirmLabel: "Move" },
+			);
+			if (!ok) return;
+		}
 		try {
 			await apiFetch(`/api/groups/${group.id}/members`, { method: "POST", body: { user_id: Number(userId) } });
-			toast("Member added to group.");
+			toast("Member moved to group.");
 			await loadGroups();
 			showGroup(currentGroupId);
 		} catch (e) {
@@ -519,14 +539,14 @@ if (canManageGroups) {
 		}
 	});
 
-	document.getElementById("add-group-role-form").addEventListener("submit", async (ev) => {
+	document.getElementById("group-role-form").addEventListener("submit", async (ev) => {
 		ev.preventDefault();
 		const group = lastGroups.find(t => String(t.id) === String(currentGroupId));
-		const roleId = document.getElementById("add-group-role-select").value;
-		if (!group || !roleId) return;
+		if (!group || group.id == null) return;
+		const roleId = document.getElementById("group-role-select").value;
 		try {
-			await apiFetch(`/api/groups/${group.id}/roles`, { method: "POST", body: { role_id: Number(roleId) } });
-			toast("Role assigned to group.");
+			await apiFetch(`/api/groups/${group.id}/role`, { method: "PUT", body: { role_id: roleId ? Number(roleId) : null } });
+			toast("Group role saved.");
 			await loadGroups();
 			showGroup(currentGroupId);
 		} catch (e) {

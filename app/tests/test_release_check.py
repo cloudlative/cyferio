@@ -16,12 +16,10 @@ def _make_admin_user(db_session, username="admin", password="adminpass123"):
     # file_upgrade_ticket's candidate lookup below goes through
     # has_permission_any_scope, which needs real group membership.
     admin_role = db_session.query(RoleDef).filter_by(slug="admin").one()
-    group = Group(name=f"{username}-admin-group")
-    group.role_defs.append(admin_role)
+    group = Group(name=f"{username}-admin-group", role_id=admin_role.id)
     db_session.add(group)
     db_session.flush()
-    user = User(username=username, password_hash=hash_password(password), role=Role.admin, role_id=admin_role.id)
-    user.groups.append(group)
+    user = User(username=username, password_hash=hash_password(password), role=Role.admin, role_id=admin_role.id, group_id=group.id)
     db_session.add(user)
     db_session.commit()
     return user
@@ -29,12 +27,10 @@ def _make_admin_user(db_session, username="admin", password="adminpass123"):
 
 def _make_viewer_user(db_session, username="viewer", password="viewerpass123"):
     viewer_role = db_session.query(RoleDef).filter_by(slug="viewer").one()
-    group = Group(name=f"{username}-viewer-group")
-    group.role_defs.append(viewer_role)
+    group = Group(name=f"{username}-viewer-group", role_id=viewer_role.id)
     db_session.add(group)
     db_session.flush()
-    user = User(username=username, password_hash=hash_password(password), role=Role.viewer, role_id=viewer_role.id)
-    user.groups.append(group)
+    user = User(username=username, password_hash=hash_password(password), role=Role.viewer, role_id=viewer_role.id, group_id=group.id)
     db_session.add(user)
     db_session.commit()
     return user

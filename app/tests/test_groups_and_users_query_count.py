@@ -1,5 +1,5 @@
 """Regression tests for the N+1 query fix in routes/groups.py::list_groups()
-and routes/users.py::list_users() (selectinload(User.groups)/(User.role_def)
+and routes/users.py::list_users() (selectinload(User.group)/(User.role_def)
 -- see their own comments). Asserts the actual SQL query count doesn't grow
 with the number of users, not just that the diff "looks" eager-loaded."""
 from sqlalchemy import event
@@ -28,8 +28,8 @@ def _add_users_across_groups(db_session, n_users, groups, prefix):
     for i in range(n_users):
         u = User(
             username=f"{prefix}{i}", password_hash=hash_password("memberpass123"), role=Role.viewer,
+            group_id=groups[i % len(groups)].id,
         )
-        u.groups.append(groups[i % len(groups)])
         db_session.add(u)
     db_session.commit()
 

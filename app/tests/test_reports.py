@@ -25,7 +25,7 @@ def _seed(db_session):
     db_session.add(group)
     db_session.commit()
 
-    alice = User(username="alice", password_hash="x", first_name="Alice", groups=[group])
+    alice = User(username="alice", password_hash="x", first_name="Alice", group_id=group.id)
     bob = User(username="bob", password_hash="x", first_name="Bob")  # no group -- "Unassigned"
     db_session.add_all([alice, bob])
     db_session.commit()

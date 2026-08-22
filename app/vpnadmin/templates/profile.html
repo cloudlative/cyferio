@@ -16,7 +16,7 @@
 		<div><label>Effective Role(s)</label><div>{% for rn in user.effective_role_names %}<span class="role-badge">{{ rn }}</span>{% else %}<span class="muted">None (no group membership)</span>{% endfor %}</div></div>
 		<div><label>Created</label><div class="muted" id="p-created">—</div></div>
 		<div><label>Last Login</label><div class="muted" id="p-last-login">—</div></div>
-		<div><label>Group(s)</label><div class="muted" id="p-groups">—</div></div>
+		<div><label>Group</label><div class="muted" id="p-groups">—</div></div>
 	</div>
 	<p class="muted">Your role, account status, and group membership are managed by an admin. Everything below, you control yourself.</p>
 </div>
@@ -192,7 +192,7 @@ async function loadProfile() {
 		document.getElementById("p-gender").value = me.gender || "unspecified";
 		document.getElementById("p-email").value = me.email || "";
 		profilePhone.setValue(me.phone || "");
-		document.getElementById("p-groups").textContent = (me.groups && me.groups.length) ? me.groups.join(", ") : "Unassigned";
+		document.getElementById("p-groups").textContent = me.group || "Unassigned";
 		updateDisplayedIdentity(me);
 	} catch (e) {
 		toast(e.message, "error");
@@ -219,7 +219,7 @@ document.getElementById("profile-form").addEventListener("submit", async (ev) =>
 			},
 		});
 		updateDisplayedIdentity(updated);
-		document.getElementById("p-groups").textContent = (updated.groups && updated.groups.length) ? updated.groups.join(", ") : "Unassigned";
+		document.getElementById("p-groups").textContent = updated.group || "Unassigned";
 		toast("Profile updated.");
 	} catch (e) {
 		toast(e.message, "error");

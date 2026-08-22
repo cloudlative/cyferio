@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..audit import log_action
 from ..db import get_db
-from ..models import ApiScope, ObjectPermission, RoleApiScope, RoleDef, RoleKind, User, group_role_defs, user_groups
+from ..models import ApiScope, Group, ObjectPermission, RoleApiScope, RoleDef, RoleKind, User
 from ..permissions import ACTIONS, OBJECTS, require_permission
 
 router = APIRouter(prefix="/api/roles", tags=["roles"])
@@ -35,20 +35,19 @@ def _matrix_for(db: Session, role_id: int) -> dict:
 
 
 def _serialize(db: Session, role: RoleDef, *, with_matrix: bool = False) -> dict:
-    # Group-only permissions: "how many users actually have this role" is
-    # no longer a User.role_id count (that column is legacy/inert for
-    # permission purposes -- see permissions.py's effective_role_ids). The
-    # real answer is "how many distinct, non-deleted users belong to a
-    # group this role is assigned to" -- surfacing the old role_id count
-    # here instead would show stale data as if it were current, real
-    # usage (e.g. 0 for a role that's actually granted to 50 people
-    # through a group, or a non-zero count for a role nobody currently
-    # has effective access through any more).
+    # Single-group/single-role permissions: "how many users actually have
+    # this role" is no longer a User.role_id count (that column is
+    # legacy/inert for permission purposes -- see permissions.py's
+    # effective_role_ids). The real answer is "how many distinct,
+    # non-deleted users belong to a group this role is assigned to" --
+    # surfacing the old role_id count here instead would show stale data
+    # as if it were current, real usage (e.g. 0 for a role that's actually
+    # granted to 50 people through a group, or a non-zero count for a role
+    # nobody currently has effective access through any more).
     user_count = (
         db.query(User.id)
-        .join(user_groups, user_groups.c.user_id == User.id)
-        .join(group_role_defs, group_role_defs.c.group_id == user_groups.c.group_id)
-        .filter(group_role_defs.c.role_id == role.id, User.deleted.is_(False))
+        .join(Group, Group.id == User.group_id)
+        .filter(Group.role_id == role.id, User.deleted.is_(False))
         .distinct()
         .count()
     )
@@ -172,14 +171,14 @@ def delete_role(role_id: int, admin: User = Depends(require_roles_admin), db: Se
         raise HTTPException(status_code=404, detail="Role not found.")
     if role.is_system:
         raise HTTPException(status_code=409, detail=f"'{role.name}' is a built-in system role and can't be deleted.")
-    # Group-only permissions: the ONLY thing that actually grants this
-    # role to anyone any more is a group assignment (see permissions.py's
-    # effective_role_ids) -- User.role_id is legacy/inert, so a "still in
-    # use" check against it would be checking data nobody's access is
-    # actually determined by (and could false-negative on a role that
-    # genuinely has zero effective holders, or false-positive-block on a
-    # role only a stale role_id references). This is the real guard.
-    group_assignments = db.query(group_role_defs.c.group_id).filter(group_role_defs.c.role_id == role.id).count()
+    # Single-group/single-role permissions: the ONLY thing that actually
+    # grants this role to anyone any more is a group assignment (see
+    # permissions.py's effective_role_ids) -- User.role_id is legacy/inert,
+    # so a "still in use" check against it would be checking data nobody's
+    # access is actually determined by (and could false-negative on a role
+    # that genuinely has zero effective holders, or false-positive-block on
+    # a role only a stale role_id references). This is the real guard.
+    group_assignments = db.query(Group.id).filter(Group.role_id == role.id).count()
     if group_assignments:
         raise HTTPException(
             status_code=409,

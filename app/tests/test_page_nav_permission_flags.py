@@ -45,12 +45,10 @@ def _make_user(db_session, username: str, role: RoleDef) -> None:
     # give this user ZERO effective permissions and make every test below
     # fail closed. role_id is still set too (harmless/inert) purely to
     # match what a real account looks like.
-    group = Group(name=f"{role.slug}-group")
-    group.role_defs.append(role)
+    group = Group(name=f"{role.slug}-group", role_id=role.id)
     db_session.add(group)
     db_session.flush()
-    user = User(username=username, password_hash=hash_password("testpass123"), role_id=role.id)
-    user.groups.append(group)
+    user = User(username=username, password_hash=hash_password("testpass123"), role_id=role.id, group_id=group.id)
     db_session.add(user)
     db_session.commit()
 

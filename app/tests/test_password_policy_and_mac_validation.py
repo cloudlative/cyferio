@@ -41,13 +41,13 @@ class TestPasswordComplexityPolicy:
         assert r.status_code == 422
         assert "number" in str(r.json()).lower()
 
-    def test_create_user_accepts_compliant_password(self, app_client, monkeypatch):
+    def test_create_user_accepts_compliant_password(self, app_client, monkeypatch, default_group_id):
         from vpnadmin.routes import users as users_mod
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "goodpwuser", "password": "Goodpass123!", "first_name": "Good",
-            "email": "goodpwuser@example.com", "mac": "aa:bb:cc:dd:ee:04",
+            "email": "goodpwuser@example.com", "mac": "aa:bb:cc:dd:ee:04", "group_id": default_group_id,
         })
         assert r.status_code == 201
 
@@ -77,14 +77,14 @@ class TestMacFormatValidation:
         assert r.status_code == 422
         assert "mac address" in str(r.json()).lower()
 
-    def test_create_user_normalizes_mac_with_mixed_separators(self, app_client, monkeypatch):
+    def test_create_user_normalizes_mac_with_mixed_separators(self, app_client, monkeypatch, default_group_id):
         from vpnadmin.routes import users as users_mod
         captured = {}
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: captured.setdefault("mac", mac) or f"{name} added.")
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "normmacuser", "password": "Goodpass123!", "first_name": "Norm",
-            "email": "normmacuser@example.com", "mac": "AA-BB-CC-DD-EE-FF",
+            "email": "normmacuser@example.com", "mac": "AA-BB-CC-DD-EE-FF", "group_id": default_group_id,
         })
         assert r.status_code == 201
         assert captured["mac"] == "aa:bb:cc:dd:ee:ff"

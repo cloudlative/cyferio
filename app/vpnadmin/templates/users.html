@@ -31,11 +31,10 @@
 		<h2>Add a User</h2>
 		<form id="add-user-form" autocomplete="off">
 			<!-- Row 1: Username, First Name, Last Name -- no direct Role field:
-			     under the group-only permission model a personal role would
-			     silently do nothing (see permissions.py's effective_role_ids).
-			     Grant access via the Groups picker below (Row 2), or leave
-			     the new account in zero groups and organize it later from
-			     the Groups page -- it has no permissions until then. -->
+			     a personal role would silently do nothing (see
+			     permissions.py's effective_role_ids). Grant access via the
+			     Group picker below (Row 2) -- every user must belong to
+			     exactly one group, which is why that field is required. -->
 			<div class="form-row">
 				<div class="field">
 					<label for="u-username">Username</label>
@@ -67,8 +66,10 @@
 					<div id="u-phone-mount"></div>
 				</div>
 				<div class="field">
-					<label for="u-group-toggle">Groups <span class="muted">(optional, select several)</span></label>
-					<div id="u-group-ms"></div>
+					<label for="u-group">Group</label>
+					<select id="u-group" required>
+						<option value="" disabled selected>Select a group…</option>
+					</select>
 				</div>
 			</div>
 			<div class="checkbox-row" style="margin-top:10px">
@@ -303,12 +304,12 @@
 		<h2>Edit User</h2>
 		<form id="edit-form" autocomplete="off">
 			<!-- Row 1: Username (read-only), First Name, Last Name, Status --
-			     no direct Role field: under the group-only permission model
-			     editing a personal role would silently do nothing (see
-			     permissions.py's effective_role_ids) -- change access via
-			     the Groups picker in Row 2, or from the Groups page, which
-			     shows each member's effective role(s) already; repeating a
-			     read-only echo of it here too was redundant.
+			     no direct Role field: editing a personal role would silently
+			     do nothing (see permissions.py's effective_role_ids) --
+			     change access via the Group picker in Row 2, or from the
+			     Groups page, which shows each member's effective role
+			     already; repeating a read-only echo of it here too was
+			     redundant.
 			     autocomplete="off" throughout -- same reasoning as Add User's
 			     own fields: this dialog edits someone ELSE's identity, never
 			     the admin's own, so browser autofill must never touch it. -->
@@ -325,7 +326,7 @@
 			<div class="form-row" style="margin-top:14px">
 				<div class="field"><label for="e-email">Email</label><input type="email" id="e-email" required autocomplete="off"></div>
 				<div class="field field-wide-phone"><label for="e-phone-mount">Phone</label><div id="e-phone-mount"></div></div>
-				<div class="field"><label for="e-group-toggle">Groups <span class="muted">(select several)</span></label><div id="e-group-ms"></div></div>
+				<div class="field"><label for="e-group">Group</label><select id="e-group" required></select></div>
 			</div>
 			<div class="form-row" style="margin-top:14px">
 				<div class="field">
@@ -575,9 +576,6 @@ function fmtDate(iso) {
 	return iso ? fmtTimestamp(iso) : "—";
 }
 
-const addGroupMs = createMultiselectDropdown(document.getElementById("u-group-ms"), { placeholder: "Unassigned" });
-const editGroupMs = createMultiselectDropdown(document.getElementById("e-group-ms"), { placeholder: "Unassigned" });
-
 const addCountriesMs = createMultiselectDropdown(document.getElementById("u-countries-ms"), {
 	placeholder: "Any country", idType: "string", emptyLabel: "No countries found.", unitLabel: "countries",
 	localFilter: true, searchPlaceholder: "Type to search countries…",
@@ -708,7 +706,6 @@ function resetAddUserForm() {
 	document.getElementById("add-user-form").reset();
 	resetPasswordVisibility(document.getElementById("u-password"));
 	resetPasswordVisibility(document.getElementById("u-password-confirm"));
-	addGroupMs.reset();
 	addPhone.reset();
 	addCountriesMs.reset();
 	addCitiesMs.reset();
@@ -839,7 +836,7 @@ document.getElementById("reset-pw-form").addEventListener("submit", async (ev) =
 // Add/Edit User Role <select>s from GET /api/roles) were removed along
 // with that dropdown -- see the group-only permissions change. A role is
 // no longer ever assigned directly to a user from this page; only to a
-// Group (Groups page), which a user then joins via the Groups picker
+// Group (Groups page), which a user then belongs to via the Group picker
 // here. NOTE: Settings -> User Management's "default role for new users"
 // (default_new_user_role) is consequently unused by this page now -- left
 // in place/unremoved (out of this change's scope) since it may still be
@@ -847,12 +844,19 @@ document.getElementById("reset-pw-form").addEventListener("submit", async (ev) =
 // flagged here for whoever reviews this so it isn't a silent dead
 // setting nobody knows about.
 
+// Single-group-per-user model: the Add/Edit User Group field is a plain
+// required <select>, one group per user, no multi-select widget needed any
+// more. The "SuperAdmin" group is excluded from both pickers -- membership
+// in it is exclusively automatic (the bootstrap admin account only, see
+// routes/groups.py), never manually assignable through this page, for
+// every user including the bootstrap admin itself (whose own Edit User
+// dialog disables the field entirely -- see openEdit below).
 async function loadGroupOptions() {
 	try {
-		allGroups = (await apiFetch("/api/groups")).filter(t => t.group !== "Unassigned");
-		const opts = allGroups.map(t => ({ id: t.id, label: t.group }));
-		addGroupMs.setOptions(opts);
-		editGroupMs.setOptions(opts);
+		allGroups = (await apiFetch("/api/groups")).filter(t => t.group !== "Unassigned" && !t.is_super_admin_group);
+		const optionsHtml = allGroups.map(t => `<option value="${t.id}">${escapeHtml(t.group)}</option>`).join("");
+		document.getElementById("u-group").innerHTML = `<option value="" disabled selected>Select a group…</option>${optionsHtml}`;
+		document.getElementById("e-group").innerHTML = optionsHtml;
 	} catch (e) {
 		toast(e.message, "error");
 	}
@@ -860,7 +864,7 @@ async function loadGroupOptions() {
 
 function matchesSearch(u) {
 	if (!userSearchTerm) return true;
-	const haystack = `${u.display_name} ${u.username} ${(u.groups || []).join(" ")} ${u.vpn_client_name || ""}`.toLowerCase();
+	const haystack = `${u.display_name} ${u.username} ${u.group || ""} ${u.vpn_client_name || ""}`.toLowerCase();
 	return haystack.includes(userSearchTerm);
 }
 
@@ -948,7 +952,7 @@ function renderUsers() {
 		return;
 	}
 	el.innerHTML = `<table>
-		<thead><tr><th>User</th><th>VPN Profile</th><th>Groups</th><th>Effective Role(s)</th><th>Status</th><th>MFA</th><th>Restrictions</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
+		<thead><tr><th>User</th><th>VPN Profile</th><th>Group</th><th>Effective Role(s)</th><th>Status</th><th>MFA</th><th>Restrictions</th><th>Created</th><th>Last Login</th><th class="text-right">Actions</th></tr></thead>
 		<tbody>${filtered.map(u => `
 			<tr data-id="${u.id}">
 				<td>
@@ -956,7 +960,7 @@ function renderUsers() {
 					<div class="muted" style="font-size:0.82em">${escapeHtml(u.username)}${u.username === currentUsername ? " (you)" : ""}</div>
 				</td>
 				<td class="mono">${u.vpn_client_name ? escapeHtml(u.vpn_client_name) : '<span class="muted">— unlinked —</span>'}</td>
-				<td class="muted">${u.groups && u.groups.length ? escapeHtml(u.groups.join(", ")) : "—"}</td>
+				<td class="muted">${u.group ? escapeHtml(u.group) : "—"}</td>
 				<td>${u.effective_roles && u.effective_roles.length ? u.effective_roles.map(r => `<span class="role-badge">${escapeHtml(r)}</span>`).join(" ") : '<span class="muted">None</span>'}${u.is_bootstrap_admin ? ' <span class="muted" style="font-size:0.78em">(bootstrap)</span>' : ""}</td>
 				<td>${u.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
 				<td>${u.mfa_enabled ? '<span class="status-pill status-online">Enabled</span>' : (u.mfa_setup_required ? '<span class="status-pill status-offline">Pending</span>' : '<span class="muted">Disabled</span>')}</td>
@@ -1214,14 +1218,18 @@ function openEdit(u) {
 	document.getElementById("e-gender").value = u.gender || "unspecified";
 	document.getElementById("e-email").value = u.email || "";
 	editPhone.setValue(u.phone || "");
-	editGroupMs.setSelected(u.group_ids);
+	document.getElementById("e-group").value = u.group_id != null ? String(u.group_id) : "";
 	document.getElementById("e-active").value = String(u.is_active);
 	// The bootstrap admin account can never be demoted/deactivated/deleted
 	// (by anyone, even another admin) -- the API enforces this
 	// unconditionally (see routes/users.py's update_user); disable that
 	// control here too so the UI doesn't offer an action that will just be
-	// rejected.
+	// rejected. Same reasoning for its group: it's fixed to the (also
+	// immutable) "SuperAdmin" group -- see routes/groups.py -- so the
+	// picker is disabled here rather than offering a change that will
+	// just be silently ignored server-side.
 	document.getElementById("e-active").disabled = editingUserIsBootstrapAdmin;
+	document.getElementById("e-group").disabled = editingUserIsBootstrapAdmin;
 	document.getElementById("e-password").value = "";
 	resetPasswordVisibility(document.getElementById("e-password"));
 	document.getElementById("e-password-confirm").value = "";
@@ -1293,7 +1301,7 @@ document.getElementById("edit-form").addEventListener("submit", async (ev) => {
 		gender: document.getElementById("e-gender").value,
 		email: document.getElementById("e-email").value.trim(),
 		phone: editPhone.getValue(),
-		group_ids: editGroupMs.getSelected(),
+		group_id: document.getElementById("e-group").value ? Number(document.getElementById("e-group").value) : null,
 		allowed_os: [...document.querySelectorAll(".e-os-check:checked")].map(cb => cb.value),
 		bandwidth_monthly_gb: (() => {
 			const raw = document.getElementById("e-bandwidth").value.trim();
@@ -1399,7 +1407,7 @@ document.getElementById("add-user-form").addEventListener("submit", async (ev) =
 				last_name: document.getElementById("u-last").value.trim() || null,
 				email: document.getElementById("u-email").value.trim(),
 				phone: addPhone.getValue() || null,
-				group_ids: addGroupMs.getSelected(),
+				group_id: Number(document.getElementById("u-group").value),
 				restrict_login_by_country: document.getElementById("u-restrict-country").checked,
 				allowed_login_countries: addCountriesMs.getSelected(),
 				restrict_login_by_city: document.getElementById("u-restrict-city").checked,

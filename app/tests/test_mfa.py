@@ -22,12 +22,10 @@ def _make_user(db_session, username, *, role_slug="user", password="somepass123"
     # effective permissions. role_id is still set too (harmless/inert)
     # purely to match what a real account looks like.
     role = db_session.query(RoleDef).filter_by(slug=role_slug).first()
-    group = Group(name=f"{role_slug}-group-{username}")
-    group.role_defs.append(role)
+    group = Group(name=f"{role_slug}-group-{username}", role_id=role.id)
     db_session.add(group)
     db_session.flush()
-    user = User(username=username, password_hash=hash_password(password), role_id=role.id, email=f"{username}@example.com")
-    user.groups.append(group)
+    user = User(username=username, password_hash=hash_password(password), role_id=role.id, email=f"{username}@example.com", group_id=group.id)
     db_session.add(user)
     db_session.commit()
     return user
@@ -339,12 +337,10 @@ class TestMfaAdminObjectSplit:
         accounts otherwise. Confirms the split is a real, enforced
         boundary, not just a cosmetic new OBJECTS entry."""
         role = self._make_role(db_session, "users_only", object_key="users")
-        group = Group(name="users-only-group")
-        group.role_defs.append(role)
+        group = Group(name="users-only-group", role_id=role.id)
         db_session.add(group)
         db_session.flush()
-        user = User(username="usersonly", password_hash=hash_password("testpass123"), role_id=role.id)
-        user.groups.append(group)
+        user = User(username="usersonly", password_hash=hash_password("testpass123"), role_id=role.id, group_id=group.id)
         db_session.add(user)
         db_session.commit()
         alice = _make_user(db_session, "alice")
@@ -367,12 +363,10 @@ class TestMfaAdminObjectSplit:
         endpoints (role change/delete/rename) -- the delegation this split
         exists to enable."""
         role = self._make_role(db_session, "mfa_only", object_key="mfa_admin")
-        group = Group(name="mfa-only-group")
-        group.role_defs.append(role)
+        group = Group(name="mfa-only-group", role_id=role.id)
         db_session.add(group)
         db_session.flush()
-        user = User(username="mfaonly", password_hash=hash_password("testpass123"), role_id=role.id)
-        user.groups.append(group)
+        user = User(username="mfaonly", password_hash=hash_password("testpass123"), role_id=role.id, group_id=group.id)
         db_session.add(user)
         db_session.commit()
         alice = _make_user(db_session, "alice")

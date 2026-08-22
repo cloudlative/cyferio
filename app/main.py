@@ -32,7 +32,7 @@ from vpnadmin.app_settings import migrate_decouple_portal_and_vpn_restrictions, 
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_admin
-from vpnadmin.permissions import migrate_users_to_role_groups
+from vpnadmin.permissions import ensure_super_admin_group, migrate_groups_and_users_to_single_assignment
 from vpnadmin import geo_lists, mailer, slack_notifications
 from vpnadmin import app_settings
 from vpnadmin.models import QuotaNotification
@@ -268,10 +268,13 @@ async def lifespan(_app: FastAPI):
         promote_bootstrap_admin_to_super_admin(db)
         # Same "fresh-install first call was a no-op" reasoning as the
         # promote_bootstrap_admin_to_super_admin call just above -- see
-        # permissions.py's migrate_users_to_role_groups docstring and
-        # db.py's _seed_rbac (which already ran this once, but on a
-        # brand-new database there were no users yet at that point).
-        migrate_users_to_role_groups(db)
+        # permissions.py's ensure_super_admin_group/migrate_groups_and_
+        # users_to_single_assignment docstrings and db.py's _seed_rbac
+        # (which already ran both once, but on a brand-new database the
+        # bootstrap account -- and therefore every group it's placed
+        # into -- didn't exist yet at that point).
+        ensure_super_admin_group(db)
+        migrate_groups_and_users_to_single_assignment(db)
         # Load the DB-backed settings override (Settings page) into the
         # in-process cache templates/mailer.py/auth.py actually read, then
         # prune the audit log per whatever retention that config specifies.

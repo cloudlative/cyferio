@@ -57,7 +57,11 @@ def _per_client_row(user: User, client_name: str | None, policies: dict, usage: 
         "used_gb": round(used_gb, 3),
         "remaining_gb": remaining_gb,
         "pct_used": pct_used,
-        "group_names": [t.name for t in user.groups],
+        # Single-group model: at most one now, kept as a list (rather than
+        # renamed to a singular field) so reports.html's existing
+        # search/render code (list operations over "every group name")
+        # keeps working unchanged for the 0-or-1-element case.
+        "group_names": [user.group.name] if user.group is not None else [],
     }
 
 
@@ -107,7 +111,7 @@ def _load_rows(db: Session) -> list[dict]:
     so they're excluded here rather than shown with every field null."""
     users = (
         db.query(User)
-        .options(selectinload(User.groups), selectinload(User.vpn_profile_link))
+        .options(selectinload(User.group), selectinload(User.vpn_profile_link))
         .filter(User.deleted.is_(False), User.is_active.is_(True))
         .order_by(User.username)
         .all()
@@ -306,7 +310,7 @@ def get_user_analytics(user_id: int, _: User = Depends(require_reports_view), db
     never hit this 404 for an option it actually offered."""
     user = (
         db.query(User)
-        .options(selectinload(User.groups), selectinload(User.vpn_profile_link))
+        .options(selectinload(User.group), selectinload(User.vpn_profile_link))
         .filter(User.id == user_id, User.deleted.is_(False), User.is_active.is_(True))
         .one_or_none()
     )

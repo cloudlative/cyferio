@@ -7,23 +7,20 @@ from .conftest import login
 
 
 def _make_admin(db_session, username: str, password: str) -> User:
-    """Group-only permissions: a role only grants anything via group
-    membership now (see permissions.py's effective_role_ids) -- the old
-    `role=Role.admin` alone (still set here, for realism/legacy-column
-    parity) is not enough to actually make this user functionally an
-    admin any more. This helper creates a group with the real "admin"
-    RoleDef assigned and puts the new user in it, so it genuinely has
-    users:manage (etc.) the way conftest.py's own "admin" fixture does
-    (via migrate_users_to_role_groups(), called explicitly there for the
-    exact same reason -- this mirrors that for a SECOND admin account a
-    test creates after that fixture already ran)."""
+    """Single-group/single-role permissions: a role only grants anything
+    via the ONE group a user belongs to now (see permissions.py's
+    effective_role_ids) -- the old `role=Role.admin` alone (still set
+    here, for realism/legacy-column parity) is not enough to actually make
+    this user functionally an admin any more. This helper creates a group
+    with the real "admin" RoleDef assigned and puts the new user in it, so
+    it genuinely has users:manage (etc.) the way conftest.py's own "admin"
+    fixture does (this mirrors that for a SECOND admin account a test
+    creates after that fixture already ran)."""
     admin_role = db_session.query(RoleDef).filter_by(slug="admin").one()
-    group = Group(name=f"{username}-admin-group")
-    group.role_defs.append(admin_role)
+    group = Group(name=f"{username}-admin-group", role_id=admin_role.id)
     db_session.add(group)
     db_session.flush()
-    user = User(username=username, password_hash=hash_password(password), role=Role.admin, role_id=admin_role.id)
-    user.groups.append(group)
+    user = User(username=username, password_hash=hash_password(password), role=Role.admin, role_id=admin_role.id, group_id=group.id)
     db_session.add(user)
     db_session.commit()
     return user
@@ -116,14 +113,13 @@ class TestLoginFlow:
         db_session.commit()
         db_session.add(ObjectPermission(role_id=role.id, object_key="users", can_manage=True))
         db_session.commit()
-        # Group-only permissions: a role only grants anything via group
-        # membership now -- see permissions.py's effective_role_ids.
-        group = Group(name="Users Only Group")
-        group.role_defs.append(role)
+        # Single-group/single-role permissions: a role only grants anything
+        # via the ONE group a user belongs to -- see permissions.py's
+        # effective_role_ids.
+        group = Group(name="Users Only Group", role_id=role.id)
         db_session.add(group)
         db_session.flush()
-        u = User(username="usersonly", password_hash=hash_password("somepass123"), role_id=role.id)
-        u.groups.append(group)
+        u = User(username="usersonly", password_hash=hash_password("somepass123"), role_id=role.id, group_id=group.id)
         db_session.add(u)
         db_session.commit()
 
@@ -359,34 +355,35 @@ class TestSelfLockoutGuardrails:
         assert r.status_code == 400
 
     def test_bootstrap_admin_group_membership_cannot_be_changed_by_another_admin(self, app_client, db_session):
-        """Group-only permissions equivalent of the old "cannot be
-        demoted via role" protection: since a role can no longer be
-        assigned directly to anyone, the bootstrap admin's (super_admin's)
-        "Not modifiable by anyone but itself" guarantee now applies to
-        group_ids instead -- see routes/users.py's update_user, which
-        skips the group_ids branch entirely for a is_bootstrap_admin
-        target. Confirms another admin's attempt to change it is silently
-        a no-op (200, unchanged), not an error and not actually applied."""
+        """Single-group/single-role permissions equivalent of the old
+        "cannot be demoted via role" protection: since a role can no
+        longer be assigned directly to anyone, the bootstrap admin's
+        (super_admin's) "Not modifiable by anyone but itself" guarantee
+        now applies to group_id instead -- see routes/users.py's
+        update_user, which skips the group_id branch entirely for a
+        is_bootstrap_admin target. Confirms another admin's attempt to
+        change it is silently a no-op (200, unchanged), not an error and
+        not actually applied."""
         admin = db_session.query(User).filter(User.username == "admin").one()
         admin.is_bootstrap_admin = True
         db_session.commit()
-        # conftest's app_client fixture already auto-migrated "admin" into
-        # its own group (see migrate_users_to_role_groups) -- capture that
-        # starting set to confirm it's UNCHANGED after the attempted edit
-        # below, not that it's empty.
-        original_group_ids = {g.id for g in admin.groups}
-        _make_admin(db_session, "admin2", "admin2pass123")  #_make_admin(db_session, "admin2", "admin2pass123")
-        other_group = Group(name="Some Other Group")
+        # conftest's app_client fixture puts "admin" in its own group --
+        # capture that starting value to confirm it's UNCHANGED after the
+        # attempted edit below, not that it's empty.
+        original_group_id = admin.group_id
+        _make_admin(db_session, "admin2", "admin2pass123")
+        other_role = db_session.query(RoleDef).filter_by(slug="viewer").one()
+        other_group = Group(name="Some Other Group", role_id=other_role.id)
         db_session.add(other_group)
         db_session.commit()
 
         login(app_client, "admin2", "admin2pass123")
-        r = app_client.patch(f"/api/users/{admin.id}", json={"group_ids": [other_group.id]})
+        r = app_client.patch(f"/api/users/{admin.id}", json={"group_id": other_group.id})
         assert r.status_code == 200
 
         db_session.expire_all()
         refreshed = db_session.query(User).filter(User.username == "admin").one()
-        assert {g.id for g in refreshed.groups} == original_group_ids
+        assert refreshed.group_id == original_group_id
 
     def test_bootstrap_admin_cannot_be_deactivated_or_deleted_by_another_admin(self, app_client, db_session):
         # Task #65: the bootstrap-admin protection also covers deactivate
@@ -419,18 +416,23 @@ class TestSelfLockoutGuardrails:
         # A NON-bootstrap admin account remains demotable by another admin,
         # same as before the bootstrap-only rule existed -- this is the
         # corrected scope: it's not "no admin can ever be demoted", only
-        # the specific bootstrap account. "Demoted" now means "removed
-        # from their admin-granting group(s)" -- the group-only
-        # equivalent of the old "PATCH role=viewer" capability, which no
-        # longer exists (see test_role_field_in_patch_is_silently_ignored
-        # _not_an_error above).
+        # the specific bootstrap account. "Demoted" now means "moved to a
+        # group with a lesser role" -- every user must belong to exactly
+        # one group (there's no "clear to zero groups" option any more),
+        # so this is the single-group equivalent of the old "PATCH
+        # role=viewer" capability, which no longer exists (see
+        # test_role_field_in_patch_is_silently_ignored_not_an_error above).
         second_admin = _make_admin(db_session, "admin2", "admin2pass123")
         assert second_admin.is_bootstrap_admin is False
+        viewer_role = db_session.query(RoleDef).filter_by(slug="viewer").one()
+        demoted_group = Group(name="Demoted Group", role_id=viewer_role.id)
+        db_session.add(demoted_group)
+        db_session.commit()
 
         login(app_client, "admin", "adminpass123")
-        r = app_client.patch(f"/api/users/{second_admin.id}", json={"group_ids": []})
+        r = app_client.patch(f"/api/users/{second_admin.id}", json={"group_id": demoted_group.id})
         assert r.status_code == 200
-        assert r.json()["groups"] == []
+        assert r.json()["group"] == "Demoted Group"
 
         db_session.expire_all()
         from vpnadmin.permissions import has_permission
@@ -580,13 +582,16 @@ class TestFirstNameRequired:
         })
         assert r.status_code == 422
 
-    def test_create_user_with_first_name_succeeds(self, app_client, monkeypatch):
+    def test_create_user_with_first_name_succeeds(self, app_client, monkeypatch, db_session):
         from vpnadmin.routes import users as users_mod
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
+        group = Group(name="Some Group")
+        db_session.add(group)
+        db_session.commit()
         login(app_client, "admin", "adminpass123")
         r = app_client.post("/api/users", json={
             "username": "hasfirstname", "password": "Somepass123!", "first_name": "Alex",
-            "email": "hasfirstname@example.com", "mac": "aa:bb:cc:dd:ee:ff",
+            "email": "hasfirstname@example.com", "mac": "aa:bb:cc:dd:ee:ff", "group_id": group.id,
         })
         assert r.status_code == 201
         assert r.json()["first_name"] == "Alex"
@@ -630,43 +635,31 @@ class TestSelfServiceProfile:
         assert r.status_code == 200
         assert r.json()["first_name"] == "Val"
 
-    def test_viewer_cannot_change_own_groups(self, app_client, db_session):
+    def test_viewer_cannot_change_own_group(self, app_client, db_session):
         """Group membership is deliberately not self-service for anyone (see
         update_my_profile's own comment) -- UpdateProfileRequest has no
-        group_ids field at all, so one included in the request body is
+        group_id field at all, so one included in the request body is
         silently ignored (Pydantic's default extra="ignore" behavior),
         never rejected and never applied. Previously (pre-f1d2e5d) this
         endpoint DID accept group_ids -- see that commit's "Profile page:
         removed the self-service Groups field entirely" note for why this
         test's expected outcome flipped from "applies" to "ignored"."""
-        group = Group(name="Support")
+        role = db_session.query(RoleDef).filter_by(slug="viewer").one()
+        group = Group(name="Support", role_id=role.id)
         db_session.add(group)
         db_session.commit()
-        # conftest's app_client fixture already auto-migrated "viewer" into
-        # its own group (see migrate_users_to_role_groups) -- capture that
-        # starting set to confirm it's UNCHANGED below, not that it's empty.
+        # conftest's app_client fixture already put "viewer" in its own
+        # group -- capture that starting value to confirm it's UNCHANGED
+        # below, not that it's empty.
         viewer = db_session.query(User).filter(User.username == "viewer").one()
-        original_groups = sorted(g.name for g in viewer.groups)
+        original_group = viewer.group.name if viewer.group else None
 
         login(app_client, "viewer", "viewerpass123")
-        r = app_client.patch("/api/users/me", json={"first_name": "Val", "group_ids": [group.id]})
+        r = app_client.patch("/api/users/me", json={"first_name": "Val", "group_id": group.id})
         assert r.status_code == 200
         body = r.json()
         assert body["first_name"] == "Val"
-        assert sorted(body["groups"]) == original_groups
-
-    def test_viewer_cannot_change_own_groups_with_multiple_ids(self, app_client, db_session):
-        t1 = Group(name="Support")
-        t2 = Group(name="Infra")
-        db_session.add_all([t1, t2])
-        db_session.commit()
-        viewer = db_session.query(User).filter(User.username == "viewer").one()
-        original_groups = sorted(g.name for g in viewer.groups)
-
-        login(app_client, "viewer", "viewerpass123")
-        r = app_client.patch("/api/users/me", json={"group_ids": [t1.id, t2.id]})
-        assert r.status_code == 200
-        assert sorted(r.json()["groups"]) == original_groups
+        assert body["group"] == original_group
 
     def test_profile_update_cannot_change_role(self, app_client, db_session):
         login(app_client, "viewer", "viewerpass123")
@@ -722,10 +715,9 @@ class TestSelfServiceProfile:
 
 class TestGroups:
     def test_groups_groups_users_including_unassigned(self, app_client, db_session):
-        # Under group-only permissions, conftest's app_client fixture
-        # auto-migrates "admin"/"viewer" into their own groups (see
-        # migrate_users_to_role_groups) so their existing access survives
-        # -- neither is actually "Unassigned" any more. Confirms the
+        # Under the single-group model, conftest's app_client fixture puts
+        # "admin"/"viewer" into their own groups directly so their existing
+        # access works -- neither is actually "Unassigned". Confirms the
         # "Unassigned" bucket is empty here, and a genuinely group-less
         # user still lands in it.
         login(app_client, "viewer", "viewerpass123")
@@ -746,7 +738,7 @@ class TestGroups:
         db_session.commit()
         login(app_client, "admin", "adminpass123")
         viewer = db_session.query(User).filter(User.username == "viewer").one()
-        viewer.groups = [group]
+        viewer.group_id = group.id
         db_session.commit()
         r = app_client.get("/api/groups")
         assert r.status_code == 200
@@ -754,27 +746,6 @@ class TestGroups:
         platform = next(g for g in data if g["group"] == "Platform")
         assert platform["count"] == 1
         assert platform["members"][0]["username"] == "viewer"
-
-    def test_user_appears_under_every_group_they_belong_to(self, app_client, db_session):
-        # Task #63: membership is many-to-many -- a user in two groups must
-        # show up in both groups' member lists, not just one.
-        t1 = Group(name="Platform")
-        t2 = Group(name="Security")
-        db_session.add_all([t1, t2])
-        db_session.commit()
-        viewer = db_session.query(User).filter(User.username == "viewer").one()
-        viewer.groups = [t1, t2]
-        db_session.commit()
-
-        login(app_client, "viewer", "viewerpass123")
-        r = app_client.get("/api/groups")
-        data = r.json()
-        platform = next(g for g in data if g["group"] == "Platform")
-        security = next(g for g in data if g["group"] == "Security")
-        assert any(m["username"] == "viewer" for m in platform["members"])
-        assert any(m["username"] == "viewer" for m in security["members"])
-        unassigned = next(g for g in data if g["group"] == "Unassigned")
-        assert all(m["username"] != "viewer" for m in unassigned["members"])
 
     def test_deleted_users_excluded_from_groups(self, app_client, db_session):
         login(app_client, "admin", "adminpass123")
@@ -812,7 +783,7 @@ class TestGroups:
         db_session.add(group)
         db_session.commit()
         viewer = db_session.query(User).filter(User.username == "viewer").one()
-        viewer.groups = [group]
+        viewer.group_id = group.id
         db_session.commit()
 
         login(app_client, "admin", "adminpass123")
@@ -823,7 +794,7 @@ class TestGroups:
         db_session.expire_all()
         assert db_session.get(Group, group.id) is not None
         still_there = db_session.query(User).filter(User.username == "viewer").one()
-        assert group in still_there.groups  # untouched, not unassigned
+        assert still_there.group_id == group.id  # untouched, not unassigned
 
     def test_delete_group_succeeds_when_empty(self, app_client, db_session):
         group = Group(name="Ghost")
@@ -843,11 +814,13 @@ class TestGroups:
         viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
 
         login(app_client, "admin", "adminpass123")
-        r = app_client.patch(f"/api/users/{viewer_id}", json={"group_ids": [group.id]})
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"group_id": group.id})
         assert r.status_code == 200
-        assert r.json()["groups"] == ["Infra"]
+        assert r.json()["group"] == "Infra"
 
-    def test_assign_user_to_multiple_groups_via_admin_edit_endpoint(self, app_client, db_session):
+    def test_moving_user_to_a_different_group_replaces_not_adds(self, app_client, db_session):
+        """A user belongs to exactly one group at a time -- assigning a
+        NEW group_id moves them, it never results in more than one."""
         t1 = Group(name="Infra")
         t2 = Group(name="Security")
         db_session.add_all([t1, t2])
@@ -855,15 +828,38 @@ class TestGroups:
         viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
 
         login(app_client, "admin", "adminpass123")
-        r = app_client.patch(f"/api/users/{viewer_id}", json={"group_ids": [t1.id, t2.id]})
-        assert r.status_code == 200
-        assert sorted(r.json()["groups"]) == ["Infra", "Security"]
+        r1 = app_client.patch(f"/api/users/{viewer_id}", json={"group_id": t1.id})
+        assert r1.status_code == 200
+        assert r1.json()["group"] == "Infra"
+
+        r2 = app_client.patch(f"/api/users/{viewer_id}", json={"group_id": t2.id})
+        assert r2.status_code == 200
+        assert r2.json()["group"] == "Security"
+
+        db_session.expire_all()
+        assert db_session.get(User, viewer_id).group_id == t2.id
 
     def test_assign_user_to_nonexistent_group_rejected(self, app_client, db_session):
         viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
         login(app_client, "admin", "adminpass123")
-        r = app_client.patch(f"/api/users/{viewer_id}", json={"group_ids": [99999]})
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"group_id": 99999})
         assert r.status_code == 400
+
+    def test_clearing_group_to_null_rejected(self, app_client, db_session):
+        """Every user must belong to exactly one group -- an explicit
+        `null` group_id is rejected outright, not silently ignored."""
+        viewer_id = db_session.query(User).filter(User.username == "viewer").one().id
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch(f"/api/users/{viewer_id}", json={"group_id": None})
+        assert r.status_code == 400
+
+    def test_create_user_without_group_id_rejected(self, app_client):
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post("/api/users", json={
+            "username": "nogroupuser", "password": "Somepass123!", "first_name": "No",
+            "email": "nogroup@example.com",
+        })
+        assert r.status_code == 422
 
     def test_add_and_remove_group_member_endpoints(self, app_client, db_session):
         group = Group(name="Infra")
@@ -875,9 +871,29 @@ class TestGroups:
         r = app_client.post(f"/api/groups/{group.id}/members", json={"user_id": viewer_id})
         assert r.status_code == 201
         db_session.expire_all()
-        assert group in db_session.get(User, viewer_id).groups
+        assert db_session.get(User, viewer_id).group_id == group.id
 
         r = app_client.delete(f"/api/groups/{group.id}/members/{viewer_id}")
         assert r.status_code == 200
         db_session.expire_all()
-        assert group not in db_session.get(User, viewer_id).groups
+        assert db_session.get(User, viewer_id).group_id is None
+
+    def test_add_group_member_moves_from_previous_group(self, app_client, db_session):
+        """Since a user can only be in one group at a time, POSTing them to
+        a different group's /members endpoint MOVES them -- it doesn't add
+        a second membership."""
+        old_group = Group(name="Old Group")
+        new_group = Group(name="New Group")
+        db_session.add_all([old_group, new_group])
+        db_session.commit()
+        viewer = db_session.query(User).filter(User.username == "viewer").one()
+        viewer.group_id = old_group.id
+        db_session.commit()
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.post(f"/api/groups/{new_group.id}/members", json={"user_id": viewer.id})
+        assert r.status_code == 201
+        assert "moved" in r.json()["message"].lower()
+
+        db_session.expire_all()
+        assert db_session.get(User, viewer.id).group_id == new_group.id

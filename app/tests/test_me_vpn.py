@@ -31,12 +31,10 @@ def _make_self_service_user(db_session, username, *, vpn_client_name=None, passw
     (see permissions.py's effective_role_ids), so this also creates a
     group with that role assigned and adds the user to it."""
     role = db_session.query(RoleDef).filter_by(slug="user").first()
-    group = Group(name=f"{username}-user-group")
-    group.role_defs.append(role)
+    group = Group(name=f"{username}-user-group", role_id=role.id)
     db_session.add(group)
     db_session.flush()
-    user = User(username=username, password_hash=hash_password(password), role_id=role.id)
-    user.groups.append(group)
+    user = User(username=username, password_hash=hash_password(password), role_id=role.id, group_id=group.id)
     db_session.add(user)
     db_session.commit()
     if vpn_client_name:

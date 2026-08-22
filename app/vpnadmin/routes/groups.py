@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..audit import log_action
 from ..auth import require_user
 from ..db import get_db
-from ..models import RoleDef, Group, User
+from ..models import SUPER_ADMIN_GROUP_NAME, RoleDef, Group, User
 from ..permissions import require_permission
 
 router = APIRouter(prefix="/api/groups", tags=["groups"])
@@ -50,6 +50,10 @@ def _derive_unique_slug(db: Session, name: str) -> str:
     return slug
 
 
+def _is_super_admin_group(group: Group) -> bool:
+    return group.name == SUPER_ADMIN_GROUP_NAME
+
+
 class CreateGroupRequest(BaseModel):
     name: str
     # Optional: create_group() below derives it from `name` (same slugify
@@ -68,6 +72,8 @@ class CreateGroupRequest(BaseModel):
             raise ValueError("Group name must be 1-64 characters.")
         if v == UNASSIGNED:
             raise ValueError(f"'{UNASSIGNED}' is reserved and can't be used as a group name.")
+        if v == SUPER_ADMIN_GROUP_NAME:
+            raise ValueError(f"'{SUPER_ADMIN_GROUP_NAME}' is reserved for the built-in, system-managed group and can't be used as a group name.")
         return v
 
     @field_validator("slug")
@@ -91,7 +97,9 @@ class UpdateGroupRequest(BaseModel):
     """All fields optional -- PATCH semantics, only supplied fields change.
     No `members` here; membership stays on its own dedicated endpoints
     below (add_group_member/remove_group_member), same separation of concerns
-    already established for this resource."""
+    already established for this resource. Rejected outright (see
+    update_group below) for the immutable "SuperAdmin" group, regardless of
+    which fields are supplied."""
     name: str | None = None
     slug: str | None = None
     description: str | None = None
@@ -137,28 +145,32 @@ def _group_detail(t: Group) -> dict:
         "slug": t.slug,
         "description": t.description,
         "tags": json.loads(t.tags) if t.tags else [],
-        # Roles assigned to this group -- inherited by every current member.
-        # Groups are the ONLY source of a user's effective permissions (see
-        # permissions.py's effective_role_ids) -- a group with zero roles
-        # assigned grants its members nothing.
-        "roles": [_role_brief(r) for r in t.role_defs],
+        # Single-group/single-role permissions: a group has AT MOST one
+        # role -- null means this group currently grants its members
+        # nothing (see permissions.py's effective_role_ids).
+        "role": _role_brief(t.role) if t.role is not None else None,
+        # Drives the client-side immutability guards mirrored in
+        # groups.html (Edit/Delete/role-change/member-management all
+        # disabled or hidden for this one group) -- the actual enforcement
+        # is server-side, in update_group/delete_group/set_group_role/
+        # add_group_member/remove_group_member below; this flag is
+        # defense-in-depth/UX only.
+        "is_super_admin_group": _is_super_admin_group(t),
     }
 
 
 def _member(u: User) -> dict:
-    # Deliberately NOT u.role/u.role_id -- under the group-only permission
-    # model neither one determines this user's actual access any more (see
-    # permissions.py's effective_role_ids), so showing either here would be
-    # stale/misleading. "effective_roles" instead: the union of every role
-    # assigned to every group this user belongs to (not just the group this
-    # member listing is nested under -- a user may be in several groups),
-    # i.e. the same role set effective_role_ids() would compute --
-    # including the super_admin hardcoded exemption (see
-    # User.effective_role_names' own docstring): that account shows its
-    # real role here even with zero group memberships, same as everywhere
-    # else in this app that displays a role. Relies on the caller having
-    # selectinload'd both User.groups and Group.role_defs (see list_groups
-    # below) so this stays O(1) queries, not N+1.
+    # Deliberately NOT u.role/u.role_id -- under the single-group/single-
+    # role permission model neither one determines this user's actual
+    # access any more (see permissions.py's effective_role_ids), so
+    # showing either here would be stale/misleading. "effective_roles"
+    # instead: the role this user's ONE group grants (empty if none), i.e.
+    # the same role set effective_role_ids() would compute -- including
+    # the super_admin hardcoded exemption (see User.effective_role_names'
+    # own docstring): that account shows its real role here even though
+    # its own group's role assignment is purely cosmetic. Relies on the
+    # caller having selectinload'd both User.group and Group.role (see
+    # list_groups below) so this stays O(1) queries, not N+1.
     return {
         "id": u.id,
         "username": u.username,
@@ -170,32 +182,28 @@ def _member(u: User) -> dict:
 
 @router.get("")
 def list_groups(_: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Groups active, non-deleted portal users by group -- a user can now
-    belong to several groups at once (see User.groups / the user_groups
-    association table), so a user may appear under more than one group
-    here, unlike a traditional single-owner grouping. Built from the Group
-    table so a group with zero members still shows up (with count 0), not
-    just groups that happen to already have someone assigned. Deliberately
-    open to any logged-in user (viewer or admin), unlike /api/users, since
-    only non-sensitive fields are exposed here (no password/email/etc.)."""
-    # selectinload(Group.role_defs): same N+1 reasoning as selectinload(User.
-    # groups) below, just for the roles-assigned-to-group list _group_detail
-    # now includes -- one extra query total for every group's roles, instead
-    # of one lazy SELECT per group the first time `.role_defs` is touched.
-    group_rows = db.query(Group).options(selectinload(Group.role_defs)).order_by(Group.name).all()
-    # selectinload(User.groups): without it, every `t in u.groups` check below
-    # lazy-fires its own SELECT the first time each user's `.groups` is
-    # touched -- one extra query per user (N+1), the actual cause of this
-    # page's slow load on any deployment with more than a handful of users.
-    # This batches it into a single extra query total, up front.
+    """Active, non-deleted portal users grouped by their ONE group -- see
+    models.py's Group/User docstrings for the single-group/single-role
+    model. Built from the Group table so a group with zero members still
+    shows up (with count 0), not just groups that happen to already have
+    someone assigned. Deliberately open to any logged-in user (viewer or
+    admin), unlike /api/users, since only non-sensitive fields are exposed
+    here (no password/email/etc.)."""
+    # selectinload(Group.role): same N+1 reasoning as selectinload(User.
+    # group) below, just for the role-assigned-to-group field _group_detail
+    # now includes -- one extra query total for every group's role, instead
+    # of one lazy SELECT per group the first time `.role` is touched.
+    group_rows = db.query(Group).options(selectinload(Group.role)).order_by(Group.name).all()
+    # selectinload(User.group): without it, every `u.group_id == t.id` check
+    # below is still cheap (a plain column compare), but _member() reads
+    # each member's effective_roles via u.group.role -- without eager-
+    # loading both hops, that's a lazy SELECT per user (N+1). This batches
+    # it into a single extra query total, up front. selectinload(User.
+    # role_def): _member() -> User.effective_role_names' super_admin
+    # exemption check needs it.
     users = (
         db.query(User)
-        # .selectinload(Group.role_defs) chained on: _member() below reads
-        # each member's effective_roles via u.groups[*].role_defs -- without
-        # this, that's a lazy SELECT per group per user (N+1 on top of N+1).
-        # selectinload(User.role_def): _member() -> User.effective_role_names'
-        # super_admin exemption check needs it.
-        .options(selectinload(User.groups).selectinload(Group.role_defs), selectinload(User.role_def))
+        .options(selectinload(User.group).selectinload(Group.role), selectinload(User.role_def))
         .filter(User.deleted.is_(False))
         .order_by(User.username)
         .all()
@@ -203,13 +211,13 @@ def list_groups(_: User = Depends(require_user), db: Session = Depends(get_db)):
 
     groups: list[dict] = []
     for t in group_rows:
-        members = [_member(u) for u in users if t in u.groups]
+        members = [_member(u) for u in users if u.group_id == t.id]
         groups.append({**_group_detail(t), "count": len(members), "members": members})
 
-    unassigned_members = [_member(u) for u in users if len(u.groups) == 0]
+    unassigned_members = [_member(u) for u in users if u.group_id is None]
     groups.append({
-        "id": None, "group": UNASSIGNED, "slug": None, "description": None, "tags": [], "roles": [],
-        "count": len(unassigned_members), "members": unassigned_members,
+        "id": None, "group": UNASSIGNED, "slug": None, "description": None, "tags": [], "role": None,
+        "is_super_admin_group": False, "count": len(unassigned_members), "members": unassigned_members,
     })
 
     return groups
@@ -237,6 +245,12 @@ def update_group(group_id: int, body: UpdateGroupRequest, admin: User = Depends(
     group = db.get(Group, group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found.")
+    if _is_super_admin_group(group):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{SUPER_ADMIN_GROUP_NAME}' is a built-in, system-managed group -- its name, slug, "
+                   f"description, and tags can't be changed.",
+        )
     changes = []
     if body.name is not None and body.name != group.name:
         if db.query(Group).filter(Group.name == body.name, Group.id != group_id).first() is not None:
@@ -265,10 +279,20 @@ def delete_group(group_id: int, admin: User = Depends(require_admin), db: Sessio
     """Deletes a group, but only if it currently has no members -- unlike
     the previous behavior (auto-unassigning members then deleting), the
     caller must explicitly reassign/remove every member first. This avoids
-    a group disappearing out from under people who are still on it."""
+    a group disappearing out from under people who are still on it. The
+    immutable "SuperAdmin" group is rejected explicitly, with its own clear
+    message, even though it would also always fail the "has members" guard
+    below in practice (it permanently holds exactly the bootstrap admin) --
+    an explicit check makes the REASON unambiguous rather than looking like
+    an ordinary "reassign members first" case."""
     group = db.get(Group, group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found.")
+    if _is_super_admin_group(group):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{SUPER_ADMIN_GROUP_NAME}' is a built-in, system-managed group and can't be deleted.",
+        )
     active_members = [u for u in group.members if not u.deleted]
     if active_members:
         raise HTTPException(
@@ -289,20 +313,35 @@ class MembershipRequest(BaseModel):
 
 @router.post("/{group_id}/members", status_code=201)
 def add_group_member(group_id: int, body: MembershipRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """Adds one user to one group, without disturbing any of their other
-    group memberships -- the per-group complement to PATCH /api/users/{id}
-    with group_ids (which replaces a user's whole membership list at once)."""
+    """Moves one user into this group -- since a user can only ever belong
+    to ONE group at a time now, this REPLACES whatever group (if any) they
+    were previously in, it doesn't add a second membership. The immutable
+    "SuperAdmin" group rejects being the target of a move entirely (its
+    one member, the bootstrap admin, is fixed) -- see also update_user's
+    own is_bootstrap_admin guard in routes/users.py, which is the other
+    place group membership could otherwise be changed."""
     group = db.get(Group, group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found.")
+    if _is_super_admin_group(group):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{SUPER_ADMIN_GROUP_NAME}' is a built-in, system-managed group -- its membership is "
+                   f"fixed to the bootstrap admin account and can't be changed.",
+        )
     user = db.get(User, body.user_id)
     if user is None or user.deleted:
         raise HTTPException(status_code=404, detail="User not found.")
-    if group not in user.groups:
-        user.groups.append(group)
+    if user.is_bootstrap_admin:
+        raise HTTPException(status_code=400, detail="The bootstrap admin account's group can't be changed.")
+    previous_group = user.group
+    if user.group_id != group.id:
+        user.group_id = group.id
         db.commit()
-        log_action(db, admin, "add_group_member", target=group.name, detail=user.username)
-    return {"message": f"'{user.username}' added to '{group.name}'."}
+        detail = user.username if previous_group is None else f"{user.username} (moved from '{previous_group.name}')"
+        log_action(db, admin, "add_group_member", target=group.name, detail=detail)
+    verb = "moved to" if previous_group is not None else "added to"
+    return {"message": f"'{user.username}' {verb} '{group.name}'."}
 
 
 @router.delete("/{group_id}/members/{user_id}")
@@ -313,74 +352,82 @@ def remove_group_member(group_id: int, user_id: int, admin: User = Depends(requi
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found.")
-    if group in user.groups:
-        user.groups.remove(group)
+    if _is_super_admin_group(group):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{SUPER_ADMIN_GROUP_NAME}' is a built-in, system-managed group -- its membership is "
+                   f"fixed to the bootstrap admin account and can't be changed.",
+        )
+    if user.group_id == group.id:
+        user.group_id = None
         db.commit()
         log_action(db, admin, "remove_group_member", target=group.name, detail=user.username)
     return {"message": f"'{user.username}' removed from '{group.name}'."}
 
 
-# --- Group-Based Permissions Phase 1: role assignment -----------------------
-# A group can be assigned zero or more roles; every current member inherits
-# every assigned role's permissions on top of their own direct role_id (see
-# permissions.py's effective_role_ids). Deliberately its own pair of
-# endpoints, same "membership stays on its own dedicated endpoints" split
-# UpdateGroupRequest's docstring already establishes for members -- role
-# assignment is a distinct concern from group metadata and from membership.
-# Gated on the same groups:manage permission (require_admin above) as every
-# other Groups write.
+# --- Single-group/single-role permissions: role assignment ------------------
+# A group is assigned AT MOST one role; every current member inherits it.
+# Deliberately its own endpoint, same "membership stays on its own
+# dedicated endpoints" split UpdateGroupRequest's docstring already
+# establishes for members -- role assignment is a distinct concern from
+# group metadata and from membership. Gated on the same groups:manage
+# permission (require_admin above) as every other Groups write.
 
 @router.get("/available-roles")
 def list_available_roles(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """Every RoleDef, for the "Assign Roles" picker on the Groups page --
-    deliberately its own minimal endpoint (id/slug/name only, no
-    permission matrix) rather than reusing GET /api/roles, which is gated
-    on roles:manage: an admin granted groups:manage but not roles:manage
-    must still be able to assign an existing role to a group without also
-    needing Roles Management access."""
+    """Every RoleDef, for the Groups page's "Role" picker -- deliberately
+    its own minimal endpoint (id/slug/name only, no permission matrix)
+    rather than reusing GET /api/roles, which is gated on roles:manage: an
+    admin granted groups:manage but not roles:manage must still be able to
+    assign an existing role to a group without also needing Roles
+    Management access."""
     # Excludes "super_admin" -- reserved exclusively for the bootstrap
     # admin account (see permissions.py's effective_role_ids hardcoded
     # exemption and db.py's promote_bootstrap_admin_to_super_admin). That
-    # account's access never depends on group membership by design, so
-    # assigning this role to a group would be a no-op at best and
-    # confusing at worst -- it shouldn't be offered as a choice here at
-    # all. Server-side backstop for this same rule lives in
-    # assign_group_role below.
+    # account's actual access never depends on group membership, so
+    # assigning this role to an ordinary group would be misleading at
+    # best -- it's already permanently assigned (cosmetically) to the
+    # SuperAdmin group instead, which isn't offered here as a group to
+    # edit in the first place. Server-side backstop for this same rule
+    # lives in set_group_role below.
     roles = db.query(RoleDef).filter(RoleDef.slug != "super_admin").order_by(RoleDef.name).all()
     return [_role_brief(r) for r in roles]
 
 
 class GroupRoleRequest(BaseModel):
-    role_id: int
+    role_id: int | None = None  # None = clear this group's role (grants nothing)
 
 
-@router.post("/{group_id}/roles", status_code=201)
-def assign_group_role(group_id: int, body: GroupRoleRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+@router.put("/{group_id}/role")
+def set_group_role(group_id: int, body: GroupRoleRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Sets (or clears) this group's ONE role -- REPLACES whatever role it
+    had before, unlike the earlier Group-Only Permissions model's additive
+    "assign a role" endpoint. Rejected outright for the immutable
+    "SuperAdmin" group, which is permanently pinned to the super_admin
+    role."""
     group = db.get(Group, group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found.")
+    if _is_super_admin_group(group):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{SUPER_ADMIN_GROUP_NAME}' is a built-in, system-managed group -- its role is fixed "
+                   f"to Super Admin and can't be changed.",
+        )
+    if body.role_id is None:
+        if group.role_id is not None:
+            old_slug = group.role.slug if group.role is not None else str(group.role_id)
+            group.role_id = None
+            db.commit()
+            log_action(db, admin, "group_role_removed", target=group.name, detail=old_slug)
+        return _group_detail(group)
     role = db.get(RoleDef, body.role_id)
     if role is None:
         raise HTTPException(status_code=404, detail="Role not found.")
     if role.slug == "super_admin":
         raise HTTPException(status_code=400, detail="The Super Admin role can't be assigned to a group -- it's reserved for the bootstrap admin account and is never sourced from group membership.")
-    if role not in group.role_defs:
-        group.role_defs.append(role)
+    if group.role_id != role.id:
+        group.role_id = role.id
         db.commit()
         log_action(db, admin, "group_role_assigned", target=group.name, detail=role.slug)
-    return {**_group_detail(group), "count": len([u for u in group.members if not u.deleted]), "members": [_member(u) for u in group.members if not u.deleted]}
-
-
-@router.delete("/{group_id}/roles/{role_id}")
-def remove_group_role(group_id: int, role_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    group = db.get(Group, group_id)
-    if group is None:
-        raise HTTPException(status_code=404, detail="Group not found.")
-    role = db.get(RoleDef, role_id)
-    if role is None:
-        raise HTTPException(status_code=404, detail="Role not found.")
-    if role in group.role_defs:
-        group.role_defs.remove(role)
-        db.commit()
-        log_action(db, admin, "group_role_removed", target=group.name, detail=role.slug)
-    return {"message": f"Role '{role.slug}' removed from '{group.name}'."}
+    return _group_detail(group)

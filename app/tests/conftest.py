@@ -165,24 +165,32 @@ def app_client(db_session, monkeypatch):
 
     app.dependency_overrides[get_db] = _override_get_db
 
-    admin = User(username="admin", password_hash=hash_password("adminpass123"), role=Role.admin)
-    viewer = User(username="viewer", password_hash=hash_password("viewerpass123"), role=Role.viewer)
+    # Single-group/single-role permissions: role= (the legacy enum, above)
+    # and the role_id it backfills (via models.py's _default_role_id_from_
+    # legacy_role listener) are no longer consulted for permission checks
+    # at all -- see permissions.py's effective_role_ids. Without an actual
+    # group+role, "admin" and "viewer" here would each have ZERO effective
+    # permissions, and every require_permission-gated route in every test
+    # using this fixture would 403. Unlike production startup (db.py's
+    # _seed_rbac / main.py's lifespan), which resolves this via the
+    # migrate_groups_and_users_to_single_assignment() migration for an
+    # UPGRADING deployment's pre-existing data, this fixture is building a
+    # brand-new test database from scratch every time -- there's no
+    # legacy data to migrate, so it creates the two groups it needs
+    # directly, same as any other test would.
+    from vpnadmin.models import Group, RoleDef
+
+    admin_role = db_session.query(RoleDef).filter_by(slug="admin").one()
+    viewer_role = db_session.query(RoleDef).filter_by(slug="viewer").one()
+    admin_group = Group(name="Admins", slug="admins", role_id=admin_role.id)
+    viewer_group = Group(name="Viewers", slug="viewers", role_id=viewer_role.id)
+    db_session.add_all([admin_group, viewer_group])
+    db_session.flush()
+
+    admin = User(username="admin", password_hash=hash_password("adminpass123"), role=Role.admin, group_id=admin_group.id)
+    viewer = User(username="viewer", password_hash=hash_password("viewerpass123"), role=Role.viewer, group_id=viewer_group.id)
     db_session.add_all([admin, viewer])
     db_session.commit()
-    # Group-only permissions: role= (the legacy enum, above) and the
-    # role_id it backfills (via models.py's _default_role_id_from_legacy_
-    # role listener) are no longer consulted for permission checks at all
-    # -- see permissions.py's effective_role_ids. Without this, "admin"
-    # and "viewer" here would each have ZERO effective permissions (no
-    # group membership), and every require_permission-gated route in every
-    # test using this fixture would 403. This is the exact same
-    # migrate_users_to_role_groups() call production runs at startup (see
-    # main.py's lifespan / db.py's _seed_rbac) -- mirrored here explicitly
-    # for the same reason seed_system_roles() already is in db_session
-    # above: this fixture builds its schema/session directly rather than
-    # through init_db()'s real startup sequence.
-    from vpnadmin.permissions import migrate_users_to_role_groups
-    migrate_users_to_role_groups(db_session)
 
     with TestClient(app) as client:
         yield client
@@ -192,3 +200,20 @@ def app_client(db_session, monkeypatch):
 
 def login(client, username, password):
     return client.post("/login", data={"username": username, "password": password})
+
+
+@pytest.fixture()
+def default_group_id(db_session):
+    """A ready-made, role-bearing Group id for tests that create a user via
+    POST /api/users but don't care which group they land in -- group_id is
+    now mandatory on that endpoint (see routes/users.py's
+    CreateUserRequest), so every test exercising create_user() needs a
+    real one. Saves every such test from constructing its own throwaway
+    Group just to satisfy that requirement."""
+    from vpnadmin.models import Group, RoleDef
+
+    role = db_session.query(RoleDef).filter_by(slug="user").one()
+    group = Group(name="Default Test Group", role_id=role.id)
+    db_session.add(group)
+    db_session.commit()
+    return group.id

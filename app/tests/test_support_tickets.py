@@ -15,12 +15,10 @@ def _make_role_user(db_session, username, role_slug, password="somepass123"):
     # Group-only permissions: a role only grants anything via group
     # membership now (see permissions.py's effective_role_ids).
     role = db_session.query(RoleDef).filter_by(slug=role_slug).first()
-    group = Group(name=f"{username}-{role_slug}-group")
-    group.role_defs.append(role)
+    group = Group(name=f"{username}-{role_slug}-group", role_id=role.id)
     db_session.add(group)
     db_session.flush()
-    user = User(username=username, password_hash=hash_password(password), role_id=role.id)
-    user.groups.append(group)
+    user = User(username=username, password_hash=hash_password(password), role_id=role.id, group_id=group.id)
     db_session.add(user)
     db_session.commit()
     return user
