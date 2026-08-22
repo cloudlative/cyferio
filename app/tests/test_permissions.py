@@ -58,6 +58,46 @@ class TestSeedSystemRoles:
         # instance's can_manage value, not just an equal one).
         assert perms["dashboard"].can_manage is True
 
+    def test_mfa_admin_backfills_onto_a_preexisting_admin_role_at_manage_level(self):
+        """"mfa_admin" was split out of "users" (see permissions.py's
+        OBJECTS entry) specifically so existing deployments aren't locked
+        out: a system role seeded before this split -- with users:manage
+        already granted -- must pick up mfa_admin at can_manage=True too on
+        the next seed_system_roles() call, mirroring what users:manage
+        already gave "admin" for MFA actions before the split. Simulates a
+        pre-split "admin" row the same way
+        test_backfills_new_object_onto_a_preexisting_system_role does for
+        db_reporting."""
+        from vpnadmin.permissions import seed_system_roles
+
+        db = _fresh_session()
+        role = RoleDef(slug="admin", name="Admin", is_system=True)
+        db.add(role)
+        db.flush()
+        db.add(ObjectPermission(role_id=role.id, object_key="users", can_manage=True))
+        db.commit()
+
+        seed_system_roles(db)
+
+        perms = {p.object_key: p for p in db.query(ObjectPermission).filter_by(role_id=role.id).all()}
+        assert "mfa_admin" in perms
+        assert perms["mfa_admin"].can_manage is True
+        assert perms["users"].can_manage is True  # untouched
+
+    def test_viewer_role_does_not_get_mfa_admin(self):
+        """Viewer never had users:manage (only users:view), so it must not
+        pick up mfa_admin either -- confirms the blanket "view everything"
+        comprehension in _SYSTEM_ROLES' viewer spec deliberately excludes
+        mfa_admin (same exclusion list as db_reporting/system_audit)."""
+        from vpnadmin.permissions import seed_system_roles
+
+        db = _fresh_session()
+        seed_system_roles(db)
+
+        viewer = db.query(RoleDef).filter_by(slug="viewer").one()
+        perm = db.query(ObjectPermission).filter_by(role_id=viewer.id, object_key="mfa_admin").first()
+        assert perm is None
+
     def test_never_touches_an_already_granted_object(self):
         """A deliberately customized existing row (e.g. an admin manually
         revoked a system role's access to one module) must survive a

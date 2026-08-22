@@ -10,7 +10,7 @@ import pyotp
 from vpnadmin import app_settings
 from vpnadmin import mfa as mfa_module
 from vpnadmin.auth import hash_password
-from vpnadmin.models import AuditLog, MfaRecoveryCode, RoleDef, User
+from vpnadmin.models import AuditLog, MfaRecoveryCode, ObjectPermission, RoleDef, RoleKind, User
 
 from .conftest import login
 
@@ -302,6 +302,81 @@ class TestAdminActions:
         r = app_client.patch(f"/api/users/{alice.id}", json={"mfa_policy_override": "exempt"})
         assert r.status_code == 200
         assert db_session.query(AuditLog).filter_by(username="admin", action="mfa_bypass_granted").count() == 1
+
+
+class TestMfaAdminObjectSplit:
+    """The three admin MFA actions moved from require_permission("users",
+    "manage") to require_permission("mfa_admin", "manage") -- see
+    permissions.py's OBJECTS entry for "mfa_admin". These confirm the
+    ACTUAL resulting behavior of that split: "admin" (which still has
+    users:manage AND, via seed_system_roles' backfill, mfa_admin too)
+    keeps working -- covered by TestAdminActions above, which logs in as
+    "admin" -- while a custom role demonstrates the new object is genuinely
+    independent of users:manage in both directions."""
+
+    def _make_role(self, db_session, slug: str, *, object_key: str, action: str = "manage") -> RoleDef:
+        role = RoleDef(slug=slug, name=slug, kind=RoleKind.custom, is_system=False)
+        db_session.add(role)
+        db_session.flush()
+        db_session.add(ObjectPermission(role_id=role.id, object_key=object_key, **{f"can_{action}": True}))
+        db_session.commit()
+        return role
+
+    def test_users_manage_without_mfa_admin_is_denied_on_mfa_endpoints(self, app_client, db_session):
+        """A role with users:manage but NOT mfa_admin -- the exact new
+        combination this split makes possible going forward -- must be
+        rejected by the MFA endpoints even though it can fully manage
+        accounts otherwise. Confirms the split is a real, enforced
+        boundary, not just a cosmetic new OBJECTS entry."""
+        role = self._make_role(db_session, "users_only", object_key="users")
+        db_session.add(User(username="usersonly", password_hash=hash_password("testpass123"), role_id=role.id))
+        db_session.commit()
+        alice = _make_user(db_session, "alice")
+        login(app_client, "usersonly", "testpass123")
+
+        r = app_client.post(f"/api/users/{alice.id}/mfa/reset")
+        assert r.status_code == 403
+        r = app_client.post(f"/api/users/{alice.id}/mfa/disable")
+        assert r.status_code == 403
+        r = app_client.post(f"/api/users/{alice.id}/mfa/force-enroll")
+        assert r.status_code == 403
+        # This role DOES still have general user management -- e.g. renaming
+        # the target's first name via the general PATCH endpoint.
+        r = app_client.patch(f"/api/users/{alice.id}", json={"first_name": "Alicia"})
+        assert r.status_code == 200
+
+    def test_mfa_admin_alone_succeeds_on_mfa_endpoints_but_not_general_user_management(self, app_client, db_session):
+        """A role with ONLY mfa_admin (no users:manage at all) can perform
+        all three MFA actions, but is denied on general user-management
+        endpoints (role change/delete/rename) -- the delegation this split
+        exists to enable."""
+        role = self._make_role(db_session, "mfa_only", object_key="mfa_admin")
+        db_session.add(User(username="mfaonly", password_hash=hash_password("testpass123"), role_id=role.id))
+        db_session.commit()
+        alice = _make_user(db_session, "alice")
+        _enroll(db_session, alice)
+        login(app_client, "mfaonly", "testpass123")
+
+        r = app_client.post(f"/api/users/{alice.id}/mfa/reset")
+        assert r.status_code == 200
+        alice = db_session.query(User).filter_by(username="alice").one()
+        assert alice.mfa_enabled is False
+        assert alice.mfa_setup_required is True
+
+        r = app_client.post(f"/api/users/{alice.id}/mfa/force-enroll")
+        assert r.status_code == 200
+
+        r = app_client.post(f"/api/users/{alice.id}/mfa/disable")
+        assert r.status_code == 200
+
+        # General user management -- rename, role change, delete -- must
+        # still be denied; this role never got users:manage.
+        r = app_client.patch(f"/api/users/{alice.id}", json={"first_name": "Alicia"})
+        assert r.status_code == 403
+        r = app_client.patch(f"/api/users/{alice.id}", json={"role": "editor"})
+        assert r.status_code == 403
+        r = app_client.delete(f"/api/users/{alice.id}")
+        assert r.status_code == 403
 
 
 class TestSettingsApi:

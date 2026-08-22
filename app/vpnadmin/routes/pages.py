@@ -47,6 +47,15 @@ def _ctx(user: User, db: Session, **extra) -> dict:
         # ("users", "manage")) rather than a hardcoded role check.
         "is_admin": has_permission(db, user, "users", "manage"),
         "can_manage_roles": has_permission(db, user, "roles", "manage"),
+        # Admin MFA actions (Reset/Disable/Force Enrollment buttons in the
+        # Edit User dialog) now check "mfa_admin", not "users:manage" (see
+        # permissions.py's OBJECTS entry) -- this flag lets users.html hide
+        # those specific buttons for a role that has users:manage but was
+        # deliberately NOT granted mfa_admin, instead of showing buttons
+        # that would 403 on click. Every role that had users:manage before
+        # this split still gets mfa_admin via seed_system_roles' backfill,
+        # so this doesn't change what any EXISTING role sees.
+        "can_manage_mfa": has_permission(db, user, "mfa_admin", "manage"),
         # Client/MAC management (add/revoke/restore/purge a client, MAC
         # add/remove, email .ovpn) -- former require_client_manager scope,
         # now require_permission("vpn_profiles", "execute").

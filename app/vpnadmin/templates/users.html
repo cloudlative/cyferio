@@ -338,12 +338,14 @@
 						</select>
 					</div>
 				</div>
+				{% if can_manage_mfa %}
 				<div class="form-row" style="margin-top:8px">
 					<button type="button" class="btn-secondary btn-sm" id="e-mfa-reset-btn">Reset MFA</button>
 					<button type="button" class="btn-secondary btn-sm" id="e-mfa-disable-btn">Disable MFA</button>
 					<button type="button" class="btn-secondary btn-sm" id="e-mfa-force-enroll-btn">Force Enrollment</button>
 				</div>
 				<p class="field-hint">These three actions take effect immediately (no need to click Save Changes below) and are independent of the Policy Override dropdown, which only applies on Save.</p>
+				{% endif %}
 			</div>
 			<div class="form-row" style="margin-top:14px">
 				<div class="field">
@@ -1269,11 +1271,15 @@ async function _mfaAction(action, confirmMsg) {
 		toast(e.message, "error");
 	}
 }
-document.getElementById("e-mfa-reset-btn").addEventListener("click", () =>
+// These three buttons only render when can_manage_mfa is true (see the
+// Jinja guard around them above) -- optional-chain the listeners so a role
+// with users:manage but not mfa_admin (buttons absent) doesn't throw on
+// page load.
+document.getElementById("e-mfa-reset-btn")?.addEventListener("click", () =>
 	_mfaAction("reset", "Reset MFA for this user? Their current enrollment is cleared and they'll be required to set it up again at next login."));
-document.getElementById("e-mfa-disable-btn").addEventListener("click", () =>
+document.getElementById("e-mfa-disable-btn")?.addEventListener("click", () =>
 	_mfaAction("disable", "Disable MFA for this user? They will not be required to re-enroll."));
-document.getElementById("e-mfa-force-enroll-btn").addEventListener("click", () =>
+document.getElementById("e-mfa-force-enroll-btn")?.addEventListener("click", () =>
 	_mfaAction("force-enroll", "Require this user to set up MFA at their next login?"));
 
 document.getElementById("edit-form").addEventListener("submit", async (ev) => {
