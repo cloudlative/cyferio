@@ -360,6 +360,47 @@ class TestDeleteGroup:
         assert r.status_code == 200
         assert db_session.get(Group, gid) is None
 
+    def test_deleting_the_default_group_clears_the_setting(self, app_client, db_session):
+        """Settings -> User Management's "Default Group for New Users"
+        (AppSettings.default_group_id) has no FK constraint on purpose --
+        deleting the group it points at must proactively clear it, not
+        leave it silently pointing at a gone id forever (see
+        routes/groups.py's delete_group and AppSettings.default_group_id's
+        own docstrings)."""
+        from vpnadmin.app_settings import get_settings_row, runtime as runtime_settings
+
+        group = Group(name="Deletable Default Group")
+        db_session.add(group)
+        db_session.commit()
+        gid = group.id
+        get_settings_row(db_session).default_group_id = gid
+        db_session.commit()
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.delete(f"/api/groups/{gid}")
+        assert r.status_code == 200
+
+        db_session.expire_all()
+        assert get_settings_row(db_session).default_group_id is None
+        assert runtime_settings.default_group_id is None
+
+    def test_deleting_an_unrelated_group_leaves_the_default_setting_alone(self, app_client, db_session):
+        from vpnadmin.app_settings import get_settings_row
+
+        kept_group = Group(name="Kept Default Group")
+        other_group = Group(name="Unrelated Group")
+        db_session.add_all([kept_group, other_group])
+        db_session.commit()
+        get_settings_row(db_session).default_group_id = kept_group.id
+        db_session.commit()
+
+        login(app_client, "admin", "adminpass123")
+        r = app_client.delete(f"/api/groups/{other_group.id}")
+        assert r.status_code == 200
+
+        db_session.expire_all()
+        assert get_settings_row(db_session).default_group_id == kept_group.id
+
     def test_cannot_delete_a_group_with_active_members(self, app_client, db_session):
         role = db_session.query(RoleDef).filter_by(slug="viewer").one()
         group = Group(name="Occupied Group", role_id=role.id)

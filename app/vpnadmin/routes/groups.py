@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session, selectinload
 
+from .. import app_settings
+from ..app_settings import get_settings_row, refresh_runtime_cache
 from ..audit import log_action
 from ..auth import require_user
 from ..db import get_db
@@ -149,6 +151,12 @@ def _group_detail(t: Group) -> dict:
         # role -- null means this group currently grants its members
         # nothing (see permissions.py's effective_role_ids).
         "role": _role_brief(t.role) if t.role is not None else None,
+        # Settings -> User Management's "Default Group for New Users" --
+        # surfaced here (rather than a separate /api/settings round-trip)
+        # since users.html already fetches /api/groups to populate the Add
+        # User form's own Group picker. See AppSettings.default_group_id's
+        # own docstring for the full design.
+        "is_default": t.id == app_settings.runtime.default_group_id,
         # Drives the client-side immutability guards mirrored in
         # groups.html (Edit/Delete/role-change/member-management all
         # disabled or hidden for this one group) -- the actual enforcement
@@ -301,6 +309,17 @@ def delete_group(group_id: int, admin: User = Depends(require_admin), db: Sessio
                    f"reassign or remove its members first.",
         )
     name = group.name
+    # Settings -> User Management's "Default Group for New Users" (see
+    # AppSettings.default_group_id's own docstring) has no FK constraint on
+    # purpose, but leaving it pointing at an id that no longer exists would
+    # mean it just silently stops matching anything in the Add User picker
+    # forever -- clearing it here instead keeps the setting meaningful
+    # ("no default" is explicit, not an accidental side effect of some
+    # unrelated group having been deleted a year ago).
+    settings_row = get_settings_row(db)
+    if settings_row.default_group_id == group.id:
+        settings_row.default_group_id = None
+        refresh_runtime_cache(db)
     db.delete(group)
     db.commit()
     log_action(db, admin, "delete_group", target=name)
