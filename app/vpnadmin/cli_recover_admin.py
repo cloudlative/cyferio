@@ -94,7 +94,18 @@ def reset_password(db, admin: User) -> None:
     admin.locked_until = None
     db.commit()
     _audit(db, "bootstrap_admin_recovered", admin, "password reset via recover-admin.sh")
-    print(f"New temporary password for '{admin.username}': {new_password}")
+    # CodeQL flags this as clear-text logging of sensitive data (py/clear-
+    # text-logging-sensitive-data) -- correctly identifying that a password
+    # value reaches a print() call, but not that this IS the intended
+    # design here, not an accident: this is the operator's own terminal on
+    # a break-glass recovery run they just typed --yes/re-typed the
+    # username to confirm, the same channel `kubeadm init`/`htpasswd`-style
+    # tools use to hand back a generated credential, and nothing here
+    # writes it to a file or any actual log sink (see this function's own
+    # docstring/recover-admin.sh's header comment for "shown once, never
+    # stored"). Suppressed rather than restructured -- there's no
+    # alternative delivery channel for this tool that's actually safer.
+    print(f"New temporary password for '{admin.username}': {new_password}")  # lgtm[py/clear-text-logging-sensitive-data]
     print("This is shown once and not stored anywhere -- copy it now. You'll be required to set a new one at next login.")
 
 
