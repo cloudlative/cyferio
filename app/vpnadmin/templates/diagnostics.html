@@ -9,6 +9,39 @@
 
 <div class="ua-summary-row" id="violations-summary"></div>
 
+<div class="card" id="rejected-chart-card" style="display:none">
+	<div class="toolbar"><h2 style="margin:0">Rejections Breakdown</h2></div>
+	<div style="display:flex;gap:24px;flex-wrap:wrap">
+		<div style="flex:1;min-width:260px">
+			<h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--text-muted);font-weight:700">By VPN Profile</h3>
+			<div id="rejected-chart"></div>
+		</div>
+		<div style="flex:1;min-width:260px">
+			<h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--text-muted);font-weight:700">By OS</h3>
+			<div id="rejected-os-chart"></div>
+		</div>
+	</div>
+</div>
+
+<div class="card" id="rejected">
+	<div class="toolbar"><h2 style="margin:0">Recent Rejected Connection Attempts</h2></div>
+	<div class="form-row" style="margin-bottom:16px;gap:12px">
+		<div class="field" style="flex:1;min-width:180px">
+			<label for="rejected-filter-name">VPN Profile</label>
+			<select id="rejected-filter-name"><option value="">All</option></select>
+		</div>
+		<div class="field" style="flex:1;min-width:180px">
+			<label for="rejected-filter-os">OS</label>
+			<select id="rejected-filter-os"><option value="">All</option></select>
+		</div>
+		<div class="field" style="flex:1;min-width:180px">
+			<label for="rejected-filter-reason">Reason</label>
+			<select id="rejected-filter-reason"><option value="">All</option></select>
+		</div>
+	</div>
+	<div id="rejected-result"><p class="muted">Loading…</p></div>
+</div>
+
 <div class="card" id="failure-analytics-card">
 	<div class="toolbar">
 		<h2 style="margin:0">Failed Connection Analytics</h2>
@@ -59,39 +92,6 @@
 	<div class="toolbar"><h2 style="margin:0">Active Quota Warnings</h2></div>
 	<p class="page-subtitle" style="margin:-6px 0 18px">Every user currently near or over their monthly bandwidth quota (Settings -&gt; Notifications sets the warning/critical thresholds) -- the same events shown in each affected user's own notification bell, gathered here in one admin-wide view.</p>
 	<div id="quota-warnings-result"><p class="muted">Loading…</p></div>
-</div>
-
-<div class="card" id="rejected-chart-card" style="display:none">
-	<div class="toolbar"><h2 style="margin:0">Rejections Breakdown</h2></div>
-	<div style="display:flex;gap:24px;flex-wrap:wrap">
-		<div style="flex:1;min-width:260px">
-			<h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--text-muted);font-weight:700">By VPN Profile</h3>
-			<div id="rejected-chart"></div>
-		</div>
-		<div style="flex:1;min-width:260px">
-			<h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--text-muted);font-weight:700">By OS</h3>
-			<div id="rejected-os-chart"></div>
-		</div>
-	</div>
-</div>
-
-<div class="card" id="rejected">
-	<div class="toolbar"><h2 style="margin:0">Recent Rejected Connection Attempts</h2></div>
-	<div class="form-row" style="margin-bottom:16px;gap:12px">
-		<div class="field" style="flex:1;min-width:180px">
-			<label for="rejected-filter-name">VPN Profile</label>
-			<select id="rejected-filter-name"><option value="">All</option></select>
-		</div>
-		<div class="field" style="flex:1;min-width:180px">
-			<label for="rejected-filter-os">OS</label>
-			<select id="rejected-filter-os"><option value="">All</option></select>
-		</div>
-		<div class="field" style="flex:1;min-width:180px">
-			<label for="rejected-filter-reason">Reason</label>
-			<select id="rejected-filter-reason"><option value="">All</option></select>
-		</div>
-	</div>
-	<div id="rejected-result"><p class="muted">Loading…</p></div>
 </div>
 {% endblock %}
 
