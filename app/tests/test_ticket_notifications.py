@@ -245,6 +245,60 @@ class TestNotificationPreferences:
         after2 = app_client.get("/api/notifications").json()["unread_count"]
         assert after2 == before, "a new ticket_created row must not count either while muted"
 
+    def test_user_email_disabled_stops_creator_email_but_bell_row_still_appears(self, app_client, db_session):
+        """user_email_notify_types gates ticket_notifications._notify_user's
+        email send to the ticket's own CREATOR -- entirely independent of
+        ticket_email_notify_types (the admin side of the same events, see
+        the two tests above)."""
+        alice = _make_self_service_user(db_session, "alice")
+        alice.email = "alice@example.com"
+        db_session.commit()
+        login(app_client, "admin", "adminpass123")
+        r = app_client.patch("/api/settings", json={"user_email_notify_types": {"ticket_reply": False}})
+        assert r.status_code == 200
+
+        login(app_client, "alice", "somepass123")
+        ticket_id = _create_ticket(app_client).json()["id"]
+
+        from vpnadmin import ticket_notifications
+        sent = {}
+        orig = ticket_notifications.mailer.send_ticket_notification_email
+        ticket_notifications.mailer.send_ticket_notification_email = lambda **kw: sent.update(kw)
+        try:
+            login(app_client, "admin", "adminpass123")
+            r2 = app_client.post(f"/api/tickets/{ticket_id}/replies", data={"body": "we're looking into it"})
+            assert r2.status_code == 201
+        finally:
+            ticket_notifications.mailer.send_ticket_notification_email = orig
+        assert not sent, "user_email_notify_types has ticket_reply off -- no email to the creator"
+
+        login(app_client, "alice", "somepass123")
+        kinds = [n["kind"] for n in app_client.get("/api/notifications").json()["notifications"]]
+        assert "ticket_reply" in kinds, "the bell row is untouched by the user-email-only preference"
+
+    def test_user_email_enabled_by_default(self, app_client, db_session):
+        """No settings.py PATCH at all -- effective_user_email_types must
+        default every key to True (this subdivides behavior that was
+        previously unconditional, see notification_prefs.py's own
+        docstring), so an upgraded deployment keeps emailing ticket
+        creators exactly as before until an admin opts something out."""
+        alice = _make_self_service_user(db_session, "alice")
+        alice.email = "alice@example.com"
+        db_session.commit()
+        login(app_client, "alice", "somepass123")
+        ticket_id = _create_ticket(app_client).json()["id"]
+
+        from vpnadmin import ticket_notifications
+        sent = {}
+        orig = ticket_notifications.mailer.send_ticket_notification_email
+        ticket_notifications.mailer.send_ticket_notification_email = lambda **kw: sent.update(kw)
+        try:
+            login(app_client, "admin", "adminpass123")
+            app_client.post(f"/api/tickets/{ticket_id}/replies", data={"body": "we're looking into it"})
+        finally:
+            ticket_notifications.mailer.send_ticket_notification_email = orig
+        assert sent, "an unconfigured user_email_notify_types must default to on"
+
 
 class TestMigrateTicketEmailNotifyTypes:
     def test_seeds_every_key_from_the_legacy_toggle(self, db_session):

@@ -273,8 +273,11 @@
 		</div>
 		<p class="field-hint">Allowed attachment types (images, PDF, txt/log/csv, zip) are fixed and not configurable here. The Duplicate Detection Window controls how close together (in time) two tickets must be created to be surfaced as a candidate duplicate cluster in Support Center's Duplicate Cleanup tool.</p>
 		<h3 style="margin:18px 0 4px">Ticket Email Notifications</h3>
-		<p class="muted" style="margin:0 0 10px;font-size:0.85rem">Which ticket events send YOU (the admin) an email -- same per-event control as Slack Integration below. This is independent of what a ticket's own creator gets emailed (they're always notified of replies/status changes on their own ticket, regardless of these).</p>
+		<p class="muted" style="margin:0 0 10px;font-size:0.85rem">Which ticket events send YOU (the admin) an email -- same per-event control as Slack Integration below. This is independent of what a ticket's own creator gets emailed, which is controlled separately below.</p>
 		<div id="ticket-email-notify-types" class="notify-groups-grid"></div>
+		<h3 style="margin:18px 0 4px">Ticket Notifications for Requesters</h3>
+		<p class="muted" style="margin:0 0 10px;font-size:0.85rem">Which events email the person who opened the ticket, about their own ticket -- independent of the admin email controls above.</p>
+		<div id="user-email-notify-types" class="notify-groups-grid"></div>
 	</div>
 
 	<div class="card">
@@ -717,6 +720,11 @@ async function loadSettings() {
 			s.ticket_email_notify_types || {}, "ticket-email-notify-type",
 		);
 		renderNotifyTypeCheckboxes(
+			document.getElementById("user-email-notify-types"),
+			[{ group: null, options: s.user_email_events || [] }],
+			s.user_email_notify_types || {}, "user-email-notify-type",
+		);
+		renderNotifyTypeCheckboxes(
 			document.getElementById("bell-notify-types"),
 			s.bell_event_groups || [], s.bell_notify_types || {}, "bell-notify-type",
 		);
@@ -1026,6 +1034,9 @@ document.getElementById("settings-form").addEventListener("submit", async (ev) =
 		ticket_duplicate_window_minutes: intOrNull(val("s-ticket-duplicate-window")),
 		ticket_email_notify_types: Object.fromEntries(
 			[...document.querySelectorAll(".ticket-email-notify-type")].map(el => [el.dataset.key, el.checked])
+		),
+		user_email_notify_types: Object.fromEntries(
+			[...document.querySelectorAll(".user-email-notify-type")].map(el => [el.dataset.key, el.checked])
 		),
 		bell_notify_types: Object.fromEntries(
 			[...document.querySelectorAll(".bell-notify-type")].map(el => [el.dataset.key, el.checked])

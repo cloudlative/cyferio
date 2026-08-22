@@ -57,6 +57,11 @@ class UpdateSettingsRequest(BaseModel):
     # with current, don't replace wholesale" handling as Slack's own
     # notify_types below (see update_settings()).
     ticket_email_notify_types: dict[str, bool] | None = None
+    # Per-event control over which events email the ticket's own CREATOR
+    # (see notification_prefs.USER_EMAIL_EVENTS) -- independent of
+    # ticket_email_notify_types above, which controls the admin side of
+    # the same events. Same merge-not-replace handling in update_settings().
+    user_email_notify_types: dict[str, bool] | None = None
     ticket_duplicate_window_minutes: int | None = None
 
     # Multi-Factor Authentication (TOTP) -- see mfa.py's effective_policy /
@@ -312,6 +317,16 @@ class UpdateSettingsRequest(BaseModel):
             raise ValueError(f"Unknown ticket email notification type(s): {', '.join(sorted(unknown))}.")
         return v
 
+    @field_validator("user_email_notify_types")
+    @classmethod
+    def _user_email_notify_types_keys(cls, v: dict[str, bool] | None) -> dict[str, bool] | None:
+        if v is None:
+            return v
+        unknown = set(v) - notification_prefs.USER_EMAIL_KEYS
+        if unknown:
+            raise ValueError(f"Unknown ticket requester notification type(s): {', '.join(sorted(unknown))}.")
+        return v
+
     @field_validator("bell_notify_types")
     @classmethod
     def _bell_notify_types_keys(cls, v: dict[str, bool] | None) -> dict[str, bool] | None:
@@ -468,6 +483,8 @@ def _serialize() -> dict:
         # left in place, unread, past its one-time migration seed).
         "ticket_email_notify_types": notification_prefs.effective_ticket_email_types(s.ticket_email_notify_types),
         "ticket_email_events": notification_prefs.ticket_email_events_for_form(),
+        "user_email_notify_types": notification_prefs.effective_user_email_types(s.user_email_notify_types),
+        "user_email_events": notification_prefs.user_email_events_for_form(),
         "bell_notify_types": notification_prefs.effective_bell_types(s.bell_notify_types),
         "bell_event_groups": notification_prefs.bell_event_groups_for_form(),
         "ticket_duplicate_window_minutes": (
@@ -605,6 +622,12 @@ def update_settings(body: UpdateSettingsRequest, admin: User = Depends(require_a
         if merged != current:
             row.ticket_email_notify_types = json.dumps(merged)
             changes.append("ticket_email_notify_types")
+    if "user_email_notify_types" in fields_set:
+        current = notification_prefs.effective_user_email_types(row.user_email_notify_types)
+        merged = {**current, **body.user_email_notify_types}
+        if merged != current:
+            row.user_email_notify_types = json.dumps(merged)
+            changes.append("user_email_notify_types")
     if "bell_notify_types" in fields_set:
         current = notification_prefs.effective_bell_types(row.bell_notify_types)
         merged = {**current, **body.bell_notify_types}
