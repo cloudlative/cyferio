@@ -236,7 +236,7 @@ async function loadTraefikHealth() {
 		html += '<h3 style="margin:2px 0 4px">Requests</h3>';
 		if (d.metrics) {
 			html += '<p class="note" style="margin:0 0 6px"><strong>Note:</strong> cumulative totals since Traefik last started, not a live rate.</p>';
-			html += `<div class="traefik-subsection-grid traefik-subsection-grid-2col">
+			html += `<div class="traefik-subsection-grid traefik-subsection-grid-2col traefik-metrics-grid">
 				<div><p class="traefik-subsection-label">By service:</p>${traefikReqTotals(d.metrics.services)}</div>
 				<div><p class="traefik-subsection-label">By entrypoint:</p>${traefikReqTotals(d.metrics.entrypoints)}</div>
 			</div>`;
