@@ -57,7 +57,7 @@ STATUS_LABELS: dict[str, str] = {
     "assigned": "Assigned",
     "in_progress": "In Progress",
     "resolved": "Resolved",
-    "waiting_for_user": "Waiting on Customer",
+    "waiting_for_user": "Waiting on User",
     "closed": "Closed",
     "completed": "Completed",
     "failed": "Failed",
