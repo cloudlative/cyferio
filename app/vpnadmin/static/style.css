@@ -291,8 +291,14 @@ a:hover { text-decoration: underline; }
 body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 
 .sidebar {
-	width: 252px;
-	flex: 0 0 252px;
+	/* Widened from 252px -- reported live: cramped now that .sidebar nav
+	   can grow a scrollbar of its own (every section expanded) eating
+	   into the already-tight available width for link text. Still well
+	   under a small phone's own viewport width for the off-canvas mobile
+	   drawer below, which inherits this same value (no separate mobile
+	   override exists). */
+	width: 276px;
+	flex: 0 0 276px;
 	display: flex;
 	flex-direction: column;
 	background: linear-gradient(190deg, var(--side-1) 0%, var(--side-2) 60%, var(--side-3) 140%);
@@ -401,7 +407,13 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
    the bottom aren't visible once everything's expanded). overflow-y: auto
    then gives that overflow somewhere to go -- an internal scrollbar on
    the nav itself, not the whole sidebar (brand/logo above stays put). */
-.sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; overflow-y: auto; }
+/* scrollbar-gutter: stable reserves the scrollbar's own width up front
+   (supporting browsers) instead of only claiming it once the nav
+   actually overflows -- without it, every link's text reflows a few
+   pixels narrower the moment a scrollbar appears (e.g. expanding one
+   more section pushes it past the viewport), which reads as content
+   jumping around rather than a stable layout gaining a scrollbar. */
+.sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
 /* Groups the sidebar into labeled sections (My Account / VPN Management /
    Monitoring / Administration) -- see base.html's own comment on why the
    grouping exists, and its Expand/Collapse comment for why most roles get
@@ -532,7 +544,7 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 }
 .sidebar-backdrop.open { display: block; }
 
-/* Below this width there isn't room for a permanent 252px sidebar next to
+/* Below this width there isn't room for a permanent 276px sidebar next to
    real content (tables/forms already fight for space on a phone) -- same
    breakpoint the marketing/docs sites collapse their own nav at, so the
    whole product switches to a mobile layout at one consistent width.
