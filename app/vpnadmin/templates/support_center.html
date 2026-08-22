@@ -142,6 +142,17 @@ function updateBulkToolbar() {
 	const toolbar = document.getElementById("sc-bulk-toolbar");
 	toolbar.style.display = selectedIds.size > 0 ? "block" : "none";
 	document.getElementById("sc-bulk-count").textContent = `${selectedIds.size} selected`;
+	// Greyed out (real disabled state, not just a visual dim) when the
+	// action would be a no-op for EVERY selected ticket -- Close can't do
+	// anything to an already-Closed ticket, and Mark Resolved can't
+	// either (Closed can only exit via Reopen, same Status Workflow Rules
+	// the backend enforces -- see routes/tickets.py's bulk_close_tickets/
+	// bulk_resolve_tickets). A mixed selection (some closed, some not)
+	// leaves both enabled, matching the backend's own "skip the ones that
+	// don't apply, still act on the rest" behavior for a partial batch.
+	const selected = allTickets.filter((t) => selectedIds.has(t.id));
+	document.getElementById("sc-bulk-close").disabled = selected.length > 0 && selected.every((t) => t.status === "closed");
+	document.getElementById("sc-bulk-resolve").disabled = selected.length > 0 && selected.every((t) => t.status === "resolved" || t.status === "closed");
 }
 
 function renderTicketTable() {

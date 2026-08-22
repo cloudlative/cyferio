@@ -263,7 +263,12 @@ def bulk_resolve_tickets(body: BulkTicketIdsRequest, admin: User = Depends(_requ
     now = datetime.now(timezone.utc)
     changed = []
     for t in tickets:
-        if is_duplicate_locked(t) or t.locked or t.status == "resolved":
+        # Same Status Workflow Rules guard as bulk_close_tickets above --
+        # this one was missing it (only checked "already resolved", not
+        # "closed can't jump straight to resolved without reopening
+        # first"), a real gap the single-ticket PATCH endpoint and
+        # bulk_close_tickets already both closed.
+        if is_duplicate_locked(t) or t.locked or t.status == "resolved" or "resolved" not in allowed_next_statuses(t.status, t.category):
             continue
         old_status = t.status
         t.status = "resolved"
