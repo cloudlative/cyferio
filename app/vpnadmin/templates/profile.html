@@ -5,7 +5,7 @@
 	<div class="avatar-circle" id="avatar-initials">{{ user.username[:2].upper() }}</div>
 	<div>
 		<h1 style="display:block" id="profile-heading">{{ user.display_name }}</h1>
-		<p class="page-subtitle" style="margin:0">{{ user.username }} · <span class="role-badge role-{{ user.role_slug }}">{{ user.role_display_name }}</span></p>
+		<p class="page-subtitle" style="margin:0">{{ user.username }} · {% for rn in user.effective_role_names %}<span class="role-badge">{{ rn }}</span>{% else %}<span class="role-badge muted">No Role</span>{% endfor %}</p>
 	</div>
 </div>
 
@@ -13,12 +13,12 @@
 	<div class="toolbar"><h2 style="margin:0">Account Details</h2><button class="btn-secondary" id="refresh-btn">Refresh</button></div>
 	<div class="form-grid" style="margin-bottom:18px">
 		<div><label>Username</label><div class="mono">{{ user.username }}</div></div>
-		<div><label>Role</label><div><span class="role-badge role-{{ user.role_slug }}">{{ user.role_display_name }}</span></div></div>
+		<div><label>Effective Role(s)</label><div>{% for rn in user.effective_role_names %}<span class="role-badge">{{ rn }}</span>{% else %}<span class="muted">None (no group membership)</span>{% endfor %}</div></div>
 		<div><label>Created</label><div class="muted" id="p-created">—</div></div>
 		<div><label>Last Login</label><div class="muted" id="p-last-login">—</div></div>
-		<div><label>Team(s)</label><div class="muted" id="p-teams">—</div></div>
+		<div><label>Group(s)</label><div class="muted" id="p-groups">—</div></div>
 	</div>
-	<p class="muted">Your role, account status, and team membership are managed by an admin. Everything below, you control yourself.</p>
+	<p class="muted">Your role, account status, and group membership are managed by an admin. Everything below, you control yourself.</p>
 </div>
 
 <div class="card">
@@ -192,7 +192,7 @@ async function loadProfile() {
 		document.getElementById("p-gender").value = me.gender || "unspecified";
 		document.getElementById("p-email").value = me.email || "";
 		profilePhone.setValue(me.phone || "");
-		document.getElementById("p-teams").textContent = (me.teams && me.teams.length) ? me.teams.join(", ") : "Unassigned";
+		document.getElementById("p-groups").textContent = (me.groups && me.groups.length) ? me.groups.join(", ") : "Unassigned";
 		updateDisplayedIdentity(me);
 	} catch (e) {
 		toast(e.message, "error");
@@ -219,7 +219,7 @@ document.getElementById("profile-form").addEventListener("submit", async (ev) =>
 			},
 		});
 		updateDisplayedIdentity(updated);
-		document.getElementById("p-teams").textContent = (updated.teams && updated.teams.length) ? updated.teams.join(", ") : "Unassigned";
+		document.getElementById("p-groups").textContent = (updated.groups && updated.groups.length) ? updated.groups.join(", ") : "Unassigned";
 		toast("Profile updated.");
 	} catch (e) {
 		toast(e.message, "error");

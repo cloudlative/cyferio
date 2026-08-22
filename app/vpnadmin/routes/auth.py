@@ -88,7 +88,12 @@ async def login_submit(
     # role except admin/super_admin. Checked before restriction/lockout/
     # password checks -- a maintenance window shouldn't leak any of that
     # detail to a non-admin account that can't log in anyway right now.
-    if app_settings.runtime.maintenance_mode and user.role_slug not in ("admin", "super_admin"):
+    # Group-only permissions: "admin/super_admin" is no longer a single
+    # role_slug to compare -- checks whether EITHER is among this user's
+    # effective roles (union across their group membership).
+    if app_settings.runtime.maintenance_mode and not (
+        set(user.effective_role_slugs) & {"admin", "super_admin"}
+    ):
         message = app_settings.runtime.maintenance_message or "This application is temporarily down for maintenance. Please try again shortly."
         return templates.TemplateResponse(request, "login.html", {"error": message, "captcha": captcha_ctx}, status_code=503)
 

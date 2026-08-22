@@ -5,13 +5,21 @@ to "assigned" status on claim, the audit trail, and that assignment fires
 an in-app notification following the existing merged-bell id-prefix
 contract (routes/notifications.py)."""
 from vpnadmin.auth import hash_password
-from vpnadmin.models import AuditLog, Role, SupportTicket, TicketNotification, User
+from vpnadmin.models import AuditLog, Group, RoleDef, Role, SupportTicket, TicketNotification, User
 
 from .conftest import login
 
 
 def _make_second_admin(db_session, username="admin2", password="somepass123"):
-    user = User(username=username, password_hash=hash_password(password), role=Role.admin)
+    # Group-only permissions: a role only grants anything via group
+    # membership now (see permissions.py's effective_role_ids).
+    admin_role = db_session.query(RoleDef).filter_by(slug="admin").one()
+    group = Group(name=f"{username}-admin-group")
+    group.role_defs.append(admin_role)
+    db_session.add(group)
+    db_session.flush()
+    user = User(username=username, password_hash=hash_password(password), role=Role.admin, role_id=admin_role.id)
+    user.groups.append(group)
     db_session.add(user)
     db_session.commit()
     return user

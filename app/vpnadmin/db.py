@@ -70,7 +70,7 @@ def init_db():
     _sync_missing_columns()
     _sync_enum_values()
     _seed_rbac()
-    _backfill_team_slugs()
+    _backfill_group_slugs()
     _clamp_release_check_interval()
 
 
@@ -80,7 +80,12 @@ def _seed_rbac():
     role_id has something to point at. Split into its own function (rather
     than inlined in init_db) so Phase 2's migrate_user_roles() backfill can
     be added right after this call without further restructuring."""
-    from .permissions import migrate_user_roles, rename_legacy_vpn_self_service_role, seed_system_roles
+    from .permissions import (
+        migrate_user_roles,
+        migrate_users_to_role_groups,
+        rename_legacy_vpn_self_service_role,
+        seed_system_roles,
+    )
     db = SessionLocal()
     try:
         # Must run before seed_system_roles() -- see its own docstring for
@@ -90,6 +95,16 @@ def _seed_rbac():
         seed_system_roles(db)
         migrate_user_roles(db)  # Phase 2 backfill -- see permissions.py's docstring
         promote_bootstrap_admin_to_super_admin(db)
+        # Group-only permissions migration -- MUST run after both
+        # migrate_user_roles (needs User.role_id backfilled from the legacy
+        # `role` enum first) and promote_bootstrap_admin_to_super_admin
+        # (needs the bootstrap account's role_id already at its FINAL
+        # value, "super_admin", not the plain "admin" it started as) --
+        # see permissions.py's migrate_users_to_role_groups docstring.
+        # Also called a second time from main.py's lifespan, same
+        # "fresh-install first call is necessarily a no-op" reasoning as
+        # promote_bootstrap_admin_to_super_admin's own docstring explains.
+        migrate_users_to_role_groups(db)
     finally:
         db.close()
 
@@ -128,30 +143,30 @@ def promote_bootstrap_admin_to_super_admin(db) -> None:
     db.commit()
 
 
-def _backfill_team_slugs():
-    """One-time backfill for Team.slug on rows that predate the column
-    (added for future team-based reporting -- see models.py's Team
+def _backfill_group_slugs():
+    """One-time backfill for Group.slug on rows that predate the column
+    (added for future group-based reporting -- see models.py's Group
     docstring). _sync_missing_columns() above only fills a single static
     default across every row of a new column, which would violate this
     column's uniqueness constraint here -- a per-row derived value needs
     its own pass, same reasoning as _seed_rbac()'s role/user backfills.
     Idempotent: only touches rows where slug IS NULL, so it's a no-op on
-    every run after the first for a given team."""
+    every run after the first for a given group."""
     import re
 
-    from .models import Team
+    from .models import Group
 
     db = SessionLocal()
     try:
-        existing_slugs = {t.slug for t in db.query(Team).filter(Team.slug.isnot(None)).all()}
-        for team in db.query(Team).filter(Team.slug.is_(None)).order_by(Team.id).all():
-            base = re.sub(r"[^a-z0-9]+", "-", team.name.strip().lower()).strip("-") or "team"
+        existing_slugs = {t.slug for t in db.query(Group).filter(Group.slug.isnot(None)).all()}
+        for group in db.query(Group).filter(Group.slug.is_(None)).order_by(Group.id).all():
+            base = re.sub(r"[^a-z0-9]+", "-", group.name.strip().lower()).strip("-") or "group"
             slug = base
             n = 2
             while slug in existing_slugs:
                 slug = f"{base}-{n}"
                 n += 1
-            team.slug = slug
+            group.slug = slug
             existing_slugs.add(slug)
         db.commit()
     finally:

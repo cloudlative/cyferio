@@ -1,6 +1,6 @@
 """Tests for the bandwidth Reports page's three endpoints
 (routes/reports.py) -- pure aggregation over policy_store's JSON files
-joined against User/Team/VpnProfileLink, no new data collection to test
+joined against User/Group/VpnProfileLink, no new data collection to test
 beyond the aggregation math itself."""
 import subprocess
 
@@ -9,7 +9,7 @@ import pytest
 from vpnadmin import cli_wrapper as cw
 from vpnadmin import policy_store
 from vpnadmin.config import settings
-from vpnadmin.models import Team, User, VpnProfileLink
+from vpnadmin.models import Group, User, VpnProfileLink
 
 from .conftest import login
 
@@ -21,12 +21,12 @@ def _tmp_policy_files(tmp_path, monkeypatch):
 
 
 def _seed(db_session):
-    team = Team(name="Engineering", slug="engineering")
-    db_session.add(team)
+    group = Group(name="Engineering", slug="engineering")
+    db_session.add(group)
     db_session.commit()
 
-    alice = User(username="alice", password_hash="x", first_name="Alice", teams=[team])
-    bob = User(username="bob", password_hash="x", first_name="Bob")  # no team -- "Unassigned"
+    alice = User(username="alice", password_hash="x", first_name="Alice", groups=[group])
+    bob = User(username="bob", password_hash="x", first_name="Bob")  # no group -- "Unassigned"
     db_session.add_all([alice, bob])
     db_session.commit()
 
@@ -62,7 +62,7 @@ class TestUserReport:
         assert rows["alice"]["quota_gb"] == 1.0
         assert rows["alice"]["used_gb"] == pytest.approx(0.9, abs=0.01)
         assert rows["alice"]["pct_used"] == pytest.approx(90.0, abs=0.5)
-        assert rows["alice"]["team_names"] == ["Engineering"]
+        assert rows["alice"]["group_names"] == ["Engineering"]
         assert rows["bob"]["quota_gb"] is None
         assert rows["bob"]["pct_used"] is None
 
@@ -72,17 +72,17 @@ class TestUserReport:
         assert app_client.get("/api/reports/users").status_code == 200
 
 
-class TestTeamReport:
-    def test_team_and_unassigned_buckets(self, app_client, db_session):
+class TestGroupReport:
+    def test_group_and_unassigned_buckets(self, app_client, db_session):
         _seed(db_session)
         login(app_client, "admin", "adminpass123")
-        r = app_client.get("/api/reports/teams")
+        r = app_client.get("/api/reports/groups")
         assert r.status_code == 200
-        teams = {t["team"]: t for t in r.json()}
-        assert teams["Engineering"]["member_count"] == 1
-        assert teams["Engineering"]["total_quota_gb"] == 1.0
-        assert teams["Unassigned"]["member_count"] == 1
-        assert teams["Unassigned"]["total_quota_gb"] is None  # bob has no quota
+        groups = {t["group"]: t for t in r.json()}
+        assert groups["Engineering"]["member_count"] == 1
+        assert groups["Engineering"]["total_quota_gb"] == 1.0
+        assert groups["Unassigned"]["member_count"] == 1
+        assert groups["Unassigned"]["total_quota_gb"] is None  # bob has no quota
 
 
 class TestGlobalReport:

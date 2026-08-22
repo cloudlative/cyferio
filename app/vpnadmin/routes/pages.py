@@ -76,10 +76,10 @@ def _ctx(user: User, db: Session, **extra) -> dict:
         "can_view_health": has_permission_any_scope(db, user, "health", "view"),
         "can_view_system_audit": has_permission_any_scope(db, user, "system_audit", "view"),
         "can_view_reports": has_permission_any_scope(db, user, "reports", "view"),
-        # Teams / Settings / Users Activity nav links used to be gated on
+        # Groups / Settings / Users Activity nav links used to be gated on
         # "is_admin" (users:manage) as a stand-in for "can reach this page"
-        # -- wrong, since /teams, /settings, and /users/activity are each
-        # gated on their OWN object below (teams_page: teams:manage,
+        # -- wrong, since /groups, /settings, and /users/activity are each
+        # gated on their OWN object below (groups_page: groups:manage,
         # settings_page: settings:manage, users_activity_page:
         # audit_log:manage). A custom role granted exactly one of those via
         # Roles Management (without users:manage) could already open the
@@ -90,7 +90,7 @@ def _ctx(user: User, db: Session, **extra) -> dict:
         # real gate so the nav link (and the section holding it -- see
         # base.html) tracks what a role can actually do, not just whether
         # it happens to also be a full user-manager.
-        "can_manage_teams": has_permission(db, user, "teams", "manage"),
+        "can_manage_groups": has_permission(db, user, "groups", "manage"),
         "can_manage_settings": has_permission(db, user, "settings", "manage"),
         "can_view_users_activity": has_permission(db, user, "audit_log", "manage"),
         # Support Center nav visibility -- an "own"-scoped account (the
@@ -282,16 +282,16 @@ def profile_page(request: Request, user: User | None = Depends(get_current_user)
     return templates.TemplateResponse(request, "profile.html", _ctx(user, db))
 
 
-@router.get("/teams")
-def teams_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("/groups")
+def groups_page(request: Request, user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if user is None:
         return RedirectResponse("/login", status_code=303)
     redirect = _password_reset_redirect(user, request)
     if redirect is not None:
         return redirect
-    if not has_permission(db, user, "teams", "manage"):
+    if not has_permission(db, user, "groups", "manage"):
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(request, "teams.html", _ctx(user, db))
+    return templates.TemplateResponse(request, "groups.html", _ctx(user, db))
 
 
 @router.get("/settings")

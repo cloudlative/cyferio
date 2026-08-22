@@ -121,7 +121,18 @@ class TestSuperAdminRole:
         assert role is not None
         assert role.is_system is True
 
-    def test_cannot_be_assigned_via_create_user(self, app_client, monkeypatch):
+    def test_role_field_in_create_user_is_silently_ignored_not_assignable(self, app_client, monkeypatch):
+        """Group-only permissions: CreateUserRequest no longer has a
+        `role` field at all (see routes/users.py) -- a personal role can
+        no longer be assigned directly to ANYONE through this endpoint,
+        super_admin included, so "Administrators should not be able to
+        assign or change users to the Super Admin role through normal
+        user editing workflows" is now satisfied even more strongly than
+        the old 400-rejection did: there's no role-assignment capability
+        left to (mis)use at all. Pydantic ignores the unknown field, so
+        this is a harmless 201 with the new account left with zero
+        effective role (see effective_role_ids), never a 400 and never an
+        actual super_admin grant."""
         from vpnadmin.routes import users as users_mod
         monkeypatch.setattr(users_mod.cli, "add_client", lambda name, mac: f"{name} added.")
         login(app_client, "admin", "adminpass123")
@@ -129,19 +140,20 @@ class TestSuperAdminRole:
             "username": "wannabesuper", "password": "Somepass123!", "first_name": "W",
             "email": "wannabesuper@example.com", "mac": "aa:bb:cc:dd:ee:04", "role": "super_admin",
         })
-        assert r.status_code == 400
+        assert r.status_code == 201
+        assert r.json()["effective_roles"] == []  # in zero groups -- role field had no effect
 
-    def test_cannot_be_assigned_via_update_user(self, app_client, db_session):
-        # Task feedback: "Administrators should not be able to assign or
-        # change users to the Super Admin role through normal user editing
-        # workflows" -- covers Edit User's PATCH path, the counterpart to
-        # test_cannot_be_assigned_via_create_user above.
+    def test_role_field_in_update_user_is_silently_ignored_not_assignable(self, app_client, db_session):
+        # Group-only permissions equivalent of the old "cannot be
+        # assigned via update_user" test -- see the create_user version's
+        # docstring above for the full reasoning.
         target = User(username="editme-notsuper", password_hash="x", role=Role.viewer, email="editme@example.com")
         db_session.add(target)
         db_session.commit()
         login(app_client, "admin", "adminpass123")
         r = app_client.patch(f"/api/users/{target.id}", json={"role": "super_admin"})
-        assert r.status_code == 400
+        assert r.status_code == 200
+        assert r.json()["effective_roles"] == []  # unaffected by the ignored field
 
     def test_roles_list_orders_super_admin_first(self, app_client, db_session):
         # Custom role, deliberately named to sort alphabetically before

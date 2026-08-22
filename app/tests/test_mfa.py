@@ -10,14 +10,24 @@ import pyotp
 from vpnadmin import app_settings
 from vpnadmin import mfa as mfa_module
 from vpnadmin.auth import hash_password
-from vpnadmin.models import AuditLog, MfaRecoveryCode, ObjectPermission, RoleDef, RoleKind, User
+from vpnadmin.models import AuditLog, Group, MfaRecoveryCode, ObjectPermission, RoleDef, RoleKind, User
 
 from .conftest import login
 
 
 def _make_user(db_session, username, *, role_slug="user", password="somepass123"):
+    # Group-only permissions: a role only grants anything via group
+    # membership now (see permissions.py's effective_role_ids) -- role_id
+    # alone (the old way this helper worked) would give this user ZERO
+    # effective permissions. role_id is still set too (harmless/inert)
+    # purely to match what a real account looks like.
     role = db_session.query(RoleDef).filter_by(slug=role_slug).first()
+    group = Group(name=f"{role_slug}-group-{username}")
+    group.role_defs.append(role)
+    db_session.add(group)
+    db_session.flush()
     user = User(username=username, password_hash=hash_password(password), role_id=role.id, email=f"{username}@example.com")
+    user.groups.append(group)
     db_session.add(user)
     db_session.commit()
     return user
@@ -329,7 +339,13 @@ class TestMfaAdminObjectSplit:
         accounts otherwise. Confirms the split is a real, enforced
         boundary, not just a cosmetic new OBJECTS entry."""
         role = self._make_role(db_session, "users_only", object_key="users")
-        db_session.add(User(username="usersonly", password_hash=hash_password("testpass123"), role_id=role.id))
+        group = Group(name="users-only-group")
+        group.role_defs.append(role)
+        db_session.add(group)
+        db_session.flush()
+        user = User(username="usersonly", password_hash=hash_password("testpass123"), role_id=role.id)
+        user.groups.append(group)
+        db_session.add(user)
         db_session.commit()
         alice = _make_user(db_session, "alice")
         login(app_client, "usersonly", "testpass123")
@@ -351,7 +367,13 @@ class TestMfaAdminObjectSplit:
         endpoints (role change/delete/rename) -- the delegation this split
         exists to enable."""
         role = self._make_role(db_session, "mfa_only", object_key="mfa_admin")
-        db_session.add(User(username="mfaonly", password_hash=hash_password("testpass123"), role_id=role.id))
+        group = Group(name="mfa-only-group")
+        group.role_defs.append(role)
+        db_session.add(group)
+        db_session.flush()
+        user = User(username="mfaonly", password_hash=hash_password("testpass123"), role_id=role.id)
+        user.groups.append(group)
+        db_session.add(user)
         db_session.commit()
         alice = _make_user(db_session, "alice")
         _enroll(db_session, alice)

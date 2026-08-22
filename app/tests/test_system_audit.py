@@ -126,9 +126,18 @@ class TestRunAuditOrchestration:
 
     def test_new_critical_notifies_every_admin(self, db_session, monkeypatch):
         from vpnadmin.auth import hash_password
-        from vpnadmin.models import Role, User
+        from vpnadmin.models import Group, Role, RoleDef, User
 
-        second_admin = User(username="second-admin", password_hash=hash_password("password123"), role=Role.admin)
+        # Group-only permissions: a role only grants anything via group
+        # membership now (see permissions.py's effective_role_ids) --
+        # _notify_admins below goes through has_permission.
+        admin_role = db_session.query(RoleDef).filter_by(slug="admin").one()
+        group = Group(name="second-admin-group")
+        group.role_defs.append(admin_role)
+        db_session.add(group)
+        db_session.flush()
+        second_admin = User(username="second-admin", password_hash=hash_password("password123"), role=Role.admin, role_id=admin_role.id)
+        second_admin.groups.append(group)
         db_session.add(second_admin)
         db_session.commit()
 
@@ -151,9 +160,16 @@ class TestRunAuditOrchestration:
 
     def test_repeat_finding_does_not_renotify(self, db_session, monkeypatch):
         from vpnadmin.auth import hash_password
-        from vpnadmin.models import Role, User
+        from vpnadmin.models import Group, Role, RoleDef, User
 
-        db_session.add(User(username="an-admin", password_hash=hash_password("password123"), role=Role.admin))
+        admin_role = db_session.query(RoleDef).filter_by(slug="admin").one()
+        group = Group(name="an-admin-group")
+        group.role_defs.append(admin_role)
+        db_session.add(group)
+        db_session.flush()
+        an_admin = User(username="an-admin", password_hash=hash_password("password123"), role=Role.admin, role_id=admin_role.id)
+        an_admin.groups.append(group)
+        db_session.add(an_admin)
         db_session.commit()
 
         _mock_channels(monkeypatch)

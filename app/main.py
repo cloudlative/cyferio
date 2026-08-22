@@ -32,10 +32,11 @@ from vpnadmin.app_settings import migrate_decouple_portal_and_vpn_restrictions, 
 from vpnadmin.auth import bootstrap_admin, ensure_bootstrap_admin_flag
 from vpnadmin.config import settings
 from vpnadmin.db import SessionLocal, init_db, promote_bootstrap_admin_to_super_admin
+from vpnadmin.permissions import migrate_users_to_role_groups
 from vpnadmin import geo_lists, mailer, slack_notifications
 from vpnadmin import app_settings
 from vpnadmin.models import QuotaNotification
-from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, host_ingest, me_connection_issues, me_tickets, me_vpn, mfa as mfa_routes, notifications, pages, release as release_routes, reports, roles, settings as settings_routes, status, system_audit as system_audit_routes, teams, tickets, users
+from vpnadmin.routes import auth, clients, diagnostics, email_providers, geo, health, host_ingest, me_connection_issues, me_tickets, me_vpn, mfa as mfa_routes, notifications, pages, release as release_routes, reports, roles, settings as settings_routes, status, system_audit as system_audit_routes, groups, tickets, users
 from vpnadmin.routes.reports import _load_rows
 
 logger = logging.getLogger(__name__)
@@ -265,6 +266,12 @@ async def lifespan(_app: FastAPI):
         # account didn't exist yet until bootstrap_admin() just created it.
         # See db.py's promote_bootstrap_admin_to_super_admin docstring.
         promote_bootstrap_admin_to_super_admin(db)
+        # Same "fresh-install first call was a no-op" reasoning as the
+        # promote_bootstrap_admin_to_super_admin call just above -- see
+        # permissions.py's migrate_users_to_role_groups docstring and
+        # db.py's _seed_rbac (which already ran this once, but on a
+        # brand-new database there were no users yet at that point).
+        migrate_users_to_role_groups(db)
         # Load the DB-backed settings override (Settings page) into the
         # in-process cache templates/mailer.py/auth.py actually read, then
         # prune the audit log per whatever retention that config specifies.
@@ -361,7 +368,7 @@ app.include_router(diagnostics.router)
 app.include_router(health.router)
 app.include_router(users.router)
 app.include_router(geo.router)
-app.include_router(teams.router)
+app.include_router(groups.router)
 app.include_router(settings_routes.router)
 app.include_router(roles.router)
 app.include_router(me_vpn.router)

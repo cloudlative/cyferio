@@ -19,8 +19,8 @@ from ..geo_validators import valid_asn_list as _valid_asn_list
 from ..geo_validators import valid_city_list as _valid_city_list
 from ..geo_validators import valid_country_list as _valid_country_list
 from ..geo_validators import valid_ip_list as _valid_ip_list
-from ..models import Gender, Role, RoleDef, Team, User, VpnProfileLink
-from ..permissions import require_permission
+from ..models import Gender, Group, User, VpnProfileLink
+from ..permissions import has_permission, require_permission
 from ..policy_store import PolicyValidationError
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -35,29 +35,12 @@ require_admin = require_permission("users", "manage")  # former auth.require_adm
 require_mfa_admin = require_permission("mfa_admin", "manage")
 
 
-def _resolve_role(db: Session, slug: str) -> RoleDef:
-    """Same validate-then-resolve pattern as _resolve_teams below, for the
-    role slug a CreateUserRequest/UpdateUserRequest carries -- kept as a
-    plain slug string (not a role_id int) so the existing users.html
-    <select> and any external API caller keeps working unchanged through
-    this migration; Roles Management (Phase 5) can still create/reference
-    custom roles by slug the same way."""
-    role = db.query(RoleDef).filter(RoleDef.slug == slug.strip().lower()).first()
-    if role is None:
-        raise HTTPException(status_code=400, detail=f"No such role: '{slug}'.")
-    return role
-
-
-def _resolve_creatable_role(db: Session, slug: str) -> RoleDef:
-    """Same as _resolve_role, but additionally rejects "super_admin" --
-    reserved exclusively for the bootstrap admin account (see
-    db.py's _promote_bootstrap_admin_to_super_admin), never assignable via
-    Add User or an admin edit. Server-side backstop behind the Add-User
-    dropdown already excluding it client-side (see users.html)."""
-    role = _resolve_role(db, slug)
-    if role.slug == "super_admin":
-        raise HTTPException(status_code=400, detail="The Super Admin role can't be assigned -- it's reserved for the bootstrap admin account.")
-    return role
+# _resolve_role/_resolve_creatable_role (which used to validate a direct
+# role slug from CreateUserRequest/UpdateUserRequest) were removed along
+# with those requests' `role` field -- see this file's group-only
+# permissions changes. A role is no longer ever assigned directly to a
+# user through this API; only to a Group (routes/groups.py), which a user
+# then joins via `group_ids` below.
 
 
 _PW_UPPER_RE = re.compile(r"[A-Z]")
@@ -302,26 +285,32 @@ def _valid_mac_format(v: str) -> str:
         )
 
 
-def _resolve_teams(db: Session, team_ids: list[int]) -> list[Team]:
-    """Validates every id in team_ids references an existing Team, and
-    returns the Team rows themselves (for assigning to User.teams). Used by
+def _resolve_groups(db: Session, group_ids: list[int]) -> list[Group]:
+    """Validates every id in group_ids references an existing Group, and
+    returns the Group rows themselves (for assigning to User.groups). Used by
     both the admin-edit and self-service endpoints so a client can only
-    ever land a user in real teams, never arbitrary free text or bogus ids.
-    A user can belong to zero, one, or several teams at once."""
-    if not team_ids:
+    ever land a user in real groups, never arbitrary free text or bogus ids.
+    A user can belong to zero, one, or several groups at once."""
+    if not group_ids:
         return []
-    teams = db.query(Team).filter(Team.id.in_(team_ids)).all()
-    found_ids = {t.id for t in teams}
-    missing = [tid for tid in team_ids if tid not in found_ids]
+    groups = db.query(Group).filter(Group.id.in_(group_ids)).all()
+    found_ids = {t.id for t in groups}
+    missing = [tid for tid in group_ids if tid not in found_ids]
     if missing:
-        raise HTTPException(status_code=400, detail=f"No such team(s): {missing}")
-    return teams
+        raise HTTPException(status_code=400, detail=f"No such group(s): {missing}")
+    return groups
 
 
 class CreateUserRequest(BaseModel):
     username: str
     password: str
-    role: str = "viewer"  # a RoleDef slug -- resolved/validated in create_user() via _resolve_role
+    # No direct role field -- under the group-only permission model a
+    # user's permissions come exclusively from group membership (see
+    # permissions.py's effective_role_ids), so setting a personal role here
+    # would silently do nothing. Grant access via `group_ids` below
+    # (assigning to an existing, role-bearing group), or leave empty and
+    # organize the account into a group afterward from the Groups page --
+    # a user in no group has zero permissions until then, by design.
     first_name: str
     last_name: str | None = None
     gender: Gender = Gender.unspecified
@@ -349,7 +338,7 @@ class CreateUserRequest(BaseModel):
     # own field below, reusing the exact same "attach" semantics via
     # create_user()'s own inlined version of link_vpn_profile()'s logic.
     link_existing_vpn_profile: str | None = None
-    team_ids: list[int] = []
+    group_ids: list[int] = []
 
     # "Send VPN Profile via Email" checkbox (Add User form) -- best-effort,
     # fire-and-forget: see create_user()'s own handling below for why a
@@ -555,7 +544,9 @@ class UpdateUserRequest(BaseModel):
     """Admin-only edits to another (or their own, for non-guardrailed
     fields) user's account. Password here is an unconditional admin reset --
     no current-password check, unlike the self-service /me endpoint below."""
-    role: str | None = None  # a RoleDef slug -- resolved/validated in update_user() via _resolve_role
+    # No `role` field -- under the group-only permission model, editing a
+    # user's personal role would silently do nothing (see permissions.py's
+    # effective_role_ids). Grant/revoke access via `group_ids` below.
     is_active: bool | None = None
     deleted: bool | None = None  # True = soft-delete, False = restore
     password: str | None = None
@@ -564,7 +555,7 @@ class UpdateUserRequest(BaseModel):
     gender: Gender | None = None
     email: str | None = None
     phone: str | None = None
-    team_ids: list[int] | None = None  # explicit [] = clear all teams; see model_fields_set usage below
+    group_ids: list[int] | None = None  # explicit [] = clear all groups; see model_fields_set usage below
 
     # Edit User's "Force Password Reset on Next Login" checkbox -- an
     # explicit, independent toggle for User.must_reset_password, on top of
@@ -598,7 +589,7 @@ class UpdateUserRequest(BaseModel):
     # linked VPN profile's policy (a no-op if this user has no linked
     # profile yet, e.g. the rare cert-created-but-DB-failed edge case).
     # None means "not provided in this PATCH" (model_fields_set decides,
-    # same convention as team_ids/allowed_login_* above); an explicit []/null
+    # same convention as group_ids/allowed_login_* above); an explicit []/null
     # clears the restriction.
     allowed_os: list[str] | None = None
     bandwidth_monthly_gb: float | None = None
@@ -769,14 +760,24 @@ class UpdateProfileRequest(BaseModel):
         return _valid_phone(v)
 
 
-def _role_slug(u: User) -> str:
-    """u.role_def is the dynamic-RBAC role (see permissions.py); it's set
-    for every user going forward (create_user always sets it, and
-    migrate_user_roles backfills every pre-existing row on startup -- see
-    db.py's _seed_rbac), but this falls back to the legacy `role` enum
-    column for the narrow in-flight-request window before that backfill
-    runs on a fresh deploy, rather than ever returning None."""
-    return u.role_def.slug if u.role_def is not None else u.role.value
+def _effective_role_names(u: User) -> list[str]:
+    """Names of every role this user's group memberships actually grant --
+    the union of RoleDef.name across every group they belong to, i.e. the
+    same role set permissions.py's effective_role_ids() would resolve to
+    (kept as a plain in-Python computation over already-loaded
+    relationships rather than calling effective_role_ids() itself, so this
+    doesn't need a `db` session threaded through every _serialize() caller;
+    correct as long as the caller eager-loads User.groups and
+    Group.role_defs -- see _USERS_LIST_OPTIONS below). Deliberately NOT
+    u.role/u.role_id -- neither is consulted for permission checks any
+    more (see effective_role_ids' docstring), so surfacing either here
+    would be stale/misleading data presented as if it were authoritative.
+
+    HARDCODED EXEMPTION -- super_admin (see User.effective_role_names'
+    own docstring in models.py, reused here): that account's access never
+    depends on group membership, so it must show its real role here too,
+    not a misleading "no access" for having zero groups."""
+    return u.effective_role_names
 
 
 def _serialize(u: User, policies: dict | None = None) -> dict:
@@ -791,8 +792,7 @@ def _serialize(u: User, policies: dict | None = None) -> dict:
     return {
         "id": u.id,
         "username": u.username,
-        "role": _role_slug(u),
-        "role_name": u.role_def.name if u.role_def is not None else u.role.value.capitalize(),
+        "effective_roles": _effective_role_names(u),
         "is_active": u.is_active,
         "is_bootstrap_admin": u.is_bootstrap_admin,
         "must_reset_password": u.must_reset_password,
@@ -806,8 +806,8 @@ def _serialize(u: User, policies: dict | None = None) -> dict:
         "gender": u.gender.value if u.gender else Gender.unspecified.value,
         "email": u.email,
         "phone": u.phone,
-        "team_ids": [t.id for t in u.teams],
-        "teams": [t.name for t in u.teams],
+        "group_ids": [t.id for t in u.groups],
+        "groups": [t.name for t in u.groups],
         # Portal Login Restrictions -- User columns, enforced only by
         # routes/auth.py's login check. Independent from the VPN Access
         # Restrictions block below; see
@@ -853,26 +853,41 @@ def _serialize(u: User, policies: dict | None = None) -> dict:
 
 
 def _guard_against_self_lockout(db: Session, target: User, admin: User, *, removing: bool) -> None:
-    """Shared guardrail for anything that would demote/deactivate/delete an
-    admin: can't do it to yourself, and can't do it if it would leave zero
-    active, non-deleted admins."""
+    """Shared guardrail for anything that would deactivate/delete a user
+    who can currently manage users: can't do it to yourself, and can't do
+    it if it would leave nobody else able to manage users.
+
+    Under the group-only permission model "admin" is no longer a single
+    role to query for -- "can manage users" is whatever
+    has_permission(db, u, "users", "manage") resolves to via that user's
+    group membership (see permissions.py's effective_role_ids). Checking
+    every active user in Python (rather than a SQL join on a role column,
+    the old approach) is the only correct way to ask this now, since
+    permission resolution is set-based (union across every group a user
+    belongs to), not a single joinable column."""
     if not removing:
         return
     if target.id == admin.id:
         raise HTTPException(status_code=400, detail="You can't demote, deactivate, or delete your own account.")
-    remaining_admins = db.query(User).join(RoleDef, User.role_id == RoleDef.id).filter(
-        RoleDef.slug == "admin", User.is_active.is_(True), User.deleted.is_(False), User.id != target.id
-    ).count()
+    others = db.query(User).filter(User.is_active.is_(True), User.deleted.is_(False), User.id != target.id).all()
+    remaining_admins = sum(1 for u in others if has_permission(db, u, "users", "manage"))
     if remaining_admins == 0:
-        raise HTTPException(status_code=400, detail="Can't remove the last active admin account.")
+        raise HTTPException(status_code=400, detail="Can't remove the last active user able to manage users.")
 
 
-# selectinload(role_def)/(teams): _serialize() (above) touches both per user
-# -- without eager-loading, each is a separate lazy-fired query the first
-# time it's touched, i.e. up to 2 extra queries per user (N+1) on every
-# call to either endpoint below. This batches each into one extra query
-# total, up front, regardless of how many users are returned.
-_USERS_LIST_OPTIONS = (selectinload(User.role_def), selectinload(User.teams), selectinload(User.vpn_profile_link))
+# selectinload(groups).selectinload(role_defs): _serialize() (above, via
+# _effective_role_names) walks every user's groups' role_defs -- without
+# eager-loading both hops, that's a lazy-fired query per group per user
+# (N+1 on top of N+1) on every call to either endpoint below. This batches
+# it into two extra queries total, up front, regardless of how many users
+# are returned. role_def IS still loaded here (unlike a prior draft of
+# this line) -- _effective_role_names' super_admin exemption check needs
+# it.
+_USERS_LIST_OPTIONS = (
+    selectinload(User.role_def),
+    selectinload(User.groups).selectinload(Group.role_defs),
+    selectinload(User.vpn_profile_link),
+)
 
 
 @router.get("")
@@ -929,13 +944,13 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
                 setattr(user, field, value)
                 changes.append(field)
 
-    # Team membership is deliberately NOT self-service for anyone (not even
+    # Group membership is deliberately NOT self-service for anyone (not even
     # admins/editors editing their own account) -- UpdateProfileRequest has
-    # no team_ids field at all. Assignment happens only through admin/editor
-    # user management (PATCH /api/users/{id}'s UpdateUserRequest.team_ids),
+    # no group_ids field at all. Assignment happens only through admin/editor
+    # user management (PATCH /api/users/{id}'s UpdateUserRequest.group_ids),
     # per the "Regular users should not be able to assign or modify their
-    # own team membership" requirement -- see profile.html, which shows
-    # team(s) read-only.
+    # own group membership" requirement -- see profile.html, which shows
+    # group(s) read-only.
 
     if body.new_password:
         if not body.current_password or not verify_password(body.current_password, user.password_hash):
@@ -995,8 +1010,7 @@ def update_my_profile(body: UpdateProfileRequest, user: User = Depends(require_u
 def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == body.username).first() is not None:
         raise HTTPException(status_code=409, detail=f"Username '{body.username}' already exists.")
-    teams = _resolve_teams(db, body.team_ids)
-    role_def = _resolve_creatable_role(db, body.role)
+    groups = _resolve_groups(db, body.group_ids)
 
     # Two mutually-exclusive ways to give this new user a VPN profile (see
     # CreateUserRequest._exactly_one_profile_source): provision a brand new
@@ -1033,23 +1047,21 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
             log_action(db, admin, "create_user", target=body.username, detail=e.message, success=False)
             raise HTTPException(status_code=400, detail=e.message)
 
-    # The legacy `role` enum column (Role: admin/editor/viewer only) can't
-    # represent a custom or "User" self-service role -- role_id (below) is what
-    # every permission check actually reads now, so this is just a
-    # best-effort placeholder for that column until it's removed in a later
-    # cleanup (see permissions.py's migrate_user_roles docstring).
-    legacy_role = Role(role_def.slug) if role_def.slug in Role._value2member_map_ else Role.viewer
+    # role/role_id both deliberately left at their column defaults
+    # (Role.viewer / NULL) -- neither is consulted for permission checks any
+    # more (see permissions.py's effective_role_ids), so there's nothing
+    # meaningful to set here. This new account's actual permissions come
+    # entirely from `groups` above; a user created into zero groups has
+    # zero permissions until an admin adds them to one.
     user = User(
         username=body.username,
         password_hash=hash_password(body.password),
-        role=legacy_role,
-        role_id=role_def.id,
         first_name=body.first_name,
         last_name=body.last_name,
         gender=body.gender,
         email=body.email,
         phone=body.phone,
-        teams=teams,
+        groups=groups,
         # Every newly-provisioned account must change its password on
         # first login, regardless of how the admin set it -- see
         # models.py's must_reset_password docstring for the full policy.
@@ -1115,7 +1127,8 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
                    f"The VPN profile was NOT rolled back -- use Edit User's \"Attach existing VPN profile\" to link it "
                    f"to an account manually.",
         )
-    log_action(db, admin, "create_user", target=body.username, detail=f"role={role_def.slug}")
+    log_action(db, admin, "create_user", target=body.username,
+               detail=f"groups={','.join(g.name for g in groups)}" if groups else "groups=(none)")
     if body.monitoring_enabled:
         log_action(db, admin, "device_monitoring_enabled", target=effective_client_name,
                    detail=f"threshold_minutes={body.monitoring_offline_threshold_minutes} (set at user creation)")
@@ -1166,7 +1179,7 @@ def create_user(body: CreateUserRequest, admin: User = Depends(require_admin), d
             body=(
                 f"{admin.username} created a new user account.\n\n"
                 f"Username: {body.username}\n"
-                f"Role: {role_def.name}\n"
+                f"Groups: {', '.join(g.name for g in groups) if groups else '(none -- no permissions until assigned)'}\n"
                 f"Email: {body.email}\n"
                 f"VPN profile: {effective_client_name}"
                 f"{' (existing profile, linked)' if body.link_existing_vpn_profile else ''}\n"
@@ -1224,44 +1237,35 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
     # by another admin, same as before this rule existed, subject only to
     # the last-admin-standing/self-lockout guardrails below.
     if target.is_bootstrap_admin:
-        if body.role is not None and body.role.strip().lower() != "super_admin":
-            raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be demoted.")
         if body.is_active is False:
             raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deactivated.")
         if body.deleted is True:
             raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deleted.")
 
     # Guardrails against an admin locking everyone (including themselves)
-    # out: demoting, deactivating, or deleting the last active admin (or
-    # yourself) is blocked, regardless of which of those three the request
-    # is doing -- this is the general rule that predates the bootstrap-admin
-    # special case above, and still applies to every admin (bootstrap or
-    # not), including situations the unconditional bootstrap check above
-    # doesn't cover (e.g. a non-bootstrap admin demoting/deactivating/
-    # deleting themselves, or removing the last other active admin).
-    would_remove = _role_slug(target) == "admin" and (
-        (body.role is not None and body.role.strip().lower() != "admin")
-        or body.is_active is False
-        or body.deleted is True
+    # out: deactivating or deleting the last remaining user who can manage
+    # users (or yourself) is blocked. FORK/DECISION: under the group-only
+    # permission model there's no more single "role" to check for
+    # "admin-ness" -- this now asks the real question directly, via
+    # has_permission(db, target, "users", "manage") (does this account's
+    # CURRENT group membership actually grant users:manage right now,
+    # matching what require_admin above checks). Deliberately does NOT
+    # additionally simulate the effect of an in-this-same-request
+    # `group_ids` change (e.g. an admin removing the last users:manage
+    # group from the last such user) -- doing that precisely would mean
+    # duplicating effective_role_ids' resolution against a hypothetical,
+    # not-yet-committed group set. The existing behavior before this
+    # change had the identical gap (a team's role assignment being
+    # removed elsewhere was never guarded against either) -- this keeps
+    # that same, pre-existing scope rather than expanding this guard's
+    # reach as a side effect of the rename. is_active/deleted are the
+    # cases actually guarded here, same as before.
+    would_remove = has_permission(db, target, "users", "manage") and (
+        body.is_active is False or body.deleted is True
     )
     _guard_against_self_lockout(db, target, admin, removing=would_remove)
 
     changes = []
-    if body.role is not None:
-        # Non-bootstrap targets go through the same "super_admin isn't
-        # assignable" guard as create_user -- the bootstrap-admin block
-        # above already enforces the opposite direction (that account's
-        # role can ONLY ever be set to "super_admin", never anything else),
-        # so by the time a bootstrap target reaches here body.role is
-        # necessarily already "super_admin" and the plain resolver is fine.
-        new_role_def = _resolve_role(db, body.role) if target.is_bootstrap_admin else _resolve_creatable_role(db, body.role)
-        if new_role_def.id != target.role_id:
-            changes.append(f"role {_role_slug(target)}->{new_role_def.slug}")
-            target.role_id = new_role_def.id
-            # Keep the legacy enum column in sync where representable, same
-            # placeholder rule as create_user() above -- see that comment.
-            if new_role_def.slug in Role._value2member_map_:
-                target.role = Role(new_role_def.slug)
     became_inactive = became_active = False
     if body.is_active is not None and body.is_active != target.is_active:
         changes.append(f"is_active {target.is_active}->{body.is_active}")
@@ -1321,11 +1325,20 @@ def update_user(user_id: int, body: UpdateUserRequest, admin: User = Depends(req
             if value != getattr(target, field):
                 setattr(target, field, value)
                 changes.append(field)
-    if "team_ids" in body.model_fields_set:
-        new_teams = _resolve_teams(db, body.team_ids or [])
-        if {t.id for t in new_teams} != {t.id for t in target.teams}:
-            target.teams = new_teams
-            changes.append("teams")
+    # Group membership is deliberately excluded from the bootstrap admin's
+    # (super_admin's) "Not modifiable" protections above (see this
+    # function's other is_bootstrap_admin guards) even though group
+    # membership never actually affects that account's access either way
+    # (see permissions.py's effective_role_ids hardcoded exemption) --
+    # nobody but the account itself should be able to change ANY of its
+    # attributes, group membership included, matching the "not even a
+    # regular admin can touch this account" posture the rest of this
+    # function already enforces.
+    if "group_ids" in body.model_fields_set and not target.is_bootstrap_admin:
+        new_groups = _resolve_groups(db, body.group_ids or [])
+        if {t.id for t in new_groups} != {t.id for t in target.groups}:
+            target.groups = new_groups
+            changes.append("groups")
     if "restrict_login_by_country" in body.model_fields_set and body.restrict_login_by_country != target.restrict_login_by_country:
         target.restrict_login_by_country = body.restrict_login_by_country
         changes.append(f"restrict_login_by_country {target.restrict_login_by_country}")
@@ -1601,7 +1614,7 @@ def delete_user(user_id: int, admin: User = Depends(require_admin), db: Session 
         raise HTTPException(status_code=404, detail="User not found.")
     if target.is_bootstrap_admin:
         raise HTTPException(status_code=400, detail="The bootstrap admin account cannot be deleted.")
-    _guard_against_self_lockout(db, target, admin, removing=(_role_slug(target) == "admin"))
+    _guard_against_self_lockout(db, target, admin, removing=has_permission(db, target, "users", "manage"))
     target.deleted = True
     target.deleted_at = datetime.now(timezone.utc)
     target.is_active = False

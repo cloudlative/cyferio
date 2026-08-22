@@ -1,0 +1,470 @@
+{% extends "base.html" %}
+{% block title %}Groups — {{ app_settings.app_name }}{% endblock %}
+{% block content %}
+<div class="toolbar" style="margin-bottom:6px">
+	<div class="toolbar-title"><h1 style="margin:0">Groups</h1></div>
+	<button class="btn-secondary" id="refresh-btn">Refresh</button>
+</div>
+<p class="page-subtitle" style="margin-top:-10px">Portal users grouped by group — a user can belong to several groups at once. Click a group to see and manage its members.</p>
+
+<div class="stat-grid" id="summary-grid" style="margin-bottom:24px">
+	<div class="stat-card accent-total"><div class="stat-value" id="stat-group-count">—</div><div class="stat-label">Groups</div></div>
+	<div class="stat-card accent-online"><div class="stat-value" id="stat-assigned-count">—</div><div class="stat-label">Assigned Users</div></div>
+	<div class="stat-card accent-rejected"><div class="stat-value" id="stat-unassigned-count">—</div><div class="stat-label">Unassigned Users</div></div>
+</div>
+
+{% if can_manage_groups %}
+<div class="card">
+	<h2>Create a Group</h2>
+	<form id="create-group-form">
+		<div class="form-row">
+			<div class="field">
+				<label for="new-group-name">Group Name</label>
+				<input type="text" id="new-group-name" required maxlength="64" placeholder="e.g. Infrastructure">
+			</div>
+			<div class="field">
+				<label for="new-group-slug">Slug <span class="muted">(auto-filled, editable — permanent)</span>
+					<button type="button" class="info-tip" data-tip="Used to identify this group in future reporting views. Auto-fills from the group name and can be edited now, but can't be changed once the group is created -- pick it carefully." aria-label="More info on Slug">i</button>
+				</label>
+				<input type="text" id="new-group-slug" maxlength="64" placeholder="e.g. infrastructure">
+			</div>
+		</div>
+		<div class="form-row" style="margin-top:14px">
+			<div class="field" style="flex:2">
+				<label for="new-group-description">Description <span class="muted">(optional)</span></label>
+				<input type="text" id="new-group-description" maxlength="512" placeholder="e.g. Networking, servers, and cloud infra">
+			</div>
+			<div class="field">
+				<label for="new-group-tags">Tags <span class="muted">(optional, comma-separated)</span></label>
+				<input type="text" id="new-group-tags" placeholder="e.g. infra, on-call">
+			</div>
+		</div>
+		<p class="muted" style="margin:8px 0 0;font-size:0.82rem">Slug/description/tags are stored now for future reporting (bandwidth, active users, connection stats by group) -- no reporting views use them yet.</p>
+		<div class="form-row" style="margin-top:14px">
+			<button type="submit" class="btn-primary">Create Group</button>
+			<button type="button" class="btn-secondary" id="create-group-clear">Clear</button>
+		</div>
+	</form>
+</div>
+{% endif %}
+
+<div class="card">
+	<div class="toolbar"><h2 style="margin:0">All Groups</h2></div>
+	<div id="group-grid"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card" id="group-detail-card" style="display:none">
+	<div class="toolbar">
+		<div class="toolbar-title"><h2 style="margin:0" id="group-detail-title">Group</h2><span class="count-badge" id="group-detail-count">— members</span></div>
+		<div>
+			{% if can_manage_groups %}
+			<button class="btn-secondary btn-sm" id="group-edit-toggle-btn">Edit Details</button>
+			<button class="btn-danger btn-sm" id="group-delete-btn">Delete Group</button>
+			{% endif %}
+		</div>
+	</div>
+	<div id="group-detail-meta" style="margin-bottom:14px"></div>
+	{% if can_manage_groups %}
+	<div class="form-row" id="group-edit-panel" style="display:none;margin-bottom:16px">
+		<div class="field">
+			<label for="edit-group-name">Group Name</label>
+			<input type="text" id="edit-group-name" maxlength="64">
+		</div>
+		<div class="field">
+			<label for="edit-group-slug">Slug</label>
+			<input type="text" id="edit-group-slug" maxlength="64">
+		</div>
+		<div class="field" style="flex:2">
+			<label for="edit-group-description">Description</label>
+			<input type="text" id="edit-group-description" maxlength="512">
+		</div>
+		<div class="field">
+			<label for="edit-group-tags">Tags <span class="muted">(comma-separated)</span></label>
+			<input type="text" id="edit-group-tags">
+		</div>
+		<button class="btn-primary" id="group-edit-save-btn" disabled>Save Details</button>
+	</div>
+	{% endif %}
+	{% if can_manage_groups %}
+	<form id="add-member-form" class="form-row" style="margin-bottom:16px">
+		<div class="field" style="flex:2">
+			<label for="add-member-select">Add a member</label>
+			<select id="add-member-select"></select>
+		</div>
+		<button type="submit" class="btn-secondary">Add to Group</button>
+	</form>
+	{% endif %}
+	<div id="group-detail-table"></div>
+	{% if can_manage_groups %}
+	<div id="group-roles-panel" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+		<h3 style="margin:0 0 4px">Assigned Roles</h3>
+		<p class="muted" style="margin:0 0 12px;font-size:0.82rem">Groups are the only source of permissions -- every role assigned here is inherited by every current member of this group. A member of no group, or of group(s) with no role assigned, has no access.</p>
+		<div id="group-roles-chips" style="margin-bottom:12px"></div>
+		<form id="add-group-role-form" class="form-row">
+			<div class="field" style="flex:2">
+				<label for="add-group-role-select">Assign a role</label>
+				<select id="add-group-role-select"></select>
+			</div>
+			<button type="submit" class="btn-secondary">Assign Role</button>
+		</form>
+	</div>
+	{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Two distinct permission checks, not one: every /api/groups write (create/
+// edit/delete a group, add/remove a member) is gated on groups:manage (see
+// routes/groups.py), so that's what drives every write control below. The
+// member-picker dropdown is the one exception -- it needs GET /api/users,
+// which is gated on users:manage (a separate object) -- so a role with
+// groups:manage but not users:manage can still reach every button here, it
+// just won't be able to populate "Add a member" (falls back to "No other
+// users available", handled below) until it's also granted users:manage.
+const canManageGroups = {{ "true" if can_manage_groups else "false" }};
+const canManageUsers = {{ "true" if is_admin else "false" }};
+let lastGroups = [];
+let allUsers = [];
+let allRoles = []; // populated only when canManageGroups -- GET /api/groups/available-roles is gated on groups:manage
+let currentGroupId = "unassigned";
+let groupDetailOpen = false; // tracks whether the detail card is actually showing, so clicking the already-open group's row again toggles it closed
+let groupEditDirty; // assigned below, only when canManageGroups -- the edit panel doesn't exist in the DOM otherwise
+
+// Mirrors routes/groups.py's _valid_slug (lowercase letters/numbers/hyphens
+// only, no leading/trailing/doubled hyphens) -- used both to auto-fill the
+// Create form's slug from the group name, and to keep that suggestion
+// editable rather than locked to the name.
+function slugify(name) {
+	return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function parseTagsInput(v) {
+	return v.split(",").map(t => t.trim()).filter(Boolean);
+}
+
+function renderSummary() {
+	const namedGroups = lastGroups.filter(t => t.id != null);
+	const unassigned = lastGroups.find(t => t.id == null);
+	document.getElementById("stat-group-count").textContent = namedGroups.length;
+	document.getElementById("stat-assigned-count").textContent = namedGroups.reduce((sum, t) => sum + t.count, 0);
+	document.getElementById("stat-unassigned-count").textContent = unassigned ? unassigned.count : 0;
+}
+
+async function loadGroups() {
+	const grid = document.getElementById("group-grid");
+	try {
+		const [groups, users, roles] = await Promise.all([
+			apiFetch("/api/groups"),
+			canManageUsers ? apiFetch("/api/users") : Promise.resolve([]),
+			canManageGroups ? apiFetch("/api/groups/available-roles") : Promise.resolve([]),
+		]);
+		lastGroups = groups;
+		// Excludes the bootstrap admin (super_admin) -- that account's
+		// access is a hardcoded exemption (see permissions.py's
+		// effective_role_ids) that never depends on, and is never offered
+		// through, group membership -- it shouldn't appear as an "add to
+		// this group" candidate at all.
+		if (canManageUsers) allUsers = users.filter(u => !u.is_bootstrap_admin);
+		if (canManageGroups) allRoles = roles;
+		renderSummary();
+		if (lastGroups.length === 0) {
+			grid.innerHTML = '<div class="empty-state">No groups yet.</div>';
+			return;
+		}
+		// A plain table, not a KPI-card grid: group names vary a lot in
+		// length (unlike a fixed short number), so a card grid sized by
+		// auto-fit ended up with uneven row widths and long names either
+		// truncating or colliding with the hover hint. A table keeps every
+		// row's columns aligned regardless of name length, and matches the
+		// list layout used everywhere else in the app (Clients, Revoked,
+		// Users). The bar next to each count is a genuine at-a-glance
+		// signal (group size relative to the largest group), not decoration.
+		const maxCount = Math.max(1, ...lastGroups.map(t => t.count));
+		const sorted = [...lastGroups].sort((a, b) => {
+			if (a.id == null) return 1;   // Unassigned always last
+			if (b.id == null) return -1;
+			return b.count - a.count;
+		});
+		grid.innerHTML = `<table>
+			<thead><tr><th>Group</th><th>Members</th><th></th></tr></thead>
+			<tbody>${sorted.map(t => {
+				const isUnassigned = t.id == null;
+				const pct = t.count === 0 ? 0 : Math.max(6, Math.round((t.count / maxCount) * 100));
+				return `
+				<tr class="group-row ${isUnassigned ? "row-dim" : ""}" data-group-id="${isUnassigned ? "unassigned" : t.id}" tabindex="0">
+					<td>${isUnassigned
+						? `<span class="muted" style="font-style:italic">${escapeHtml(t.group)}</span>`
+						: `<span style="font-weight:700">${escapeHtml(t.group)}</span>`}</td>
+					<td>
+						<div class="group-row-count">
+							<span class="mono">${t.count}</span>
+							<span class="group-row-bar"><span class="group-row-bar-fill${isUnassigned ? " muted-fill" : ""}" style="width:${pct}%"></span></span>
+						</div>
+					</td>
+					<td class="text-right"><span class="group-row-view">View →</span></td>
+				</tr>`;
+			}).join("")}</tbody>
+		</table>`;
+		grid.querySelectorAll("[data-group-id]").forEach(row => {
+			const toggle = () => {
+				if (groupDetailOpen && String(currentGroupId) === row.dataset.groupId) {
+					closeGroupDetail();
+				} else {
+					showGroup(row.dataset.groupId);
+				}
+			};
+			row.addEventListener("click", toggle);
+			row.addEventListener("keydown", (ev) => {
+				if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggle(); }
+			});
+		});
+		const fromHash = decodeURIComponent(location.hash.replace(/^#/, ""));
+		if (fromHash && lastGroups.some(t => String(t.id == null ? "unassigned" : t.id) === fromHash)) showGroup(fromHash);
+	} catch (e) {
+		toast(e.message, "error");
+	}
+}
+
+function closeGroupDetail() {
+	groupDetailOpen = false;
+	document.getElementById("group-detail-card").style.display = "none";
+	if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+}
+
+function showGroup(id) {
+	const group = lastGroups.find(t => String(t.id == null ? "unassigned" : t.id) === String(id));
+	if (!group) return;
+	currentGroupId = id;
+	groupDetailOpen = true;
+	location.hash = encodeURIComponent(id);
+	document.getElementById("group-detail-card").style.display = "";
+	document.getElementById("group-detail-title").textContent = group.group;
+	document.getElementById("group-detail-count").textContent = `${group.count} member${group.count === 1 ? "" : "s"}`;
+	const deleteBtn = document.getElementById("group-delete-btn");
+	const addForm = document.getElementById("add-member-form");
+	const isRealGroup = group.id != null;
+	const metaEl = document.getElementById("group-detail-meta");
+	if (isRealGroup) {
+		const bits = [`<span class="mono muted">${escapeHtml(group.slug || "—")}</span>`];
+		if (group.description) bits.push(escapeHtml(group.description));
+		metaEl.innerHTML = `<p class="muted" style="margin:0">${bits.join(" — ")}</p>` +
+			(group.tags && group.tags.length ? `<div class="restriction-chips" style="margin-top:6px">${group.tags.map(t => `<span class="restriction-chip">${escapeHtml(t)}</span>`).join("")}</div>` : "");
+	} else {
+		metaEl.innerHTML = "";
+	}
+	const editToggleBtn = document.getElementById("group-edit-toggle-btn");
+	const editPanel = document.getElementById("group-edit-panel");
+	if (editToggleBtn) {
+		editToggleBtn.style.display = isRealGroup ? "" : "none";
+		editPanel.style.display = "none"; // always collapsed on switching groups
+		if (isRealGroup) {
+			document.getElementById("edit-group-name").value = group.group;
+			document.getElementById("edit-group-slug").value = group.slug || "";
+			document.getElementById("edit-group-description").value = group.description || "";
+			document.getElementById("edit-group-tags").value = (group.tags || []).join(", ");
+			groupEditDirty.arm();
+		}
+	}
+	if (deleteBtn) {
+		deleteBtn.style.display = isRealGroup ? "" : "none";
+		deleteBtn.disabled = group.count > 0;
+		deleteBtn.title = group.count > 0 ? "Remove all members before deleting a group." : "";
+	}
+	if (addForm) {
+		addForm.style.display = isRealGroup ? "" : "none";
+		if (isRealGroup) {
+			const memberIds = new Set(group.members.map(m => m.id));
+			const candidates = allUsers.filter(u => !memberIds.has(u.id));
+			const select = document.getElementById("add-member-select");
+			select.innerHTML = candidates.length
+				? candidates.map(u => `<option value="${u.id}">${escapeHtml(u.display_name)} (${escapeHtml(u.username)})</option>`).join("")
+				: '<option value="">No other users available</option>';
+			select.disabled = candidates.length === 0;
+			addForm.querySelector("button[type=submit]").disabled = candidates.length === 0;
+		}
+	}
+	const el = document.getElementById("group-detail-table");
+	if (group.members.length === 0) {
+		el.innerHTML = '<div class="empty-state">No members in this group.</div>';
+	} else {
+		el.innerHTML = `<table>
+			<thead><tr><th>User</th><th>Effective Role(s)</th><th>Status</th>${canManageGroups && isRealGroup ? "<th></th>" : ""}</tr></thead>
+			<tbody>${group.members.map(m => `
+				<tr data-user-id="${m.id}">
+					<td>${escapeHtml(m.display_name)} <span class="muted" style="font-size:0.82em">(${escapeHtml(m.username)})</span></td>
+					<td>${m.effective_roles.length ? m.effective_roles.map(r => `<span class="role-badge">${escapeHtml(r)}</span>`).join(" ") : '<span class="muted">None</span>'}</td>
+					<td>${m.is_active ? '<span class="status-pill status-online">Active</span>' : '<span class="status-pill status-revoked">Disabled</span>'}</td>
+					${canManageGroups && isRealGroup ? `<td class="text-right"><button class="btn-secondary btn-sm remove-member-btn">Remove from Group</button></td>` : ""}
+				</tr>`).join("")}</tbody>
+		</table>`;
+		if (canManageGroups && isRealGroup) {
+			el.querySelectorAll(".remove-member-btn").forEach(btn => {
+				btn.addEventListener("click", async () => {
+					const userId = btn.closest("tr").dataset.userId;
+					try {
+						await apiFetch(`/api/groups/${group.id}/members/${userId}`, { method: "DELETE" });
+						toast("Member removed from group.");
+						await loadGroups();
+						showGroup(currentGroupId);
+					} catch (e) {
+						toast(e.message, "error");
+					}
+				});
+			});
+		}
+	}
+	if (canManageGroups) renderGroupRoles(group);
+	document.getElementById("group-detail-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+// Assigned Roles panel -- Group-Based Permissions Phase 1. Shown only for a
+// real group (not the synthetic "Unassigned" bucket, which has no id and
+// can't be assigned roles); the panel element itself only exists in the
+// DOM at all when canManageGroups (see the can_manage_groups guard around
+// #group-roles-panel in the template above).
+function renderGroupRoles(group) {
+	const panel = document.getElementById("group-roles-panel");
+	const isRealGroup = group.id != null;
+	panel.style.display = isRealGroup ? "" : "none";
+	if (!isRealGroup) return;
+	const chips = document.getElementById("group-roles-chips");
+	chips.innerHTML = group.roles.length
+		? group.roles.map(r => `
+			<span class="restriction-chip" data-role-id="${r.id}" style="margin:0 6px 6px 0;display:inline-flex;align-items:center;gap:6px">
+				${escapeHtml(r.name)}
+				<button type="button" class="chip-remove-btn remove-group-role-btn" aria-label="Remove ${escapeHtml(r.name)}" style="border:none;background:none;cursor:pointer;padding:0;line-height:1">&times;</button>
+			</span>`).join("")
+		: '<span class="muted" style="font-size:0.85rem">No roles assigned -- members inherit only their own individual role.</span>';
+	chips.querySelectorAll(".remove-group-role-btn").forEach(btn => {
+		btn.addEventListener("click", async () => {
+			const roleId = btn.closest("[data-role-id]").dataset.roleId;
+			try {
+				await apiFetch(`/api/groups/${group.id}/roles/${roleId}`, { method: "DELETE" });
+				toast("Role removed from group.");
+				await loadGroups();
+				showGroup(currentGroupId);
+			} catch (e) {
+				toast(e.message, "error");
+			}
+		});
+	});
+	const assignedIds = new Set(group.roles.map(r => r.id));
+	const candidates = allRoles.filter(r => !assignedIds.has(r.id));
+	const select = document.getElementById("add-group-role-select");
+	select.innerHTML = candidates.length
+		? candidates.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join("")
+		: '<option value="">No other roles available</option>';
+	select.disabled = candidates.length === 0;
+	const form = document.getElementById("add-group-role-form");
+	form.querySelector("button[type=submit]").disabled = candidates.length === 0;
+}
+
+if (canManageGroups) {
+	// Auto-fills the slug from the name as the admin types (slugify), but
+	// only until the slug field is edited by hand -- same "suggest, don't
+	// force" pattern as e.g. GitHub's repo-name -> URL-slug field.
+	let slugTouched = false;
+	document.getElementById("new-group-slug").addEventListener("input", () => { slugTouched = true; });
+	document.getElementById("new-group-name").addEventListener("input", (ev) => {
+		if (!slugTouched) document.getElementById("new-group-slug").value = slugify(ev.target.value);
+	});
+
+	document.getElementById("create-group-clear").addEventListener("click", () => {
+		document.getElementById("create-group-form").reset();
+		slugTouched = false;
+	});
+	document.getElementById("create-group-form").addEventListener("submit", async (ev) => {
+		ev.preventDefault();
+		const name = document.getElementById("new-group-name").value.trim();
+		const slug = document.getElementById("new-group-slug").value.trim();
+		const description = document.getElementById("new-group-description").value.trim();
+		const tags = parseTagsInput(document.getElementById("new-group-tags").value);
+		try {
+			await apiFetch("/api/groups", { method: "POST", body: { name, slug, description: description || null, tags } });
+			toast(`Group '${name}' created.`);
+			document.getElementById("create-group-form").reset();
+			slugTouched = false;
+			loadGroups();
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+
+	groupEditDirty = bindDirtyTracking(document.getElementById("group-edit-panel"), document.getElementById("group-edit-save-btn"));
+	document.getElementById("group-edit-toggle-btn").addEventListener("click", () => {
+		const panel = document.getElementById("group-edit-panel");
+		panel.style.display = panel.style.display === "none" ? "" : "none";
+	});
+	document.getElementById("group-edit-save-btn").addEventListener("click", async () => {
+		const group = lastGroups.find(t => String(t.id) === String(currentGroupId));
+		if (!group || group.id == null) return;
+		const body = {
+			name: document.getElementById("edit-group-name").value.trim(),
+			slug: document.getElementById("edit-group-slug").value.trim(),
+			description: document.getElementById("edit-group-description").value.trim() || null,
+			tags: parseTagsInput(document.getElementById("edit-group-tags").value),
+		};
+		try {
+			await apiFetch(`/api/groups/${group.id}`, { method: "PATCH", body });
+			toast("Group details saved.");
+			await loadGroups();
+			showGroup(currentGroupId);
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+
+	document.getElementById("add-member-form").addEventListener("submit", async (ev) => {
+		ev.preventDefault();
+		const group = lastGroups.find(t => String(t.id) === String(currentGroupId));
+		const userId = document.getElementById("add-member-select").value;
+		if (!group || !userId) return;
+		try {
+			await apiFetch(`/api/groups/${group.id}/members`, { method: "POST", body: { user_id: Number(userId) } });
+			toast("Member added to group.");
+			await loadGroups();
+			showGroup(currentGroupId);
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+
+	document.getElementById("add-group-role-form").addEventListener("submit", async (ev) => {
+		ev.preventDefault();
+		const group = lastGroups.find(t => String(t.id) === String(currentGroupId));
+		const roleId = document.getElementById("add-group-role-select").value;
+		if (!group || !roleId) return;
+		try {
+			await apiFetch(`/api/groups/${group.id}/roles`, { method: "POST", body: { role_id: Number(roleId) } });
+			toast("Role assigned to group.");
+			await loadGroups();
+			showGroup(currentGroupId);
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+
+	document.getElementById("group-delete-btn").addEventListener("click", async () => {
+		const group = lastGroups.find(t => String(t.id) === String(currentGroupId));
+		if (!group || group.id == null) return;
+		if (group.count > 0) {
+			toast("Cannot delete a group with members assigned -- reassign or remove its members first.", "error");
+			return;
+		}
+		const ok = await confirmDialog(`Delete group <strong>${escapeHtml(group.group)}</strong>? This cannot be undone.`, { confirmLabel: "Delete Group" });
+		if (!ok) return;
+		try {
+			const result = await apiFetch(`/api/groups/${group.id}`, { method: "DELETE" });
+			toast(result.message);
+			closeGroupDetail();
+			loadGroups();
+		} catch (e) {
+			toast(e.message, "error");
+		}
+	});
+}
+
+document.getElementById("refresh-btn").addEventListener("click", loadGroups);
+loadGroups();
+</script>
+{% endblock %}

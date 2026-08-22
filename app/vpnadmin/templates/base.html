@@ -110,7 +110,16 @@
 			   for that role, and never applies the `collapsed` class --
 			   the section is simply always expanded, same as before this
 			   feature existed. #}
-			{% set nav_sections_collapsible = user.role_slug != 'user' %}
+			{# Group-only permissions: there's no longer one single "role"
+			   to gate this on -- disable collapse only for the narrowest
+			   case this originally targeted, an account whose ONLY
+			   effective role (from its group membership) is the plain
+			   self-service "User" role, or that has no effective role at
+			   all (a user in zero groups, or in group(s) granting
+			   nothing) -- both see a minimal nav anyway. Anyone with any
+			   OTHER role (alone or combined with "user") keeps the
+			   collapsible sections. #}
+			{% set nav_sections_collapsible = user.effective_role_slugs != ['user'] and user.effective_role_slugs != [] %}
 
 			{# "My Account" is unconditional -- unlike the VPN-profile items
 			   inside it (gated on has_own_vpn_profile, since not every
@@ -190,8 +199,8 @@
 			</div>
 			{% endif %}
 
-			{% if is_admin or can_manage_roles or can_manage_support or can_manage_teams or can_manage_settings %}
-			{% set administration_has_active = request.url.path in ['/users', '/teams', '/roles', '/settings'] or request.url.path.startswith('/support-center') %}
+			{% if is_admin or can_manage_roles or can_manage_support or can_manage_groups or can_manage_settings %}
+			{% set administration_has_active = request.url.path in ['/users', '/groups', '/roles', '/settings'] or request.url.path.startswith('/support-center') %}
 			<div class="nav-section {{ '' if (not nav_sections_collapsible or administration_has_active) else 'collapsed' }}">
 				{% if nav_sections_collapsible %}
 				<button type="button" class="nav-section-label" data-nav-section="administration" aria-expanded="{{ 'true' if administration_has_active else 'false' }}">Administration<span class="nav-section-caret"></span></button>
@@ -203,8 +212,8 @@
 				{% if is_admin %}
 				<a href="/users" class="{{ 'active' if request.url.path == '/users' }}"><span class="nav-icon">◈</span>Users</a>
 				{% endif %}
-				{% if can_manage_teams %}
-				<a href="/teams" class="{{ 'active' if request.url.path == '/teams' }}"><span class="nav-icon">▤</span>Teams</a>
+				{% if can_manage_groups %}
+				<a href="/groups" class="{{ 'active' if request.url.path == '/groups' }}"><span class="nav-icon">▤</span>Groups</a>
 				{% endif %}
 				{% if can_manage_roles %}
 				<a href="/roles" class="{{ 'active' if request.url.path == '/roles' }}"><span class="nav-icon">⚿</span>Roles</a>
@@ -309,7 +318,11 @@
 				{% endif %}
 				<div class="who">
 					<a href="/profile" class="who-name">{{ user.first_name or user.username }}</a>
-					<span class="role-badge role-{{ user.role_slug }}">{{ user.role_display_name }}</span>
+					{% if user.effective_role_names %}
+					{% for rn in user.effective_role_names %}<span class="role-badge">{{ rn }}</span>{% endfor %}
+					{% else %}
+					<span class="role-badge muted">No Role</span>
+					{% endif %}
 				</div>
 				<form action="/logout" method="post" style="margin:0">
 					<button type="submit" class="link-button">Log out</button>

@@ -2,14 +2,21 @@
 duplicate, parent linkage, Option A enforcement (replies/status changes
 blocked on a duplicate), and the duplicate-cluster detection heuristics."""
 from vpnadmin.auth import hash_password
-from vpnadmin.models import RoleDef, User
+from vpnadmin.models import Group, RoleDef, User
 
 from .conftest import login
 
 
 def _make_self_service_user(db_session, username, password="somepass123"):
+    # Group-only permissions: a role only grants anything via group
+    # membership now (see permissions.py's effective_role_ids).
     role = db_session.query(RoleDef).filter_by(slug="user").first()
+    group = Group(name=f"{username}-user-group")
+    group.role_defs.append(role)
+    db_session.add(group)
+    db_session.flush()
     user = User(username=username, password_hash=hash_password(password), role_id=role.id)
+    user.groups.append(group)
     db_session.add(user)
     db_session.commit()
     return user
