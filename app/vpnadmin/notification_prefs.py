@@ -9,12 +9,17 @@ two channels, at an admin's request to have the same granularity
 everywhere rather than Email staying stuck on one all-or-nothing toggle
 (notify_admin_on_ticket_created) while Slack already had five.
 
-Two independent event lists, not one shared one, because the two
-channels' events genuinely aren't the same shape:
+Three independent event lists, not one shared one, because the channels'
+events genuinely aren't the same shape:
   - TICKET_EMAIL_EVENTS covers only the 4 admin-facing ticket events that
     ticket_notifications.py's _notify_admins() actually sends an email
     for today (see that module) -- narrowly scoped to "subdivide the one
     existing toggle", not "invent new email-worthy events".
+  - USER_EMAIL_EVENTS covers the 2 kinds ticket_notifications.py's
+    _notify_user() sends to the ticket's own creator today (a reply from
+    an admin, and any status change including being marked a duplicate)
+    -- these were previously unconditional/uncontrollable, see that
+    function's own docstring.
   - BELL_EVENT_GROUPS covers every kind already written unconditionally
     to QuotaNotification/TicketNotification/AuditNotification (see
     routes/notifications.py's three _serialize_* functions for the exact
@@ -22,12 +27,13 @@ channels' events genuinely aren't the same shape:
     never had any per-kind toggle before), so it's scoped to "everything
     the bell can already show", not "everything Slack/Email can send".
 
-Default semantics differ between the two for the same reason they differ
-in the docstrings above: a ticket-email key missing from stored JSON
+Default semantics differ across these for the same reason they differ in
+the docstrings above: a ticket-email key missing from stored JSON
 defaults to False (matches notify_admin_on_ticket_created's own historical
-default-off), a bell key missing from stored JSON defaults to True (the
-bell showed everything unconditionally before this shipped, so "not yet
-configured" must mean "keep showing everything", not "show nothing")."""
+default-off). A user-email or bell key missing from stored JSON defaults
+to True -- both of those channels sent/showed everything unconditionally
+before their toggle existed, so "not yet configured" must mean "keep
+behaving exactly as before", not "go silent"."""
 import json
 
 # (event_type key, label) -- shown as a single ungrouped checkbox list
@@ -66,6 +72,41 @@ def ticket_email_enabled(raw_json: str | None, event_type: str) -> bool:
     fail closed on "should this send an email", same posture the rest of
     this app's notification gating already takes."""
     return effective_ticket_email_types(raw_json).get(event_type, False)
+
+
+# (event_type key, label) -- the ticket creator's own email notifications,
+# sent by ticket_notifications.py's _notify_user(). Only 2 kinds exist
+# because _notify_user is called with either "ticket_reply" (an admin
+# replied) or "ticket_status_changed" (status changed, including being
+# marked a duplicate -- see ticket_marked_duplicate/status_changed).
+USER_EMAIL_EVENTS: list[tuple[str, str]] = [
+    ("ticket_reply", "An admin replied to your ticket"),
+    ("ticket_status_changed", "Your ticket's status changed (includes being marked a duplicate)"),
+]
+USER_EMAIL_KEYS: set[str] = {key for key, _ in USER_EMAIL_EVENTS}
+
+
+def user_email_events_for_form() -> list[dict]:
+    """Shape consumed by settings.html's Ticket Notifications for
+    Requesters section -- flat list, same convention as
+    ticket_email_events_for_form() above."""
+    return [{"key": key, "label": label} for key, label in USER_EMAIL_EVENTS]
+
+
+def effective_user_email_types(raw_json: str | None) -> dict[str, bool]:
+    try:
+        raw = json.loads(raw_json or "{}")
+    except (TypeError, ValueError):
+        raw = {}
+    return {key: bool(raw.get(key, True)) for key in USER_EMAIL_KEYS}
+
+
+def user_email_enabled(raw_json: str | None, event_type: str) -> bool:
+    """Called from ticket_notifications.py's _notify_user() at its one
+    email-send site. An unrecognized event_type is treated as enabled,
+    not disabled -- same fail-open posture as bell_enabled below, since
+    this channel's whole prior behavior was "always send"."""
+    return effective_user_email_types(raw_json).get(event_type, True)
 
 
 # group label -> [(event_type key, label), ...] -- same shape as

@@ -26,9 +26,13 @@ see _notify_admins' own comment for why (a producer with its own
 "already notified this" dedup-by-row-existence check, like main.py's
 quota loop, would otherwise re-fire on every tick while muted).
 
-User-side email is never gated by an admin toggle (see mailer.
-send_ticket_notification_email's own docstring) -- these are
-transactional to the ticket's own creator.
+User-side email is gated per-event via notification_prefs.py (see
+_notify_user below), same read-time-vs-write-time split as the admin
+side: the TicketNotification row itself is always written, only the
+email send is conditional. This is the creator's OWN preference (there's
+no per-admin-address infra to distinguish here since it's a single
+recipient); it is entirely independent of ticket_email_notify_types
+above, which controls whether admins get emailed about this same event.
 
 Every function here is best-effort: a failed email send or a notification
 insert failing for the wrong reason must never turn an otherwise-
@@ -79,7 +83,7 @@ def _notify_user(db: Session, ticket: SupportTicket, kind: str, message: str, *,
     db.add(TicketNotification(user_id=ticket.created_by_user_id, ticket_id=ticket.id, kind=kind, message=message))
     db.commit()
     creator = ticket.created_by
-    if creator and creator.email:
+    if creator and creator.email and notification_prefs.user_email_enabled(app_settings.runtime.user_email_notify_types, kind):
         mailer.send_ticket_notification_email(
             db=db, to_address=creator.email, ticket_id=ticket.id, subject=ticket.subject,
             headline=email_headline, body_text=email_body,

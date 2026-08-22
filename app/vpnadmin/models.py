@@ -747,6 +747,17 @@ class AppSettings(Base):
     # "everything on" to keep behaving exactly as before until an admin
     # opts something out).
     bell_notify_types = Column(Text, nullable=True)
+    # JSON {event_type: bool} -- per-event granular control over which
+    # events send an email to a ticket's own creator (see notification_
+    # prefs.py's USER_EMAIL_EVENTS and effective_user_email_types for the
+    # "a key missing from this JSON defaults to True" semantics). Like
+    # bell_notify_types above (and unlike ticket_email_notify_types), this
+    # subdivides behavior that was previously unconditional -- _notify_user
+    # always emailed the creator on a reply or status change -- so a brand
+    # new deployment's default must be "everything on" to keep behaving
+    # exactly as before until an admin opts something out. No legacy
+    # column to migrate from, since there was never a prior toggle here.
+    user_email_notify_types = Column(Text, nullable=True)
     # Duplicate Cleanup Tools -- the "created within a configurable time
     # window of each other" heuristic used by GET /api/tickets/
     # duplicate-clusters (routes/tickets.py) to group candidate duplicates

@@ -236,6 +236,7 @@ class _RuntimeSettings:
         self.notify_admin_on_ticket_created = False
         self.ticket_email_notify_types = None  # raw JSON string or None -- see notification_prefs.effective_ticket_email_types
         self.bell_notify_types = None  # raw JSON string or None -- see notification_prefs.effective_bell_types
+        self.user_email_notify_types = None  # raw JSON string or None -- see notification_prefs.effective_user_email_types
         self.ticket_duplicate_window_minutes = 1440  # 24h -- see AppSettings.ticket_duplicate_window_minutes
 
         # Multi-Factor Authentication (TOTP) -- see mfa.py's effective_policy.
@@ -355,6 +356,7 @@ def refresh_runtime_cache(db: Session) -> None:
     runtime.notify_admin_on_ticket_created = bool(row.notify_admin_on_ticket_created)
     runtime.ticket_email_notify_types = row.ticket_email_notify_types
     runtime.bell_notify_types = row.bell_notify_types
+    runtime.user_email_notify_types = row.user_email_notify_types
     runtime.ticket_duplicate_window_minutes = (
         row.ticket_duplicate_window_minutes if row.ticket_duplicate_window_minutes is not None else 1440
     )

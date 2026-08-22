@@ -1484,6 +1484,13 @@ label { display: block; font-weight: 700; font-size: 0.82rem; margin-bottom: 6px
    sharing a row. */
 .field-stack { display: flex; flex-direction: column; gap: 18px; }
 .field-stack .field { margin-bottom: 0; }
+/* Same reasoning as the .field rule above, for a nested <fieldset> (e.g.
+   users.html's Device Monitoring "Notifications"/"Alert Cooldown"
+   sub-sections): the base `fieldset` rule below gives every fieldset its
+   own margin-bottom: 18px, which stacked on top of this flex column's own
+   18px gap doubled the visual space around a nested fieldset compared to
+   a plain .field sitting right next to it. */
+.field-stack fieldset { margin-bottom: 0; }
 /* The Generate-password button sits in its own .field-shaped slot at the
    end of the New/Confirm Password row (users.html's Row 3) so it lines up
    with the two input baselines via .form-row's align-items:flex-end --
