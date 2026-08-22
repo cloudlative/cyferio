@@ -55,6 +55,13 @@
 		</div>
 		<div class="audit-severity-strip" style="margin-top:18px" id="audit-severity-strip"></div>
 		<p class="muted" style="font-size:0.85rem;margin:12px 0 0" id="audit-delta-summary"></p>
+		<!-- Small firewall-status line -- "which firewall is actually on,
+		     or none" (user ask, 2026-08-22). Derived client-side from this
+		     run's own firewall-category findings (ufw/firewalld/nftables'
+		     check_ids specifically) rather than a new backend field --
+		     that data's already in hand on every render, see
+		     renderFirewallStatus(). -->
+		<p style="font-size:0.85rem;margin:10px 0 0" id="firewall-status-line"></p>
 	</div>
 
 	<div class="card">
@@ -154,6 +161,60 @@ function renderScoreCard(run) {
 	if (run.new_findings_count) deltaBits.push(`<strong style="color:var(--danger-text)">${run.new_findings_count} new</strong> since the previous run`);
 	if (run.resolved_findings_count) deltaBits.push(`<strong style="color:var(--success-text)">${run.resolved_findings_count} resolved</strong> since the previous run`);
 	document.getElementById("audit-delta-summary").innerHTML = deltaBits.length ? deltaBits.join(" · ") : "No change in findings since the previous run.";
+
+	renderFirewallStatus(run);
+}
+
+// Small "which firewall is actually on" line -- reads this run's own
+// firewall-category findings rather than re-probing anything (that
+// probe already ran as part of this audit; re-running it here would
+// mean a second host-executor round-trip just to render a status line).
+// Only the three general-purpose managers (ufw/firewalld/nftables) count
+// toward "a firewall is on" -- openvpn-iptables.service is this
+// project's own narrow VPN NAT/forward rule, not a general host
+// firewall, so it's deliberately excluded from this determination (see
+// firewall_checks.py's own comment on that unit).
+const _FIREWALL_MANAGER_CHECK_IDS = [
+	["firewall.ufw_enabled", "UFW"],
+	["firewall.firewalld_enabled", "firewalld"],
+	["firewall.nftables_active", "nftables"],
+];
+
+function renderFirewallStatus(run) {
+	const el = document.getElementById("firewall-status-line");
+	const fwFindings = (run.findings || []).filter(f => f.category === "firewall");
+	if (fwFindings.length === 0) {
+		el.innerHTML = '<span class="status-pill status-offline">Unknown</span> <span class="muted">No firewall data in this run.</span>';
+		return;
+	}
+	const byCheckId = {};
+	fwFindings.forEach(f => { byCheckId[f.check_id] = f; });
+
+	const active = _FIREWALL_MANAGER_CHECK_IDS
+		.filter(([id]) => byCheckId[id] && byCheckId[id].severity === "passed")
+		.map(([, name]) => name);
+	if (active.length > 0) {
+		el.innerHTML = `<span class="status-pill status-online">Firewall: On</span> <span class="muted">${escapeHtml(active.join(" + "))} is active on this host.</span>`;
+		return;
+	}
+
+	const installedNotActive = _FIREWALL_MANAGER_CHECK_IDS
+		.filter(([id]) => byCheckId[id] && byCheckId[id].severity !== "passed" && byCheckId[id].severity !== "info")
+		.map(([, name]) => name);
+	if (installedNotActive.length > 0) {
+		el.innerHTML = `<span class="status-pill status-revoked">Firewall: Off</span> <span class="muted">${escapeHtml(installedNotActive.join(", "))} installed but not currently active.</span>`;
+		return;
+	}
+
+	if (fwFindings.some(f => f.title === "No firewall detected")) {
+		el.innerHTML = '<span class="status-pill status-revoked">Firewall: None</span> <span class="muted">No firewall (ufw/firewalld/nftables) was detected on this host.</span>';
+		return;
+	}
+
+	// Phase 1 file-based fallback (no host-executor configured) can't
+	// always tell active-vs-not, only installed-vs-not -- shown as
+	// Unknown rather than guessing either way.
+	el.innerHTML = '<span class="status-pill status-offline">Unknown</span> <span class="muted">Could not determine the active firewall from this run\'s findings.</span>';
 }
 
 function renderFindings() {
