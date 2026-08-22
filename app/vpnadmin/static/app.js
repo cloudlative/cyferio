@@ -2255,23 +2255,32 @@ document.addEventListener("click", (e) => {
 			dot.className = `release-indicator-dot ${data.status}`;
 			label.textContent = data.status === "critical_update" ? "Critical update available"
 				: data.status === "update_available" ? "Update available" : "Updated";
-			if (panel.style.display === "block") renderBody();
+			// Always kept current, not just while the panel happens to be
+			// visibly open -- the panel can now also open on plain :hover
+			// (see style.css), which has no JS hook to trigger a render on
+			// the way in, so the content has to already be there.
+			renderBody();
 		} catch (e) { /* non-fatal -- indicator just stays hidden/at its last-known state */ }
 	}
 
+	// .open is an explicit, sticky "stay open" state from a click/keyboard
+	// activation -- separate from the plain CSS :hover/:focus-within reveal
+	// (see style.css), which needs no JS at all and clears itself the
+	// moment the pointer/focus leaves. Without this class, a click would
+	// have nothing left to toggle once hover was already handling the
+	// common case.
 	toggle.addEventListener("click", () => {
-		const willOpen = panel.style.display !== "block";
-		panel.style.display = willOpen ? "block" : "none";
+		const willOpen = !panel.classList.contains("open");
+		panel.classList.toggle("open", willOpen);
 		toggle.setAttribute("aria-expanded", String(willOpen));
-		if (willOpen) renderBody();
 	});
 	document.getElementById("release-indicator-close").addEventListener("click", () => {
-		panel.style.display = "none";
+		panel.classList.remove("open");
 		toggle.setAttribute("aria-expanded", "false");
 	});
 	document.addEventListener("click", (ev) => {
 		if (!root.contains(ev.target)) {
-			panel.style.display = "none";
+			panel.classList.remove("open");
 			toggle.setAttribute("aria-expanded", "false");
 		}
 	});

@@ -291,14 +291,15 @@ a:hover { text-decoration: underline; }
 body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 
 .sidebar {
-	/* Widened from 252px -- reported live: cramped now that .sidebar nav
-	   can grow a scrollbar of its own (every section expanded) eating
-	   into the already-tight available width for link text. Still well
-	   under a small phone's own viewport width for the off-canvas mobile
-	   drawer below, which inherits this same value (no separate mobile
-	   override exists). */
-	width: 276px;
-	flex: 0 0 276px;
+	/* Widened 252px -> 276px -- reported live: cramped now that .sidebar
+	   nav can grow a scrollbar of its own (every section expanded) eating
+	   into the already-tight available width for link text. Widened
+	   again to 325px shortly after (reported live again: "a little more
+	   widened"). Still well under a small phone's own viewport width for
+	   the off-canvas mobile drawer below, which inherits this same value
+	   (no separate mobile override exists). */
+	width: 325px;
+	flex: 0 0 325px;
 	display: flex;
 	flex-direction: column;
 	background: linear-gradient(190deg, var(--side-1) 0%, var(--side-2) 60%, var(--side-3) 140%);
@@ -366,15 +367,10 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 	color: var(--text-muted);
 	opacity: 0.75;
 }
-/* Wraps brand-version + the admin-only release indicator so they sit on
-   one line together -- see base.html's own comment on why the release
-   indicator moved here (next to the version it's actually reporting on)
-   instead of its previous spot in the content-header. */
-.brand-version-row { display: flex; align-items: center; gap: 8px; }
 /* Sidebar-specific skin for .release-indicator-toggle (style.css's shared
    button styling further down is meant for the light content-header
    background, wrong colors entirely against this dark gradient) -- same
-   font treatment as .brand-version right next to it, just a real <button>
+   font treatment as .brand-version above it, just a real <button>
    underneath for the click/keyboard-focus behavior static/app.js's
    initReleaseIndicator() already wires up. */
 .sidebar-release-indicator-toggle {
@@ -393,6 +389,13 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 }
 .sidebar-release-indicator-toggle:hover { opacity: 1; }
 .sidebar-release-indicator-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Isolated from .brand-version -- its own line, with real spacing above
+   it, instead of packed onto the version's own line (reported live:
+   "should be isolated from version"). .sidebar .brand-text's own 1px
+   gap (tight by design, for the name/version pair) is too little for a
+   third, functionally distinct element to read as separate rather than
+   part of the same label. */
+.sidebar-release-indicator { margin-top: 5px; }
 /* The shared .release-indicator-panel is anchored `right: 0` (correct for
    its old spot near the content-header's own right edge) -- from this
    narrow, left-of-screen sidebar position that would push most of the
@@ -400,6 +403,18 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
    instead opens it rightward, over the main content area, which actually
    stays fully on-screen. */
 .sidebar-release-indicator .release-indicator-panel { left: 0; right: auto; }
+/* Detail panel opens on hover (reported live), on top of the existing
+   click/keyboard toggle (which adds/removes .open via static/app.js) --
+   :focus-within covers keyboard activation (Tab + Enter/Space lands
+   focus on the toggle button) for anyone who can't hover, e.g. touch or
+   keyboard-only navigation. The plain .release-indicator-panel selector
+   elsewhere still defaults to display:none; this only overrides it while
+   one of these three conditions holds. */
+.sidebar-release-indicator:hover .release-indicator-panel,
+.sidebar-release-indicator:focus-within .release-indicator-panel,
+.sidebar-release-indicator .release-indicator-panel.open {
+	display: block;
+}
 /* min-height: 0 overrides flexbox's default "never shrink below content
    size" for a flex child -- without it, a nav with every section expanded
    grows taller than the sidebar's fixed 100vh and pushes its own bottom
@@ -544,7 +559,7 @@ body.has-sidebar { display: flex; align-items: stretch; min-height: 100vh; }
 }
 .sidebar-backdrop.open { display: block; }
 
-/* Below this width there isn't room for a permanent 276px sidebar next to
+/* Below this width there isn't room for a permanent 325px sidebar next to
    real content (tables/forms already fight for space on a phone) -- same
    breakpoint the marketing/docs sites collapse their own nav at, so the
    whole product switches to a mobile layout at one consistent width.

@@ -52,42 +52,39 @@
 			   backed. #}
 			<span class="brand-text">
 				<span class="brand-name">{{ app_settings.app_name }}</span>
-				<span class="brand-version-row">
-					<span class="brand-version" title="Deployed application version">{{ app_settings.app_version }}</span>
-					{% if is_admin %}
-					{# Release Availability Indicator/Popup -- admin-only (see
-					   this feature's own "err toward admin-only visibility"
-					   decision): only an admin can act on an available update
-					   (claim the auto-filed upgrade ticket), so a non-admin
-					   seeing a dot they can't do anything about isn't useful.
-					   Placed right next to the version it's reporting on
-					   (reported live: "place up to date or update available
-					   somewhere near where already version is mentioned") --
-					   previously its own separate element in the content-
-					   header, competing for space with the notif bell/theme
-					   switch and read as disconnected from the version it's
-					   actually about. Same anchored-panel/dismissible-popup
-					   interaction shape as #notif-bell/#theme-quick-switch --
-					   see static/app.js's initReleaseIndicator() for the
-					   shared "single panel open at a time" convention this
-					   reuses; that script needs no changes, it only ever
-					   looked these elements up by id, never assumed where in
-					   the page they'd be. #}
-					<div class="release-indicator sidebar-release-indicator" id="release-indicator" style="display:none">
-						<button type="button" class="sidebar-release-indicator-toggle" id="release-indicator-toggle" aria-haspopup="true" aria-expanded="false">
-							<span class="release-indicator-dot" id="release-indicator-dot"></span>
-							<span id="release-indicator-label">Updated</span>
-						</button>
-						<div class="release-indicator-panel" id="release-indicator-panel">
-							<div class="release-indicator-panel-head">
-								<span>Release Availability</span>
-								<button type="button" class="link-button" id="release-indicator-close" aria-label="Close">&times;</button>
-							</div>
-							<div id="release-indicator-body"></div>
+				<span class="brand-version" title="Deployed application version">{{ app_settings.app_version }}</span>
+				{% if is_admin %}
+				{# Release Availability Indicator/Popup -- admin-only (see
+				   this feature's own "err toward admin-only visibility"
+				   decision): only an admin can act on an available update
+				   (claim the auto-filed upgrade ticket), so a non-admin
+				   seeing a dot they can't do anything about isn't useful.
+				   On its own line below the version, not packed onto the
+				   same line as it (reported live: "should be isolated from
+				   version") -- still close by/clearly about the version
+				   above it, just visually its own element rather than
+				   reading as one run-on label. Detail panel opens on
+				   hover now (reported live), in addition to click/keyboard
+				   activation (:focus-within) for touch and keyboard users
+				   who can't hover -- see the .open class toggle in static/
+				   app.js's initReleaseIndicator(), which also now always
+				   keeps the panel body populated (not just while visibly
+				   open) so a hover never shows a stale "Checking…"
+				   placeholder. #}
+				<div class="release-indicator sidebar-release-indicator" id="release-indicator" style="display:none">
+					<button type="button" class="sidebar-release-indicator-toggle" id="release-indicator-toggle" aria-haspopup="true" aria-expanded="false">
+						<span class="release-indicator-dot" id="release-indicator-dot"></span>
+						<span id="release-indicator-label">Updated</span>
+					</button>
+					<div class="release-indicator-panel" id="release-indicator-panel">
+						<div class="release-indicator-panel-head">
+							<span>Release Availability</span>
+							<button type="button" class="link-button" id="release-indicator-close" aria-label="Close">&times;</button>
 						</div>
+						<div id="release-indicator-body"></div>
 					</div>
-					{% endif %}
-				</span>
+				</div>
+				{% endif %}
 			</span>
 		</a>
 		<nav>
